@@ -1,0 +1,54 @@
+using System.ComponentModel;
+
+#nullable enable
+
+namespace Batcomputer;
+
+partial class UimdIconsDialog
+{
+    private IContainer? components = null;
+    private Label _designerPreviewLabel = null!;
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            components?.Dispose();
+        }
+
+        base.Dispose(disposing);
+    }
+
+    private void InitializeComponent()
+    {
+        components = new Container();
+        _designerPreviewLabel = new Label();
+        SuspendLayout();
+
+        _designerPreviewLabel.BackColor = Color.FromArgb(43, 47, 54);
+        _designerPreviewLabel.BorderStyle = BorderStyle.FixedSingle;
+        _designerPreviewLabel.Dock = DockStyle.Fill;
+        _designerPreviewLabel.ForeColor = Color.FromArgb(236, 238, 242);
+        _designerPreviewLabel.Location = new Point(0, 0);
+        _designerPreviewLabel.Name = "_designerPreviewLabel";
+        _designerPreviewLabel.Padding = new Padding(18);
+        _designerPreviewLabel.Size = new Size(760, 360);
+        _designerPreviewLabel.TabIndex = 0;
+        _designerPreviewLabel.Text = "Suit Icons / UIMD Dialog\r\n\r\nDesigner shell only. Runtime builds the icon path rows and validation.";
+        _designerPreviewLabel.TextAlign = ContentAlignment.MiddleCenter;
+
+        AutoScaleDimensions = new SizeF(7F, 15F);
+        AutoScaleMode = AutoScaleMode.Font;
+        BackColor = Color.FromArgb(26, 29, 34);
+        ClientSize = new Size(760, 360);
+        Controls.Add(_designerPreviewLabel);
+        ForeColor = Color.FromArgb(236, 238, 242);
+        MaximizeBox = false;
+        MinimizeBox = false;
+        Name = "UimdIconsDialog";
+        StartPosition = FormStartPosition.CenterParent;
+        Text = "Suit icons (UIMD)";
+
+        ResumeLayout(false);
+    }
+}

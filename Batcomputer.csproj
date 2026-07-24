@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Batcomputer</AssemblyName>
+    <RootNamespace>Batcomputer</RootNamespace>
+    <ApplicationIcon>Assets\Icon.ico</ApplicationIcon>
+    <!-- WFO1000 wants DesignerSerializationVisibility on custom control properties. Our controls are
+         built in code, never dropped on a designer surface, so the serialization hint is irrelevant. -->
+    <NoWarn>$(NoWarn);WFO1000</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="BCnEncoder.Net" Version="2.3.0" />
+    <PackageReference Include="CUE4Parse-Conversion" Version="1.2.2.202607" />
+    <PackageReference Include="Microsoft.Bcl.Memory" Version="10.0.10" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4078.44" />
+    <PackageReference Include="UAssetAPI" Version="1.1.0" />
+  </ItemGroup>
+  <PropertyGroup>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+  <!-- Release layout: one self-contained exe, no .NET runtime prerequisite.
+       gamedata stays loose so it can be refreshed without a rebuild.
+       Scoped to Release ON PURPOSE: setting RuntimeIdentifier globally moves the Debug build into
+       bin\Debug\net8.0-windows\win-x64\, which orphans the settings file that lives next to the exe
+       and makes the app think every F5 is a first run. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!-- Release ships just the exe; no loose .pdb next to it. -->
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Compiled INTO the assembly (see EmbeddedAssets) so the exe carries its own art. -->
+    <EmbeddedResource Include="Assets\**\*.png" />
+    <!-- Also embedded, so the window/taskbar icon works in the single-file build. -->
+    <EmbeddedResource Include="Assets\Icon.ico" />
+    <!-- Vendored three.js (MIT, r128) for the offline in-app 3D preview. Embedded so the exe carries
+         its own renderer - the user downloads nothing. License in licenses/three.js-LICENSE.txt.
+         Kept in Web\ (committed), not Assets\ (the user's art, excluded from the repo). -->
+    <EmbeddedResource Include="Web\preview\*.js" />
+    <!-- GameDataService loads the NEWEST gamedata json by file timestamp. Keep exactly one file
+         here: zip extraction can rewrite timestamps, so shipping two makes which one loads a
+         coin flip. publish-release.ps1 fails the build if more than one is present. -->
+    <None Update="gamedata\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,32 @@
+# Build outputs (regenerable)
+bin/
+obj/
+*.user
+.vs/
+.vscode/
+
+# Release staging + zips produced by publish-release.ps1
+artifacts/
+
+# UI artwork. Compiled into the exe as an embedded resource, so it is required to
+# BUILD but is not kept in the repo. See the note in README.md.
+Assets/
+
+# Anything the tool generates at runtime, and the per-machine settings file
+# (it stores absolute paths — never publish it).
+Generated/
+_generated/
+Batcomputer.settings.json
+
+# The mined asset catalog (gamedata/lotdk-*.json) IS shipped — it's reference
+# metadata (asset paths + class names), not game content. Exclude only the
+# work-in-progress duplicate.
+gamedata/*.NEW.json
+
+# Old local source copies (may contain absolute machine paths)
+_source_snapshots/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
