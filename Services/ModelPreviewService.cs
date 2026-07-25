@@ -400,8 +400,9 @@ public static class ModelPreviewService
     /// at /Game/Animation/LEGOface/LEGOface_&lt;Character&gt;/A_&lt;Expression&gt;_&lt;Character&gt;_LEGOface. Without
     /// this the preview shows the mesh in BIND pose, which the game never displays.
     ///
-    /// Axis mapping was derived by comparing the exported glTF bone nodes against the UE reference
-    /// skeleton: position (X, Z, Y)/100, quaternion (x, z, y, -w).
+    /// Axis mapping measured by comparing the exported glTF bind nodes against the UE reference
+    /// skeleton (verified on Eye_L, Mouth_L, Lips_UL_3, Brows_M): position (X, Z, Y)/100,
+    /// quaternion (x, z, y, w) - the axis swap alone, W is NOT negated - and scale (X, Z, Y).
     /// </summary>
     private static Dictionary<string, (Vector3 P, System.Numerics.Quaternion Q, Vector3 S)>? LoadFacePose(
         DefaultFileProvider provider, string expression, string? character)
@@ -452,7 +453,7 @@ public static class ModelPreviewService
                     var s = tr.KeyScale.Length > 0 ? tr.KeyScale[^1] : new FVector(1, 1, 1);
                     pose[refBones[i].Name.Text] = (
                         new Vector3(p.X / 100f, p.Z / 100f, p.Y / 100f),
-                        new System.Numerics.Quaternion(q.X, q.Z, q.Y, -q.W),
+                        new System.Numerics.Quaternion(q.X, q.Z, q.Y, q.W),
                         new Vector3(s.X, s.Z, s.Y));
                 }
                 Console.WriteLine($"  face pose '{expression}': {pose.Count} bones from {path.Split('/')[^1]}");

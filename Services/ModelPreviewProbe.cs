@@ -211,7 +211,7 @@ internal static class ModelPreviewProbe
                 for (var i = 0; i < conv.RefSkeleton.Count; i++)
                 {
                     var b = conv.RefSkeleton[i];
-                    Console.WriteLine($"  [{i}] {b.Name} parent={b.ParentIndex} pos={b.Position}");
+                    Console.WriteLine($"  [{i}] {b.Name} parent={b.ParentIndex} pos={b.Position} quat={b.Orientation}");
                 }
             }
             return 0;
