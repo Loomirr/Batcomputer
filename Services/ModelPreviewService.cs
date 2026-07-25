@@ -234,6 +234,7 @@ public static class ModelPreviewService
         };
 
         var models = new List<(string File, PreviewPart Part, List<SlotShading> Slots)>();
+        List<SlotShading>? bodyShading = null;
         for (var i = 0; i < parts.Count; i++)
         {
             var part = parts[i];
@@ -256,17 +257,40 @@ public static class ModelPreviewService
             // shell vs its eyes, the cape's LOD variants), so one texture must not be sprayed across all.
             var slotShading = new List<SlotShading>();
             var slotMats = (mesh as USkeletalMesh)?.Materials;
+            var disabledSlots = DisabledSectionSlots(mesh);
             for (var si = 0; si < (slotMats?.Length ?? 0); si++)
             {
                 var slotOverride = part.Overrides is not null && si < part.Overrides.Length
                     ? part.Overrides[si]?.ResolvedObject?.Load() : null;
-                var resolved = ResolveSlot(slotOverride ?? slotMats![si]?.Load(), previewDir);
+                var resolved = ResolveSlot(provider, slotOverride ?? slotMats![si]?.Load(), previewDir);
+                if (disabledSlots.Contains(si))
+                {
+                    resolved = resolved with { Hidden = true };
+                    Console.WriteLine($"      [{si}] section disabled in cooked mesh -> hidden");
+                }
                 if (headSkin is not null && resolved.Texture is null && resolved.Colour is null)
                 {
-                    resolved = resolved with { Colour = headSkin };
-                    Console.WriteLine($"      head: no material bound -> skin tone #{headSkin.Value.R:X2}{headSkin.Value.G:X2}{headSkin.Value.B:X2}");
+                    // The head is part of the LEGOfig body system: its FACE PRINT (frown, brows, chin
+                    // shading) lives in the character's TPAGE atlas, sampled through the same uv2
+                    // channel as the body. The separate SK_LEGOface shell is the cutscene expression
+                    // layer on top. So the head wears the BODY's shading, not a flat skin tone.
+                    if (bodyShading is { Count: > 0 })
+                    {
+                        resolved = bodyShading[0];
+                        Console.WriteLine("      head: no material bound -> body TPAGE shading (face print lives in the atlas)");
+                    }
+                    else
+                    {
+                        resolved = resolved with { Colour = headSkin };
+                        Console.WriteLine($"      head: no material bound -> skin tone #{headSkin.Value.R:X2}{headSkin.Value.G:X2}{headSkin.Value.B:X2}");
+                    }
                 }
                 slotShading.Add(resolved);
+            }
+
+            if (i == 0 && slotShading.Count > 0)
+            {
+                bodyShading = slotShading;
             }
 
             bool Build(ExporterOptions opt)
@@ -307,7 +331,7 @@ public static class ModelPreviewService
             throw new InvalidOperationException("No meshes could be exported for preview.");
         }
 
-        WriteViewerAssets(previewDir, AlignToHead(previewDir, models));
+        WriteViewerAssets(previewDir, PrepareFaceFeatures(provider, previewDir, AlignToHead(previewDir, models)));
         return previewDir;
     }
 
@@ -352,7 +376,76 @@ public static class ModelPreviewService
     private const int DecalUvChannel = 2;
 
     /// <summary>A model file, where to place it, and the base-colour texture to skin it with.</summary>
-    private readonly record struct PlacedModel(string File, Vector3 Offset, List<SlotShading> Slots, bool IsBody);
+    private readonly record struct PlacedModel(
+        string File, Vector3 Offset, List<SlotShading> Slots, bool IsBody, bool IsFace = false)
+    {
+        /// <summary>Triangle counts of the reordered face index buffer: [base, mouth, hidden].</summary>
+        public int[]? FaceGroups { get; init; }
+        /// <summary>Preview-relative path of the mouth feature print (alpha = cutout).</summary>
+        public string? MouthTex { get; init; }
+        /// <summary>Alternate expression feature bands: (ExtraUV0 slot id, triangle count).</summary>
+        public List<(int Band, int Tris)>? Bands { get; init; }
+    }
+
+    /// <summary>
+    /// The default mouth print sampled by M_LEGOface when "Mouth BC" is not overridden (the cooked
+    /// master's defaults are stripped, but the community recreation confirms this texture - the stern
+    /// Batman mouth shared by every cowled Batman face).
+    /// </summary>
+    private const string DefaultMouthTexPath = "/Game/Characters/Textures/Attachments/LEGOface/T_LEGOface_Mouth_BC";
+
+    /// <summary>
+    /// Face post-pass: split the merged face mesh into base/mouth/hidden groups (see
+    /// GlbInspector.TryGroupFaceFeatures) and export the mouth print. The mouth is a separate shell
+    /// ~0.06 above the under-layer's lip decal - rendering the lip decal alone is what made the
+    /// "mouth" look tiny, low and skin-coloured.
+    /// </summary>
+    private static List<PlacedModel> PrepareFaceFeatures(
+        DefaultFileProvider provider, string previewDir, List<PlacedModel> placed)
+    {
+        for (var i = 0; i < placed.Count; i++)
+        {
+            if (!placed[i].IsFace)
+            {
+                continue;
+            }
+            var groups = GlbInspector.TryGroupFaceFeatures(Path.Combine(previewDir, placed[i].File));
+            if (groups is null || groups[1] == 0)
+            {
+                Console.WriteLine("  face: feature split unavailable");
+                continue;
+            }
+
+            string? mouthRel = null;
+            try
+            {
+                if (provider.LoadPackageObject(DefaultMouthTexPath) is UTexture2D mouthTex)
+                {
+                    mouthRel = "textures/" + MakeSafeName(mouthTex.Name) + "_cut.png";
+                    var dest = Path.Combine(previewDir, mouthRel.Replace('/', Path.DirectorySeparatorChar));
+                    if (!File.Exists(dest) && !TextureDecodeService.TryExportPng(mouthTex, dest, keepAlpha: true))
+                    {
+                        mouthRel = null;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  face mouth texture failed: {ex.Message.Split('\n')[0]}");
+            }
+
+            Console.WriteLine($"  face split: {groups[0]} base / {groups[1]} mouth / {groups[2]} hidden tris" +
+                              (mouthRel is null ? " (no mouth print)" : $", print {Path.GetFileName(mouthRel)}"));
+            var bands = GlbInspector.FaceBandLayout.ToList();
+            if (bands.Count > 0)
+            {
+                Console.WriteLine("  face expression slots (ExtraUV0 band -> tris): " +
+                                  string.Join(", ", bands.Select(b => $"{b.Band}:{b.Tris}")));
+            }
+            placed[i] = placed[i] with { FaceGroups = groups, MouthTex = mouthRel, Bands = bands };
+        }
+        return placed;
+    }
 
     /// <summary>
     /// Exports a material and returns the preview-relative path of the texture to use as base colour.
@@ -443,7 +536,38 @@ public static class ModelPreviewService
     ///   colour   - MI_CAPE_Spiked_* has NO base-colour texture at all, only a "Base Colour" vector
     /// Faces are a fourth shape again: the print lives in "HeadLowerUnder BC" with a separate tint.
     /// </summary>
-    private sealed record SlotShading(string? Texture, string? Normal, string? Mmr, Color? Colour);
+    private sealed record SlotShading(
+        string? Texture, string? Normal, string? Mmr, Color? Colour, string? Alpha = null,
+        bool Hidden = false, bool Cutout = false, string? Nrm2 = null);
+
+    /// <summary>
+    /// Material-slot indices whose LOD0 render sections the game itself never draws. Cape meshes
+    /// carry a low-poly cloth-sim proxy sheet (the "box" around the cape) whose section is marked
+    /// bDisabled in the cooked mesh - the engine hides it at runtime, so the preview must too.
+    /// </summary>
+    private static HashSet<int> DisabledSectionSlots(UObject mesh)
+    {
+        var hidden = new HashSet<int>();
+        try
+        {
+            var lods = (mesh as USkeletalMesh)?.LODModels;
+            if (lods is { Length: > 0 } && lods[0]?.Sections is { } sections)
+            {
+                foreach (var s in sections)
+                {
+                    if (s.bDisabled)
+                    {
+                        hidden.Add(s.MaterialIndex);
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Best effort - an unreadable LOD just means nothing extra gets hidden.
+        }
+        return hidden;
+    }
 
     /// <summary>Reads a vector (colour) parameter, walking up the parent chain.</summary>
     private static Color? FindColourParam(UObject? material, string name, int depth)
@@ -463,29 +587,85 @@ public static class ModelPreviewService
                     continue;
                 }
                 var v = entry.GetOrDefault<FLinearColor>("ParameterValue");
+                // FLinearColor is already LINEAR, which is exactly what three.js r128 wants for
+                // material.color (it gamma-encodes at output). Pass the linear value straight through;
+                // gamma-encoding it here washes flat colours out (the cape's #030305 -> near white).
                 return Color.FromArgb(255,
-                    (int)Math.Clamp(v.R * 255f, 0, 255),
-                    (int)Math.Clamp(v.G * 255f, 0, 255),
-                    (int)Math.Clamp(v.B * 255f, 0, 255));
+                    (int)Math.Clamp(v.R * 255f + 0.5f, 0, 255),
+                    (int)Math.Clamp(v.G * 255f + 0.5f, 0, 255),
+                    (int)Math.Clamp(v.B * 255f + 0.5f, 0, 255));
             }
         }
         return FindColourParam(material.GetOrDefault<FPackageIndex>("Parent")?.ResolvedObject?.Load(), name, depth + 1);
     }
 
     /// <summary>Resolves one material slot to a texture or a flat colour, plus its normal/MMR maps.</summary>
-    private static SlotShading ResolveSlot(UObject? material, string previewDir)
+    private static SlotShading ResolveSlot(DefaultFileProvider provider, UObject? material, string previewDir)
     {
         if (material is null)
         {
             return new SlotShading(null, null, null, null);
         }
 
+        // Capes are woven cloth: the base M_Cape_EoM graph (stripped from the cooked build, wiring
+        // recovered from a near-exact Blender recreation) shades them from the shared PongeeFabric
+        // texture set, not from any parameter on the instance. Bake those instead of the generic path.
+        if (IsCapeMaterial(material))
+        {
+            return ResolveCapeSlot(provider, material, previewDir);
+        }
+
+        // Faces: the Blender recreation binds the face print's REAL alpha as opacity - the opposite
+        // of the body treatment. The face piece is a shell over the head; without the cutout the
+        // whole shell renders as an opaque mask instead of just the printed features.
+        var facePrint = FindTextureParam(material, "HeadLowerUnder BC", 0);
+        if (facePrint is not null)
+        {
+            // The instance binds the DIST(ressed) variant, whose alpha is a wear mask that measures
+            // ~0 everywhere - cutting on it deletes the whole face. The pristine sibling (same path
+            // minus _DIST) carries the actual print cutout; the paks ship it even though no
+            // parameter references it.
+            facePrint = LoadPristineSibling(provider, facePrint) ?? facePrint;
+            var rel = "textures/" + MakeSafeName(facePrint.Name) + "_cut.png";
+            var dest = Path.Combine(previewDir, rel.Replace('/', Path.DirectorySeparatorChar));
+            if (File.Exists(dest) || TextureDecodeService.TryExportPng(facePrint, dest, keepAlpha: true))
+            {
+                Console.WriteLine($"    face print (alpha cutout): {facePrint.Name} ({facePrint.Format})");
+                // Pristine normal too - the DIST variant's scratch strokes read as stray eyebrows.
+                string? faceNrm = null;
+                if (FindTextureParam(material, "HeadLowerUnder NML", 0) is { } nmlTex)
+                {
+                    nmlTex = LoadPristineSibling(provider, nmlTex) ?? nmlTex;
+                    var nrmRel = "textures/" + MakeSafeName(nmlTex.Name) + ".png";
+                    var nrmDest = Path.Combine(previewDir, nrmRel.Replace('/', Path.DirectorySeparatorChar));
+                    if (File.Exists(nrmDest) || TextureDecodeService.TryExportPng(nmlTex, nrmDest, reconstructNormalZ: true))
+                    {
+                        faceNrm = nrmRel;
+                    }
+                }
+                return new SlotShading(rel, faceNrm, null,
+                    FindColourParam(material, "HeadLowerUnder Tint", 0), Cutout: true);
+            }
+        }
+
         var tex = ExportMaterialTexture(material as CUE4Parse.UE4.Assets.Exports.Material.UUnrealMaterial, previewDir, previewDir);
         var normal = ExportSlot(material, "DNRM_Pristine", previewDir, isNormal: true)
                      ?? ExportSlot(material, "DNRM", previewDir, isNormal: true)
-                     ?? ExportSlot(material, "HeadLowerUnder NML", previewDir, isNormal: true)
-                     ?? ExportSlot(material, "NRM", previewDir, isNormal: true);
-        var mmr = ExportSlot(material, "MMR_Pristine", previewDir) ?? ExportSlot(material, "MMR", previewDir);
+                     ?? ExportSlot(material, "HeadLowerUnder NML", previewDir, isNormal: true);
+        // No atlas normal: the part's base "NRM" (UV0) becomes the normal map, with the game's
+        // micro-surface noise overlay baked in (Blender cowl graph). When there IS an atlas normal
+        // (the body's DNRM on uv2), the noised base normal rides along separately - the viewer
+        // blends the two UV spaces in the shader.
+        string? nrm2 = null;
+        if (normal is null)
+        {
+            normal = BakeNoisedNrm(provider, material, previewDir);
+        }
+        else
+        {
+            nrm2 = BakeNoisedNrm(provider, material, previewDir);
+        }
+        var mmr = ExportMmrSlot(material, previewDir);
 
         // No texture anywhere: the material states its colour directly (capes do this).
         Color? colour = tex is null
@@ -496,7 +676,123 @@ public static class ModelPreviewService
         {
             Console.WriteLine($"      flat colour #{colour.Value.R:X2}{colour.Value.G:X2}{colour.Value.B:X2}");
         }
-        return new SlotShading(tex, normal, mmr, colour);
+        return new SlotShading(tex, normal, mmr, colour, Nrm2: nrm2);
+    }
+
+    /// <summary>
+    /// Loads the pristine variant of a distressed texture by naming convention (drop "_DIST"), e.g.
+    /// T_LOWER_UNDER_Batman_DIST_BC -> T_LOWER_UNDER_Batman_BC. Null when there is no such asset.
+    /// </summary>
+    private static UTexture2D? LoadPristineSibling(DefaultFileProvider provider, UTexture2D distressed)
+    {
+        var path = distressed.GetPathName();
+        if (!path.Contains("_DIST", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+        try
+        {
+            return provider.LoadPackageObject(
+                path.Replace("_DIST", "", StringComparison.OrdinalIgnoreCase).Split('.')[0]) as UTexture2D;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Micro-surface noise normal shared by every part material (tiled 6.9x in M_TPAGE).</summary>
+    private const string MicroNoisePath = "/Game/Characters/Textures/Shared/T_Noise_Norm_SEB_N";
+
+    /// <summary>
+    /// Exports the material's base "NRM" (UV0 space) with the micro-surface noise overlay baked in.
+    /// Cached per source texture; returns the preview-relative path or null when the material has no
+    /// base NRM.
+    /// </summary>
+    private static string? BakeNoisedNrm(DefaultFileProvider provider, UObject material, string previewDir)
+    {
+        var baseNrm = FindTextureParam(material, "NRM", 0);
+        if (baseNrm is null)
+        {
+            return null;
+        }
+        var rel = "textures/" + MakeSafeName(baseNrm.Name) + "_noised.png";
+        var dest = Path.Combine(previewDir, rel.Replace('/', Path.DirectorySeparatorChar));
+        if (File.Exists(dest))
+        {
+            return rel;
+        }
+        UTexture2D? noise = null;
+        try { noise = provider.LoadPackageObject(MicroNoisePath) as UTexture2D; }
+        catch { /* overlay-less bake still better than nothing */ }
+        if (TextureDecodeService.TryBakeNoisedNormal(baseNrm, noise, tile: 6.9f, dest))
+        {
+            Console.WriteLine($"    base NRM + micro noise: {baseNrm.Name}");
+            return rel;
+        }
+        return null;
+    }
+
+    private static string MakeSafeName(string name) =>
+        string.Concat(name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
+
+    /// <summary>True when the material's parent chain reaches the M_Cape_EoM cloth master.</summary>
+    private static bool IsCapeMaterial(UObject? material)
+    {
+        for (var depth = 0; material is not null && depth < 6; depth++)
+        {
+            if (material.Name.StartsWith("M_Cape_EoM", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            material = material.GetOrDefault<FPackageIndex>("Parent")?.ResolvedObject?.Load();
+        }
+        return false;
+    }
+
+    /// <summary>Shared cape fabric source textures - referenced by the stripped base graph directly.</summary>
+    private const string CapeFabricDir = "/Game/Characters/Textures/Attachments/Cape/Batman_EOM/";
+
+    /// <summary>
+    /// Cape cloth shading: flat "Base Colour" from the instance (linear, usually near-black), plus the
+    /// baked PongeeFabric weave maps (roughness/normal/alpha). See TryBakeCapeFabric for the recipe.
+    /// </summary>
+    private static SlotShading ResolveCapeSlot(DefaultFileProvider provider, UObject material, string previewDir)
+    {
+        var colour = FindColourParam(material, "Base Colour", 0) ?? FindColourParam(material, "BaseColour", 0);
+
+        const string ormRel = "textures/cape_fabric_orm.png";
+        const string nrmRel = "textures/cape_fabric_nrm.png";
+        const string alphaRel = "textures/cape_fabric_alpha.png";
+        var orm = Path.Combine(previewDir, ormRel.Replace('/', Path.DirectorySeparatorChar));
+        var nrm = Path.Combine(previewDir, nrmRel.Replace('/', Path.DirectorySeparatorChar));
+        var alpha = Path.Combine(previewDir, alphaRel.Replace('/', Path.DirectorySeparatorChar));
+
+        var baked = File.Exists(orm);
+        if (!baked)
+        {
+            try
+            {
+                var height = provider.LoadPackageObject(CapeFabricDir + "T_PongeeFabric_height") as UTexture2D;
+                var fuzz = provider.LoadPackageObject(CapeFabricDir + "T_PongeeFabric_HairFuzzNoise") as UTexture2D;
+                var weave = provider.LoadPackageObject(CapeFabricDir + "T_PongeeFabric_NRM") as UTexture2D;
+                var scratch = provider.LoadPackageObject(CapeFabricDir + "T_PongeeFabric_Scratches_NRM") as UTexture2D;
+                baked = height is not null && weave is not null &&
+                        TextureDecodeService.TryBakeCapeFabric(height, fuzz, weave, scratch, orm, nrm, alpha);
+                Console.WriteLine(baked ? "    cape: PongeeFabric weave baked" : "    cape: fabric bake unavailable");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"    cape fabric load failed: {ex.Message.Split('\n')[0]}");
+            }
+        }
+
+        return new SlotShading(
+            Texture: null,
+            Normal: baked && File.Exists(nrm) ? nrmRel : null,
+            Mmr: baked ? ormRel : null,
+            Colour: colour ?? Color.FromArgb(255, 4, 4, 5),
+            Alpha: baked && File.Exists(alpha) ? alphaRel : null);
     }
 
     /// <summary>
@@ -515,6 +811,26 @@ public static class ModelPreviewService
                 ? part.Overrides[i]?.ResolvedObject?.GetPathName() : null;
             Console.WriteLine($"      [{i}] {m?.Name ?? "(none)"}" + (ovr is not null ? $"   <- override {ovr.Split('.')[^1]}" : ""));
         }
+    }
+
+    /// <summary>
+    /// Exports the MMR slot repacked into ORM channel order (roughness->green, metalness->blue) so a
+    /// single texture can drive both roughnessMap and metalnessMap correctly. See
+    /// <see cref="TextureDecodeService.TryExportMmrAsOrm"/> for the channel mapping.
+    /// </summary>
+    private static string? ExportMmrSlot(UObject? material, string previewDir)
+    {
+        var t = FindTextureParam(material, "MMR_Pristine", 0) ?? FindTextureParam(material, "MMR", 0);
+        if (t is null) return null;
+        var safe = string.Concat(t.Name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
+        var rel = "textures/" + safe + "_orm.png";
+        var dest = Path.Combine(previewDir, rel.Replace('/', Path.DirectorySeparatorChar));
+        if (File.Exists(dest) || TextureDecodeService.TryExportMmrAsOrm(t, dest))
+        {
+            Console.WriteLine($"    MMR->ORM: {t.Name} ({t.Format})");
+            return rel;
+        }
+        return null;
     }
 
     /// <summary>Decodes a named texture slot to PNG and returns its preview-relative path.</summary>
@@ -596,32 +912,51 @@ public static class ModelPreviewService
     private static List<PlacedModel> AlignToHead(string dir, IReadOnlyList<(string File, PreviewPart Part, List<SlotShading> Slots)> models)
     {
         var head = models.FirstOrDefault(m => m.Part.IsHeadPiece);
-        (float Min, float Max)? headBounds =
-            head.File is null ? null : GlbInspector.VerticalBounds(Path.Combine(dir, head.File));
-        var headBase = headBounds?.Min;
+        (Vector3 Min, Vector3 Max)? headB3 =
+            head.File is null ? null : GlbInspector.Bounds3(Path.Combine(dir, head.File));
+        var headBase = headB3?.Min.Y;
         if (headBase is not null)
         {
-            Console.WriteLine($"  head piece spans {headBounds!.Value.Min:0.###}..{headBounds.Value.Max:0.###} (base {headBase:0.###})");
+            Console.WriteLine($"  head piece spans {headB3!.Value.Min.Y:0.###}..{headB3.Value.Max.Y:0.###} (base {headBase:0.###})");
         }
 
         var result = new List<PlacedModel>();
         foreach (var (file, part, slots) in models)
         {
             var isBody = part.MeshPath.Contains("LEGOfig", StringComparison.OrdinalIgnoreCase);
+            var isFace = part.MeshPath.Contains("LEGOface", StringComparison.OrdinalIgnoreCase);
             if (!part.AttachToHead || headBase is null)
             {
-                result.Add(new PlacedModel(file, Vector3.Zero, slots, isBody));
+                result.Add(new PlacedModel(file, Vector3.Zero, slots, isBody, isFace));
                 continue;
             }
-            var b = GlbInspector.VerticalBounds(Path.Combine(dir, file));
-            if (b is null)
+            var b3 = GlbInspector.Bounds3(Path.Combine(dir, file));
+            if (b3 is null)
             {
-                result.Add(new PlacedModel(file, Vector3.Zero, slots, isBody));
+                result.Add(new PlacedModel(file, Vector3.Zero, slots, isBody, isFace));
                 continue;
             }
-            var dy = headBase.Value - b.Value.Min;
-            Console.WriteLine($"  {file}: spans {b.Value.Min:0.###}..{b.Value.Max:0.###} -> lift {dy:0.###}");
-            result.Add(new PlacedModel(file, new Vector3(0, dy, 0), slots, isBody));
+            var dy = headBase.Value - b3.Value.Min.Y;
+
+            // Face shells are authored at the head's exact radius (front x 0.203 vs head 0.204) -
+            // effectively coincident with the head surface, so they lose the depth test and vanish.
+            // The game pulls them out with a PixelDepthOffset material function; the preview nudges
+            // the shell forward instead. The character faces +X (chest/cowl-opening bulge that way).
+            var dx = 0f;
+            if (part.MeshPath.Contains("LEGOface", StringComparison.OrdinalIgnoreCase) && headB3 is not null)
+            {
+                dx = headB3.Value.Max.X + 0.002f - b3.Value.Max.X;
+                // The face does NOT sit flush with the head base. Calibrated against the aligned
+                // community Blender scene by anchoring the mouth print itself (it must land 18.6% of
+                // head height above the head base): our exported SK_LEGOface glb includes every
+                // feature shell (eyes/brows/mouth), so its bbox bottom sits lower than the base
+                // shell's - the net lift that lands the mouth correctly is 8.6% of head height.
+                var headHeight = headB3.Value.Max.Y - headB3.Value.Min.Y;
+                dy += headHeight * 0.086f;
+            }
+            Console.WriteLine($"  {file}: spans y {b3.Value.Min.Y:0.###}..{b3.Value.Max.Y:0.###} -> lift {dy:0.###}" +
+                              (dx != 0 ? $", forward {dx:0.####}" : ""));
+            result.Add(new PlacedModel(file, new Vector3(dx, dy, 0), slots, isBody, isFace));
         }
         return result;
     }
@@ -639,13 +974,18 @@ public static class ModelPreviewService
         {
             var slots = string.Join(",", m.Slots.Select(sl =>
                 "{" +
-                $"\"tex\":{Q(sl.Texture)},\"nrm\":{Q(sl.Normal)},\"mmr\":{Q(sl.Mmr)}," +
+                $"\"tex\":{Q(sl.Texture)},\"nrm\":{Q(sl.Normal)},\"mmr\":{Q(sl.Mmr)},\"alpha\":{Q(sl.Alpha)}," +
+                $"\"hide\":{(sl.Hidden ? "true" : "false")},\"cut\":{(sl.Cutout ? "true" : "false")},\"nrm2\":{Q(sl.Nrm2)}," +
                 $"\"col\":{(sl.Colour is null ? "null" : $"\"#{sl.Colour.Value.R:X2}{sl.Colour.Value.G:X2}{sl.Colour.Value.B:X2}\"")}" +
                 "}"));
             // Extract every UV channel so the viewer's switcher can bind sets three.js drops on import.
             var baseName = Path.GetFileNameWithoutExtension(m.File);
             var uvs = GlbInspector.ExtractUvChannels(Path.Combine(dir, m.File), dir, baseName);
-            return $"{{\"file\":\"{m.File}\",\"base\":\"{baseName}\",\"body\":{(m.IsBody ? "true" : "false")},\"uvs\":[{string.Join(",", uvs)}]," +
+            var fg = m.FaceGroups is null ? "null" : $"[{string.Join(",", m.FaceGroups)}]";
+            return $"{{\"file\":\"{m.File}\",\"base\":\"{baseName}\",\"body\":{(m.IsBody ? "true" : "false")},\"isface\":{(m.IsFace ? "true" : "false")}," +
+                   $"\"fgroups\":{fg},\"mouth\":{Q(m.MouthTex)}," +
+                   $"\"fbands\":[{string.Join(",", (m.Bands ?? new()).Select(b => $"[{b.Band},{b.Tris}]"))}]," +
+                   $"\"uvs\":[{string.Join(",", uvs)}]," +
                    $"\"offset\":[{m.Offset.X:0.#####},{m.Offset.Y:0.#####},{m.Offset.Z:0.#####}]," +
                    $"\"slots\":[{slots}]}}";
         })) + "]";
@@ -678,7 +1018,24 @@ const scene=new THREE.Scene();scene.background=new THREE.Color(0x1a1d22);
 const camera=new THREE.PerspectiveCamera(45,innerWidth/innerHeight,0.1,100000);
 const renderer=new THREE.WebGLRenderer({antialias:true});
 renderer.setPixelRatio(devicePixelRatio);renderer.setSize(innerWidth,innerHeight);
-renderer.outputEncoding=THREE.sRGBEncoding;document.body.appendChild(renderer.domElement);
+renderer.outputEncoding=THREE.sRGBEncoding;
+// The game renders through UE's ACES filmic tonemapper - without it saturated colours (the face
+// print's nougat tint) come out light and candy-like instead of the in-game deep brown.
+renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.1;
+document.body.appendChild(renderer.domElement);
+// A soft studio environment so metals (the belt/buckle from the MMR metalness channel) have something
+// to reflect - without it a metallic surface renders pure black. Built from a tiny vertical gradient
+// (bright top, dark floor) run through PMREM; also lifts the plastic with a subtle sheen.
+function buildEnv(){
+  const c=document.createElement('canvas');c.width=8;c.height=64;const ctx=c.getContext('2d');
+  const g=ctx.createLinearGradient(0,0,0,64);
+  g.addColorStop(0,'#d6dde8');g.addColorStop(0.55,'#7a828e');g.addColorStop(1,'#24272c');
+  ctx.fillStyle=g;ctx.fillRect(0,0,8,64);
+  const t=new THREE.CanvasTexture(c);t.mapping=THREE.EquirectangularReflectionMapping;
+  const pm=new THREE.PMREMGenerator(renderer);const env=pm.fromEquirectangular(t).texture;
+  pm.dispose();t.dispose();return env;
+}
+scene.environment=buildEnv();
 scene.add(new THREE.HemisphereLight(0xffffff,0x50525a,1.5));
 const key=new THREE.DirectionalLight(0xffffff,1.6);key.position.set(4,6,5);scene.add(key);
 const fill=new THREE.DirectionalLight(0xffffff,0.7);fill.position.set(-5,2,-3);scene.add(fill);
@@ -704,32 +1061,118 @@ function dress(g,info){
     // The shared LEGOfig body maps into the character's decal atlas through its SECOND UV set
     // (TEXCOORD_1 = ExtraUV0 = three.js uv2), not UV0. UV0 is a per-part structural unwrap, so the
     // atlas tiles onto every limb. Bind uv2 as the sampling UV. (Confirmed via the channel switcher.)
-    if(info.body&&o.geometry.attributes.uv2){o.geometry.setAttribute('uv',o.geometry.attributes.uv2);}
+    if(info.body&&o.geometry.attributes.uv2){
+      // Keep the structural UV0 reachable as aUv0 - the plastic base normal samples it while the
+      // atlas maps sample uv (rebound to uv2 below).
+      o.geometry.setAttribute('aUv0',o.geometry.attributes.uv);
+      o.geometry.setAttribute('uv',o.geometry.attributes.uv2);}
     // Keep the switcher available on body meshes for tuning other suits.
     if(info.body&&info.base&&info.uvs&&info.uvs.length){uvMeshes.push({o:o,base:info.base,uvs:info.uvs});}
     const list=Array.isArray(o.material)?o.material:[o.material];
     list.forEach((m,li)=>{if(!m)return;
       const s=slots[matIndex]||slots[0]||{};
       matIndex++;
+      // Sections the cooked mesh marks bDisabled (cape cloth-sim proxy sheets) are never drawn
+      // by the game - hide the whole primitive.
+      if(s.hide){o.visible=false;say(info.file+': hid disabled section');return;}
       if(s.tex){const t=texLoader.load(s.tex,
           ()=>say('  '+s.tex.split('/').pop()+' loaded'),
           undefined,()=>say('  TEX FAIL '+s.tex));
-        t.flipY=false;t.encoding=THREE.sRGBEncoding;m.map=t;m.color=new THREE.Color(0xffffff);applied++;}
+        t.flipY=false;t.encoding=THREE.sRGBEncoding;m.map=t;
+        // Face prints are white stencils - their colour comes from the material's tint (the
+        // Blender recreation drives Base Colour flat and takes only the texture's alpha). The tint
+        // hex is an sRGB colour, so decode it to linear for the shader - passing it raw washes the
+        // mouth out to pale tan instead of the reference's darker nougat.
+        m.color=(s.cut&&s.col)?new THREE.Color(s.col).convertSRGBToLinear():new THREE.Color(0xffffff);applied++;}
       else if(s.col){m.map=null;m.color=new THREE.Color(s.col);applied++;}
       else if(!m.map){m.color=new THREE.Color(0x9aa0a8);}
       const n=tex(s.nrm,false); if(n)m.normalMap=n;
-      // LEGO minifig plastic is not metal. A metalnessMap with no environment renders the surface
-      // pure BLACK, which is what buried the body. Force plastic: metalness 0, MMR only for roughness.
+      // Body: blend the uv0-space plastic base normal (LEGOfig seams + micro noise, baked in C#)
+      // under the uv2-space DNRM sculpt. three.js samples every normal map with one UV set, so the
+      // second map needs a small shader patch reading the preserved aUv0 attribute.
+      if(s.nrm2&&n){
+        const bn=tex(s.nrm2,false);bn.wrapS=bn.wrapT=THREE.RepeatWrapping;
+        m.onBeforeCompile=sh=>{
+          sh.uniforms.baseNormalMap={value:bn};
+          sh.vertexShader=sh.vertexShader
+            .replace('#include <common>','#include <common>\nattribute vec2 aUv0;varying vec2 vBaseUv;')
+            .replace('#include <uv_vertex>','#include <uv_vertex>\nvBaseUv=aUv0;');
+          // onBeforeCompile sees the template BEFORE #include expansion, so the mapN line cannot be
+          // patched directly - expand the chunk ourselves, patch inside it, and splice it back.
+          sh.fragmentShader=sh.fragmentShader
+            .replace('#include <common>','#include <common>\nuniform sampler2D baseNormalMap;varying vec2 vBaseUv;')
+            .replace('#include <normal_fragment_maps>',
+              THREE.ShaderChunk.normal_fragment_maps.replace(
+                'vec3 mapN = texture2D( normalMap, vUv ).xyz * 2.0 - 1.0;',
+                'vec3 mapN = texture2D( normalMap, vUv ).xyz * 2.0 - 1.0;\n'+
+                'vec3 baseN = texture2D( baseNormalMap, vBaseUv ).xyz * 2.0 - 1.0;\n'+
+                'mapN = normalize( vec3( mapN.xy + baseN.xy, mapN.z * baseN.z ) );'));
+        };
+        m.customProgramCacheKey=function(){return 'baseNormal';};
+      }
+      // MMR is exported repacked into ORM order (roughness->green, metalness->blue) so one texture
+      // drives both maps the way three.js samples them. The scene has an environment map, so the
+      // metallic belt/buckle now reflects it instead of rendering black (which is why metalness used
+      // to be forced to 0). Plastic areas have metalness 0 in the map and stay diffuse.
       const r=tex(s.mmr,false);
-      m.metalness=0.0;
-      if(r){m.roughnessMap=r;m.roughness=1;}else{m.roughness=0.6;}
+      if(r){m.roughnessMap=r;m.metalnessMap=r;m.roughness=1;m.metalness=1;}
+      else{m.roughness=0.55;m.metalness=0;}
+      m.envMapIntensity=0.5;
       // LEGO packs masks into alpha - it is not opacity.
       m.transparent=false;m.alphaTest=0;m.opacity=1;m.depthWrite=true;
+      // Cape cloth: the baked weave alpha makes the deep weave holes see-through (the game's
+      // BLEND_Masked + hashed look). alphaTest keeps depth-write on, so no sorting artifacts.
+      if(s.alpha){const a=tex(s.alpha,false);if(a){m.alphaMap=a;m.alphaTest=0.4;}}
+      // Face prints: their texture alpha IS opacity (unlike the body) - cut the shell away so only
+      // the printed features remain over the head piece. The shell hugs the head surface, so bias
+      // the depth test toward the camera (the game's PixelDepthOffset equivalent).
+      if(s.cut){m.alphaTest=0.5;m.polygonOffset=true;m.polygonOffsetFactor=-2;m.polygonOffsetUnits=-2;}
+      // Cloth (the cape) is authored single-sided; without double-siding you see through to its
+      // inside faces. Cheap to always enable for a static preview.
+      m.side=THREE.DoubleSide;
       // The body mesh carries a COLOR_0 vertex-colour set (a mask/AO), which GLTFLoader turns into
       // vertexColors=true. That multiplies the albedo - if those colours are dark the whole surface
       // goes black regardless of texture or UV. It is not the display colour, so switch it off.
       if(m.vertexColors){m.vertexColors=false;say('  '+(info.file||'')+': disabled vertexColors');}
       m.needsUpdate=true;});
+    // Face feature split: the cooked face mesh is ONE section; C# reordered its index buffer into
+    // [base][mouth][hidden] runs so the mouth shell can wear its own print (black stern mouth) and
+    // the unused feature shells (eyes etc., dummied by this character's material) stay hidden.
+    if(info.isface&&info.fgroups&&o.geometry.index){
+      const g=info.fgroups,geo=o.geometry;
+      geo.clearGroups();
+      geo.addGroup(0,g[0]*3,0);
+      geo.addGroup(g[0]*3,g[1]*3,1);
+      const baseM=Array.isArray(o.material)?o.material[0]:o.material;
+      // The mouth's SHAPE is sculpted geometry (visible in Blender's untextured solid shading) -
+      // the material only colours it dark. Painting the O-ring sheet onto it was the mistake:
+      // that texture is the open-mouth cavity used by talking expressions.
+      const mouthM=new THREE.MeshStandardMaterial({color:0x0a0a0a,roughness:0.4,metalness:0});
+      mouthM.side=THREE.DoubleSide;
+      // SK_LEGOface is the morph-animated expression layer (M_LEGOface has bUsedWithMorphTargets).
+      // The TPAGE atlas head region is BLANK for these characters, so the visible face comes from
+      // this layer: the under-layer stencil plus the mouth shells sampling the mouth sheet.
+      // F cycles the layers for inspection.
+      mouthM.visible=true;baseM.visible=true;
+      const hidM=new THREE.MeshStandardMaterial();hidM.visible=false;
+      const mats=[baseM,mouthM,hidM];
+      // Expression slots: each alternate ExtraUV0 band is one sprite slot the game's
+      // SpriteIndex00/01 anim notifies select. Give each its own group+material so they can be
+      // switched on individually (E cycles).
+      const bands=info.fbands||[];
+      let off=(g[0]+g[1])*3;
+      bands.forEach(b=>{
+        const m2=new THREE.MeshStandardMaterial({color:0x0a0a0a,roughness:0.4,metalness:0});
+        m2.side=THREE.DoubleSide;m2.visible=false;
+        mats.push(m2);
+        geo.addGroup(off,b[1]*3,mats.length-1);
+        off+=b[1]*3;
+        faceSlotMats.push({band:b[0],mat:m2,tris:b[1]});
+      });
+      o.material=mats;
+      faceLayerMats.push({base:baseM,mouth:mouthM});
+      say(info.file+': face split '+g[0]+'/'+g[1]+'/'+g[2]+' tris (expression layer hidden - press F)');
+    }
   });
   say(info.file+': slots='+slots.length+' applied='+applied+' ['+
       slots.map(s=>s.tex?'tex':(s.col?s.col:'-')).join(',')+']');
@@ -744,17 +1187,56 @@ function frameAll(){
 }
 function load(m){return new Promise(res=>loader.load(m.file,g=>{dress(g,m);res({m,scene:g.scene});},
   undefined,e=>{document.getElementById('err').textContent='Load error ('+m.file+'): '+(e&&e.message||e);res(null);}));}
+const faceScenes=[];let faceNudge={x:0,y:0};
+const faceLayerMats=[];let faceLayerState=2;
+// Alternate FEATURE shells (brows/eyes/lashes/teeth...), addressed by their ExtraUV0 band. These
+// are NOT expressions on their own: the game poses the face BONE RIG (ABP_LEGOface_PostProcess)
+// from per-character animations A_<Expression>_<Character>_LEGOFace. E is an inspection aid.
+const faceSlotMats=[];let faceSlot=-1;
+addEventListener('keydown',e=>{
+  if(e.key!=='e'&&e.key!=='E')return;
+  if(!faceSlotMats.length){say('no alternate feature shells in this face mesh');return;}
+  if(faceSlot>=0)faceSlotMats[faceSlot].mat.visible=false;
+  faceSlot++;
+  if(faceSlot>=faceSlotMats.length){faceSlot=-1;say('feature shells: none (default face)');return;}
+  const s=faceSlotMats[faceSlot];
+  s.mat.visible=true;
+  say('feature shell band '+s.band+' ('+s.tris+' tris) - '+(faceSlot+1)+'/'+faceSlotMats.length);
+});
+// F cycles the LEGOface expression layers: 0 hidden -> 1 under-layer -> 2 under-layer + mouth.
+addEventListener('keydown',e=>{
+  if(e.key!=='f'&&e.key!=='F')return;
+  if(!faceLayerMats.length)return;
+  faceLayerState=(faceLayerState+1)%3;
+  faceLayerMats.forEach(x=>{x.base.visible=faceLayerState>=1;x.mouth.visible=faceLayerState>=2;});
+  say('face expression layer: '+['hidden','under-layer','under-layer + mouth'][faceLayerState]);
+});
 Promise.all(models.map(load)).then(loaded=>{
   loaded=loaded.filter(Boolean);
   // Offsets are precomputed in C# from the exported glb skeletons, so the viewer just places them.
   loaded.forEach(x=>{
     const o=x.m.offset;
     if(o&&(o[0]||o[1]||o[2]))x.scene.position.set(o[0],o[1],o[2]);
+    if(x.m.isface)faceScenes.push(x.scene);
     root.add(x.scene);
   });
   frameAll();
   const avail=[...new Set(uvMeshes.flatMap(u=>u.uvs))].sort();
   say('UV switch: press '+avail.join('/')+' to change texture UV channel (now: glTF default)');
+  if(faceScenes.length)say('Face nudge: arrow keys (up/down = height, left/right = depth)');
+});
+// Calibration aid: arrows move the face piece in 0.004 steps and report the total, so the right
+// permanent offset can be read straight off the HUD instead of guessed.
+addEventListener('keydown',e=>{
+  if(!faceScenes.length)return;
+  let dx=0,dy=0;
+  if(e.key==='ArrowUp')dy=0.004;else if(e.key==='ArrowDown')dy=-0.004;
+  else if(e.key==='ArrowRight')dx=0.004;else if(e.key==='ArrowLeft')dx=-0.004;
+  else return;
+  e.preventDefault();
+  faceNudge.x+=dx;faceNudge.y+=dy;
+  faceScenes.forEach(s=>{s.position.x+=dx;s.position.y+=dy;});
+  say('face nudge: y '+faceNudge.y.toFixed(3)+', x '+faceNudge.x.toFixed(3));
 });
 // Live UV-channel switcher: bind a mesh's chosen TEXCOORD set (extracted to .f32 by the exporter)
 // as its 'uv' attribute. Three.js only imports channels 0/1, so this is the only way to test 2+.

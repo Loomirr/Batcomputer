@@ -35,7 +35,27 @@ internal static class TextureDecodeService
         try
         {
             var mip = texture.GetFirstMip();
-            if (mip?.BulkData?.Data is not { Length: > 0 } data || Codec(texture.Format) is not { } codec)
+            if (mip?.BulkData?.Data is not { Length: > 0 } data)
+            {
+                return null;
+            }
+            // PF_G8 is plain uncompressed 8-bit grayscale (the cape fabric height/noise maps use it) -
+            // not a block format, so expand it here rather than through BCnEncoder.
+            if (texture.Format == EPixelFormat.PF_G8)
+            {
+                if (data.Length < mip.SizeX * mip.SizeY)
+                {
+                    return null;
+                }
+                var gray = new ColorRgba32[mip.SizeX * mip.SizeY];
+                for (var i = 0; i < gray.Length; i++)
+                {
+                    var v = data[i];
+                    gray[i] = new ColorRgba32(v, v, v, 255);
+                }
+                return new Decoded(gray, mip.SizeX, mip.SizeY);
+            }
+            if (Codec(texture.Format) is not { } codec)
             {
                 return null;
             }
@@ -175,10 +195,269 @@ internal static class TextureDecodeService
     }
 
     /// <summary>
+    /// Repacks the LEGO "MMR" map into three.js's ORM channel order.
+    ///
+    /// Confirmed by decoding T_TPAGE_Batman_89_DIST_MMR: the game packs
+    ///   R = metalness (the belt/buckle metal, spikes to 255; ~0 on plastic)
+    ///   G = unused    (measured max 0 across the whole texture)
+    ///   B = roughness (the muscle/logo/plastic detail field, ~0.2 avg = glossy plastic)
+    /// three.js MeshStandardMaterial reads roughness from the GREEN channel and metalness from BLUE, so
+    /// binding MMR straight makes it sample the empty green and render the whole body mirror-glossy.
+    /// Rewrite to R = AO(255), G = roughness (src B), B = metalness (src R) so both read correctly from
+    /// one texture bound as roughnessMap + metalnessMap.
+    /// </summary>
+    public static bool TryExportMmrAsOrm(UTexture2D mmr, string destPath)
+    {
+        var d = TryDecode(mmr);
+        if (d is null)
+        {
+            return false;
+        }
+        try
+        {
+            using var bmp = new Bitmap(d.Width, d.Height, PixelFormat.Format32bppArgb);
+            var bits = bmp.LockBits(new Rectangle(0, 0, d.Width, d.Height), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+            try
+            {
+                // 32bppArgb is BGRA in memory: [0]=Blue [1]=Green [2]=Red [3]=Alpha.
+                var row = new byte[d.Width * 4];
+                for (var y = 0; y < d.Height; y++)
+                {
+                    for (var x = 0; x < d.Width; x++)
+                    {
+                        var c = d.Pixels[y * d.Width + x];
+                        var o = x * 4;
+                        // Roughness floor 0.146 from the recreated M_TPAGE graph's colour ramp
+                        // (0 -> 0.146, 1 -> 1): even the shiniest plastic keeps a slight matte.
+                        var rough = (byte)Math.Clamp(37 + c.b * (255 - 37) / 255, 0, 255);
+                        row[o + 0] = c.r;   // Blue  <- metalness (three.js metalnessMap reads .b)
+                        row[o + 1] = rough; // Green <- roughness (three.js roughnessMap reads .g)
+                        row[o + 2] = 255;   // Red   <- AO none
+                        row[o + 3] = 255;
+                    }
+                    System.Runtime.InteropServices.Marshal.Copy(row, 0, bits.Scan0 + y * bits.Stride, row.Length);
+                }
+            }
+            finally
+            {
+                bmp.UnlockBits(bits);
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+            bmp.Save(destPath, ImageFormat.Png);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"    MMR repack failed for {mmr.Name}: {ex.Message.Split('\n')[0]}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Bakes the cape's woven-fabric shading maps. The cooked M_Cape_EoM graph is stripped, but a
+    /// community Blender recreation (near-exact to in-game) revealed the wiring, and all four source
+    /// textures ship in the paks (Characters/Textures/Attachments/Cape/Batman_EOM/T_PongeeFabric_*):
+    ///   roughness = ramp(0.2136->0.307, 0.2932->1.0) of height*(1-fuzz)   [weave valleys glossier]
+    ///   normal    = overlay(NRM, Scratches_NRM)                            [weave + wear]
+    ///   alpha     = ramp(0->0, 0.1864->1) of height                        [deep weave holes see-through]
+    /// Writes an ORM png (G=roughness, B=0 metal), a normal png, and a separate grayscale alpha png -
+    /// separate because three.js reads BOTH alphaMap and roughnessMap from the green channel, so the
+    /// two cannot share one texture.
+    /// </summary>
+    public static bool TryBakeCapeFabric(
+        UTexture2D height, UTexture2D? fuzz, UTexture2D nrm, UTexture2D? scratches,
+        string ormDest, string nrmDest, string alphaDest)
+    {
+        var h = TryDecode(height);
+        if (h is null)
+        {
+            return false;
+        }
+        var f = fuzz is null ? null : TryDecode(fuzz);
+        var n1 = TryDecode(nrm);
+        var n2 = scratches is null ? null : TryDecode(scratches);
+
+        // The weave ramp: below lo the fabric floor, above hi fully rough. Values from the Blender
+        // recreation's colour ramps.
+        static float RampRough(float x) => x <= 0.2136f ? 0.3073f
+            : x >= 0.2932f ? 1f
+            : 0.3073f + (x - 0.2136f) / (0.2932f - 0.2136f) * (1f - 0.3073f);
+        static float RampAlpha(float x) => x >= 0.1864f ? 1f : Math.Max(0f, x / 0.1864f);
+        static ColorRgba32 SampleN(Decoded d, float u, float v)
+        {
+            var x = Math.Clamp((int)(u * (d.Width - 1) + 0.5f), 0, d.Width - 1);
+            var y = Math.Clamp((int)(v * (d.Height - 1) + 0.5f), 0, d.Height - 1);
+            return d.Pixels[y * d.Width + x];
+        }
+        static float Overlay(float a, float b) => a < 0.5f ? 2f * a * b : 1f - 2f * (1f - a) * (1f - b);
+
+        try
+        {
+            int w = h.Width, ht = h.Height;
+            using var orm = new Bitmap(w, ht, PixelFormat.Format32bppArgb);
+            using var alp = new Bitmap(w, ht, PixelFormat.Format32bppArgb);
+            var ob = orm.LockBits(new Rectangle(0, 0, w, ht), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+            var ab = alp.LockBits(new Rectangle(0, 0, w, ht), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+            try
+            {
+                var orow = new byte[w * 4];
+                var arow = new byte[w * 4];
+                for (var y = 0; y < ht; y++)
+                {
+                    var v = ht <= 1 ? 0f : y / (float)(ht - 1);
+                    for (var x = 0; x < w; x++)
+                    {
+                        var u = w <= 1 ? 0f : x / (float)(w - 1);
+                        var hv = h.Pixels[y * w + x].r / 255f;
+                        var fv = f is null ? 0f : SampleN(f, u, v).r / 255f;
+                        var rough = (byte)Math.Clamp(RampRough(hv * (1f - fv)) * 255f, 0, 255);
+                        var a = (byte)Math.Clamp(RampAlpha(hv) * 255f, 0, 255);
+                        var o = x * 4;
+                        orow[o + 0] = 0;     // B: metalness 0 - cloth
+                        orow[o + 1] = rough; // G: roughness
+                        orow[o + 2] = 255;   // R: AO none
+                        orow[o + 3] = 255;
+                        arow[o + 0] = a; arow[o + 1] = a; arow[o + 2] = a; arow[o + 3] = 255;
+                    }
+                    System.Runtime.InteropServices.Marshal.Copy(orow, 0, ob.Scan0 + y * ob.Stride, orow.Length);
+                    System.Runtime.InteropServices.Marshal.Copy(arow, 0, ab.Scan0 + y * ab.Stride, arow.Length);
+                }
+            }
+            finally
+            {
+                orm.UnlockBits(ob);
+                alp.UnlockBits(ab);
+            }
+            Directory.CreateDirectory(Path.GetDirectoryName(ormDest)!);
+            orm.Save(ormDest, ImageFormat.Png);
+            alp.Save(alphaDest, ImageFormat.Png);
+
+            // Fabric normal: overlay-blend the weave and scratch normals in X/Y, rebuild Z (the
+            // sources are BC5, so blue is empty on both).
+            if (n1 is not null)
+            {
+                int nw = n1.Width, nh = n1.Height;
+                using var bmp = new Bitmap(nw, nh, PixelFormat.Format32bppArgb);
+                var bits = bmp.LockBits(new Rectangle(0, 0, nw, nh), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+                try
+                {
+                    var row = new byte[nw * 4];
+                    for (var y = 0; y < nh; y++)
+                    {
+                        var v = nh <= 1 ? 0f : y / (float)(nh - 1);
+                        for (var x = 0; x < nw; x++)
+                        {
+                            var u = nw <= 1 ? 0f : x / (float)(nw - 1);
+                            var c1 = n1.Pixels[y * nw + x];
+                            float rx = c1.r / 255f, gy = c1.g / 255f;
+                            if (n2 is not null)
+                            {
+                                var c2 = SampleN(n2, u, v);
+                                rx = Overlay(rx, c2.r / 255f);
+                                gy = Overlay(gy, c2.g / 255f);
+                            }
+                            var nx = rx * 2f - 1f;
+                            var ny = gy * 2f - 1f;
+                            var nz = (float)Math.Sqrt(Math.Max(0f, 1f - nx * nx - ny * ny));
+                            var o = x * 4;
+                            row[o + 0] = (byte)Math.Clamp((nz + 1f) * 127.5f, 0, 255);
+                            row[o + 1] = (byte)Math.Clamp(gy * 255f, 0, 255);
+                            row[o + 2] = (byte)Math.Clamp(rx * 255f, 0, 255);
+                            row[o + 3] = 255;
+                        }
+                        System.Runtime.InteropServices.Marshal.Copy(row, 0, bits.Scan0 + y * bits.Stride, row.Length);
+                    }
+                }
+                finally
+                {
+                    bmp.UnlockBits(bits);
+                }
+                bmp.Save(nrmDest, ImageFormat.Png);
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"    cape fabric bake failed: {ex.Message.Split('\n')[0]}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Bakes a normal map with the game's micro-surface noise overlaid, Z rebuilt. The recreated
+    /// shader graphs overlay T_Noise_Norm_SEB_N (tiled <paramref name="tile"/>x, 6.9 in M_TPAGE) over
+    /// the part's base normal - the subtle injection-moulded plastic texture. Both live in the same
+    /// UV space, so the overlay can be baked into one texture offline.
+    /// </summary>
+    public static bool TryBakeNoisedNormal(UTexture2D baseNrm, UTexture2D? noise, float tile, string destPath)
+    {
+        var b = TryDecode(baseNrm);
+        if (b is null)
+        {
+            return false;
+        }
+        var n = noise is null ? null : TryDecode(noise);
+
+        static float Overlay(float a, float x) => a < 0.5f ? 2f * a * x : 1f - 2f * (1f - a) * (1f - x);
+
+        try
+        {
+            int w = b.Width, h = b.Height;
+            using var bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+            var bits = bmp.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+            try
+            {
+                var row = new byte[w * 4];
+                for (var y = 0; y < h; y++)
+                {
+                    for (var x = 0; x < w; x++)
+                    {
+                        var c = b.Pixels[y * w + x];
+                        float rx = c.r / 255f, gy = c.g / 255f;
+                        if (n is not null)
+                        {
+                            // Tile the noise across the base map's UV space.
+                            var nu = x / (float)w * tile % 1f;
+                            var nv = y / (float)h * tile % 1f;
+                            var np = n.Pixels[Math.Clamp((int)(nv * n.Height), 0, n.Height - 1) * n.Width
+                                              + Math.Clamp((int)(nu * n.Width), 0, n.Width - 1)];
+                            rx = Overlay(rx, np.r / 255f);
+                            gy = Overlay(gy, np.g / 255f);
+                        }
+                        var nx = rx * 2f - 1f;
+                        var ny = gy * 2f - 1f;
+                        var nz = (float)Math.Sqrt(Math.Max(0f, 1f - nx * nx - ny * ny));
+                        var o = x * 4;
+                        row[o + 0] = (byte)Math.Clamp((nz + 1f) * 127.5f, 0, 255);
+                        row[o + 1] = (byte)Math.Clamp(gy * 255f, 0, 255);
+                        row[o + 2] = (byte)Math.Clamp(rx * 255f, 0, 255);
+                        row[o + 3] = 255;
+                    }
+                    System.Runtime.InteropServices.Marshal.Copy(row, 0, bits.Scan0 + y * bits.Stride, row.Length);
+                }
+            }
+            finally
+            {
+                bmp.UnlockBits(bits);
+            }
+            Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+            bmp.Save(destPath, ImageFormat.Png);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"    noised normal bake failed for {baseNrm.Name}: {ex.Message.Split('\n')[0]}");
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Writes <paramref name="texture"/> to <paramref name="destPath"/> as PNG. Returns false when the
     /// format isn't one we decode or the texture has no usable mip.
     /// </summary>
-    public static bool TryExportPng(UTexture2D texture, string destPath, bool reconstructNormalZ = false)
+    public static bool TryExportPng(UTexture2D texture, string destPath, bool reconstructNormalZ = false,
+        bool keepAlpha = false)
     {
         try
         {
@@ -225,8 +504,9 @@ internal static class TextureDecodeService
                         row[o + 0] = bb;
                         row[o + 1] = c.g;
                         row[o + 2] = c.r;
-                        // Force opaque: LEGO packs masks in alpha, it is not opacity.
-                        row[o + 3] = 255;
+                        // Force opaque by default: LEGO packs masks in alpha, it is not opacity.
+                        // Faces are the exception - their print alpha IS opacity (keepAlpha).
+                        row[o + 3] = keepAlpha ? c.a : (byte)255;
                     }
                     System.Runtime.InteropServices.Marshal.Copy(
                         row, 0, bits.Scan0 + y * bits.Stride, row.Length);

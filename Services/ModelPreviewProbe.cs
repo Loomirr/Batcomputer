@@ -111,6 +111,54 @@ internal static class ModelPreviewProbe
             return 0;
         }
 
+        // "sections:<meshPath>" prints LOD0's render sections and the mesh's own material slots -
+        // which slot each section draws with, so cloth-sim proxy sections can be identified.
+        if (objectPath.StartsWith("sections:", StringComparison.OrdinalIgnoreCase))
+        {
+            var m = provider.LoadPackageObject(objectPath["sections:".Length..]);
+            if (m is USkeletalMesh sk3)
+            {
+                var mats = sk3.Materials ?? [];
+                Console.WriteLine($"material slots: {mats.Length}");
+                for (var i = 0; i < mats.Length; i++)
+                {
+                    Console.WriteLine($"  [{i}] {mats[i]?.Load()?.Name ?? "(none)"}");
+                }
+                if (sk3.TryConvert(out var conv2))
+                {
+                    for (var li = 0; li < conv2.LODs.Count; li++)
+                    {
+                        var secs = conv2.LODs[li].Sections.Value;
+                        Console.WriteLine($"LOD{li}: {conv2.LODs[li].NumVerts} verts, {secs.Length} section(s)");
+                        foreach (var s in secs)
+                        {
+                            Console.WriteLine($"    section: matIndex={s.MaterialIndex} firstFace={s.FirstIndex / 3} numFaces={s.NumFaces}");
+                        }
+                    }
+                }
+                // Raw render sections carry the cloth/disabled flags the converter drops.
+                var lods = sk3.LODModels;
+                for (var li = 0; lods is not null && li < lods.Length; li++)
+                {
+                    Console.WriteLine($"raw LOD{li}:");
+                    foreach (var s in lods[li].Sections)
+                    {
+                        var t = s.GetType();
+                        var line = $"    raw section matIndex={s.MaterialIndex} tris={s.NumTriangles}";
+                        foreach (var fname in new[] { "bDisabled", "CorrespondClothAssetIndex", "ClothingData", "HasClothData", "ClothMappingDataLODs" })
+                        {
+                            var fi = t.GetField(fname) ?? null;
+                            var pi = t.GetProperty(fname);
+                            var v = fi?.GetValue(s) ?? pi?.GetValue(s);
+                            if (v is not null) line += $" {fname}={(v is Array a ? $"[{a.Length}]" : v)}";
+                        }
+                        Console.WriteLine(line);
+                    }
+                }
+            }
+            return 0;
+        }
+
         // "bones:<meshPath>" prints the skeleton: each bone name, parent, and local position.
         if (objectPath.StartsWith("bones:", StringComparison.OrdinalIgnoreCase))
         {
