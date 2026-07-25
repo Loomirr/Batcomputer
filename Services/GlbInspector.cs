@@ -250,6 +250,9 @@ internal static class GlbInspector
     /// </summary>
     public static List<(int Band, int Tris)> FaceBandLayout { get; private set; } = new();
 
+    /// <summary>Mean z of each band's vertices - the sign says which side of the face it is on.</summary>
+    public static Dictionary<int, float> FaceBandCentres { get; private set; } = new();
+
     public static int[]? TryGroupFaceFeatures(string glbPath)
     {
         try
@@ -373,47 +376,28 @@ internal static class GlbInspector
             // units - seated at local y 0.089..0.115 on the front surface). Connectivity alone finds
             // only the small square inner-mouth cavity below it, which sampled the whole mouth sheet
             // and rendered as a round "O".
-            var baseT = new List<uint>();
-            var mouthT = new List<uint>();
-            var hiddenT = new List<uint>();
-            const int MouthBand = 13;
-            const int FaceBand = 8;
-
-            // Every OTHER band is an alternate feature shell - the expression system's sprite slots
-            // (anim notifies "SpriteIndex00"/"SpriteIndex01" carry the index to show). Keep them in
-            // band order inside the hidden run so the viewer can address each one individually.
-            var otherBands = new SortedDictionary<int, List<uint>>();
+            // Group triangles by band, in ascending band order, and report the layout so the
+            // caller can give each band its own material. Which band is which feature is decided
+            // there, from the face material's parameters.
+            var byBand = new SortedDictionary<int, List<uint>>();
             for (var t = 0; t + 2 < iCount; t += 3)
             {
-                List<uint> bucket;
-                if (haveBands)
+                var band = haveBands ? uv1Band[indices[t]] : (kind[triComp[t / 3]] == 2 ? -1 : 0);
+                if (!byBand.TryGetValue(band, out var bucket))
                 {
-                    var band = uv1Band[indices[t]];
-                    if (band == MouthBand) bucket = mouthT;
-                    else if (band == FaceBand) bucket = baseT;
-                    else
-                    {
-                        if (!otherBands.TryGetValue(band, out bucket!))
-                        {
-                            bucket = new List<uint>();
-                            otherBands[band] = bucket;
-                        }
-                    }
-                }
-                else
-                {
-                    bucket = kind[triComp[t / 3]] == 2 ? hiddenT : baseT;
+                    bucket = new List<uint>();
+                    byBand[band] = bucket;
                 }
                 bucket.Add(indices[t]); bucket.Add(indices[t + 1]); bucket.Add(indices[t + 2]);
             }
-            FaceBandLayout = otherBands.Select(kv => (kv.Key, kv.Value.Count / 3)).ToList();
-            foreach (var kv in otherBands)
-            {
-                hiddenT.AddRange(kv.Value);
-            }
+            FaceBandLayout = byBand.Select(kv => (kv.Key, kv.Value.Count / 3)).ToList();
+            FaceBandCentres = byBand.ToDictionary(
+                kv => kv.Key,
+                kv => kv.Value.Count == 0 ? 0f : kv.Value.Average(i => pos[i].Z));
+            var ordered = byBand.SelectMany(kv => kv.Value).ToList();
 
-            // Rewrite the index buffer in [base][mouth][hidden] order, in place.
-            var reordered = baseT.Concat(mouthT).Concat(hiddenT).ToArray();
+            // Rewrite the index buffer so each band is one contiguous run.
+            var reordered = ordered.ToArray();
             for (var i = 0; i < reordered.Length; i++)
             {
                 if (iType == 5125)
@@ -426,7 +410,7 @@ internal static class GlbInspector
                 }
             }
             File.WriteAllBytes(glbPath, data);
-            return new[] { baseT.Count / 3, mouthT.Count / 3, hiddenT.Count / 3 };
+            return FaceBandLayout.Select(b => b.Tris).ToArray();
         }
         catch
         {

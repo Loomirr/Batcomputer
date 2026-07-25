@@ -44,7 +44,10 @@ internal static class Program
         {
             ApplicationConfiguration.Initialize();
             var folder = ModelPreviewService.BuildPreview(args[1], args[2], args[3]);
-            Application.Run(ModelPreviewForm.ForFolder(folder, "Preview — " + args[3].Split('/')[^1]));
+            // Folder name in the title: the viewer is served from a per-build guid directory, so this
+            // is the only way to tell from a screenshot which build a window is actually showing.
+            Application.Run(ModelPreviewForm.ForFolder(folder,
+                "Preview — " + args[3].Split('/')[^1] + "  [" + Path.GetFileName(folder) + "]"));
             return 0;
         }
 

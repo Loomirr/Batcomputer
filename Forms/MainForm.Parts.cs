@@ -164,6 +164,13 @@ public sealed partial class MainForm
                 "Animations", animCount > 0 ? $"{animCount} override(s) · click to edit" : "none · click to edit", Theme.Animations,
                 onClick: () => SelectComboValue(_toyboxCategoryCombo, "Animations"),
                 onMaterialDrop: null));
+
+            // Straight from the suit you are building into the 3D viewer, so you can check the
+            // look without hunting for the character in the list.
+            _yourCharacter.SlotFlow.Controls.Add(BuildActionRow(
+                "View in 3D", "see this suit rendered", Theme.Gold,
+                onClick: ViewCurrentSuitIn3D,
+                onMaterialDrop: null));
         }
 
         UpdateSlotDots();

@@ -9,7 +9,10 @@ namespace Batcomputer;
 /// </summary>
 public sealed class ModelPreviewForm : Form
 {
-    private const string VirtualHost = "preview.batcomputer";
+    // A UNIQUE host per preview. The folder behind a fixed host changes every build, and WebView2
+    // keeps serving the previous page's models.js and .glb from cache - which renders as a stuck
+    // camera inside a different character's geometry. A fresh host name has an empty cache.
+    private readonly string _virtualHost = $"p{Guid.NewGuid():N}.batcomputer";
     private readonly WebView2 _web = new() { Dock = DockStyle.Fill };
     private readonly string? _html;
     private readonly string? _folder;
@@ -64,8 +67,11 @@ public sealed class ModelPreviewForm : Form
                 // Serve the local preview folder over a fake https host - this supports fetching the
                 // .glb and the module scripts, which NavigateToString's about:blank origin does not.
                 _web.CoreWebView2.SetVirtualHostNameToFolderMapping(
-                    VirtualHost, _folder, Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
-                _web.CoreWebView2.Navigate($"https://{VirtualHost}/index.html");
+                    _virtualHost, _folder, Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
+                // Cache-bust: the virtual host name is constant while the folder behind it changes
+                // per build, so WebView2 happily serves a PREVIOUS character's index.html/models.js
+                // - which renders as a stuck camera inside stale geometry.
+                _web.CoreWebView2.Navigate($"https://{_virtualHost}/index.html");
             }
             else
             {

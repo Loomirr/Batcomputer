@@ -82,7 +82,7 @@ public sealed partial class MainForm
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         _toyboxCategoryCombo.DropDownStyle = ComboBoxStyle.DropDownList;
-        var categories = new List<object> { "Home", "Base", "Materials", "Textures", "Parts", "Faces", "Equipment", "Gliders", "Animations", "Review" };
+        var categories = new List<object> { "Home", "Base", "Materials", "Textures", "Parts", "Faces", "Equipment", "Gliders", "Animations", "3D viewer", "Review" };
         if (AppSettings.Current.ShowResearchTools)
         {
             categories.Add("Research");
@@ -142,6 +142,10 @@ public sealed partial class MainForm
         _toyboxTileGrid.Dock = DockStyle.Fill;
         _toyboxTileGrid.Visible = false;
         toyLayout.Controls.Add(_toyboxTileGrid, 0, 1);
+
+        // The 3D viewer shares the same cell; it is built on first use because listing every
+        // character means scanning the paks.
+        _viewerHostLayout = toyLayout;
 
         _toyboxSelectionLabel.Dock = DockStyle.Fill;
         _toyboxSelectionLabel.TextAlign = ContentAlignment.MiddleLeft;
@@ -398,7 +402,7 @@ public sealed partial class MainForm
     private Control CreateCategoryRail()
     {
         var rail = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, BackColor = Theme.PanelBg, Padding = new Padding(4, 6, 4, 6) };
-        var cats = new[] { ("Home", "⌂"), ("Base", "◱"), ("Materials", "◈"), ("Textures", "▣"), ("Parts", "◆"), ("Faces", "☺"), ("Equipment", "★"), ("Gliders", "︾"), ("Animations", "➤"), ("Review", "✎"), ("Research", "⌕") };
+        var cats = new[] { ("Home", "⌂"), ("Base", "◱"), ("Materials", "◈"), ("Textures", "▣"), ("Parts", "◆"), ("Faces", "☺"), ("Equipment", "★"), ("Gliders", "︾"), ("Animations", "➤"), ("3D viewer", "◐"), ("Review", "✎"), ("Research", "⌕") };
 
         // Load PNGs per category instead of requiring every category to have one.
         // Home/Textures can fall back to glyphs without disabling the real bundled
@@ -1204,6 +1208,13 @@ public sealed partial class MainForm
         UpdateToyboxChips();
         var category = _toyboxCategoryCombo.SelectedItem?.ToString();
         var type = _toyboxTypeCombo.SelectedItem?.ToString();
+
+        if (category == ViewerCategory)
+        {
+            ShowViewerPanel();
+            return;
+        }
+        HideViewerPanel();
 
         if (category == "Home")
         {

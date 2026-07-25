@@ -201,6 +201,111 @@ internal static class ModelPreviewProbe
             return 0;
         }
 
+        // "sockets:<meshPath>" lists the mesh's named attachment sockets and their transforms -
+        // this is what components mean by AttachToName (e.g. HeadStud_Attach_Socket).
+        if (objectPath.StartsWith("sockets:", StringComparison.OrdinalIgnoreCase))
+        {
+            if (provider.LoadPackageObject(objectPath["sockets:".Length..]) is USkeletalMesh skm2)
+            {
+                var socks = skm2.Sockets ?? [];
+                Console.WriteLine($"sockets: {socks.Length}");
+                foreach (var sref in socks)
+                {
+                    if (sref?.Load() is not { } so) continue;
+                    var name = so.GetOrDefault<CUE4Parse.UE4.Objects.UObject.FName>("SocketName");
+                    var bone = so.GetOrDefault<CUE4Parse.UE4.Objects.UObject.FName>("BoneName");
+                    var loc = so.GetOrDefault<CUE4Parse.UE4.Objects.Core.Math.FVector>("RelativeLocation");
+                    var rot = so.GetOrDefault<CUE4Parse.UE4.Objects.Core.Math.FRotator>("RelativeRotation");
+                    Console.WriteLine($"  {name} on bone {bone}  loc={loc} rot={rot}");
+                }
+            }
+            return 0;
+        }
+
+        // "statics:<materialPath>" expands the STATIC parameter set (switches that enable or
+        // disable whole material layers) and prints texture parameters untruncated.
+        if (objectPath.StartsWith("statics:", StringComparison.OrdinalIgnoreCase))
+        {
+            var cur2 = provider.LoadPackageObject(objectPath["statics:".Length..]);
+            var depth2 = 0;
+            while (cur2 is not null && depth2++ < 6)
+            {
+                Console.WriteLine($"[{cur2.ExportType}] {cur2.Name}");
+                var statics = cur2.GetOrDefault<CUE4Parse.UE4.Assets.Objects.FStructFallback>("StaticParametersRuntime");
+                if (statics is not null)
+                {
+                    foreach (var prop in statics.Properties)
+                    {
+                        Console.WriteLine($"    static.{prop.Name.Text} = {prop.Tag?.GenericValue}");
+                        if (prop.Tag?.GenericValue is CUE4Parse.UE4.Assets.Objects.FStructFallback[] arr)
+                        {
+                            foreach (var e in arr)
+                            {
+                                var info = e.GetOrDefault<CUE4Parse.UE4.Assets.Objects.FStructFallback>("ParameterInfo");
+                                var nm = info?.GetOrDefault<CUE4Parse.UE4.Objects.UObject.FName>("Name").Text ?? "?";
+                                var val = e.Properties.FirstOrDefault(x => x.Name.Text == "Value")?.Tag?.GenericValue;
+                                Console.WriteLine($"        {nm} = {val}");
+                            }
+                        }
+                    }
+                }
+                var texes = cur2.GetOrDefault<CUE4Parse.UE4.Assets.Objects.FStructFallback[]>("TextureParameterValues");
+                if (texes is not null)
+                {
+                    foreach (var e in texes)
+                    {
+                        var nm = e.GetOrDefault<CUE4Parse.UE4.Assets.Objects.FStructFallback>("ParameterInfo")
+                                  ?.GetOrDefault<CUE4Parse.UE4.Objects.UObject.FName>("Name").Text ?? "?";
+                        var t = e.GetOrDefault<CUE4Parse.UE4.Objects.UObject.FPackageIndex>("ParameterValue")?.ResolvedObject;
+                        Console.WriteLine($"    tex {nm} = {t?.GetPathName()}");
+                    }
+                }
+                cur2 = cur2.GetOrDefault<CUE4Parse.UE4.Objects.UObject.FPackageIndex>("Parent")?.ResolvedObject?.Load();
+            }
+            return 0;
+        }
+
+        // "statics:<materialPath>" expands the STATIC parameter set - the switches that turn whole
+        // material layers on or off. A texture being bound proves nothing on its own; the switch is
+        // what decides whether the game draws that layer.
+        if (objectPath.StartsWith("statics:", StringComparison.OrdinalIgnoreCase))
+        {
+            var cur2 = provider.LoadPackageObject(objectPath["statics:".Length..]);
+            var depth2 = 0;
+            while (cur2 is not null && depth2++ < 6)
+            {
+                Console.WriteLine($"[{cur2.ExportType}] {cur2.Name}");
+                var statics = cur2.GetOrDefault<CUE4Parse.UE4.Assets.Objects.FStructFallback>("StaticParametersRuntime");
+                if (statics is not null)
+                {
+                    foreach (var prop in statics.Properties)
+                    {
+                        var gv = prop.Tag?.GenericValue;
+                        Console.WriteLine($"    [{prop.Name.Text}] {gv?.GetType().Name}");
+                        if (gv is System.Collections.IEnumerable seq and not string)
+                        {
+                            foreach (var item in seq)
+                            {
+                                if (item is CUE4Parse.UE4.Assets.Objects.FStructFallback sf)
+                                {
+                                    var nm = sf.GetOrDefault<CUE4Parse.UE4.Assets.Objects.FStructFallback>("ParameterInfo")
+                                               ?.GetOrDefault<CUE4Parse.UE4.Objects.UObject.FName>("Name").Text ?? "?";
+                                    var parts = sf.Properties.Select(x => $"{x.Name.Text}={x.Tag?.GenericValue}");
+                                    Console.WriteLine($"        SWITCH {nm}: {string.Join(", ", parts)}");
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"        raw {item}");
+                                }
+                            }
+                        }
+                    }
+                }
+                cur2 = cur2.GetOrDefault<CUE4Parse.UE4.Objects.UObject.FPackageIndex>("Parent")?.ResolvedObject?.Load();
+            }
+            return 0;
+        }
+
         // "bones:<meshPath>" prints the skeleton: each bone name, parent, and local position.
         if (objectPath.StartsWith("bones:", StringComparison.OrdinalIgnoreCase))
         {

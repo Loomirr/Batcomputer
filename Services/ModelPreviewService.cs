@@ -92,7 +92,8 @@ public static class ModelPreviewService
     /// renders where it already sits.
     /// </summary>
     private readonly record struct PreviewPart(
-        string MeshPath, bool AttachToHead, bool IsHeadPiece = false, FPackageIndex[]? Overrides = null);
+        string MeshPath, bool AttachToHead, bool IsHeadPiece = false, FPackageIndex[]? Overrides = null,
+        bool IsStaticAttachment = false);
 
     /// <summary>
     /// World position of a bone in the UE reference skeleton, converted to the exported glTF's space.
@@ -156,6 +157,7 @@ public static class ModelPreviewService
                 if (p is not null)
                 {
                     attachPoints[boneName] = p.Value;
+                    _headAttachPoint = p.Value;
                     Console.WriteLine($"  attach '{boneName}' -> ({p.Value.X:0.###}, {p.Value.Y:0.###}, {p.Value.Z:0.###})");
                 }
                 else
@@ -170,15 +172,24 @@ public static class ModelPreviewService
         // is nothing to read; it takes the face material's skin tint instead.
         parts.Add(new PreviewPart(DefaultHeadMesh, AttachToHead: false, IsHeadPiece: true));
 
+        _bpCharacter = System.Text.RegularExpressions.Regex
+            .Match(Path.GetFileNameWithoutExtension(bpPath), @"^BP_([A-Za-z0-9]+)")
+            .Groups[1].Value is { Length: > 0 } bpName ? bpName : null;
+
         var bp = provider.LoadPackage(bpPath);
         foreach (var exp in bp.GetExports())
         {
-            if (!exp.ExportType.Contains("SkeletalMeshComponent", StringComparison.OrdinalIgnoreCase))
+            var isSkeletal = exp.ExportType.Contains("SkeletalMeshComponent", StringComparison.OrdinalIgnoreCase);
+            var isStatic = exp.ExportType.Contains("StaticMeshComponent", StringComparison.OrdinalIgnoreCase);
+            if (!isSkeletal && !isStatic)
             {
                 continue;
             }
+            // Hair and other rigid head pieces are STATIC meshes (SM_HAIR_*), not skeletal ones -
+            // skipping them is why every character without a cowl came out bald.
             var meshRef = exp.GetOrDefault<FPackageIndex>("SkeletalMeshAsset")
-                          ?? exp.GetOrDefault<FPackageIndex>("SkeletalMesh");
+                          ?? exp.GetOrDefault<FPackageIndex>("SkeletalMesh")
+                          ?? exp.GetOrDefault<FPackageIndex>("StaticMesh");
             var path = meshRef?.ResolvedObject?.GetPathName();
             if (string.IsNullOrWhiteSpace(path))
             {
@@ -201,7 +212,7 @@ public static class ModelPreviewService
             // MI_Batman_89_EOM), not in the base mesh's own material slots.
             var overrides = exp.GetOrDefault<FPackageIndex[]>("OverrideMaterials");
             parts.Add(new PreviewPart(path, AttachToHead: AttachBoneFor(exp.Name) is not null,
-                Overrides: overrides));
+                Overrides: overrides, IsStaticAttachment: isStatic));
         }
 
         return BuildPreviewCore(provider, parts);
@@ -295,6 +306,16 @@ public static class ModelPreviewService
                 slotShading.Add(resolved);
             }
 
+            // Hair and other static parts report no material slots of their own - their look lives
+            // entirely in the component's override. Without this they render untextured.
+            if (slotShading.Count == 0 && part.Overrides is { Length: > 0 } soloOverride)
+            {
+                var solo = ResolveSlot(provider, soloOverride[0]?.ResolvedObject?.Load(), previewDir);
+                slotShading.Add(solo);
+                Console.WriteLine($"      no mesh slots -> override material "
+                                  + soloOverride[0]?.ResolvedObject?.GetPathName()?.Split('.')[^1]);
+            }
+
             if (i == 0 && slotShading.Count > 0)
             {
                 bodyShading = slotShading;
@@ -384,18 +405,18 @@ public static class ModelPreviewService
 
     /// <summary>A model file, where to place it, and the base-colour texture to skin it with.</summary>
     private readonly record struct PlacedModel(
-        string File, Vector3 Offset, List<SlotShading> Slots, bool IsBody, bool IsFace = false)
+        string File, Vector3 Offset, List<SlotShading> Slots, bool IsBody, bool IsFace = false, bool IsHead = false)
     {
         /// <summary>Triangle counts of the reordered face index buffer: [base, mouth, hidden].</summary>
         public int[]? FaceGroups { get; init; }
         /// <summary>Preview-relative path of the mouth feature print (alpha = cutout).</summary>
         public string? MouthTex { get; init; }
         /// <summary>Alternate expression feature bands: (ExtraUV0 slot id, triangle count).</summary>
-        public List<(int Band, int Tris)>? Bands { get; init; }
+        public List<(int Band, int Tris, string? Tex, Color? Tint)>? Bands { get; init; }
         /// <summary>True when the character binds a dummy to the mouth feature (draw nothing).</summary>
         public bool MouthHidden { get; init; }
         /// <summary>Facial rig pose (bone name -> local transform, glTF space) from the expression anim.</summary>
-        public Dictionary<string, Dictionary<string, (Vector3 P, System.Numerics.Quaternion Q, Vector3 S)>>? Poses { get; init; }
+        public Dictionary<string, Dictionary<int, Dictionary<string, (Vector3 P, System.Numerics.Quaternion Q, Vector3 S)>>>? Poses { get; init; }
     }
 
     /// <summary>
@@ -411,21 +432,32 @@ public static class ModelPreviewService
     /// skeleton (verified on Eye_L, Mouth_L, Lips_UL_3, Brows_M): position (X, Z, Y)/100,
     /// quaternion (x, z, y, w) - the axis swap alone, W is NOT negated - and scale (X, Z, Y).
     /// </summary>
-    private static Dictionary<string, (Vector3 P, System.Numerics.Quaternion Q, Vector3 S)>? LoadFacePose(
+    private static Dictionary<int, Dictionary<string, (Vector3 P, System.Numerics.Quaternion Q, Vector3 S)>>? LoadFacePose(
         DefaultFileProvider provider, string expression, string? character)
     {
+        // Expression sets, best first. A character's own folder wins; otherwise use the SHARED
+        // sets the game ships for this rig: LEGOface_Superhero (Batman's face material is
+        // MI_LEGOface-Defaults_Superhero) then the generic LEGOface_Expressions. Both pose the rig
+        // at root scale 1.0 - unlike a per-character donor such as Bane, whose sequences scale
+        // AttachRoot by 1.485 to fit his larger head.
+        // Try the CHARACTER'S OWN animation folders first - both the name from the face material
+        // (FACE_BruceAdult) and the one from the blueprint (BP_BruceWayne_... -> BruceWayne), since
+        // the two differ and the animation folders are keyed on the blueprint's name. Only then
+        // fall back to the shared sets, which pose the same rig at root scale 1.0.
         var candidates = new List<string>();
-        if (!string.IsNullOrWhiteSpace(character))
+        foreach (var who in new[] { character, _bpCharacter }.Where(w => !string.IsNullOrWhiteSpace(w)).Distinct())
         {
-            candidates.Add($"/Game/Animation/LEGOface/LEGOface_{character}/A_{expression}_{character}_LEGOface");
-            candidates.Add($"/Game/Animation/LEGOface/LEGOface_{character}/A_{expression}_{character}_LEGOFace");
+            candidates.Add($"/Game/Animation/LEGOface/LEGOface_{who}/A_{expression}_{who}_LEGOface");
+            candidates.Add($"/Game/Animation/LEGOface/LEGOface_{who}/A_{expression}_{who}_LEGOFace");
+            candidates.Add($"/Game/Animation/LEGOfig/{who}/Movement/A_{expression}_{who}_LEGOface");
+            candidates.Add($"/Game/Animation/LEGOfig/{who}/Movement/A_{expression}_{who}_LEGOFace");
+            // Some characters keep their face animation one level deeper, under Attachments/
+            // (Batman: Movement/A_Idle_Batman_LEGOface, Bruce: Movement/Attachments/A_Idle_BruceWayne_LEGOface).
+            candidates.Add($"/Game/Animation/LEGOfig/{who}/Movement/Attachments/A_{expression}_{who}_LEGOface");
+            candidates.Add($"/Game/Animation/LEGOfig/{who}/Movement/Attachments/A_{expression}_{who}_LEGOFace");
         }
-        // The rig (SKEL_LEGOface) is shared, so a character missing an expression can borrow it.
-        foreach (var donor in new[] { "Batman", "Bane", "Alt" })
-        {
-            candidates.Add($"/Game/Animation/LEGOface/LEGOface_{donor}/A_{expression}_{donor}_LEGOface");
-            candidates.Add($"/Game/Animation/LEGOface/LEGOface_{donor}/A_{expression}_{donor}_LEGOFace");
-        }
+        candidates.Add($"/Game/Animation/LEGOface/LEGOface_Superhero/A_{expression}_LEGOFace_Superhero");
+        candidates.Add($"/Game/Animation/LEGOface/LEGOface_Expressions/A_{expression}_LEGOFace");
 
         foreach (var path in candidates)
         {
@@ -447,6 +479,20 @@ public static class ModelPreviewService
                     continue;
                 }
                 var refBones = skel.ReferenceSkeleton.FinalRefBoneInfo;
+
+                // Sample a fixed frame partway in. These sequences ease into the expression, hold
+                // it, then relax, so neither frame 0 nor the last key is the pose - and a
+                // "most deviation" heuristic picks whatever extreme the ease-out passes through.
+                var frameCount = seq.Tracks.Max(t2 => Math.Max(t2.KeyQuat.Length, t2.KeyPos.Length));
+                // Sample several points through the clip so the viewer can scrub: the pose is held
+                // somewhere in the middle and neither end is it.
+                var samples = FacePoseSamples
+                    .Select(f => Math.Clamp((int)(frameCount * f), 0, Math.Max(0, frameCount - 1)))
+                    .Distinct().ToList();
+                var byFrame = new Dictionary<int, Dictionary<string, (Vector3, System.Numerics.Quaternion, Vector3)>>();
+                foreach (var bestFrame in samples)
+                {
+
                 var pose = new Dictionary<string, (Vector3, System.Numerics.Quaternion, Vector3)>();
                 for (var i = 0; i < seq.Tracks.Count && i < refBones.Length; i++)
                 {
@@ -455,21 +501,31 @@ public static class ModelPreviewService
                     {
                         continue;
                     }
+                    // The ROOT track is locked by the game (every sequence sets bForceRootLock).
+                    // It is not a pose - it is the donor character's fit: Bane's expressions scale
+                    // AttachRoot by 1.485 for his larger head. Applying it inflates the whole face
+                    // rig and lifts it off the skull.
+                    if (refBones[i].ParentIndex < 0)
+                    {
+                        continue;
+                    }
                     // Sample the LAST key: these sequences ease from a neutral start into the held
                     // expression, so frame 0 is the transition, not the pose the game rests on.
-                    var p = tr.KeyPos.Length > 0 ? tr.KeyPos[^1] : default;
-                    var q = tr.KeyQuat.Length > 0 ? tr.KeyQuat[^1] : default;
+                    var p = tr.KeyPos.Length > 0 ? tr.KeyPos[Math.Min(bestFrame, tr.KeyPos.Length - 1)] : default;
+                    var q = tr.KeyQuat.Length > 0 ? tr.KeyQuat[Math.Min(bestFrame, tr.KeyQuat.Length - 1)] : default;
                     // Scale is NOT decorative here: the rig scales feature shells (mouth 1.4x/1.3x,
                     // unused features toward zero) to form the expression. Dropping it leaves every
                     // shell at bind size, which renders as slabs across the face.
-                    var s = tr.KeyScale.Length > 0 ? tr.KeyScale[^1] : new FVector(1, 1, 1);
+                    var s = tr.KeyScale.Length > 0 ? tr.KeyScale[Math.Min(bestFrame, tr.KeyScale.Length - 1)] : new FVector(1, 1, 1);
                     pose[refBones[i].Name.Text] = (
                         new Vector3(p.X / 100f, p.Z / 100f, p.Y / 100f),
                         new System.Numerics.Quaternion(q.X, q.Z, q.Y, q.W),
                         new Vector3(s.X, s.Z, s.Y));
                 }
-                Console.WriteLine($"  face pose '{expression}': {pose.Count} bones from {path.Split('/')[^1]}");
-                return pose;
+                byFrame[bestFrame] = pose;
+                }
+                Console.WriteLine($"  face pose '{expression}': {byFrame.Count} frames {string.Join("/", byFrame.Keys)} of {frameCount} from {path.Split('/')[^1]}");
+                return byFrame;
             }
             catch
             {
@@ -484,8 +540,74 @@ public static class ModelPreviewService
     /// master's defaults are stripped, but the community recreation confirms this texture - the stern
     /// Batman mouth shared by every cowled Batman face).
     /// </summary>
+    /// <summary>
+    /// Pulls the character name out of a face material path, e.g.
+    /// /Game/Characters/Attachments/Face/FACE_Batman/MI_FACE_Batman_NoEyes -> "Batman".
+    /// </summary>
+    private static string? CharacterFromFaceMaterial(UObject? faceMaterial)
+    {
+        var path = faceMaterial?.GetPathName();
+        if (string.IsNullOrEmpty(path))
+        {
+            return null;
+        }
+        var m = System.Text.RegularExpressions.Regex.Match(path, @"/FACE_([A-Za-z0-9]+)/");
+        return m.Success ? m.Groups[1].Value : null;
+    }
+
+    /// <summary>
+    /// Which material parameter drives each ExtraUV0 band of the LEGO face mesh.
+    ///
+    /// The face is layered: "HeadLowerUnder" is the base skin shell and "HeadLowerOver" is a second
+    /// full shell on top (band 7) carrying the upper-face print. Batman binds a dummy to Over, so
+    /// hiding it was invisible on him - on an ordinary face it drops the entire top half. The
+    /// remaining bands are the paired features, resolved left/right by the sign of z.
+    /// </summary>
+    /// <summary>
+    /// Which face feature each ExtraUV0 band draws: the texture parameter and its tint parameter.
+    ///
+    /// Every LEGO face feature is a WHITE STENCIL (shape in alpha, RGB pure white) coloured by a
+    /// "&lt;feature&gt; Tint" vector parameter - brows are white sheets tinted 442E2B, skin is tinted
+    /// D28856. The head is split into LOWER and UPPER halves, each with an Under (skin) and Over
+    /// (print) layer; missing HeadUpperUnder is what left ordinary faces with no top half.
+    /// Bands were identified by cycling each one alone in the viewer (press B).
+    /// </summary>
+    private static (string Tex, string? Tint)[] ParamsForBand(int band, float centreZ) => band switch
+    {
+        8 => new[] { ("HeadLowerUnder BC", (string?)"HeadLowerUnder Tint") },
+        7 => new[] { ("HeadLowerOver BC", (string?)null) },
+        0 => new[] { ("HeadUpperUnder BC", (string?)"HeadUpperUnder Tint") },
+        3 => new[] { ("HeadUpperOver BC", (string?)null) },
+        13 => new[] { ("Mouth BC", (string?)null) },
+        1 or 2 => centreZ < 0
+            ? new[] { ("BrowL BC", (string?)"BrowL Tint") }
+            : new[] { ("BrowR BC", (string?)"BrowR Tint") },
+        // Bands 11/12 are the LASH quads. Deliberately NOT drawn: the game ships exactly one lash
+        // texture (T_LEGOface_Lash_Generic_Female_A_BC - there is no male variant) and binds it on
+        // male faces too, with no matching "Lash Tint", so it rendered as a white swoosh above the
+        // eye. A bound parameter is not evidence the game draws the layer.
+        // Remaining bands are alternate variants / unused feature quads: left undrawn until a
+        // character is found that binds them, rather than guessed at.
+        _ => Array.Empty<(string, string?)>(),
+    };
+
     /// <summary>Face material of the current build, so feature bands can read their own params.</summary>
     private static UObject? _faceMaterial;
+
+    /// <summary>
+    /// World position (glTF space) of the head attach bone. Cooked meshes carry NO sockets - the
+    /// Sockets array is empty on the body, head, face and full-figure meshes - so the component's
+    /// AttachToName ("HeadStud_Attach_Socket") cannot be resolved from the assets. The head attach
+    /// bone is the closest real anchor the data does give us.
+    /// </summary>
+    private static Vector3? _headAttachPoint;
+
+    /// <summary>
+    /// Character name taken from the blueprint being previewed (BP_BruceWayne_Ninja_Playable ->
+    /// "BruceWayne"). The face MATERIAL often uses a different name (FACE_BruceAdult), and the
+    /// animation folders are keyed on the blueprint's name, so both are tried.
+    /// </summary>
+    private static string? _bpCharacter;
 
     /// <summary>
     /// True for the placeholder textures the game binds to features a character does not use
@@ -512,10 +634,17 @@ public static class ModelPreviewService
     {
         "Neutral", "Smiling", "Smirking", "Grinning", "Laughing", "Frowning", "Sullen", "Enraged",
         "Grimacing", "Screaming", "Crying", "Dazed", "Sensing", "Yearning", "Open", "Closed",
+        // Character-specific gameplay poses - these resolve only for characters that ship them
+        // (Batman has Idle/Jump/Land in his own LEGOface folder).
+        "Idle", "Jump", "Land",
     };
 
+    /// <summary>Points through each expression clip to sample, as fractions of its length.</summary>
+    public static readonly double[] FacePoseSamples = { 0.15, 0.3, 0.45, 0.6, 0.75, 0.9 };
+
     public static string FaceExpression { get; set; } = "Neutral";
-    public static string? FaceCharacter { get; set; } = "Batman";
+    /// <summary>Override for whose expression set to use; null = detect from the face material.</summary>
+    public static string? FaceCharacter { get; set; }
 
     /// <summary>
     /// Face post-pass: split the merged face mesh into base/mouth/hidden groups (see
@@ -559,9 +688,9 @@ public static class ModelPreviewService
                 mouthTex ??= mouthHidden ? null : provider.LoadPackageObject(DefaultMouthTexPath) as UTexture2D;
                 if (mouthTex is not null)
                 {
-                    mouthRel = "textures/" + MakeSafeName(mouthTex.Name) + "_cut.png";
+                    mouthRel = "textures/" + MakeSafeName(mouthTex.Name) + "_mouth.png";
                     var dest = Path.Combine(previewDir, mouthRel.Replace('/', Path.DirectorySeparatorChar));
-                    if (!File.Exists(dest) && !TextureDecodeService.TryExportPng(mouthTex, dest, keepAlpha: true))
+                    if (!File.Exists(dest) && !TextureDecodeService.TryExportMouthSheet(mouthTex, dest))
                     {
                         mouthRel = null;
                     }
@@ -572,21 +701,57 @@ public static class ModelPreviewService
                 Console.WriteLine($"  face mouth texture failed: {ex.Message.Split('\n')[0]}");
             }
 
-            Console.WriteLine($"  face split: {groups[0]} base / {groups[1]} mouth / {groups[2]} hidden tris" +
-                              (mouthRel is null ? " (no mouth print)" : $", print {Path.GetFileName(mouthRel)}"));
-            var bands = GlbInspector.FaceBandLayout.ToList();
-            if (bands.Count > 0)
+            // Give every band the texture its own material parameter names. A band whose feature the
+            // character does not use resolves to a dummy (fully transparent) and is left untextured,
+            // so cowled faces stay clean while ordinary faces get their brows, eyes and upper layer.
+            var bands = new List<(int Band, int Tris, string? Tex, Color? Tint)>();
+            foreach (var (band, tris) in GlbInspector.FaceBandLayout)
             {
-                Console.WriteLine("  face expression slots (ExtraUV0 band -> tris): " +
-                                  string.Join(", ", bands.Select(b => $"{b.Band}:{b.Tris}")));
+                string? rel = null;
+                Color? tint = null;
+                var z = GlbInspector.FaceBandCentres.TryGetValue(band, out var c) ? c : 0f;
+                foreach (var (texParam, tintParam) in ParamsForBand(band, z))
+                {
+                    // "<feature> BC" is the DISTRESSED variant - a wear mask that measures 98-99%
+                    // transparent, so drawing it renders nothing (this is what lost the eyes and the
+                    // upper-face print). The artwork is in the pristine sibling, which the game
+                    // spells "Prestine". Prefer it, fall back to the distressed one.
+                    var t = FindTextureParam(faceMaterial, texParam + " Prestine", 0)
+                            ?? FindTextureParam(faceMaterial, texParam, 0);
+                    if (t is null || IsDummyTexture(t))
+                    {
+                        continue;
+                    }
+                    // Keep the alpha: it carries the feature's SHAPE. A distinct suffix so this is
+                    // never confused with an alpha-forced-opaque export of the same texture.
+                    var name = "textures/" + MakeSafeName(t.Name) + "_stencil.png";
+                    var dest = Path.Combine(previewDir, name.Replace('/', Path.DirectorySeparatorChar));
+                    if (File.Exists(dest) || TextureDecodeService.TryExportPng(t, dest, keepAlpha: true))
+                    {
+                        rel = name;
+                        tint = tintParam is null ? null : FindColourParam(faceMaterial, tintParam, 0);
+                        break;
+                    }
+                }
+                bands.Add((band, tris, rel, tint));
             }
+            Console.WriteLine("  face bands (* = textured): " + string.Join(", ",
+                bands.Select(b => $"{b.Band}:{b.Tris}{(b.Tex is null ? "" : "*")}{(b.Tint is null ? "" : "t")}")));
             // Load every expression the game ships for this rig so the viewer can switch between
             // them. Batman's own folder only has Neutral; the rest of the set lives under other
             // characters, and they all pose the same shared SKEL_LEGOface rig.
-            var poses = new Dictionary<string, Dictionary<string, (Vector3, System.Numerics.Quaternion, Vector3)>>();
+            // Whose expression set to use is read from the face material itself
+            // (…/Face/FACE_<Character>/MI_FACE_<Character>_…), so any character works without
+            // being named here. Falls back to the shared sets when they ship no own animations.
+            var character = FaceCharacter ?? CharacterFromFaceMaterial(_faceMaterial);
+            if (character is not null)
+            {
+                Console.WriteLine($"  face character: {character}");
+            }
+            var poses = new Dictionary<string, Dictionary<int, Dictionary<string, (Vector3, System.Numerics.Quaternion, Vector3)>>>();
             foreach (var expr in FaceExpressions)
             {
-                var one = LoadFacePose(provider, expr, FaceCharacter);
+                var one = LoadFacePose(provider, expr, character);
                 if (one is not null)
                 {
                     poses[expr] = one;
@@ -1076,15 +1241,38 @@ public static class ModelPreviewService
         {
             var isBody = part.MeshPath.Contains("LEGOfig", StringComparison.OrdinalIgnoreCase);
             var isFace = part.MeshPath.Contains("LEGOface", StringComparison.OrdinalIgnoreCase);
+            var isHead = part.IsHeadPiece;
             if (!part.AttachToHead || headBase is null)
             {
-                result.Add(new PlacedModel(file, Vector3.Zero, slots, isBody, isFace));
+                result.Add(new PlacedModel(file, Vector3.Zero, slots, isBody, isFace, isHead));
                 continue;
             }
+            // Hair and other rigid head pieces are authored around their own origin and pinned to
+            // the head socket, so bounds-matching them to the head (which suits shells like cowls)
+            // puts them in the wrong place. Anchor them to the head attach bone instead.
+            if (part.IsStaticAttachment && headB3 is { } hb)
+            {
+                // Cooked meshes carry no sockets, and the head attach bone sits at the very TOP of
+                // the skull - anchoring there leaves hair hovering. A hair piece is modelled to
+                // sheathe the head, so centre it on the head in all three axes: that also corrects
+                // the small front/back bias in how the piece is authored.
+                var hairB = GlbInspector.Bounds3(Path.Combine(dir, file));
+                if (hairB is { } pb)
+                {
+                    var headCentre = (hb.Min + hb.Max) / 2f;
+                    var partCentre = (pb.Min + pb.Max) / 2f;
+                    var delta = headCentre - partCentre;
+                    Console.WriteLine($"  {file}: head attachment centred -> "
+                                      + $"({delta.X:0.###}, {delta.Y:0.###}, {delta.Z:0.###})");
+                    result.Add(new PlacedModel(file, delta, slots, isBody, isFace, isHead));
+                    continue;
+                }
+            }
+
             var b3 = GlbInspector.Bounds3(Path.Combine(dir, file));
             if (b3 is null)
             {
-                result.Add(new PlacedModel(file, Vector3.Zero, slots, isBody, isFace));
+                result.Add(new PlacedModel(file, Vector3.Zero, slots, isBody, isFace, isHead));
                 continue;
             }
             var dy = headBase.Value - b3.Value.Min.Y;
@@ -1107,7 +1295,7 @@ public static class ModelPreviewService
             }
             Console.WriteLine($"  {file}: spans y {b3.Value.Min.Y:0.###}..{b3.Value.Max.Y:0.###} -> lift {dy:0.###}" +
                               (dx != 0 ? $", forward {dx:0.####}" : ""));
-            result.Add(new PlacedModel(file, new Vector3(dx, dy, 0), slots, isBody, isFace));
+            result.Add(new PlacedModel(file, new Vector3(dx, dy, 0), slots, isBody, isFace, isHead));
         }
         return result;
     }
@@ -1121,6 +1309,7 @@ public static class ModelPreviewService
                         ?? throw new FileNotFoundException($"embedded viewer asset missing: {js}");
             File.WriteAllBytes(Path.Combine(dir, js), bytes);
         }
+        Console.WriteLine("  writing viewer assets...");
         var jsonList = "[" + string.Join(",", models.Select(m =>
         {
             var slots = string.Join(",", m.Slots.Select(sl =>
@@ -1131,11 +1320,12 @@ public static class ModelPreviewService
                 "}"));
             // Extract every UV channel so the viewer's switcher can bind sets three.js drops on import.
             var baseName = Path.GetFileNameWithoutExtension(m.File);
+            Console.WriteLine($"    uv extract {m.File}");
             var uvs = GlbInspector.ExtractUvChannels(Path.Combine(dir, m.File), dir, baseName);
             var fg = m.FaceGroups is null ? "null" : $"[{string.Join(",", m.FaceGroups)}]";
-            return $"{{\"file\":\"{m.File}\",\"base\":\"{baseName}\",\"body\":{(m.IsBody ? "true" : "false")},\"isface\":{(m.IsFace ? "true" : "false")}," +
+            return $"{{\"file\":\"{m.File}\",\"base\":\"{baseName}\",\"body\":{(m.IsBody ? "true" : "false")},\"isface\":{(m.IsFace ? "true" : "false")},\"ishead\":{(m.IsHead ? "true" : "false")}," +
                    $"\"fgroups\":{fg},\"mouth\":{Q(m.MouthTex)},\"mhide\":{(m.MouthHidden ? "true" : "false")}," +
-                   $"\"fbands\":[{string.Join(",", (m.Bands ?? new()).Select(b => $"[{b.Band},{b.Tris}]"))}]," +
+                   $"\"fbands\":[{string.Join(",", (m.Bands ?? new()).Select(b => $"[{b.Band},{b.Tris},{Q(b.Tex)},{(b.Tint is null ? "null" : $"\"#{b.Tint.Value.R:X2}{b.Tint.Value.G:X2}{b.Tint.Value.B:X2}\"")}]"))}]," +
                    $"\"poses\":{PoseJson(m.Poses)}," +
                    $"\"uvs\":[{string.Join(",", uvs)}]," +
                    $"\"offset\":[{m.Offset.X:0.#####},{m.Offset.Y:0.#####},{m.Offset.Z:0.#####}]," +
@@ -1144,7 +1334,8 @@ public static class ModelPreviewService
         static string Q(string? v) => v is null ? "null" : $"\"{v}\"";
 
         // Serialises every expression pose as {name:{bone:[px,py,pz,qx,qy,qz,qw,sx,sy,sz]}}.
-        static string PoseJson(Dictionary<string, Dictionary<string, (Vector3 P, System.Numerics.Quaternion Q, Vector3 S)>>? poses)
+        // {expression:{frame:{bone:[px,py,pz,qx,qy,qz,qw,sx,sy,sz]}}}
+        static string PoseJson(Dictionary<string, Dictionary<int, Dictionary<string, (Vector3 P, System.Numerics.Quaternion Q, Vector3 S)>>>? poses)
         {
             if (poses is null || poses.Count == 0)
             {
@@ -1152,20 +1343,28 @@ public static class ModelPreviewService
             }
             var sb = new System.Text.StringBuilder("{");
             var firstExpr = true;
-            foreach (var (name, bones) in poses)
+            foreach (var (name, frames) in poses)
             {
                 if (!firstExpr) sb.Append(',');
                 firstExpr = false;
                 sb.Append('"').Append(name).Append("\":{");
-                var firstBone = true;
-                foreach (var (bone, t) in bones)
+                var firstFrame = true;
+                foreach (var (frame, bones) in frames)
                 {
-                    if (!firstBone) sb.Append(',');
-                    firstBone = false;
-                    sb.Append('"').Append(bone).Append("\":[")
-                      .Append($"{t.P.X:0.####},{t.P.Y:0.####},{t.P.Z:0.####},")
-                      .Append($"{t.Q.X:0.####},{t.Q.Y:0.####},{t.Q.Z:0.####},{t.Q.W:0.####},")
-                      .Append($"{t.S.X:0.####},{t.S.Y:0.####},{t.S.Z:0.####}]");
+                    if (!firstFrame) sb.Append(',');
+                    firstFrame = false;
+                    sb.Append('"').Append(frame).Append("\":{");
+                    var firstBone = true;
+                    foreach (var (bone, t) in bones)
+                    {
+                        if (!firstBone) sb.Append(',');
+                        firstBone = false;
+                        sb.Append('"').Append(bone).Append("\":[")
+                          .Append($"{t.P.X:0.####},{t.P.Y:0.####},{t.P.Z:0.####},")
+                          .Append($"{t.Q.X:0.####},{t.Q.Y:0.####},{t.Q.Z:0.####},{t.Q.W:0.####},")
+                          .Append($"{t.S.X:0.####},{t.S.Y:0.####},{t.S.Z:0.####}]");
+                    }
+                    sb.Append('}');
                 }
                 sb.Append('}');
             }
@@ -1174,6 +1373,7 @@ public static class ModelPreviewService
 
         File.WriteAllText(Path.Combine(dir, "models.js"), $"window.PREVIEW_MODELS={jsonList};");
         File.WriteAllText(Path.Combine(dir, "index.html"), ViewerHtml);
+        Console.WriteLine("  viewer assets written");
     }
 
     /// <summary>
@@ -1324,49 +1524,74 @@ function dress(g,info){
     // Face feature split: the cooked face mesh is ONE section; C# reordered its index buffer into
     // [base][mouth][hidden] runs so the mouth shell can wear its own print (black stern mouth) and
     // the unused feature shells (eyes etc., dummied by this character's material) stay hidden.
-    if(info.isface&&info.fgroups&&o.geometry.index){
-      const g=info.fgroups,geo=o.geometry;
+    if(info.isface&&info.fbands&&info.fbands.length&&o.geometry.index){
+      // One group + material per ExtraUV0 band. A band with no texture is a feature this
+      // character does not use (its material parameter is a dummy), so it is not drawn.
+      const geo=o.geometry;
       geo.clearGroups();
-      geo.addGroup(0,g[0]*3,0);
-      geo.addGroup(g[0]*3,g[1]*3,1);
-      const baseM=Array.isArray(o.material)?o.material[0]:o.material;
-      // The mouth's SHAPE is sculpted geometry (visible in Blender's untextured solid shading) -
-      // the material only colours it dark. Painting the O-ring sheet onto it was the mistake:
-      // that texture is the open-mouth cavity used by talking expressions.
-      const mouthM=new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.4,metalness:0});
-      mouthM.side=THREE.DoubleSide;
-      if(info.mouth){const mt=tex(info.mouth,true);if(mt){mouthM.map=mt;mouthM.alphaTest=0.5;}}
-      else mouthM.color=new THREE.Color(0x0a0a0a);
-      // SK_LEGOface is the morph-animated expression layer (M_LEGOface has bUsedWithMorphTargets).
-      // The TPAGE atlas head region is BLANK for these characters, so the visible face comes from
-      // this layer: the under-layer stencil plus the mouth shells sampling the mouth sheet.
-      // F cycles the layers for inspection.
-      mouthM.visible=true;baseM.visible=true;
-      const hidM=new THREE.MeshStandardMaterial();hidM.visible=false;
-      const mats=[baseM,mouthM,hidM];
-      geo.addGroup((g[0]+g[1])*3,g[2]*3,2);
-      // Expression slots: each alternate ExtraUV0 band is one sprite slot the game's
-      // SpriteIndex00/01 anim notifies select. Give each its own group+material so they can be
-      // switched on individually (E cycles).
+      const mats=[];let off=0;
+      info.fbands.forEach(b=>{
+        const band=b[0],tris=b[1],texPath=b[2],tint=b[3];
+        const m2=new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.42,metalness:0});
+        m2.side=THREE.DoubleSide;
+        // Feature textures are WHITE STENCILS: the alpha is the shape, the colour comes from the
+        // material's "<feature> Tint" (brows 442E2B, skin D28856). Tint is linear, so convert.
+        if(texPath){const t=tex(texPath,true);if(t){m2.map=t;m2.alphaTest=0.5;}}
+        else m2.visible=false;
+        if(tint)m2.color=new THREE.Color(tint).convertSRGBToLinear();
+        // Layered shells sit on the same surface; bias the ones above the base skin forward.
+        if(band!==8){m2.polygonOffset=true;m2.polygonOffsetFactor=-2;m2.polygonOffsetUnits=-2;}
+        mats.push(m2);
+        faceBandMats.push({band:band,mat:m2,tris:tris,tex:texPath});
+        geo.addGroup(off,tris*3,mats.length-1);
+        off+=tris*3;
+      });
       o.material=mats;
-      say(info.file+': face '+g[0]+' base / '+g[1]+' mouth / '+g[2]+' unused-feature tris');
+      say(info.file+': face bands '+info.fbands.filter(b=>b[2]).length+'/'+info.fbands.length+' textured');
     }
   });
-  say(info.file+': slots='+slots.length+' applied='+applied+' ['+
-      slots.map(s=>s.tex?'tex':(s.col?s.col:'-')).join(',')+']');
-}
-function frameAll(){
-  const box=new THREE.Box3().setFromObject(root);if(box.isEmpty())return;
-  const size=box.getSize(new THREE.Vector3());const center=box.getCenter(new THREE.Vector3());
-  root.position.sub(center);
-  const d=Math.max(size.x,size.y,size.z)||1;
-  camera.position.set(d*0.55,d*0.3,d*1.7);camera.near=d/100;camera.far=d*40;camera.updateProjectionMatrix();
-  controls.target.set(0,0,0);controls.update();
 }
 // Apply the facial rig pose from the game's expression animation. Without this the face renders in
-// BIND pose, which the game never shows - it always runs A_<Expression>_<Char>_LEGOface through the
-// mesh's PostProcessAnimBlueprint.
-const faceRig={bones:[],bind:new Map(),poses:null};
+// BIND pose, which the game never shows.
+const faceRig={bones:[],bind:new Map(),poses:null,frameKeys:[]};
+// Band identification aid: paint every ExtraUV0 band a distinct colour with a legend, so which
+// band is which facial feature can be read off one screenshot instead of inferred.
+const faceBandMats=[];let bandDebug=false;
+const BAND_COLOURS=[0xe6194b,0x3cb44b,0xffe119,0x4363d8,0xf58231,0x911eb4,0x46f0f0,0xf032e6,
+                    0xbcf60c,0xfabebe,0x008080,0xe6beff,0x9a6324,0xfffac8,0x800000,0xaaffc3,
+                    0x808000,0xffd8b1,0x000075,0x808080,0xffffff];
+let bandIndex=-1;
+addEventListener('keydown',e=>{
+  if(e.key!=='b'&&e.key!=='B')return;
+  if(!faceBandMats.length){say('no face bands to identify');return;}
+  // Cycle ONE band at a time: these shells are stacked full-face variants, so showing them all
+  // together just z-fights into stripes and identifies nothing.
+  if(bandIndex<0){
+    faceBandMats.forEach(b=>{b.mat.userData.savedMap=b.mat.map;b.mat.userData.savedVisible=b.mat.visible;});
+  }
+  bandIndex++;
+  if(bandIndex>=faceBandMats.length){
+    bandIndex=-1;
+    faceBandMats.forEach(b=>{
+      b.mat.map=b.mat.userData.savedMap||null;
+      b.mat.color=new THREE.Color(0xffffff);
+      b.mat.visible=b.mat.userData.savedVisible!==false&&!!b.mat.map;
+      if(b.mat.map)b.mat.alphaTest=0.5;
+      b.mat.needsUpdate=true;});
+    say('band debug off - normal face restored');
+    return;
+  }
+  faceBandMats.forEach((b,i)=>{
+    const on=i===bandIndex;
+    b.mat.map=null;b.mat.alphaTest=0;
+    b.mat.color=new THREE.Color(on?0xff2d55:0x202428);
+    b.mat.visible=on;
+    b.mat.needsUpdate=true;
+  });
+  const cur=faceBandMats[bandIndex];
+  say('BAND '+cur.band+' — '+cur.tris+' tris'+(cur.tex?' [has texture]':' [no texture]')
+      +'  ('+(bandIndex+1)+' of '+faceBandMats.length+', press B for next)');
+});
 function poseFace(g,info){
   if(!info.poses||!Object.keys(info.poses).length)return;
   faceRig.poses=info.poses;
@@ -1379,8 +1604,19 @@ function poseFace(g,info){
   buildExpressionUi();
 }
 // Apply one of the game's expression poses to the facial rig (or restore the bind pose).
-function applyExpression(name){
-  const pose=name&&faceRig.poses?faceRig.poses[name]:null;
+function applyExpression(name,frameIdx){
+  const frames=name&&faceRig.poses?faceRig.poses[name]:null;
+  let pose=null;
+  if(frames){
+    const keys=Object.keys(frames).map(Number).sort((a,b)=>a-b);
+    faceRig.frameKeys=keys;
+    const fi=Math.min(frameIdx===undefined?Math.floor(keys.length/2):frameIdx,keys.length-1);
+    pose=frames[keys[fi]];
+    const lab=document.getElementById('frameLabel');
+    if(lab)lab.textContent='frame '+keys[fi];
+    const sl=document.getElementById('frame');
+    if(sl){sl.max=keys.length-1;sl.value=fi;}
+  }
   faceRig.bones.forEach(b=>{
     const t=pose&&pose[b.name];
     if(t){b.position.set(t[0],t[1],t[2]);b.quaternion.set(t[3],t[4],t[5],t[6]);b.scale.set(t[7],t[8],t[9]);}
@@ -1397,9 +1633,32 @@ function buildExpressionUi(){
   const sel=document.createElement('select');
   sel.id='expr';
   sel.innerHTML='<option value="">None (rest)</option>'+names.map(n=>'<option>'+n+'</option>').join('');
-  sel.onchange=()=>applyExpression(sel.value);
+  sel.onchange=()=>{applyExpression(sel.value);applyShrinkwrap();};
   wrap.appendChild(sel);
+  // Scrub the sampled frames: these clips ease in, hold, then relax, so the pose you
+  // want is somewhere in the middle - this finds it by eye instead of by guessing.
+  const row=document.createElement('div');
+  row.style.cssText='margin-top:6px;display:flex;align-items:center;gap:6px';
+  const sl=document.createElement('input');
+  sl.type='range';sl.id='frame';sl.min=0;sl.max=4;sl.value=2;sl.style.width='110px';
+  sl.oninput=()=>{applyExpression(sel.value,+sl.value);applyShrinkwrap();};
+  const lab=document.createElement('span');lab.id='frameLabel';lab.textContent='frame';
+  lab.style.cssText='font-size:12px;color:#9ea6b2;min-width:64px';
+  row.appendChild(sl);row.appendChild(lab);
+  wrap.appendChild(row);
   document.body.appendChild(wrap);
+}
+function frameAll(){
+  const box=new THREE.Box3().setFromObject(root);
+  if(box.isEmpty()){say('frame: scene is EMPTY - nothing was added');return;}
+  const size=box.getSize(new THREE.Vector3());const center=box.getCenter(new THREE.Vector3());
+  root.position.sub(center);
+  const d=Math.max(size.x,size.y,size.z)||1;
+  camera.position.set(d*0.55,d*0.3,d*1.7);camera.near=d/100;camera.far=d*40;camera.updateProjectionMatrix();
+  controls.target.set(0,0,0);controls.update();
+  // One line saying what actually reached the scene, so a bad render can be read off the screen.
+  say('frame: '+root.children.length+' parts, size '
+      +size.x.toFixed(2)+'x'+size.y.toFixed(2)+'x'+size.z.toFixed(2));
 }
 function load(m){return new Promise(res=>loader.load(m.file,g=>{dress(g,m);poseFace(g,m);res({m,scene:g.scene});},
   undefined,e=>{document.getElementById('err').textContent='Load error ('+m.file+'): '+(e&&e.message||e);res(null);}));}
@@ -1411,14 +1670,56 @@ Promise.all(models.map(load)).then(loaded=>{
     if(o&&(o[0]||o[1]||o[2]))x.scene.position.set(o[0],o[1],o[2]);
     root.add(x.scene);
   });
+  // Frame the scene BEFORE anything optional runs: frameAll is what positions the camera, so if
+  // a later step throws the camera is left at the origin - inside the character, which reads as a
+  // "stuck camera" with no error on screen.
   frameAll();
+  try{
+  // Head is the shrinkwrap target; the face shells project onto it.
+    const headEntry=loaded.find(x=>x.m.ishead), faceEntry=loaded.find(x=>x.m.isface);
+    if(headEntry&&faceEntry){
+      headEntry.scene.updateMatrixWorld(true);
+      let headMesh=null; headEntry.scene.traverse(o=>{if(o.isMesh&&!headMesh)headMesh=o;});
+      let faceMesh=null; faceEntry.scene.traverse(o=>{if(o.isMesh&&!faceMesh)faceMesh=o;});
+      if(headMesh&&faceMesh&&faceMesh.isSkinnedMesh){
+        buildWrapTarget(headMesh);
+        const g=faceMesh.geometry;
+        const vg=new Int32Array(g.attributes.position.count);
+        g.groups.forEach(grp=>{for(let i=grp.start;i<grp.start+grp.count;i++)vg[g.index.getX(i)]=grp.materialIndex;});
+        // Render a BAKED copy: GPU-skinned positions cannot be read back, so the
+        // shell is posed + projected on the CPU into this twin, while the skinned
+        // original stays (hidden) as the source the skeleton drives.
+        const bg=g.clone();
+        const baked=new THREE.Mesh(bg,faceMesh.material);
+        baked.position.copy(faceMesh.position);
+        baked.quaternion.copy(faceMesh.quaternion);
+        baked.scale.copy(faceMesh.scale);
+        faceMesh.parent.add(baked);
+        faceMesh.visible=false;
+        baked.updateMatrixWorld(true);
+        faceSkins.push({mesh:faceMesh,baked:baked,
+                        offsets:{0:0.0005,1:0.0017,2:0.0028},vertGroup:vg});
+        // Defer a frame: world matrices (and the skeleton) must be current, or the
+        // projection reads stale transforms and silently no-ops.
+        // Shrinkwrap is OFF: projecting the shells onto the head still explodes the geometry on
+        // some characters, and it runs after the camera has framed the scene, so the failure looks
+        // like a stuck camera. Set wrapPending=3 to re-enable once the projection is trustworthy.
+        wrapPending=0;
+      }
+    }
+  }catch(e){say('face setup skipped: '+e.message);}
+
   const avail=[...new Set(uvMeshes.flatMap(u=>u.uvs))].sort();
   say('UV switch: press '+avail.join('/')+' to change texture UV channel (now: glTF default)');
 });
 // Calibration aid: arrows move the face piece in 0.004 steps and report the total, so the right
 // permanent offset can be read straight off the HUD instead of guessed.
 addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
-(function loop(){requestAnimationFrame(loop);controls.update();renderer.render(scene,camera);})();
+(function loop(){requestAnimationFrame(loop);controls.update();renderer.render(scene,camera);
+  // Project the face onto the head a few frames in, when the skeleton and world
+  // matrices are actually live - doing it during load silently no-ops.
+  if(wrapPending>0&&--wrapPending===0){applyShrinkwrap();say('face shrinkwrapped onto the head');}
+})();
 </script></body></html>
 """;
 }

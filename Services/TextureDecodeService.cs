@@ -255,6 +255,58 @@ internal static class TextureDecodeService
     }
 
     /// <summary>
+    /// Bakes the shared LEGO mouth sheet into a drawable mouth.
+    ///
+    /// T_LEGOface_Mouth_BC is pure white RGB with the shape entirely in ALPHA: the opaque region is
+    /// the TEETH, the transparent interior is the mouth cavity. Rendered with an alpha cutout you get
+    /// a floating white ring ("the O"); what the game shows is a dark opening with white teeth in it.
+    /// So resolve alpha into colour - white where the teeth are, near-black inside - and return a
+    /// fully opaque texture.
+    /// </summary>
+    public static bool TryExportMouthSheet(UTexture2D sheet, string destPath)
+    {
+        var d = TryDecode(sheet);
+        if (d is null)
+        {
+            return false;
+        }
+        try
+        {
+            using var bmp = new Bitmap(d.Width, d.Height, PixelFormat.Format32bppArgb);
+            var bits = bmp.LockBits(new Rectangle(0, 0, d.Width, d.Height), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+            try
+            {
+                var row = new byte[d.Width * 4];
+                for (var y = 0; y < d.Height; y++)
+                {
+                    for (var x = 0; x < d.Width; x++)
+                    {
+                        // Opaque region = the mouth OPENING (dark); the transparent interior is
+                        // what the teeth show through as. Reads as a dark mouth with white teeth.
+                        var opening = d.Pixels[y * d.Width + x].a >= 128;
+                        var v = (byte)(opening ? 16 : 232);
+                        var o = x * 4;
+                        row[o + 0] = v; row[o + 1] = v; row[o + 2] = v; row[o + 3] = 255;
+                    }
+                    System.Runtime.InteropServices.Marshal.Copy(row, 0, bits.Scan0 + y * bits.Stride, row.Length);
+                }
+            }
+            finally
+            {
+                bmp.UnlockBits(bits);
+            }
+            Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+            bmp.Save(destPath, ImageFormat.Png);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"    mouth sheet bake failed: {ex.Message.Split('\n')[0]}");
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Bakes the cape's woven-fabric shading maps. The cooked M_Cape_EoM graph is stripped, but a
     /// community Blender recreation (near-exact to in-game) revealed the wiring, and all four source
     /// textures ship in the paks (Characters/Textures/Attachments/Cape/Batman_EOM/T_PongeeFabric_*):

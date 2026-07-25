@@ -1,0 +1,283 @@
+namespace Batcomputer;
+
+/// <summary>
+/// The "3D viewer" category: pick a character - your own suit, a playable blueprint, or a cutscene
+/// one - and render it with the game's materials, parts and facial expressions.
+/// </summary>
+public sealed partial class MainForm
+{
+    private ModelPreviewControl? _viewer;
+    private ListBox? _viewerList;
+    private SearchBox? _viewerSearch;
+    private Label? _viewerStatus;
+    private Button? _viewerLoadButton;
+    private FlowLayoutPanel? _viewerSources;
+    private string _viewerSource = "My suits";
+    private List<CharacterCatalogService.Entry> _viewerEntries = new();
+
+    private TableLayoutPanel? _viewerHostLayout;
+    private Control? _viewerPanel;
+
+    private const string ViewerCategory = "3D viewer";
+
+    /// <summary>Swaps the tile grid for the viewer, building it the first time it is shown.</summary>
+    private void ShowViewerPanel()
+    {
+        if (_viewerHostLayout is null)
+        {
+            return;
+        }
+        if (_viewerPanel is null)
+        {
+            _viewerPanel = CreateViewerPanel();
+            _viewerPanel.Dock = DockStyle.Fill;
+            _viewerHostLayout.Controls.Add(_viewerPanel, 0, 1);
+        }
+        _toyboxTileFlow.Visible = false;
+        _toyboxTileGrid.Visible = false;
+        _viewerPanel.Visible = true;
+        _viewerPanel.BringToFront();
+    }
+
+    private void HideViewerPanel()
+    {
+        if (_viewerPanel is not null)
+        {
+            _viewerPanel.Visible = false;
+        }
+    }
+
+    /// <summary>Builds the viewer screen: source list on the left, render on the right.</summary>
+    private Control CreateViewerPanel()
+    {
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            BackColor = Theme.WindowBg,
+            Padding = new Padding(10),
+        };
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 250));
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+
+        // --- left: source picker + list ---------------------------------------
+        var left = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, BackColor = Color.Transparent,
+        };
+        left.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        left.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        left.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        left.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        // Segmented source switch: three flat buttons that behave as one control.
+        _viewerSources = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top, Height = 30, FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false, BackColor = Color.Transparent, Margin = new Padding(0),
+        };
+        foreach (var name in new[] { "My suits", "Playable", "Cutscene" })
+        {
+            var b = new Button
+            {
+                Text = name, Width = 79, Height = 26, FlatStyle = FlatStyle.Flat, Font = Theme.Caption,
+                BackColor = Theme.PanelBg, ForeColor = Theme.OnDarkMuted, Margin = new Padding(0, 0, 2, 0),
+                Tag = name,
+            };
+            b.FlatAppearance.BorderColor = Theme.PanelBg;
+            b.Click += (s2, _) =>
+            {
+                _viewerSource = (string)((Button)s2!).Tag!;
+                SyncViewerSourceButtons();
+                RefreshViewerList();
+            };
+            _viewerSources.Controls.Add(b);
+        }
+        left.Controls.Add(_viewerSources, 0, 0);
+        SyncViewerSourceButtons();
+
+        _viewerSearch = new SearchBox { Dock = DockStyle.Top, Height = 28 };
+        _viewerSearch.TextChanged += (_, _) => RefreshViewerList();
+        left.Controls.Add(_viewerSearch, 0, 1);
+
+        _viewerList = new ListBox
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Theme.PanelBg,
+            ForeColor = Theme.OnDark,
+            BorderStyle = BorderStyle.None,
+            Font = Theme.Body,
+            IntegralHeight = false,
+        };
+        _viewerList.DoubleClick += (_, _) => LoadSelectedViewerCharacter();
+        left.Controls.Add(_viewerList, 0, 2);
+
+        _viewerLoadButton = new Button
+        {
+            Dock = DockStyle.Top, Height = 32, Text = "View in 3D", FlatStyle = FlatStyle.Flat,
+            BackColor = Theme.PanelBg, ForeColor = Theme.Gold, Font = Theme.Body, Margin = new Padding(0, 6, 0, 0),
+        };
+        _viewerLoadButton.FlatAppearance.BorderColor = Theme.GoldDim;
+        _viewerLoadButton.Click += (_, _) => LoadSelectedViewerCharacter();
+        left.Controls.Add(_viewerLoadButton, 0, 3);
+
+        root.Controls.Add(left, 0, 0);
+
+        // --- right: the render + status ---------------------------------------
+        var right = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = Color.Transparent,
+            Padding = new Padding(10, 0, 0, 0),
+        };
+        right.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        right.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        _viewer = new ModelPreviewControl { Dock = DockStyle.Fill };
+        right.Controls.Add(_viewer, 0, 0);
+
+        _viewerStatus = new Label
+        {
+            Dock = DockStyle.Top, AutoSize = false, Height = 24, ForeColor = Theme.OnDarkMuted,
+            Font = Theme.Caption, TextAlign = ContentAlignment.MiddleLeft, Text = "No character loaded.",
+        };
+        right.Controls.Add(_viewerStatus, 0, 1);
+
+        root.Controls.Add(right, 1, 0);
+
+        LoadViewerCatalog();
+        return root;
+    }
+
+    /// <summary>Reads the catalogue (cached after the first pak scan) and fills the list.</summary>
+    private void LoadViewerCatalog()
+    {
+        try
+        {
+            var settings = AppSettings.Current;
+            var paks = settings.GamePaksRoot ?? string.Empty;
+            var usmap = settings.EffectiveUsmapPath() ?? string.Empty;
+            _viewerEntries = CharacterCatalogService.Load(paks, usmap);
+            _viewerEntries.AddRange(CharacterCatalogService.CustomSuits(settings.EffectiveProjectRoot()));
+        }
+        catch (Exception ex)
+        {
+            _viewerStatus!.Text = "Could not read the character list: " + ex.Message.Split('\n')[0];
+        }
+        RefreshViewerList();
+    }
+
+    private void SyncViewerSourceButtons()
+    {
+        foreach (var c in _viewerSources?.Controls.OfType<Button>() ?? Enumerable.Empty<Button>())
+        {
+            var on = string.Equals((string)c.Tag!, _viewerSource, StringComparison.Ordinal);
+            c.ForeColor = on ? Theme.Gold : Theme.OnDarkMuted;
+            c.FlatAppearance.BorderColor = on ? Theme.GoldDim : Theme.PanelBg;
+        }
+    }
+
+    private void RefreshViewerList()
+    {
+        if (_viewerList is null)
+        {
+            return;
+        }
+        var source = _viewerSource switch
+        {
+            "Playable" => CharacterCatalogService.Source.Playable,
+            "Cutscene" => CharacterCatalogService.Source.Cutscene,
+            _ => CharacterCatalogService.Source.CustomSuit,
+        };
+        var needle = _viewerSearch?.Text?.Trim() ?? string.Empty;
+
+        _viewerList.BeginUpdate();
+        _viewerList.Items.Clear();
+        foreach (var e in _viewerEntries.Where(e => e.Origin == source)
+                     .Where(e => needle.Length == 0 || e.Name.Contains(needle, StringComparison.OrdinalIgnoreCase)))
+        {
+            _viewerList.Items.Add(e);
+        }
+        _viewerList.DisplayMember = nameof(CharacterCatalogService.Entry.Name);
+        _viewerList.EndUpdate();
+
+        if (_viewerList.Items.Count > 0)
+        {
+            _viewerList.SelectedIndex = 0;
+        }
+        else if (source == CharacterCatalogService.Source.CustomSuit)
+        {
+            _viewerStatus!.Text = "No suit projects yet - build one under My character.";
+        }
+    }
+
+    private void LoadSelectedViewerCharacter()
+    {
+        if (_viewerList?.SelectedItem is not CharacterCatalogService.Entry entry)
+        {
+            return;
+        }
+        if (entry.Origin == CharacterCatalogService.Source.CustomSuit)
+        {
+            // Custom suits are assembled from the project's own base + parts, which the packaging
+            // path resolves. Until that is wired in, preview the base the suit is built from.
+            _viewerStatus!.Text = $"{entry.Name}: custom suit preview is not wired up yet.";
+            _viewer?.ShowMessage("Custom suit preview is coming next - "
+                                 + "playable and cutscene characters work now.");
+            return;
+        }
+        ShowCharacterInViewer(entry.ObjectPath, entry.Name);
+    }
+
+    /// <summary>Builds and shows a character; used by the tab and by "View in 3D" on My character.</summary>
+    private async void ShowCharacterInViewer(string objectPath, string label)
+    {
+        _viewer?.ShowMessage($"Building {label}...");
+        _viewerStatus!.Text = $"Building {label} - decoding meshes, materials and expressions...";
+        _viewerLoadButton!.Enabled = false;
+        try
+        {
+            var settings = AppSettings.Current;
+            var paks = settings.GamePaksRoot ?? string.Empty;
+            var usmap = settings.EffectiveUsmapPath() ?? string.Empty;
+            var folder = await Task.Run(() =>
+                ModelPreviewService.BuildPreviewCharacter(paks, usmap, objectPath));
+            await _viewer!.ShowFolderAsync(folder);
+            _viewerStatus.Text = $"{label} - drag to orbit, scroll to zoom.";
+        }
+        catch (Exception ex)
+        {
+            var why = ex.Message.Split('\n')[0];
+            _viewer?.ShowMessage("Could not build this character.\n\n" + why);
+            _viewerStatus.Text = "Failed: " + why;
+        }
+        finally
+        {
+            _viewerLoadButton!.Enabled = true;
+        }
+    }
+
+    /// <summary>Jumps to the viewer tab and loads the base the current suit is built on.</summary>
+    private void ViewCurrentSuitIn3D()
+    {
+        SelectComboValue(_toyboxCategoryCombo, ViewerCategory);
+        var basePath = _currentProject?.PlayableTemplate?.Uasset;
+        if (string.IsNullOrWhiteSpace(basePath))
+        {
+            _viewer?.ShowMessage("Pick a base character first, then view the suit in 3D.");
+            return;
+        }
+        // The project stores a file path; the preview wants the mounted object path.
+        var objectPath = basePath.Replace('\\', '/');
+        var idx = objectPath.IndexOf("LEGOBatmanLotDK/", StringComparison.OrdinalIgnoreCase);
+        if (idx >= 0)
+        {
+            objectPath = objectPath[idx..];
+        }
+        if (objectPath.EndsWith(".uasset", StringComparison.OrdinalIgnoreCase))
+        {
+            objectPath = objectPath[..^".uasset".Length];
+        }
+        ShowCharacterInViewer(objectPath, _currentProject?.DisplayName ?? "Current suit");
+    }
+}
