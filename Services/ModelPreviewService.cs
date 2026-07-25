@@ -15,6 +15,8 @@ using CUE4Parse.UE4.Versions;
 using CUE4Parse_Conversion;
 using CUE4Parse_Conversion.Meshes;
 using CUE4Parse_Conversion.Materials;
+using CUE4Parse_Conversion.Animations;
+using CUE4Parse.UE4.Assets.Exports.Animation;
 
 namespace Batcomputer;
 
@@ -385,6 +387,84 @@ public static class ModelPreviewService
         public string? MouthTex { get; init; }
         /// <summary>Alternate expression feature bands: (ExtraUV0 slot id, triangle count).</summary>
         public List<(int Band, int Tris)>? Bands { get; init; }
+        /// <summary>Facial rig pose (bone name -> local transform, glTF space) from the expression anim.</summary>
+        public Dictionary<string, (Vector3 P, System.Numerics.Quaternion Q, Vector3 S)>? Pose { get; init; }
+    }
+
+    /// <summary>
+    /// Loads a LEGOface expression animation and returns its first-frame pose per bone, already
+    /// converted to glTF space.
+    ///
+    /// SK_LEGOface has no morph targets: the game poses a facial BONE RIG (Brows_*, Eye_*, Eyelid_*,
+    /// Mouth_*, Lips_*, Cheek_*) through its PostProcessAnimBlueprint, from per-character sequences
+    /// at /Game/Animation/LEGOface/LEGOface_&lt;Character&gt;/A_&lt;Expression&gt;_&lt;Character&gt;_LEGOface. Without
+    /// this the preview shows the mesh in BIND pose, which the game never displays.
+    ///
+    /// Axis mapping was derived by comparing the exported glTF bone nodes against the UE reference
+    /// skeleton: position (X, Z, Y)/100, quaternion (x, z, y, -w).
+    /// </summary>
+    private static Dictionary<string, (Vector3 P, System.Numerics.Quaternion Q, Vector3 S)>? LoadFacePose(
+        DefaultFileProvider provider, string expression, string? character)
+    {
+        var candidates = new List<string>();
+        if (!string.IsNullOrWhiteSpace(character))
+        {
+            candidates.Add($"/Game/Animation/LEGOface/LEGOface_{character}/A_{expression}_{character}_LEGOface");
+            candidates.Add($"/Game/Animation/LEGOface/LEGOface_{character}/A_{expression}_{character}_LEGOFace");
+        }
+        candidates.Add($"/Game/Animation/LEGOface/LEGOface_Batman/A_{expression}_Batman_LEGOface");
+
+        foreach (var path in candidates)
+        {
+            try
+            {
+                if (provider.LoadPackageObject(path) is not UAnimSequence anim)
+                {
+                    continue;
+                }
+                var skel = anim.Skeleton?.Load<USkeleton>();
+                if (skel is null)
+                {
+                    continue;
+                }
+                var set = skel.ConvertAnims(anim);
+                var seq = set.Sequences.FirstOrDefault();
+                if (seq is null)
+                {
+                    continue;
+                }
+                var refBones = skel.ReferenceSkeleton.FinalRefBoneInfo;
+                var pose = new Dictionary<string, (Vector3, System.Numerics.Quaternion, Vector3)>();
+                for (var i = 0; i < seq.Tracks.Count && i < refBones.Length; i++)
+                {
+                    var tr = seq.Tracks[i];
+                    if (tr.KeyPos.Length == 0 && tr.KeyQuat.Length == 0)
+                    {
+                        continue;
+                    }
+                    // Sample the LAST key: these sequences ease from a neutral start into the held
+                    // expression, so frame 0 is the transition, not the pose the game rests on.
+                    var p = tr.KeyPos.Length > 0 ? tr.KeyPos[^1] : default;
+                    var q = tr.KeyQuat.Length > 0 ? tr.KeyQuat[^1] : default;
+                    // Scale is NOT decorative here: the rig scales feature shells (mouth 1.4x/1.3x,
+                    // unused features toward zero) to form the expression. Dropping it leaves every
+                    // shell at bind size, which renders as slabs across the face.
+                    var s = tr.KeyScale.Length > 0 ? tr.KeyScale[^1] : new FVector(1, 1, 1);
+                    pose[refBones[i].Name.Text] = (
+                        new Vector3(p.X / 100f, p.Z / 100f, p.Y / 100f),
+                        new System.Numerics.Quaternion(q.X, q.Z, q.Y, -q.W),
+                        new Vector3(s.X, s.Z, s.Y));
+                }
+                Console.WriteLine($"  face pose '{expression}': {pose.Count} bones from {path.Split('/')[^1]}");
+                return pose;
+            }
+            catch
+            {
+                // Try the next candidate path.
+            }
+        }
+        Console.WriteLine($"  face pose '{expression}': no animation found (face stays in bind pose)");
+        return null;
     }
 
     /// <summary>
@@ -393,6 +473,19 @@ public static class ModelPreviewService
     /// Batman mouth shared by every cowled Batman face).
     /// </summary>
     private const string DefaultMouthTexPath = "/Game/Characters/Textures/Attachments/LEGOface/T_LEGOface_Mouth_BC";
+
+    /// <summary>
+    /// Expression applied to the face rig, and the character whose set to take it from.
+    ///
+    /// OFF by default: the ACL pose decodes correctly (59 bones, real position/rotation/scale), but
+    /// mapping it onto the exported glTF rig still renders wrong - the rotation handedness and the
+    /// scale axis order are inferred, not measured, so shells come out deformed. The unposed face
+    /// (band-classified geometry + game materials) is the good state; this stays opt-in until the
+    /// conversion is verified against the reference skeleton's own bone orientations.
+    /// </summary>
+    public static bool ApplyFacePose { get; set; }
+    public static string FaceExpression { get; set; } = "Neutral";
+    public static string? FaceCharacter { get; set; } = "Batman";
 
     /// <summary>
     /// Face post-pass: split the merged face mesh into base/mouth/hidden groups (see
@@ -442,7 +535,8 @@ public static class ModelPreviewService
                 Console.WriteLine("  face expression slots (ExtraUV0 band -> tris): " +
                                   string.Join(", ", bands.Select(b => $"{b.Band}:{b.Tris}")));
             }
-            placed[i] = placed[i] with { FaceGroups = groups, MouthTex = mouthRel, Bands = bands };
+            var pose = ApplyFacePose ? LoadFacePose(provider, FaceExpression, FaceCharacter) : null;
+            placed[i] = placed[i] with { FaceGroups = groups, MouthTex = mouthRel, Bands = bands, Pose = pose };
         }
         return placed;
     }
@@ -985,6 +1079,7 @@ public static class ModelPreviewService
             return $"{{\"file\":\"{m.File}\",\"base\":\"{baseName}\",\"body\":{(m.IsBody ? "true" : "false")},\"isface\":{(m.IsFace ? "true" : "false")}," +
                    $"\"fgroups\":{fg},\"mouth\":{Q(m.MouthTex)}," +
                    $"\"fbands\":[{string.Join(",", (m.Bands ?? new()).Select(b => $"[{b.Band},{b.Tris}]"))}]," +
+                   $"\"pose\":{{{string.Join(",", (m.Pose ?? new()).Select(kv => $"\"{kv.Key}\":[{kv.Value.P.X:0.#####},{kv.Value.P.Y:0.#####},{kv.Value.P.Z:0.#####},{kv.Value.Q.X:0.#####},{kv.Value.Q.Y:0.#####},{kv.Value.Q.Z:0.#####},{kv.Value.Q.W:0.#####},{kv.Value.S.X:0.#####},{kv.Value.S.Y:0.#####},{kv.Value.S.Z:0.#####}]"))}}}," +
                    $"\"uvs\":[{string.Join(",", uvs)}]," +
                    $"\"offset\":[{m.Offset.X:0.#####},{m.Offset.Y:0.#####},{m.Offset.Z:0.#####}]," +
                    $"\"slots\":[{slots}]}}";
@@ -1185,7 +1280,23 @@ function frameAll(){
   camera.position.set(d*0.55,d*0.3,d*1.7);camera.near=d/100;camera.far=d*40;camera.updateProjectionMatrix();
   controls.target.set(0,0,0);controls.update();
 }
-function load(m){return new Promise(res=>loader.load(m.file,g=>{dress(g,m);res({m,scene:g.scene});},
+// Apply the facial rig pose from the game's expression animation. Without this the face renders in
+// BIND pose, which the game never shows - it always runs A_<Expression>_<Char>_LEGOface through the
+// mesh's PostProcessAnimBlueprint.
+function poseFace(g,info){
+  const p=info.pose; if(!p||!Object.keys(p).length)return;
+  let n=0;
+  g.scene.traverse(o=>{
+    const t=p[o.name];
+    if(!t)return;
+    o.position.set(t[0],t[1],t[2]);
+    o.quaternion.set(t[3],t[4],t[5],t[6]);
+    if(t.length>=10)o.scale.set(t[7],t[8],t[9]);
+    n++;
+  });
+  if(n)say(info.file+': posed '+n+' face bones');
+}
+function load(m){return new Promise(res=>loader.load(m.file,g=>{dress(g,m);poseFace(g,m);res({m,scene:g.scene});},
   undefined,e=>{document.getElementById('err').textContent='Load error ('+m.file+'): '+(e&&e.message||e);res(null);}));}
 const faceScenes=[];let faceNudge={x:0,y:0};
 const faceLayerMats=[];let faceLayerState=2;

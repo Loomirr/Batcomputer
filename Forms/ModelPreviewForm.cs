@@ -47,7 +47,15 @@ public sealed class ModelPreviewForm : Form
     {
         try
         {
-            await _web.EnsureCoreWebView2Async();
+            // Each preview gets its OWN WebView2 user-data folder. The default folder is derived from
+            // the exe path, so a second instance (or a leftover msedgewebview2 child from a previous
+            // run) holds a lock on it and the next launch dies with 0x800700AA "resource in use".
+            var userData = Path.Combine(Path.GetTempPath(), "Batcomputer.WebView2",
+                Environment.ProcessId.ToString());
+            Directory.CreateDirectory(userData);
+            var env = await Microsoft.Web.WebView2.Core.CoreWebView2Environment.CreateAsync(
+                browserExecutableFolder: null, userDataFolder: userData);
+            await _web.EnsureCoreWebView2Async(env);
             _web.CoreWebView2.Settings.AreDevToolsEnabled = false;
             _web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
             _web.DefaultBackgroundColor = Theme.WindowBg;

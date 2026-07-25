@@ -49,5 +49,10 @@
          here: zip extraction can rewrite timestamps, so shipping two makes which one loads a
          coin flip. publish-release.ps1 fails the build if more than one is present. -->
     <None Update="gamedata\*.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- CUE4Parse's native helper (win-x64). Needed ONLY to decompress ACL-compressed animation,
+         which is how the game stores facial expression poses - there is no managed ACL decoder.
+         Apache-2.0 (CUE4Parse) + MIT (ACL); notice in licenses/CUE4Parse-Natives-NOTICE.txt.
+         Must stay ABI-matched to the CUE4Parse package version above. -->
+    <None Include="native\CUE4Parse-Natives.dll" CopyToOutputDirectory="PreserveNewest" Link="CUE4Parse-Natives.dll" />
   </ItemGroup>
 </Project>

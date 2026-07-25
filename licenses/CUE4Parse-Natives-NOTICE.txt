@@ -1,0 +1,61 @@
+CUE4Parse-Natives.dll
+=====================
+
+native/CUE4Parse-Natives.dll is a prebuilt binary from the CUE4Parse project.
+Batcomputer uses it for exactly one thing: decompressing ACL-compressed
+animation data, which is how LEGO Batman: Legacy of the Dark Knight stores
+facial expression poses. CUE4Parse offers no managed ACL decoder, and the
+format is not practical to reimplement correctly.
+
+Everything else in the preview pipeline (texture decode, mesh conversion,
+pak access) is managed code.
+
+
+CUE4Parse
+---------
+https://github.com/FabianFG/CUE4Parse
+Licensed under the Apache License, Version 2.0.
+
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+ACL (Animation Compression Library)
+-----------------------------------
+https://github.com/nfrechette/acl
+Bundled inside CUE4Parse-Natives. Licensed under the MIT License.
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+    THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+
+
+Updating
+--------
+The DLL must stay ABI-matched to the CUE4Parse PackageReference version in
+Batcomputer.csproj (currently 1.2.2.202607). It is not published as a
+standalone release asset; it ships inside FModel's single-file executable and
+can be lifted out of that bundle without running it.

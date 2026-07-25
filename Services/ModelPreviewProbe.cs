@@ -7,6 +7,7 @@ using CUE4Parse.UE4.Assets.Exports.SkeletalMesh;
 using CUE4Parse.UE4.Assets.Exports.StaticMesh;
 using CUE4Parse_Conversion;
 using CUE4Parse_Conversion.Meshes;
+using CUE4Parse_Conversion.Animations;
 
 namespace Batcomputer;
 
@@ -153,6 +154,47 @@ internal static class ModelPreviewProbe
                             if (v is not null) line += $" {fname}={(v is Array a ? $"[{a.Length}]" : v)}";
                         }
                         Console.WriteLine(line);
+                    }
+                }
+            }
+            return 0;
+        }
+
+        // "anim:<animPath>" loads a face expression animation and prints the pose it applies at
+        // time 0 - the per-bone delta from the reference skeleton. The game drives faces this way
+        // (SK_LEGOface has no morph targets; its PostProcessAnimBlueprint poses the facial rig).
+        if (objectPath.StartsWith("anim:", StringComparison.OrdinalIgnoreCase))
+        {
+            var obj = provider.LoadPackageObject(objectPath["anim:".Length..]);
+            Console.WriteLine($"[{obj.ExportType}] {obj.Name}");
+            foreach (var prop in obj.Properties)
+            {
+                var val = prop.Tag?.GenericValue?.ToString() ?? "";
+                if (val.Length > 70) val = val[..70] + "…";
+                Console.WriteLine($"    {prop.Name.Text} = {val}");
+            }
+            if (obj is CUE4Parse.UE4.Assets.Exports.Animation.UAnimSequence anim)
+            {
+                Console.WriteLine($"  sequence: {anim.SequenceLength}s, {anim.NumFrames} frames");
+                var skel = anim.Skeleton?.Load<CUE4Parse.UE4.Assets.Exports.Animation.USkeleton>();
+                if (skel is not null)
+                {
+                    Console.WriteLine($"  skeleton: {skel.Name}");
+                    var set = skel.ConvertAnims(anim);
+                    foreach (var seq in set.Sequences)
+                    {
+                        Console.WriteLine($"  seq '{seq.Name}': {seq.Tracks.Count} tracks, {seq.NumFrames} frames");
+                        for (var i = 0; i < seq.Tracks.Count && i < 40; i++)
+                        {
+                            var tr = seq.Tracks[i];
+                            if (tr.KeyPos.Length == 0 && tr.KeyQuat.Length == 0) continue;
+                            var refBones = skel.ReferenceSkeleton.FinalRefBoneInfo;
+                            var bone = i < refBones.Length ? refBones[i].Name.Text : $"track{i}";
+                            var p = tr.KeyPos.Length > 0 ? tr.KeyPos[0].ToString() : "-";
+                            var q = tr.KeyQuat.Length > 0 ? tr.KeyQuat[0].ToString() : "-";
+                            var s = tr.KeyScale.Length > 0 ? tr.KeyScale[0].ToString() : "-";
+                            Console.WriteLine($"    {bone}: pos={p} quat={q} scale={s} (nPos={tr.KeyPos.Length} nQ={tr.KeyQuat.Length} nS={tr.KeyScale.Length})");
+                        }
                     }
                 }
             }
