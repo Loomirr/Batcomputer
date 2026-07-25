@@ -264,7 +264,12 @@ public static class ModelPreviewService
             {
                 var slotOverride = part.Overrides is not null && si < part.Overrides.Length
                     ? part.Overrides[si]?.ResolvedObject?.Load() : null;
-                var resolved = ResolveSlot(provider, slotOverride ?? slotMats![si]?.Load(), previewDir);
+                var slotMat = slotOverride ?? slotMats![si]?.Load();
+                if (si == 0 && part.MeshPath.Contains("LEGOface", StringComparison.OrdinalIgnoreCase))
+                {
+                    _faceMaterial = slotMat;
+                }
+                var resolved = ResolveSlot(provider, slotMat, previewDir);
                 if (disabledSlots.Contains(si))
                 {
                     resolved = resolved with { Hidden = true };
@@ -387,8 +392,10 @@ public static class ModelPreviewService
         public string? MouthTex { get; init; }
         /// <summary>Alternate expression feature bands: (ExtraUV0 slot id, triangle count).</summary>
         public List<(int Band, int Tris)>? Bands { get; init; }
+        /// <summary>True when the character binds a dummy to the mouth feature (draw nothing).</summary>
+        public bool MouthHidden { get; init; }
         /// <summary>Facial rig pose (bone name -> local transform, glTF space) from the expression anim.</summary>
-        public Dictionary<string, (Vector3 P, System.Numerics.Quaternion Q, Vector3 S)>? Pose { get; init; }
+        public Dictionary<string, Dictionary<string, (Vector3 P, System.Numerics.Quaternion Q, Vector3 S)>>? Poses { get; init; }
     }
 
     /// <summary>
@@ -413,7 +420,12 @@ public static class ModelPreviewService
             candidates.Add($"/Game/Animation/LEGOface/LEGOface_{character}/A_{expression}_{character}_LEGOface");
             candidates.Add($"/Game/Animation/LEGOface/LEGOface_{character}/A_{expression}_{character}_LEGOFace");
         }
-        candidates.Add($"/Game/Animation/LEGOface/LEGOface_Batman/A_{expression}_Batman_LEGOface");
+        // The rig (SKEL_LEGOface) is shared, so a character missing an expression can borrow it.
+        foreach (var donor in new[] { "Batman", "Bane", "Alt" })
+        {
+            candidates.Add($"/Game/Animation/LEGOface/LEGOface_{donor}/A_{expression}_{donor}_LEGOface");
+            candidates.Add($"/Game/Animation/LEGOface/LEGOface_{donor}/A_{expression}_{donor}_LEGOFace");
+        }
 
         foreach (var path in candidates)
         {
@@ -464,7 +476,6 @@ public static class ModelPreviewService
                 // Try the next candidate path.
             }
         }
-        Console.WriteLine($"  face pose '{expression}': no animation found (face stays in bind pose)");
         return null;
     }
 
@@ -473,6 +484,17 @@ public static class ModelPreviewService
     /// master's defaults are stripped, but the community recreation confirms this texture - the stern
     /// Batman mouth shared by every cowled Batman face).
     /// </summary>
+    /// <summary>Face material of the current build, so feature bands can read their own params.</summary>
+    private static UObject? _faceMaterial;
+
+    /// <summary>
+    /// True for the placeholder textures the game binds to features a character does not use
+    /// (T_Dummy_Alpha_Off / T_Dummy_NML). They are fully transparent, so the feature draws nothing.
+    /// </summary>
+    private static bool IsDummyTexture(UTexture2D t) =>
+        t.Name.Contains("Dummy", StringComparison.OrdinalIgnoreCase)
+        || t.Name.Contains("Alpha_Off", StringComparison.OrdinalIgnoreCase);
+
     private const string DefaultMouthTexPath = "/Game/Characters/Textures/Attachments/LEGOface/T_LEGOface_Mouth_BC";
 
     /// <summary>
@@ -485,6 +507,13 @@ public static class ModelPreviewService
     /// conversion is verified against the reference skeleton's own bone orientations.
     /// </summary>
     public static bool ApplyFacePose { get; set; }
+    /// <summary>Every expression name the game ships for the LEGOface rig.</summary>
+    public static readonly string[] FaceExpressions =
+    {
+        "Neutral", "Smiling", "Smirking", "Grinning", "Laughing", "Frowning", "Sullen", "Enraged",
+        "Grimacing", "Screaming", "Crying", "Dazed", "Sensing", "Yearning", "Open", "Closed",
+    };
+
     public static string FaceExpression { get; set; } = "Neutral";
     public static string? FaceCharacter { get; set; } = "Batman";
 
@@ -510,10 +539,25 @@ public static class ModelPreviewService
                 continue;
             }
 
+            // Each feature band takes its texture from the face material's OWN parameter for that
+            // feature ("Mouth BC" for the mouth shells). When the character binds a dummy there -
+            // cowled Batman faces set nearly every feature to T_Dummy_Alpha_Off, a fully transparent
+            // texture - the game draws nothing, so the band must be hidden rather than shaded.
             string? mouthRel = null;
+            var mouthHidden = false;
+            var faceMaterial = _faceMaterial;
+            var mouthTex = FindTextureParam(faceMaterial, "Mouth BC", 0)
+                           ?? FindTextureParam(faceMaterial, "Mouth BC Prestine", 0);
+            if (mouthTex is not null && IsDummyTexture(mouthTex))
+            {
+                // A dummy here means the character overrides nothing, not that the mouth is absent -
+                // the shared sheet is the base the rig deforms. Fall through to it.
+                mouthTex = null;
+            }
             try
             {
-                if (provider.LoadPackageObject(DefaultMouthTexPath) is UTexture2D mouthTex)
+                mouthTex ??= mouthHidden ? null : provider.LoadPackageObject(DefaultMouthTexPath) as UTexture2D;
+                if (mouthTex is not null)
                 {
                     mouthRel = "textures/" + MakeSafeName(mouthTex.Name) + "_cut.png";
                     var dest = Path.Combine(previewDir, mouthRel.Replace('/', Path.DirectorySeparatorChar));
@@ -536,8 +580,20 @@ public static class ModelPreviewService
                 Console.WriteLine("  face expression slots (ExtraUV0 band -> tris): " +
                                   string.Join(", ", bands.Select(b => $"{b.Band}:{b.Tris}")));
             }
-            var pose = ApplyFacePose ? LoadFacePose(provider, FaceExpression, FaceCharacter) : null;
-            placed[i] = placed[i] with { FaceGroups = groups, MouthTex = mouthRel, Bands = bands, Pose = pose };
+            // Load every expression the game ships for this rig so the viewer can switch between
+            // them. Batman's own folder only has Neutral; the rest of the set lives under other
+            // characters, and they all pose the same shared SKEL_LEGOface rig.
+            var poses = new Dictionary<string, Dictionary<string, (Vector3, System.Numerics.Quaternion, Vector3)>>();
+            foreach (var expr in FaceExpressions)
+            {
+                var one = LoadFacePose(provider, expr, FaceCharacter);
+                if (one is not null)
+                {
+                    poses[expr] = one;
+                }
+            }
+            Console.WriteLine($"  face expressions available: {string.Join(", ", poses.Keys)}");
+            placed[i] = placed[i] with { FaceGroups = groups, MouthTex = mouthRel, Bands = bands, Poses = poses, MouthHidden = mouthHidden };
         }
         return placed;
     }
@@ -1078,14 +1134,43 @@ public static class ModelPreviewService
             var uvs = GlbInspector.ExtractUvChannels(Path.Combine(dir, m.File), dir, baseName);
             var fg = m.FaceGroups is null ? "null" : $"[{string.Join(",", m.FaceGroups)}]";
             return $"{{\"file\":\"{m.File}\",\"base\":\"{baseName}\",\"body\":{(m.IsBody ? "true" : "false")},\"isface\":{(m.IsFace ? "true" : "false")}," +
-                   $"\"fgroups\":{fg},\"mouth\":{Q(m.MouthTex)}," +
+                   $"\"fgroups\":{fg},\"mouth\":{Q(m.MouthTex)},\"mhide\":{(m.MouthHidden ? "true" : "false")}," +
                    $"\"fbands\":[{string.Join(",", (m.Bands ?? new()).Select(b => $"[{b.Band},{b.Tris}]"))}]," +
-                   $"\"pose\":{{{string.Join(",", (m.Pose ?? new()).Select(kv => $"\"{kv.Key}\":[{kv.Value.P.X:0.#####},{kv.Value.P.Y:0.#####},{kv.Value.P.Z:0.#####},{kv.Value.Q.X:0.#####},{kv.Value.Q.Y:0.#####},{kv.Value.Q.Z:0.#####},{kv.Value.Q.W:0.#####},{kv.Value.S.X:0.#####},{kv.Value.S.Y:0.#####},{kv.Value.S.Z:0.#####}]"))}}}," +
+                   $"\"poses\":{PoseJson(m.Poses)}," +
                    $"\"uvs\":[{string.Join(",", uvs)}]," +
                    $"\"offset\":[{m.Offset.X:0.#####},{m.Offset.Y:0.#####},{m.Offset.Z:0.#####}]," +
                    $"\"slots\":[{slots}]}}";
         })) + "]";
         static string Q(string? v) => v is null ? "null" : $"\"{v}\"";
+
+        // Serialises every expression pose as {name:{bone:[px,py,pz,qx,qy,qz,qw,sx,sy,sz]}}.
+        static string PoseJson(Dictionary<string, Dictionary<string, (Vector3 P, System.Numerics.Quaternion Q, Vector3 S)>>? poses)
+        {
+            if (poses is null || poses.Count == 0)
+            {
+                return "{}";
+            }
+            var sb = new System.Text.StringBuilder("{");
+            var firstExpr = true;
+            foreach (var (name, bones) in poses)
+            {
+                if (!firstExpr) sb.Append(',');
+                firstExpr = false;
+                sb.Append('"').Append(name).Append("\":{");
+                var firstBone = true;
+                foreach (var (bone, t) in bones)
+                {
+                    if (!firstBone) sb.Append(',');
+                    firstBone = false;
+                    sb.Append('"').Append(bone).Append("\":[")
+                      .Append($"{t.P.X:0.####},{t.P.Y:0.####},{t.P.Z:0.####},")
+                      .Append($"{t.Q.X:0.####},{t.Q.Y:0.####},{t.Q.Z:0.####},{t.Q.W:0.####},")
+                      .Append($"{t.S.X:0.####},{t.S.Y:0.####},{t.S.Z:0.####}]");
+                }
+                sb.Append('}');
+            }
+            return sb.Append('}').ToString();
+        }
 
         File.WriteAllText(Path.Combine(dir, "models.js"), $"window.PREVIEW_MODELS={jsonList};");
         File.WriteAllText(Path.Combine(dir, "index.html"), ViewerHtml);
@@ -1100,6 +1185,11 @@ public static class ModelPreviewService
   html,body{margin:0;height:100%;background:#1a1d22;overflow:hidden;font-family:Segoe UI,sans-serif}
   #hud{position:absolute;left:12px;top:10px;color:#9ea6b2;font-size:13px;pointer-events:none}
   #hud b{color:#f0c230}
+  #exprwrap{position:absolute;right:14px;top:12px;color:#9ea6b2;font-size:13px;
+    background:rgba(26,29,34,.85);padding:8px 10px;border:1px solid #333a44;border-radius:8px}
+  #exprwrap label{color:#f0c230;margin-right:4px}
+  #expr{background:#22262c;color:#e6e9ee;border:1px solid #3a4048;border-radius:5px;padding:3px 6px;
+    font-family:inherit;font-size:13px;outline:none}
   #err{position:absolute;left:12px;bottom:12px;color:#f0c230;font-size:12px;line-height:1.5;font-family:Consolas,monospace}
   canvas{display:block}
 </style></head><body>
@@ -1243,8 +1333,10 @@ function dress(g,info){
       // The mouth's SHAPE is sculpted geometry (visible in Blender's untextured solid shading) -
       // the material only colours it dark. Painting the O-ring sheet onto it was the mistake:
       // that texture is the open-mouth cavity used by talking expressions.
-      const mouthM=new THREE.MeshStandardMaterial({color:0x0a0a0a,roughness:0.4,metalness:0});
+      const mouthM=new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.4,metalness:0});
       mouthM.side=THREE.DoubleSide;
+      if(info.mouth){const mt=tex(info.mouth,true);if(mt){mouthM.map=mt;mouthM.alphaTest=0.5;}}
+      else mouthM.color=new THREE.Color(0x0a0a0a);
       // SK_LEGOface is the morph-animated expression layer (M_LEGOface has bUsedWithMorphTargets).
       // The TPAGE atlas head region is BLANK for these characters, so the visible face comes from
       // this layer: the under-layer stencil plus the mouth shells sampling the mouth sheet.
@@ -1252,22 +1344,12 @@ function dress(g,info){
       mouthM.visible=true;baseM.visible=true;
       const hidM=new THREE.MeshStandardMaterial();hidM.visible=false;
       const mats=[baseM,mouthM,hidM];
+      geo.addGroup((g[0]+g[1])*3,g[2]*3,2);
       // Expression slots: each alternate ExtraUV0 band is one sprite slot the game's
       // SpriteIndex00/01 anim notifies select. Give each its own group+material so they can be
       // switched on individually (E cycles).
-      const bands=info.fbands||[];
-      let off=(g[0]+g[1])*3;
-      bands.forEach(b=>{
-        const m2=new THREE.MeshStandardMaterial({color:0x0a0a0a,roughness:0.4,metalness:0});
-        m2.side=THREE.DoubleSide;m2.visible=false;
-        mats.push(m2);
-        geo.addGroup(off,b[1]*3,mats.length-1);
-        off+=b[1]*3;
-        faceSlotMats.push({band:b[0],mat:m2,tris:b[1]});
-      });
       o.material=mats;
-      faceLayerMats.push({base:baseM,mouth:mouthM});
-      say(info.file+': face split '+g[0]+'/'+g[1]+'/'+g[2]+' tris (expression layer hidden - press F)');
+      say(info.file+': face '+g[0]+' base / '+g[1]+' mouth / '+g[2]+' unused-feature tris');
     }
   });
   say(info.file+': slots='+slots.length+' applied='+applied+' ['+
@@ -1284,87 +1366,57 @@ function frameAll(){
 // Apply the facial rig pose from the game's expression animation. Without this the face renders in
 // BIND pose, which the game never shows - it always runs A_<Expression>_<Char>_LEGOface through the
 // mesh's PostProcessAnimBlueprint.
+const faceRig={bones:[],bind:new Map(),poses:null};
 function poseFace(g,info){
-  const p=info.pose; if(!p||!Object.keys(p).length)return;
-  let n=0;
+  if(!info.poses||!Object.keys(info.poses).length)return;
+  faceRig.poses=info.poses;
   g.scene.traverse(o=>{
-    const t=p[o.name];
-    if(!t)return;
-    o.position.set(t[0],t[1],t[2]);
-    o.quaternion.set(t[3],t[4],t[5],t[6]);
-    if(t.length>=10)o.scale.set(t[7],t[8],t[9]);
-    n++;
+    if(o.isBone||o.type==='Bone'){
+      faceRig.bones.push(o);
+      faceRig.bind.set(o,{p:o.position.clone(),q:o.quaternion.clone(),s:o.scale.clone()});
+    }
   });
-  if(n)say(info.file+': posed '+n+' face bones');
+  buildExpressionUi();
+}
+// Apply one of the game's expression poses to the facial rig (or restore the bind pose).
+function applyExpression(name){
+  const pose=name&&faceRig.poses?faceRig.poses[name]:null;
+  faceRig.bones.forEach(b=>{
+    const t=pose&&pose[b.name];
+    if(t){b.position.set(t[0],t[1],t[2]);b.quaternion.set(t[3],t[4],t[5],t[6]);b.scale.set(t[7],t[8],t[9]);}
+    else{const bp=faceRig.bind.get(b);if(bp){b.position.copy(bp.p);b.quaternion.copy(bp.q);b.scale.copy(bp.s);}}
+  });
+}
+function buildExpressionUi(){
+  if(!faceRig.poses||document.getElementById('expr'))return;
+  const names=Object.keys(faceRig.poses);
+  if(!names.length)return;
+  const wrap=document.createElement('div');
+  wrap.id='exprwrap';
+  wrap.innerHTML='<label for="expr">Expression</label> ';
+  const sel=document.createElement('select');
+  sel.id='expr';
+  sel.innerHTML='<option value="">None (rest)</option>'+names.map(n=>'<option>'+n+'</option>').join('');
+  sel.onchange=()=>applyExpression(sel.value);
+  wrap.appendChild(sel);
+  document.body.appendChild(wrap);
 }
 function load(m){return new Promise(res=>loader.load(m.file,g=>{dress(g,m);poseFace(g,m);res({m,scene:g.scene});},
   undefined,e=>{document.getElementById('err').textContent='Load error ('+m.file+'): '+(e&&e.message||e);res(null);}));}
-const faceScenes=[];let faceNudge={x:0,y:0};
-const faceLayerMats=[];let faceLayerState=2;
-// Alternate FEATURE shells (brows/eyes/lashes/teeth...), addressed by their ExtraUV0 band. These
-// are NOT expressions on their own: the game poses the face BONE RIG (ABP_LEGOface_PostProcess)
-// from per-character animations A_<Expression>_<Character>_LEGOFace. E is an inspection aid.
-const faceSlotMats=[];let faceSlot=-1;
-addEventListener('keydown',e=>{
-  if(e.key!=='e'&&e.key!=='E')return;
-  if(!faceSlotMats.length){say('no alternate feature shells in this face mesh');return;}
-  if(faceSlot>=0)faceSlotMats[faceSlot].mat.visible=false;
-  faceSlot++;
-  if(faceSlot>=faceSlotMats.length){faceSlot=-1;say('feature shells: none (default face)');return;}
-  const s=faceSlotMats[faceSlot];
-  s.mat.visible=true;
-  say('feature shell band '+s.band+' ('+s.tris+' tris) - '+(faceSlot+1)+'/'+faceSlotMats.length);
-});
-// F cycles the LEGOface expression layers: 0 hidden -> 1 under-layer -> 2 under-layer + mouth.
-addEventListener('keydown',e=>{
-  if(e.key!=='f'&&e.key!=='F')return;
-  if(!faceLayerMats.length)return;
-  faceLayerState=(faceLayerState+1)%3;
-  faceLayerMats.forEach(x=>{x.base.visible=faceLayerState>=1;x.mouth.visible=faceLayerState>=2;});
-  say('face expression layer: '+['hidden','under-layer','under-layer + mouth'][faceLayerState]);
-});
 Promise.all(models.map(load)).then(loaded=>{
   loaded=loaded.filter(Boolean);
   // Offsets are precomputed in C# from the exported glb skeletons, so the viewer just places them.
   loaded.forEach(x=>{
     const o=x.m.offset;
     if(o&&(o[0]||o[1]||o[2]))x.scene.position.set(o[0],o[1],o[2]);
-    if(x.m.isface)faceScenes.push(x.scene);
     root.add(x.scene);
   });
   frameAll();
   const avail=[...new Set(uvMeshes.flatMap(u=>u.uvs))].sort();
   say('UV switch: press '+avail.join('/')+' to change texture UV channel (now: glTF default)');
-  if(faceScenes.length)say('Face nudge: arrow keys (up/down = height, left/right = depth)');
 });
 // Calibration aid: arrows move the face piece in 0.004 steps and report the total, so the right
 // permanent offset can be read straight off the HUD instead of guessed.
-addEventListener('keydown',e=>{
-  if(!faceScenes.length)return;
-  let dx=0,dy=0;
-  if(e.key==='ArrowUp')dy=0.004;else if(e.key==='ArrowDown')dy=-0.004;
-  else if(e.key==='ArrowRight')dx=0.004;else if(e.key==='ArrowLeft')dx=-0.004;
-  else return;
-  e.preventDefault();
-  faceNudge.x+=dx;faceNudge.y+=dy;
-  faceScenes.forEach(s=>{s.position.x+=dx;s.position.y+=dy;});
-  say('face nudge: y '+faceNudge.y.toFixed(3)+', x '+faceNudge.x.toFixed(3));
-});
-// Live UV-channel switcher: bind a mesh's chosen TEXCOORD set (extracted to .f32 by the exporter)
-// as its 'uv' attribute. Three.js only imports channels 0/1, so this is the only way to test 2+.
-function applyUv(ch){
-  let done=0;
-  uvMeshes.forEach(u=>{
-    if(u.uvs.indexOf(ch)<0)return;
-    fetch(u.base+'_uv'+ch+'.f32').then(r=>r.arrayBuffer()).then(buf=>{
-      const arr=new Float32Array(buf);
-      u.o.geometry.setAttribute('uv',new THREE.BufferAttribute(arr,2));
-      u.o.geometry.attributes.uv.needsUpdate=true;done++;
-      say('UV channel = '+ch+' (applied to '+done+' mesh'+(done>1?'es':'')+')');
-    }).catch(e=>say('uv'+ch+' load failed: '+e));
-  });
-}
-addEventListener('keydown',e=>{if(e.key>='0'&&e.key<='7')applyUv(parseInt(e.key));});
 addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
 (function loop(){requestAnimationFrame(loop);controls.update();renderer.render(scene,camera);})();
 </script></body></html>
