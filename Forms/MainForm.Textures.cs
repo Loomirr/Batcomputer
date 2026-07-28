@@ -13,17 +13,33 @@ namespace Batcomputer;
 /// </summary>
 public sealed partial class MainForm
 {
+    private enum TextureProfileSafety
+    {
+        Verified,
+        Experimental,
+    }
+
     private sealed record TextureCookPreset(
         string Id,
         string Label,
         string TemplateJson,
         int Width,
         int Height,
-        string PixelFormat)
+        string PixelFormat,
+        TextureProfileSafety Safety,
+        string ValidationNote)
     {
         public string Detail => $"{Width} x {Height} - {PixelFormat}";
+        public string SafetyLabel => Safety == TextureProfileSafety.Verified ? "Verified" : "Experimental";
 
-        public override string ToString() => $"{Label} - {Detail}";
+        public override string ToString() => $"{Label} [{SafetyLabel}] - {Detail}";
+    }
+
+    private sealed class TextureBackupSnapshot
+    {
+        public string CreatedUtc { get; set; } = "";
+        public string Reason { get; set; } = "";
+        public GeneratedTextureEntry Texture { get; set; } = new();
     }
 
     private static Image? TryLoadCategoryIcon(string category)
@@ -181,10 +197,10 @@ public sealed partial class MainForm
                 new()
                 {
                     Title = "Native cook profiles",
-                    Subtitle = "proven BGRA8 templates, 1K to 2K",
+                    Subtitle = "verified and experimental recipes",
                     Accent = Theme.Textures,
-                    OnClick = () => AppendLog("Texture notes: new imports use the proven uncompressed BGRA8 path. The older BC/DXT profiles are intentionally hidden until each format has passed the same FModel and in-game checks."),
-                    ToolTip = "Each profile uses a real native Texture2D template with matching mip layout. BGRA8 is the tested format for new imports."
+                    OnClick = () => AppendLog("Texture notes: verified profiles have passed their intended in-game use. Experimental profiles require confirmation and create a restorable backup before they replace an existing cooked texture."),
+                    ToolTip = "Each profile uses a real native Texture2D template with matching mip layout. Check the profile safety label before importing or recooking."
                 },
                 new()
                 {
@@ -233,16 +249,19 @@ public sealed partial class MainForm
                 ? UnrealPathUtil.AssetName(texture.PackagePath)
                 : texture.DisplayName;
             var exists = !string.IsNullOrWhiteSpace(texture.IoStoreRoot) && Directory.Exists(texture.IoStoreRoot);
+            var safety = TextureProfileSafetyFor(texture.CookProfile);
             tiles.Add(new VirtualTilePanel.Tile
             {
                 Title = TrimMiddle(title, 30),
-                Subtitle = $"{texture.Kind} · {TextureCookDetail(texture)}\n{TrimMiddle(texture.PackagePath, 38)}",
+                Subtitle = $"{texture.Kind} · {TextureProfileSafetyLabel(safety)}\n{TextureCookDetail(texture)} · {TrimMiddle(texture.PackagePath, 38)}",
                 Accent = exists ? Theme.Textures : Theme.OnDarkMuted,
                 Image = LoadTextureThumbnail(texture.SourcePng),
                 OnClick = () => CopyText(texture.PackagePath, $"Copied texture package path: {texture.PackagePath}"),
                 ToolTip =
                     $"Package: {texture.PackagePath}\n" +
                     $"Object: {TextureObjectPath(texture)}\n" +
+                    $"Safety: {TextureProfileSafetyLabel(safety)}\n" +
+                    $"Note: {TextureProfileValidationNote(texture.CookProfile)}\n" +
                     $"Cook: {TextureCookDetail(texture)}\n" +
                     $"PNG: {texture.SourcePng}\n" +
                     $"IoStore: {texture.IoStoreRoot}",
@@ -260,7 +279,10 @@ public sealed partial class MainForm
         menu.Items.Add("Copy object path", null, (_, _) => CopyText(TextureObjectPath(texture), $"Copied texture object path: {TextureObjectPath(texture)}"));
         menu.Items.Add("Copy source PNG path", null, (_, _) => CopyText(texture.SourcePng, $"Copied source PNG path: {texture.SourcePng}"));
         menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("View recipe safety...", null, (_, _) => ShowTextureRecipeSafety(texture));
         menu.Items.Add("Change cook profile...", null, (_, _) => ChangeGeneratedTextureCookProfile(texture));
+        var restore = menu.Items.Add("Restore latest texture backup", null, (_, _) => RestoreLatestTextureBackup(texture));
+        restore.Enabled = FindLatestTextureBackup(texture) is not null;
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Open output folder", null, (_, _) => OpenTextureOutputFolder(texture));
         menu.Items.Add("Copy IoStore folder", null, (_, _) => CopyText(texture.IoStoreRoot, $"Copied IoStore folder: {texture.IoStoreRoot}"));
@@ -413,6 +435,11 @@ public sealed partial class MainForm
         var requestedName = textureSettings.Value.Name;
         var textureKind = textureSettings.Value.Kind;
         var cookPreset = textureSettings.Value.Preset;
+        if (!ConfirmTextureProfileSafety(cookPreset, "import this texture"))
+        {
+            AppendLog("Texture import cancelled: experimental profile was not confirmed.");
+            return;
+        }
         var templateJson = cookPreset.TemplateJson;
         if (string.IsNullOrWhiteSpace(templateJson) || !File.Exists(templateJson))
         {
@@ -635,45 +662,130 @@ public sealed partial class MainForm
         var dxt5Path = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_BatclawLogo_DXT5", "T_DECAL_BatclawLogo.json");
         var dxt1Path = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_EoMColorMask_DXT1", "T_TPAGE_Batman_TheBatman2025_ColourMask.json");
         var candidates = new List<TextureCookPreset>();
-        void Add(string id, string label, string template, int width, int height, string pixelFormat)
+        void Add(
+            string id,
+            string label,
+            string template,
+            int width,
+            int height,
+            string pixelFormat,
+            TextureProfileSafety safety,
+            string validationNote)
         {
             if (File.Exists(template))
             {
-                candidates.Add(new TextureCookPreset(id, label, template, width, height, pixelFormat));
+                candidates.Add(new TextureCookPreset(id, label, template, width, height, pixelFormat, safety, validationNote));
             }
         }
 
         if (textureKind.Contains("normal", StringComparison.OrdinalIgnoreCase))
         {
-            Add("normal-2k-bc5-legacy", "2K BC5 normal (proven)", bc5Path, 2048, 2048, "PF_BC5");
+            Add("normal-2k-bc5-legacy", "2K BC5 normal", bc5Path, 2048, 2048, "PF_BC5",
+                TextureProfileSafety.Verified, "Verified on Electric's body normal map in game.");
         }
         else if (IsColorMaskTextureKind(textureKind))
         {
-            Add("mask-1k-bgra8", "1K BGRA8 mask", bgra1kPath, 1024, 1024, "PF_B8G8R8A8");
-            Add("mask-2k-bgra8", "2K BGRA8 mask", bgraPath, 2048, 2048, "PF_B8G8R8A8");
-            Add("mask-1k-dxt1-legacy", "1K DXT1 colour mask (legacy Electric)", dxt1Path, 1024, 1024, "PF_DXT1");
+            Add("mask-2k-bgra8", "2K BGRA8 mask", bgraPath, 2048, 2048, "PF_B8G8R8A8",
+                TextureProfileSafety.Verified, "Verified on Electric's current Red Brick colour mask.");
+            Add("mask-1k-bgra8", "1K BGRA8 mask", bgra1kPath, 1024, 1024, "PF_B8G8R8A8",
+                TextureProfileSafety.Experimental, "Lower-resolution mask; verify the intended character and Red Brick route.");
+            Add("mask-1k-dxt1-legacy", "1K DXT1 colour mask", dxt1Path, 1024, 1024, "PF_DXT1",
+                TextureProfileSafety.Experimental, "Legacy Electric-compatible donor. Test this exact texture role in game first.");
         }
         else if (textureKind.Contains("rough", StringComparison.OrdinalIgnoreCase) ||
                  textureKind.Contains("spec", StringComparison.OrdinalIgnoreCase) ||
                  textureKind.Contains("metal", StringComparison.OrdinalIgnoreCase))
         {
-            Add("mask-1k-bgra8", "1K BGRA8 packed map", bgra1kPath, 1024, 1024, "PF_B8G8R8A8");
-            Add("mask-2k-bgra8", "2K BGRA8 packed map", bgraPath, 2048, 2048, "PF_B8G8R8A8");
-            Add("packed-2k-dxt5-legacy", "2K DXT5 packed map (legacy Electric)", dxt5Path, 2048, 2048, "PF_DXT5");
+            Add("mask-2k-bgra8", "2K BGRA8 packed map", bgraPath, 2048, 2048, "PF_B8G8R8A8",
+                TextureProfileSafety.Experimental, "Current Electric-compatible route; confirm the target material's MMR response in game.");
+            Add("mask-1k-bgra8", "1K BGRA8 packed map", bgra1kPath, 1024, 1024, "PF_B8G8R8A8",
+                TextureProfileSafety.Experimental, "Lower-resolution packed map; verify roughness and metallic response in game.");
+            Add("packed-2k-dxt5-legacy", "2K DXT5 packed map", dxt5Path, 2048, 2048, "PF_DXT5",
+                TextureProfileSafety.Experimental, "Legacy Electric-compatible donor. Test the target material in game first.");
         }
         else if (IsUiTextureKind(textureKind))
         {
-            Add("ui-1k-bgra8", "1K BGRA8 UI", bgra1kPath, 1024, 1024, "PF_B8G8R8A8");
-            Add("ui-2k-bgra8", "2K BGRA8 UI", bgraPath, 2048, 2048, "PF_B8G8R8A8");
+            Add("ui-2k-bgra8", "2K BGRA8 UI", bgraPath, 2048, 2048, "PF_B8G8R8A8",
+                TextureProfileSafety.Verified, "Used by the current generated Electric menu art.");
+            Add("ui-1k-bgra8", "1K BGRA8 UI", bgra1kPath, 1024, 1024, "PF_B8G8R8A8",
+                TextureProfileSafety.Experimental, "Lower-resolution UI option; verify menu presentation in game.");
         }
         else
         {
-            Add("character-1k-bgra8", "1K BGRA8 color (proven)", bgra1kPath, 1024, 1024, "PF_B8G8R8A8");
-            Add("character-2k-bgra8", "2K BGRA8 color", bgraPath, 2048, 2048, "PF_B8G8R8A8");
-            Add("character-2k-dxt5-legacy", "2K DXT5 colour / packed map (legacy Electric)", dxt5Path, 2048, 2048, "PF_DXT5");
+            Add("character-2k-bgra8", "2K BGRA8 colour", bgraPath, 2048, 2048, "PF_B8G8R8A8",
+                TextureProfileSafety.Verified, "Verified on Electric's base-colour maps in game.");
+            Add("character-1k-bgra8", "1K BGRA8 colour", bgra1kPath, 1024, 1024, "PF_B8G8R8A8",
+                TextureProfileSafety.Experimental, "Lower-resolution character colour; verify visual quality in game.");
+            Add("character-2k-dxt5-legacy", "2K DXT5 colour / packed map", dxt5Path, 2048, 2048, "PF_DXT5",
+                TextureProfileSafety.Experimental, "Legacy donor. Test this target texture role in game first.");
         }
 
         return candidates;
+    }
+
+    private static TextureProfileSafety TextureProfileSafetyFor(string? profileId) => profileId?.ToLowerInvariant() switch
+    {
+        "normal-2k-bc5-legacy" => TextureProfileSafety.Verified,
+        "character-2k-bgra8" => TextureProfileSafety.Verified,
+        "mask-2k-bgra8" => TextureProfileSafety.Verified,
+        "ui-2k-bgra8" => TextureProfileSafety.Verified,
+        _ => TextureProfileSafety.Experimental,
+    };
+
+    private static string TextureProfileSafetyLabel(TextureProfileSafety safety) => safety == TextureProfileSafety.Verified
+        ? "Verified"
+        : "Experimental";
+
+    private static string TextureProfileValidationNote(string? profileId) => profileId?.ToLowerInvariant() switch
+    {
+        "normal-2k-bc5-legacy" => "Verified on Electric's body normal map in game.",
+        "character-2k-bgra8" => "Verified on Electric's base-colour maps in game.",
+        "mask-2k-bgra8" => "Verified on Electric's current Red Brick colour mask.",
+        "ui-2k-bgra8" => "Used by the current generated Electric menu art.",
+        "character-1k-bgra8" => "Lower-resolution character colour; verify visual quality in game.",
+        "mask-1k-bgra8" => "Lower-resolution profile; verify the target use in game.",
+        "normal-2k-bgra8" => "Deprecated normal-map route. Choose BC5 instead.",
+        "character-2k-dxt5-legacy" => "Legacy donor. Test the target texture role in game first.",
+        "packed-2k-dxt5-legacy" => "Legacy donor. Test the target material response in game first.",
+        "mask-1k-dxt1-legacy" => "Legacy colour-mask donor. Test the target Red Brick route in game first.",
+        _ => "This saved recipe has not been classified yet. Preserve it unless you are deliberately testing a new profile.",
+    };
+
+    private bool ConfirmTextureProfileSafety(TextureCookPreset preset, string action)
+    {
+        if (preset.Safety == TextureProfileSafety.Verified)
+        {
+            return true;
+        }
+
+        return Dialog.Confirm(this, "Experimental texture recipe",
+            $"{preset.Label}\n{preset.Detail}\n\n{preset.ValidationNote}\n\nThis will {action} with an experimental donor family. Batcomputer will back up an existing cooked texture before replacing it.",
+            confirmText: "Use experimental", severity: Dialog.Level.Warn);
+    }
+
+    private void ShowTextureRecipeSafety(GeneratedTextureEntry texture)
+    {
+        var safety = TextureProfileSafetyFor(texture.CookProfile);
+        Dialog.Show(this, new Dialog.Model
+        {
+            Title = "Texture recipe",
+            Subtitle = texture.DisplayName,
+            Severity = safety == TextureProfileSafety.Verified ? Dialog.Level.Good : Dialog.Level.Warn,
+            Chips = new List<(string Text, Color? Dot)>
+            {
+                (TextureProfileSafetyLabel(safety), safety == TextureProfileSafety.Verified ? Theme.Good : Theme.Warn),
+                (TextureCookDetail(texture), Theme.Textures),
+            },
+            Fields = new List<(string Label, string Value)>
+            {
+                ("Profile", string.IsNullOrWhiteSpace(texture.CookProfile) ? "legacy / unspecified" : texture.CookProfile),
+                ("Template", texture.TemplateJson),
+                ("Package", texture.PackagePath),
+            },
+            CalloutTitle = TextureProfileSafetyLabel(safety),
+            CalloutDetail = TextureProfileValidationNote(texture.CookProfile),
+            PrimaryText = "Done",
+        });
     }
 
     private static string TextureCookDetail(GeneratedTextureEntry texture)
@@ -736,6 +848,18 @@ public sealed partial class MainForm
             return;
         }
 
+        if (!ConfirmTextureProfileSafety(preset, "recook this texture"))
+        {
+            AppendLog($"Texture '{texture.DisplayName}' kept its existing profile because the experimental change was not confirmed.");
+            return;
+        }
+
+        var backupPath = CreateTextureBackup(texture, $"Before changing to {preset.Id}");
+        if (!string.IsNullOrWhiteSpace(backupPath))
+        {
+            AppendLog($"Texture backup created: {backupPath}");
+        }
+
         var oldTemplate = texture.TemplateJson;
         var oldProfile = texture.CookProfile;
         var oldWidth = texture.CookWidth;
@@ -769,6 +893,144 @@ public sealed partial class MainForm
         }
 
         RefreshToyboxTiles();
+    }
+
+    private string? CreateTextureBackup(GeneratedTextureEntry texture, string reason)
+    {
+        if (string.IsNullOrWhiteSpace(texture.OutputRoot) || string.IsNullOrWhiteSpace(texture.PackagePath))
+        {
+            return null;
+        }
+
+        var cookedContentRoot = Path.Combine(texture.OutputRoot, "Cooked", "LEGOBatmanLotDK", "Content");
+        var sourceBase = PackagePathToContentPath(cookedContentRoot, texture.PackagePath);
+        var sourceFiles = new[] { ".uasset", ".uexp", ".ubulk", ".texture-cook-report.json" }
+            .Select(extension => sourceBase + extension)
+            .Where(File.Exists)
+            .ToList();
+        if (sourceFiles.Count == 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            var backupRoot = Path.Combine(texture.OutputRoot, "TextureBackups",
+                DateTime.UtcNow.ToString("yyyyMMdd-HHmmssfff"));
+            Directory.CreateDirectory(backupRoot);
+            var snapshot = new TextureBackupSnapshot
+            {
+                CreatedUtc = DateTime.UtcNow.ToString("O"),
+                Reason = reason,
+                Texture = texture,
+            };
+            File.WriteAllText(Path.Combine(backupRoot, "recipe-before.json"),
+                JsonSerializer.Serialize(snapshot, new JsonSerializerOptions { WriteIndented = true }));
+            foreach (var source in sourceFiles)
+            {
+                File.Copy(source, Path.Combine(backupRoot, Path.GetFileName(source)), overwrite: true);
+            }
+
+            return backupRoot;
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Texture backup warning: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static string? FindLatestTextureBackup(GeneratedTextureEntry texture)
+    {
+        if (string.IsNullOrWhiteSpace(texture.OutputRoot))
+        {
+            return null;
+        }
+
+        var root = Path.Combine(texture.OutputRoot, "TextureBackups");
+        if (!Directory.Exists(root))
+        {
+            return null;
+        }
+
+        return Directory.EnumerateDirectories(root)
+            .Where(path => File.Exists(Path.Combine(path, "recipe-before.json")))
+            .OrderByDescending(Directory.GetLastWriteTimeUtc)
+            .FirstOrDefault();
+    }
+
+    private void RestoreLatestTextureBackup(GeneratedTextureEntry texture)
+    {
+        EnsureProject();
+        if (_currentProject is null)
+        {
+            return;
+        }
+
+        var backupPath = FindLatestTextureBackup(texture);
+        if (backupPath is null)
+        {
+            AppendLog($"No texture backup is available for '{texture.DisplayName}'.");
+            return;
+        }
+
+        if (!Dialog.Confirm(this, "Restore texture backup",
+                $"Restore the last cooked output and recipe for '{texture.DisplayName}'?\n\n{backupPath}",
+                confirmText: "Restore", severity: Dialog.Level.Warn))
+        {
+            return;
+        }
+
+        try
+        {
+            var snapshotPath = Path.Combine(backupPath, "recipe-before.json");
+            var snapshot = JsonSerializer.Deserialize<TextureBackupSnapshot>(File.ReadAllText(snapshotPath));
+            if (snapshot?.Texture is null || string.IsNullOrWhiteSpace(texture.OutputRoot) || string.IsNullOrWhiteSpace(texture.PackagePath))
+            {
+                AppendLog($"Texture backup '{backupPath}' is incomplete.");
+                return;
+            }
+
+            var cookedContentRoot = Path.Combine(texture.OutputRoot, "Cooked", "LEGOBatmanLotDK", "Content");
+            var destinationBase = PackagePathToContentPath(cookedContentRoot, texture.PackagePath);
+            foreach (var extension in new[] { ".uasset", ".uexp", ".ubulk", ".texture-cook-report.json" })
+            {
+                var destination = destinationBase + extension;
+                if (File.Exists(destination))
+                {
+                    File.Delete(destination);
+                }
+
+                var source = Path.Combine(backupPath, Path.GetFileName(destination));
+                if (File.Exists(source))
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                    File.Copy(source, destination, overwrite: true);
+                }
+            }
+
+            RestoreTextureRecipe(texture, snapshot.Texture);
+            (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject);
+            RecordChange("Textures", texture.DisplayName, texture.PackagePath, status: "restored");
+            AppendLog($"Restored texture '{texture.DisplayName}' from backup: {backupPath}");
+            RefreshToyboxTiles();
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Texture backup restore failed: {ex.Message}");
+        }
+    }
+
+    private static void RestoreTextureRecipe(GeneratedTextureEntry target, GeneratedTextureEntry source)
+    {
+        target.Kind = source.Kind;
+        target.CookProfile = source.CookProfile;
+        target.CookWidth = source.CookWidth;
+        target.CookHeight = source.CookHeight;
+        target.CookPixelFormat = source.CookPixelFormat;
+        target.TemplateJson = source.TemplateJson;
+        target.SourceRawRoot = source.SourceRawRoot;
+        target.PackageBaseName = source.PackageBaseName;
     }
 
     private static string TextureTemplatePixelFormat(string templateJson)

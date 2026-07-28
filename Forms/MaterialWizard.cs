@@ -16,6 +16,22 @@ public sealed partial class MaterialWizard : Form
     private readonly Label _titleLabel = new();
     private readonly List<GeneratedTextureEntry> _generatedTextures = new();
 
+    private enum TextureRole
+    {
+        Unknown,
+        BaseColour,
+        Normal,
+        SurfaceMask,
+        ColourMask,
+        UiIcon,
+    }
+
+    private sealed record TextureAssignmentWarning(
+        string Parameter,
+        GeneratedTextureEntry Texture,
+        TextureRole ExpectedRole,
+        string ExpectedKind);
+
     public string? ResultMiPackagePath { get; private set; }
 
     public MaterialWizard()
@@ -120,15 +136,18 @@ public sealed partial class MaterialWizard : Form
             Left = padding, Top = 314, Width = innerWidth, Height = 210,
             BackColor = Theme.CardBg, BorderColor = Theme.LineSoft, CornerRadius = Theme.RadiusSm
         };
-        parametersCard.Controls.Add(MakeFieldLabel("TEXTURE PARAMETERS", 14, 13, innerWidth - 28));
+        parametersCard.Controls.Add(MakeFieldLabel("MATERIAL PARAMETERS", 14, 13, innerWidth - 28));
         _grid.SetBounds(14, 37, innerWidth - 28, 148);
         StyleParameterGrid();
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Kind", HeaderText = "Type", ReadOnly = true, Width = 70 });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Param", HeaderText = "Parameter", ReadOnly = true, Width = 150 });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Current", HeaderText = "Current texture", ReadOnly = true, Width = 220 });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "YourTexture", HeaderText = "Your texture path (/Game/...)", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Current", HeaderText = "Current value", ReadOnly = true, Width = 210 });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Override", HeaderText = "Override", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
+        _grid.CellDoubleClick += (_, e) => ChooseColourForRow(e.RowIndex);
+        _grid.CellEndEdit += (_, e) => RefreshTextureRowWarning(e.RowIndex, showStatus: true);
         parametersCard.Controls.Add(_grid);
         _status.SetBounds(14, 190, innerWidth - 28, 16);
-        _status.Text = "Read a base material to load its texture parameters.";
+        _status.Text = "Read a base material to load its parameters.";
         _status.Font = Theme.Caption;
         _status.ForeColor = Theme.OnDarkMuted;
         _status.AutoEllipsis = true;
@@ -312,10 +331,137 @@ public sealed partial class MaterialWizard : Form
             return;
         }
 
-        row.Cells["YourTexture"].Value = texture.PackagePath;
+        if (!string.Equals(row.Cells["Kind"].Value?.ToString(), "Texture", StringComparison.OrdinalIgnoreCase))
+        {
+            _status.Text = "Select a texture parameter row first.";
+            return;
+        }
+
         var parameter = row.Cells["Param"].Value?.ToString() ?? "parameter";
-        _status.Text = $"Set {parameter} -> {texture.PackagePath}";
+        row.Cells["Override"].Value = texture.PackagePath;
+        var warning = DescribeTextureAssignment(parameter, texture);
+        SetTextureRowWarning(row, warning);
+        _status.Text = warning is null
+            ? $"Set {parameter} -> {texture.PackagePath}"
+            : $"Check {parameter}: {warning.ExpectedKind} is usually expected, not {texture.Kind}. You can still generate it.";
     }
+
+    private void RefreshTextureRowWarning(int rowIndex, bool showStatus)
+    {
+        if (rowIndex < 0 || rowIndex >= _grid.Rows.Count)
+        {
+            return;
+        }
+
+        var row = _grid.Rows[rowIndex];
+        if (!string.Equals(row.Cells["Kind"].Value?.ToString(), "Texture", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var parameter = row.Cells["Param"].Value?.ToString() ?? "";
+        var overrideValue = row.Cells["Override"].Value?.ToString()?.Trim() ?? "";
+        var texture = FindGeneratedTexture(overrideValue);
+        var warning = texture is null ? null : DescribeTextureAssignment(parameter, texture);
+        SetTextureRowWarning(row, warning);
+        if (showStatus && warning is not null)
+        {
+            _status.Text = $"Check {parameter}: {warning.ExpectedKind} is usually expected, not {texture!.Kind}. You can still generate it.";
+        }
+    }
+
+    private static void SetTextureRowWarning(DataGridViewRow row, TextureAssignmentWarning? warning)
+    {
+        var overrideCell = row.Cells["Override"];
+        overrideCell.ToolTipText = warning is null
+            ? ""
+            : $"Usually expects {warning.ExpectedKind}; selected texture is classified as {warning.Texture.Kind}.";
+        overrideCell.Style.ForeColor = warning is null ? Theme.OnDark : Theme.Warn;
+        overrideCell.Style.SelectionForeColor = Theme.OnDark;
+    }
+
+    private GeneratedTextureEntry? FindGeneratedTexture(string packagePath)
+    {
+        var normalized = UnrealPathUtil.NormalizePackagePath(packagePath);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        return _generatedTextures.FirstOrDefault(texture =>
+            string.Equals(UnrealPathUtil.NormalizePackagePath(texture.PackagePath), normalized, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(UnrealPathUtil.NormalizePackagePath(texture.ObjectPath), normalized, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static TextureAssignmentWarning? DescribeTextureAssignment(string parameter, GeneratedTextureEntry texture)
+    {
+        var role = TextureRoleForParameter(parameter);
+        var textureKind = TextureKindFor(texture.Kind);
+        if (role == TextureRole.Unknown || textureKind == TextureRole.Unknown || TextureKindMatchesRole(textureKind, role))
+        {
+            return null;
+        }
+
+        return new TextureAssignmentWarning(parameter, texture, role, ExpectedTextureKind(role));
+    }
+
+    private static TextureRole TextureRoleForParameter(string parameter)
+    {
+        var compact = new string((parameter ?? "").Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+        if (compact.Contains("normal", StringComparison.Ordinal) || compact.Contains("nrm", StringComparison.Ordinal))
+        {
+            return TextureRole.Normal;
+        }
+        if (compact.Contains("mmr", StringComparison.Ordinal) || compact.Contains("orm", StringComparison.Ordinal) ||
+            compact.Contains("rao", StringComparison.Ordinal) || compact.Contains("rough", StringComparison.Ordinal) ||
+            compact.Contains("metal", StringComparison.Ordinal) || compact.Contains("spec", StringComparison.Ordinal))
+        {
+            return TextureRole.SurfaceMask;
+        }
+        if (compact.Contains("colourmask", StringComparison.Ordinal) || compact.Contains("colormask", StringComparison.Ordinal))
+        {
+            return TextureRole.ColourMask;
+        }
+        if (compact.Contains("basecolour", StringComparison.Ordinal) || compact.Contains("basecolor", StringComparison.Ordinal) ||
+            compact.Contains("albedo", StringComparison.Ordinal) || compact.Contains("diffuse", StringComparison.Ordinal) ||
+            compact.Equals("bc", StringComparison.Ordinal) || compact.EndsWith("bc", StringComparison.Ordinal))
+        {
+            return TextureRole.BaseColour;
+        }
+
+        return TextureRole.Unknown;
+    }
+
+    private static TextureRole TextureKindFor(string? textureKind)
+    {
+        var kind = textureKind ?? "";
+        if (kind.Contains("normal", StringComparison.OrdinalIgnoreCase)) return TextureRole.Normal;
+        if (kind.Contains("rough", StringComparison.OrdinalIgnoreCase) || kind.Contains("spec", StringComparison.OrdinalIgnoreCase)) return TextureRole.SurfaceMask;
+        if (kind.Contains("color mask", StringComparison.OrdinalIgnoreCase) || kind.Contains("colour mask", StringComparison.OrdinalIgnoreCase)) return TextureRole.ColourMask;
+        if (kind.Contains("character", StringComparison.OrdinalIgnoreCase)) return TextureRole.BaseColour;
+        if (kind.Contains("ui", StringComparison.OrdinalIgnoreCase) || kind.Contains("icon", StringComparison.OrdinalIgnoreCase)) return TextureRole.UiIcon;
+        return TextureRole.Unknown;
+    }
+
+    private static bool TextureKindMatchesRole(TextureRole textureKind, TextureRole expectedRole) => textureKind == expectedRole;
+
+    private static string ExpectedTextureKind(TextureRole role) => role switch
+    {
+        TextureRole.BaseColour => "a Character texture",
+        TextureRole.Normal => "a Normal map",
+        TextureRole.SurfaceMask => "a Roughness/spec mask",
+        TextureRole.ColourMask => "a Color mask",
+        _ => "a compatible texture",
+    };
+
+    private List<TextureAssignmentWarning> FindTextureAssignmentWarnings(IReadOnlyDictionary<string, string> textureMap) =>
+        textureMap
+            .Select(pair => new { pair.Key, Texture = FindGeneratedTexture(pair.Value) })
+            .Where(item => item.Texture is not null)
+            .Select(item => DescribeTextureAssignment(item.Key, item.Texture!))
+            .Where(warning => warning is not null)
+            .Cast<TextureAssignmentWarning>()
+            .ToList();
 
     private void CopySelectedGeneratedTexturePath()
     {
@@ -356,9 +502,13 @@ public sealed partial class MaterialWizard : Form
 
         foreach (var parameter in info.TextureParams)
         {
-            _grid.Rows.Add(parameter.Name, parameter.CurrentTexturePath, "");
+            _grid.Rows.Add("Texture", parameter.Name, parameter.CurrentTexturePath, "");
         }
-        _status.Text = $"{info.TextureParams.Count} texture parameters loaded. Set paths only for the parameters you want to override.";
+        foreach (var parameter in info.ColorParams)
+        {
+            _grid.Rows.Add("Colour", parameter.Name, DisplayColour(parameter), "");
+        }
+        _status.Text = $"{info.TextureParams.Count} texture and {info.ColorParams.Count} colour parameters loaded.";
     }
 
     private void Generate()
@@ -369,23 +519,52 @@ public sealed partial class MaterialWizard : Form
         if (string.IsNullOrWhiteSpace(name)) { _status.Text = "Enter a material name."; return; }
 
         var outputPackage = $"/Game/Mods/{_modFolder}/{name}";
-        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var textureMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var colourMap = new Dictionary<string, MaterialGenService.ColorParam>(StringComparer.OrdinalIgnoreCase);
         foreach (DataGridViewRow row in _grid.Rows)
         {
+            var kind = row.Cells["Kind"].Value?.ToString() ?? "";
             var parameter = row.Cells["Param"].Value?.ToString() ?? "";
-            var texture = row.Cells["YourTexture"].Value?.ToString()?.Trim() ?? "";
-            if (!string.IsNullOrWhiteSpace(parameter) && !string.IsNullOrWhiteSpace(texture))
+            var overrideValue = row.Cells["Override"].Value?.ToString()?.Trim() ?? "";
+            if (string.IsNullOrWhiteSpace(parameter) || string.IsNullOrWhiteSpace(overrideValue))
             {
-                map[parameter] = texture;
+                continue;
+            }
+            if (string.Equals(kind, "Texture", StringComparison.OrdinalIgnoreCase))
+            {
+                textureMap[parameter] = overrideValue;
+            }
+            else if (string.Equals(kind, "Colour", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryParseColour(overrideValue, out var colour))
+                {
+                    _status.Text = $"{parameter} needs #RRGGBB or linear R,G,B[,A].";
+                    return;
+                }
+                colourMap[parameter] = colour;
             }
         }
-        if (map.Count == 0) { _status.Text = "Enter at least one texture path to override."; return; }
+        if (textureMap.Count == 0 && colourMap.Count == 0) { _status.Text = "Enter an override before generating."; return; }
+
+        var assignmentWarnings = FindTextureAssignmentWarnings(textureMap);
+        if (assignmentWarnings.Count > 0)
+        {
+            var details = string.Join("\n", assignmentWarnings.Select(warning =>
+                $"{warning.Parameter}: {warning.Texture.DisplayName} is {warning.Texture.Kind}; usually expects {warning.ExpectedKind}."));
+            if (!Dialog.Confirm(this, "Check material texture roles",
+                    $"These generated textures do not match the usual role for their material parameter:\n\n{details}\n\nThis is a warning only. Custom material graphs can legitimately use a different texture role.",
+                    confirmText: "Generate anyway", cancelText: "Review assignments", severity: Dialog.Level.Warn))
+            {
+                return;
+            }
+        }
 
         var result = new MaterialGenService(_projectRoot).Generate(new MaterialGenService.GenRequest
         {
             BaseUassetPath = basePath,
             OutputPackagePath = outputPackage,
-            ParamToTexture = map
+            ParamToTexture = textureMap,
+            ParamToColor = colourMap,
         });
         if (result.Status != "created")
         {
@@ -397,6 +576,92 @@ public sealed partial class MaterialWizard : Form
         DialogResult = DialogResult.OK;
         Close();
     }
+
+    private void ChooseColourForRow(int rowIndex)
+    {
+        if (rowIndex < 0 || rowIndex >= _grid.Rows.Count)
+        {
+            return;
+        }
+
+        var row = _grid.Rows[rowIndex];
+        if (!string.Equals(row.Cells["Kind"].Value?.ToString(), "Colour", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var existing = row.Cells["Override"].Value?.ToString();
+        if (string.IsNullOrWhiteSpace(existing))
+        {
+            existing = row.Cells["Current"].Value?.ToString();
+        }
+        var initial = TryParseColour(existing ?? "", out var colour) ? ToDisplayColour(colour) : Color.White;
+        using var picker = new ColorDialog { Color = initial, FullOpen = true };
+        if (picker.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        row.Cells["Override"].Value = $"#{picker.Color.R:X2}{picker.Color.G:X2}{picker.Color.B:X2}";
+        _status.Text = $"Set {row.Cells["Param"].Value} colour.";
+    }
+
+    private static string DisplayColour(MaterialGenService.ColorParam colour)
+    {
+        var display = ToDisplayColour(colour);
+        return $"#{display.R:X2}{display.G:X2}{display.B:X2}";
+    }
+
+    private static Color ToDisplayColour(MaterialGenService.ColorParam colour) => Color.FromArgb(
+        ToSrgbByte(colour.R), ToSrgbByte(colour.G), ToSrgbByte(colour.B));
+
+    private static int ToSrgbByte(float linear)
+    {
+        linear = Math.Clamp(linear, 0f, 1f);
+        var srgb = linear <= 0.0031308f ? linear * 12.92f : 1.055f * MathF.Pow(linear, 1f / 2.4f) - 0.055f;
+        return (int)Math.Clamp(MathF.Round(srgb * 255f), 0f, 255f);
+    }
+
+    private static bool TryParseColour(string value, out MaterialGenService.ColorParam colour)
+    {
+        colour = new MaterialGenService.ColorParam();
+        value = value.Trim();
+        if (value.Length == 7 && value[0] == '#' &&
+            byte.TryParse(value[1..3], System.Globalization.NumberStyles.HexNumber, null, out var r) &&
+            byte.TryParse(value[3..5], System.Globalization.NumberStyles.HexNumber, null, out var g) &&
+            byte.TryParse(value[5..7], System.Globalization.NumberStyles.HexNumber, null, out var b))
+        {
+            colour.R = SrgbToLinear(r / 255f);
+            colour.G = SrgbToLinear(g / 255f);
+            colour.B = SrgbToLinear(b / 255f);
+            colour.A = 1f;
+            return true;
+        }
+
+        var values = value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (values.Length is < 3 or > 4 || !float.TryParse(values[0], System.Globalization.CultureInfo.InvariantCulture, out var linearR) ||
+            !float.TryParse(values[1], System.Globalization.CultureInfo.InvariantCulture, out var linearG) ||
+            !float.TryParse(values[2], System.Globalization.CultureInfo.InvariantCulture, out var linearB))
+        {
+            return false;
+        }
+
+        var linearA = 1f;
+        if (values.Length == 4 && !float.TryParse(values[3], System.Globalization.CultureInfo.InvariantCulture, out linearA))
+        {
+            return false;
+        }
+
+        colour.R = Math.Clamp(linearR, 0f, 1f);
+        colour.G = Math.Clamp(linearG, 0f, 1f);
+        colour.B = Math.Clamp(linearB, 0f, 1f);
+        colour.A = Math.Clamp(linearA, 0f, 1f);
+        return true;
+    }
+
+    private static float SrgbToLinear(float value) => value <= 0.04045f
+        ? value / 12.92f
+        : MathF.Pow((value + 0.055f) / 1.055f, 2.4f);
 
     private sealed class GeneratedTextureChoice
     {

@@ -32,6 +32,16 @@ public sealed class MaterialGenService
         public string CurrentTexturePath { get; set; } = "";
     }
 
+    /// <summary>An authored Material Instance vector parameter, stored by UE as FLinearColor.</summary>
+    public sealed class ColorParam
+    {
+        public string Name { get; set; } = "";
+        public float R { get; set; }
+        public float G { get; set; }
+        public float B { get; set; }
+        public float A { get; set; } = 1f;
+    }
+
     public sealed class MaterialTemplateInfo
     {
         public string Status { get; set; } = "";
@@ -39,6 +49,7 @@ public sealed class MaterialGenService
         public string SourcePackagePath { get; set; } = "";
         public string SourceStem { get; set; } = "";
         public List<TextureParam> TextureParams { get; set; } = new();
+        public List<ColorParam> ColorParams { get; set; } = new();
     }
 
     public MaterialTemplateInfo ReadTemplate(string uassetPath)
@@ -58,15 +69,16 @@ public sealed class MaterialGenService
             info.SourcePackagePath = asset.FolderName?.ToString() ?? "";
             info.SourceStem = Path.GetFileNameWithoutExtension(uassetPath);
 
-            var (export, array) = FindTextureParameterArray(asset);
-            if (export is null || array is null)
+            var (textureExport, textureArray) = FindParameterArray(asset, "TextureParameterValues");
+            var (colorExport, colorArray) = FindParameterArray(asset, "VectorParameterValues");
+            if ((textureExport is null || textureArray is null) && (colorExport is null || colorArray is null))
             {
-                info.Status = "no-texture-params";
-                info.Error = "No TextureParameterValues array found (is this a Material Instance?).";
+                info.Status = "no-material-params";
+                info.Error = "No TextureParameterValues or VectorParameterValues array found (is this a Material Instance?).";
                 return info;
             }
 
-            foreach (var entry in array.Value?.OfType<StructPropertyData>() ?? Enumerable.Empty<StructPropertyData>())
+            foreach (var entry in textureArray?.Value?.OfType<StructPropertyData>() ?? Enumerable.Empty<StructPropertyData>())
             {
                 var name = ReadParamName(entry);
                 if (string.IsNullOrWhiteSpace(name))
@@ -82,6 +94,25 @@ public sealed class MaterialGenService
                 }
 
                 info.TextureParams.Add(new TextureParam { Name = name, CurrentTexturePath = current });
+            }
+
+            foreach (var entry in colorArray?.Value?.OfType<StructPropertyData>() ?? Enumerable.Empty<StructPropertyData>())
+            {
+                var name = ReadParamName(entry);
+                var value = FindLinearColorValue(entry);
+                if (string.IsNullOrWhiteSpace(name) || value is null)
+                {
+                    continue;
+                }
+
+                info.ColorParams.Add(new ColorParam
+                {
+                    Name = name,
+                    R = value.Value.R,
+                    G = value.Value.G,
+                    B = value.Value.B,
+                    A = value.Value.A,
+                });
             }
 
             info.Status = "ok";
@@ -103,6 +134,8 @@ public sealed class MaterialGenService
         public string OutputPackagePath { get; set; } = ""; // e.g. /Game/Mods/ElectricLBM2/MI_Batman_ElectricLBM2_Body
         // Parameter name -> texture object path (e.g. /Game/Mods/ElectricLBM2/T_..._BC)
         public Dictionary<string, string> ParamToTexture { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        // Parameter name -> linear RGBA colour. The base MI's parent graph and switches are retained.
+        public Dictionary<string, ColorParam> ParamToColor { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     public sealed class GenResult
@@ -186,17 +219,21 @@ public sealed class MaterialGenService
                 }
             }
 
-            // Retarget the mapped texture parameters.
-            var (_, array) = FindTextureParameterArray(asset);
-            if (array is null)
+            var (_, textureArray) = FindParameterArray(asset, "TextureParameterValues");
+            var (_, colorArray) = FindParameterArray(asset, "VectorParameterValues");
+            if (textureArray is null && colorArray is null)
             {
-                result.Status = "no-texture-params";
-                result.Error = "No TextureParameterValues array in base MI.";
+                result.Status = "no-material-params";
+                result.Error = "No TextureParameterValues or VectorParameterValues array in base MI.";
                 return result;
             }
 
             var textureNameReplacements = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (var entry in array.Value?.OfType<StructPropertyData>() ?? Enumerable.Empty<StructPropertyData>())
+            if (request.ParamToTexture.Count > 0 && textureArray is null)
+            {
+                result.Warnings.Add("The base MI has no texture parameters to override.");
+            }
+            foreach (var entry in textureArray?.Value?.OfType<StructPropertyData>() ?? Enumerable.Empty<StructPropertyData>())
             {
                 var name = ReadParamName(entry);
                 if (string.IsNullOrWhiteSpace(name) || !request.ParamToTexture.TryGetValue(name, out var texturePath) ||
@@ -233,6 +270,29 @@ public sealed class MaterialGenService
                 }
             }
 
+            if (request.ParamToColor.Count > 0 && colorArray is null)
+            {
+                result.Warnings.Add("The base MI has no colour parameters to override.");
+            }
+            foreach (var entry in colorArray?.Value?.OfType<StructPropertyData>() ?? Enumerable.Empty<StructPropertyData>())
+            {
+                var name = ReadParamName(entry);
+                if (string.IsNullOrWhiteSpace(name) || !request.ParamToColor.TryGetValue(name, out var colour))
+                {
+                    continue;
+                }
+
+                var value = FindLinearColorValue(entry);
+                if (value is null)
+                {
+                    result.Warnings.Add($"Param '{name}': no FLinearColor ParameterValue to retarget.");
+                    continue;
+                }
+
+                value.Value = new FLinearColor(colour.R, colour.G, colour.B, colour.A);
+                result.Retargeted.Add($"{name} -> linear ({colour.R:0.#####}, {colour.G:0.#####}, {colour.B:0.#####}, {colour.A:0.#####})");
+            }
+
             UpdateTextureStreamingData(asset, textureNameReplacements, result);
 
             UnrealPathUtil.RepairSplitPathNameMapEntries(
@@ -255,17 +315,23 @@ public sealed class MaterialGenService
 
     // ---- MI navigation ------------------------------------------------------
 
-    private static (NormalExport?, ArrayPropertyData?) FindTextureParameterArray(UAsset asset)
+    private static (NormalExport?, ArrayPropertyData?) FindParameterArray(UAsset asset, string propertyName)
     {
         foreach (var export in asset.Exports.OfType<NormalExport>())
         {
-            var array = FindProperty<ArrayPropertyData>(export.Data, "TextureParameterValues");
+            var array = FindProperty<ArrayPropertyData>(export.Data, propertyName);
             if (array is not null)
             {
                 return (export, array);
             }
         }
         return (null, null);
+    }
+
+    private static LinearColorPropertyData? FindLinearColorValue(StructPropertyData entry)
+    {
+        var parameterValue = FindProperty<StructPropertyData>(entry.Value, "ParameterValue");
+        return parameterValue?.Value.OfType<LinearColorPropertyData>().FirstOrDefault();
     }
 
     private static string ReadParamName(StructPropertyData entry)
