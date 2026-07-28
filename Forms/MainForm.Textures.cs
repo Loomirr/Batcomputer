@@ -631,6 +631,9 @@ public sealed partial class MainForm
     {
         var bgraPath = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_DroneControlBGRA8", "T_GA_DroneControl_BatGirl_AO.json");
         var bgra1kPath = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_CloudMaskBGRA8_1K", "T_CloudMask.json");
+        var bc5Path = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_BatarangBC5", "T_Batarang_N.json");
+        var dxt5Path = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_BatclawLogo_DXT5", "T_DECAL_BatclawLogo.json");
+        var dxt1Path = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_EoMColorMask_DXT1", "T_TPAGE_Batman_TheBatman2025_ColourMask.json");
         var candidates = new List<TextureCookPreset>();
         void Add(string id, string label, string template, int width, int height, string pixelFormat)
         {
@@ -642,14 +645,21 @@ public sealed partial class MainForm
 
         if (textureKind.Contains("normal", StringComparison.OrdinalIgnoreCase))
         {
-            Add("normal-2k-bgra8", "2K BGRA8 normal", bgraPath, 2048, 2048, "PF_B8G8R8A8");
+            Add("normal-2k-bc5-legacy", "2K BC5 normal (proven)", bc5Path, 2048, 2048, "PF_BC5");
         }
-        else if (IsColorMaskTextureKind(textureKind) ||
-                 textureKind.Contains("rough", StringComparison.OrdinalIgnoreCase) ||
-                 textureKind.Contains("spec", StringComparison.OrdinalIgnoreCase))
+        else if (IsColorMaskTextureKind(textureKind))
         {
             Add("mask-1k-bgra8", "1K BGRA8 mask", bgra1kPath, 1024, 1024, "PF_B8G8R8A8");
             Add("mask-2k-bgra8", "2K BGRA8 mask", bgraPath, 2048, 2048, "PF_B8G8R8A8");
+            Add("mask-1k-dxt1-legacy", "1K DXT1 colour mask (legacy Electric)", dxt1Path, 1024, 1024, "PF_DXT1");
+        }
+        else if (textureKind.Contains("rough", StringComparison.OrdinalIgnoreCase) ||
+                 textureKind.Contains("spec", StringComparison.OrdinalIgnoreCase) ||
+                 textureKind.Contains("metal", StringComparison.OrdinalIgnoreCase))
+        {
+            Add("mask-1k-bgra8", "1K BGRA8 packed map", bgra1kPath, 1024, 1024, "PF_B8G8R8A8");
+            Add("mask-2k-bgra8", "2K BGRA8 packed map", bgraPath, 2048, 2048, "PF_B8G8R8A8");
+            Add("packed-2k-dxt5-legacy", "2K DXT5 packed map (legacy Electric)", dxt5Path, 2048, 2048, "PF_DXT5");
         }
         else if (IsUiTextureKind(textureKind))
         {
@@ -660,6 +670,7 @@ public sealed partial class MainForm
         {
             Add("character-1k-bgra8", "1K BGRA8 color (proven)", bgra1kPath, 1024, 1024, "PF_B8G8R8A8");
             Add("character-2k-bgra8", "2K BGRA8 color", bgraPath, 2048, 2048, "PF_B8G8R8A8");
+            Add("character-2k-dxt5-legacy", "2K DXT5 colour / packed map (legacy Electric)", dxt5Path, 2048, 2048, "PF_DXT5");
         }
 
         return candidates;
