@@ -18,6 +18,14 @@ public sealed class AppSettings
     // retoc.exe used to build the IoStore trio.
     public string? RetocExePath { get; set; }
 
+    // Patched retoc helper used for lossless Oodle-compressed IoStore releases.
+    // It is MIT-licensed and can ship with Batcomputer; it does not include Oodle itself.
+    public string? OodleRetocExePath { get; set; }
+
+    // A user-owned oo2core runtime from their locally installed UE 5.6. This stays
+    // outside Batcomputer and is never copied into a release or source repository.
+    public string? OodleRuntimeDllPath { get; set; }
+
     // .usmap mappings file for UAssetAPI (read/write cooked assets).
     public string? UsmapPath { get; set; }
 
@@ -137,6 +145,20 @@ public sealed class AppSettings
     public string EffectiveRetocExePath() =>
         UsableFile(RetocExePath) ?? DefaultRetocExePath();
 
+    public string EffectiveOodleRetocExePath() =>
+        UsableFile(OodleRetocExePath) ?? DefaultOodleRetocExePath();
+
+    public string? EffectiveOodleRuntimeDllPath() =>
+        UsableFile(OodleRuntimeDllPath) ?? OodleRuntimeFromEngine(EffectiveUnrealEngineRoot());
+
+    public bool HasOodleCompressionPrerequisites()
+    {
+        var runtime = EffectiveOodleRuntimeDllPath();
+        return File.Exists(EffectiveOodleRetocExePath()) &&
+            !string.IsNullOrWhiteSpace(runtime) &&
+            File.Exists(runtime);
+    }
+
     public string EffectiveGamePaksModFolder() =>
         (!string.IsNullOrWhiteSpace(GamePaksModFolder) ? GamePaksModFolder! : DefaultGamePaksModFolder());
 
@@ -167,6 +189,8 @@ public sealed class AppSettings
     {
         ProjectRoot = DefaultProjectRoot(),
         RetocExePath = DefaultRetocExePath(),
+        OodleRetocExePath = DefaultOodleRetocExePath(),
+        OodleRuntimeDllPath = DefaultOodleRuntimeDllPath(),
         UsmapPath = DefaultUsmapPath(),
         ExtractedContentRoot = DefaultExtractedContentRoot(),
         ExportContentRoot = DefaultExportContentRoot(),
@@ -253,6 +277,39 @@ public sealed class AppSettings
     {
         var bundled = Path.Combine(ToolRoot, "Tools", "retoc", "retoc.exe");
         return File.Exists(bundled) ? bundled : "";
+    }
+
+
+    /// <summary>
+    /// Returns the MIT-licensed Oodle-capable retoc helper bundled with a portable
+    /// author install. The helper dynamically loads the separate local runtime below.
+    /// </summary>
+    public static string DefaultOodleRetocExePath()
+    {
+        var bundled = Path.Combine(ToolRoot, "Tools", "retoc-oodle", "retoc.exe");
+        return File.Exists(bundled) ? bundled : "";
+    }
+
+    /// <summary>
+    /// Finds a local UE 5.6 Oodle runtime without ever copying it into Batcomputer.
+    /// The AutomationTool location is the verified path for the current engine release.
+    /// </summary>
+    public static string? DefaultOodleRuntimeDllPath()
+        => OodleRuntimeFromEngine(DefaultUnrealEngineRoot());
+
+    public static string? OodleRuntimeFromEngine(string? engineRoot)
+    {
+        if (string.IsNullOrWhiteSpace(engineRoot))
+        {
+            return null;
+        }
+
+        var candidates = new[]
+        {
+            Path.Combine(engineRoot, "Engine", "Binaries", "DotNET", "AutomationTool", "oo2core_9_win64.dll"),
+            Path.Combine(engineRoot, "Engine", "Binaries", "ThirdParty", "Oodle", "Win64", "oo2core_9_win64.dll"),
+        };
+        return candidates.FirstOrDefault(File.Exists);
     }
 
     public static string? DefaultUsmapPath()

@@ -11,6 +11,11 @@ namespace Batcomputer;
 /// </summary>
 public sealed class RegistryPluginService
 {
+    /// <summary>
+    /// The SuitSlots release is the shared registry core. It owns the one Asset
+    /// Manager scan rule for /Game/Mods; author mod plugins only contribute rows.
+    /// </summary>
+    public const string CoreRegistryModId = "SuitSlots";
     public const string PrimaryAssetType = "PawnMetaData";
     public const string PawnMetadataClass = "/Script/DinnerPawnMetaData.DinnerCharacterMetaData";
     public const string WriterResultMarker = "SUIT_SLOTS_REGISTRY_WRITER_RESULT";
@@ -26,7 +31,8 @@ public sealed class RegistryPluginService
         string PluginDirectory,
         string DescriptorPath,
         string RegistryPath,
-        string GameIniPath);
+        string GameIniPath,
+        bool IncludesCoreConfiguration);
 
     public sealed class BuildResult
     {
@@ -46,7 +52,8 @@ public sealed class RegistryPluginService
             directory,
             Path.Combine(directory, pluginName + ".uplugin"),
             Path.Combine(directory, "AssetRegistry.bin"),
-            Path.Combine(directory, "Config", "Game.ini"));
+            Path.Combine(directory, "Config", "Game.ini"),
+            string.Equals(modId, CoreRegistryModId, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>Rejects malformed package paths and duplicate primary asset IDs before UE runs.</summary>
@@ -152,8 +159,25 @@ public sealed class RegistryPluginService
         {
             Directory.CreateDirectory(layout.PluginDirectory);
             File.WriteAllText(layout.DescriptorPath, BuildDescriptorJson(layout.PluginName, modDisplayName));
-            Directory.CreateDirectory(Path.GetDirectoryName(layout.GameIniPath)!);
-            File.WriteAllText(layout.GameIniPath, BuildGameIni());
+            if (layout.IncludesCoreConfiguration)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(layout.GameIniPath)!);
+                File.WriteAllText(layout.GameIniPath, BuildGameIni());
+            }
+            else
+            {
+                // A mod may have been built before this became core-only. Remove the
+                // stale file so it cannot be copied into a subsequent release.
+                if (File.Exists(layout.GameIniPath))
+                {
+                    File.Delete(layout.GameIniPath);
+                }
+                var configDirectory = Path.GetDirectoryName(layout.GameIniPath)!;
+                if (Directory.Exists(configDirectory) && !Directory.EnumerateFileSystemEntries(configDirectory).Any())
+                {
+                    Directory.Delete(configDirectory);
+                }
+            }
             if (File.Exists(layout.RegistryPath))
             {
                 File.Delete(layout.RegistryPath);
@@ -211,13 +235,16 @@ public sealed class RegistryPluginService
             var verification = writerRun.Output
                 .Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries)
                 .LastOrDefault(line => line.Contains(WriterResultMarker, StringComparison.Ordinal)) ?? "";
-            if (writerRun.ExitCode != 0 || !File.Exists(layout.RegistryPath) || !File.Exists(layout.GameIniPath))
+            if (writerRun.ExitCode != 0 || !File.Exists(layout.RegistryPath) ||
+                (layout.IncludesCoreConfiguration && !File.Exists(layout.GameIniPath)))
             {
                 return new BuildResult
                 {
                     Error = writerRun.ExitCode != 0
                         ? $"The Asset Registry writer failed verification (exit {writerRun.ExitCode})."
-                        : "The Asset Registry release is missing AssetRegistry.bin or Config\\Game.ini.",
+                        : layout.IncludesCoreConfiguration
+                            ? "The SuitSlots core registry release is missing AssetRegistry.bin or Config\\Game.ini."
+                            : "The mod registry release is missing AssetRegistry.bin.",
                     Layout = layout,
                     Rows = rows,
                     VerificationLine = verification,

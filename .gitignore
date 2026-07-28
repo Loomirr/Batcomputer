@@ -29,6 +29,11 @@ _source_snapshots/
 # Internal test harnesses are not distributed with the public tool.
 Tests/
 
+# Built locally from Loomirr/retoc-oodle and copied into release output. The
+# source and license live in that fork; never commit its binary or Oodle runtime.
+Tools/retoc-oodle/*.exe
+Tools/retoc-oodle/*.dll
+
 # OS
 Thumbs.db
 Desktop.ini

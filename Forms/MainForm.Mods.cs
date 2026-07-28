@@ -10,6 +10,7 @@ namespace Batcomputer;
 /// Home-screen "Mods" section and the mod build. A mod bundles several suit projects
 /// into one release: one pak, one <c>&lt;ModId&gt;PawnTags.ini</c>, one <c>ST_&lt;ModId&gt;</c>
 /// StringTable, one <c>mod.json</c>, and one plugin-local cooked AssetRegistry.bin.
+/// The reserved SuitSlots core release also owns the shared <c>Config/Game.ini</c>.
 /// This partial owns the UI + orchestration; the asset work lives in focused services.
 /// </summary>
 public sealed partial class MainForm
@@ -208,6 +209,9 @@ public sealed partial class MainForm
         var activeSuitCount = activeMod?.Suits.Count(entry => entry.Enabled) ?? 0;
         var hasActiveMod = activeSummary is not null && activeMod is not null;
         var hasBuild = hasActiveMod && File.Exists(Path.Combine(ModBuildRoot(activeSummary!.ModId), activeMod!.PackageBaseName + ".utoc"));
+        var hasInstalledRelease = hasBuild && File.Exists(Path.Combine(
+            AppSettings.Current.EffectiveGamePaksModFolder(),
+            activeMod!.PackageBaseName + ".utoc"));
 
         var hero = new VirtualTilePanel.HeroModel
         {
@@ -221,13 +225,13 @@ public sealed partial class MainForm
             {
                 (hasActiveMod ? "mod selected" : "no mod selected", hasActiveMod ? Theme.Research : Theme.Warn),
                 ($"{activeSuitCount} enabled suit{(activeSuitCount == 1 ? "" : "s")}", activeSuitCount > 0 ? Theme.Parts : Theme.OnDarkMuted),
-                (hasBuild ? "release built" : "not built", hasBuild ? Theme.Good : Theme.Warn),
+                (hasInstalledRelease ? "installed" : hasBuild ? "built; not installed" : "not built", hasInstalledRelease ? Theme.Good : hasBuild ? Theme.Warn : Theme.Warn),
             },
             Workflow = new[]
             {
-                new VirtualTilePanel.HeroModel.WorkflowStep { Label = "1. MOD", Detail = hasActiveMod ? "mod selected" : "choose a mod", Accent = Theme.Research, Complete = hasActiveMod, Current = !hasActiveMod },
-                new VirtualTilePanel.HeroModel.WorkflowStep { Label = "2. SUITS", Detail = activeSuitCount > 0 ? "ready to package" : "add a suit", Accent = Theme.Base, Complete = activeSuitCount > 0, Current = hasActiveMod && activeSuitCount == 0 },
-                new VirtualTilePanel.HeroModel.WorkflowStep { Label = "3. BUILD", Detail = hasBuild ? "installed release" : "build and install", Accent = Theme.Gold, Current = hasActiveMod && activeSuitCount > 0 },
+                new VirtualTilePanel.HeroModel.WorkflowStep { Label = "MOD", Detail = hasActiveMod ? "selected" : "choose one", Accent = Theme.Research, Complete = hasActiveMod, Current = !hasActiveMod },
+                new VirtualTilePanel.HeroModel.WorkflowStep { Label = "SUITS", Detail = activeSuitCount > 0 ? $"{activeSuitCount} enabled" : "add a suit", Accent = Theme.Base, Complete = activeSuitCount > 0, Current = hasActiveMod && activeSuitCount == 0 },
+                new VirtualTilePanel.HeroModel.WorkflowStep { Label = "RELEASE", Detail = hasInstalledRelease ? "built + installed" : hasBuild ? "built; install next" : "build + install", Accent = Theme.Gold, Complete = hasInstalledRelease, Current = hasActiveMod && activeSuitCount > 0 && !hasInstalledRelease },
             },
         };
 
@@ -247,6 +251,14 @@ public sealed partial class MainForm
                     Subtitle = "build and install your mod/suits to your game",
                     Accent = Theme.Gold,
                     OnClick = () => BuildMod(modPath),
+                });
+                tiles.Add(new VirtualTilePanel.Tile
+                {
+                    Section = SectionRelease,
+                    Title = "Validate release",
+                    Subtitle = "check identities, assets, textures, and registry rows",
+                    Accent = Theme.Good,
+                    OnClick = () => ValidateModReleaseFromWorkspace(modPath),
                 });
             }
             else
@@ -714,6 +726,22 @@ public sealed partial class MainForm
                 !string.IsNullOrWhiteSpace(result.AssetRegistryDestination))
             {
                 CopyDirectoryContents(plugin.PluginDirectory, result.AssetRegistryDestination, overwrite: true);
+                if (!plugin.IncludesCoreConfiguration)
+                {
+                    // Remove configuration produced by an older Batcomputer build.
+                    // Only the SuitSlots core plugin is allowed to retain Game.ini.
+                    var staleGameIni = Path.Combine(result.AssetRegistryDestination, "Config", "Game.ini");
+                    if (File.Exists(staleGameIni))
+                    {
+                        File.Delete(staleGameIni);
+                        var configDirectory = Path.GetDirectoryName(staleGameIni)!;
+                        if (Directory.Exists(configDirectory) && !Directory.EnumerateFileSystemEntries(configDirectory).Any())
+                        {
+                            Directory.Delete(configDirectory);
+                        }
+                        AppendLog($"  removed stale Config\\Game.ini from {plugin.PluginName}");
+                    }
+                }
                 installed += Directory.EnumerateFiles(plugin.PluginDirectory, "*", SearchOption.AllDirectories).Count();
                 assetRegistryInstalled = true;
                 AppendLog($"  {plugin.PluginName} -> {result.AssetRegistryDestination}");
@@ -842,8 +870,68 @@ public sealed partial class MainForm
     /// IoStore trio. Suit projects are authoring inputs; they are not exported alone.
     /// </summary>
     private ProgressDialog? _modReleaseProgress;
+    private sealed record ModReleaseFailure(string ModName, ModReleaseValidationService.Result Result);
+    private ModReleaseFailure? _lastModReleaseFailure;
 
     private void ModReleaseStep(string detail) => _modReleaseProgress?.Report(detail);
+
+    private sealed record ModReleasePreflight(
+        ModReleaseValidationService.Result Result);
+
+    /// <summary>
+    /// Validates saved authoring facts without creating a stage, so users can fix
+    /// release blockers before a build touches generated or game-facing files.
+    /// </summary>
+    private ModReleasePreflight ValidateModReleaseAuthoring(
+        NativeSuitModProject mod,
+        IReadOnlyList<ModSuitEntry> enabled)
+    {
+        ModReleaseStep("Running release preflight...");
+        var suits = new SuitProjectService(_projectRootText.Text.Trim());
+        var inputs = new List<ModReleaseValidationService.SuitInput>();
+        foreach (var entry in enabled)
+        {
+            var projectPath = ModService.ResolveSuitProjectPath(entry);
+            try
+            {
+                inputs.Add(new ModReleaseValidationService.SuitInput(entry, projectPath, suits.LoadProject(projectPath)));
+            }
+            catch (Exception ex)
+            {
+                inputs.Add(new ModReleaseValidationService.SuitInput(entry, projectPath, null,
+                    $"Could not read the saved suit project '{projectPath}': {ex.Message}"));
+            }
+        }
+
+        var service = new ModReleaseValidationService();
+        var result = service.ValidateAuthoring(
+            mod,
+            inputs,
+            AppSettings.Current.EffectiveExportContentRoot(),
+            AppSettings.GeneratedRootFor(_projectRootText.Text.Trim()),
+            EffectiveGameRuntimeSuitsFolder());
+        AppendLog($"Release preflight: {(result.Passed ? "passed" : "blocked")} ({result.ErrorCount} error(s), {result.WarningCount} warning(s)).");
+        foreach (var finding in result.Findings.Where(f => !f.Severity.Equals("INFO", StringComparison.OrdinalIgnoreCase)))
+        {
+            var suit = string.IsNullOrWhiteSpace(finding.SuitId) ? "" : $" [{finding.SuitId}]";
+            AppendLog($"  {finding.Severity.ToLowerInvariant()}{suit}: {finding.Message}");
+        }
+        return new ModReleasePreflight(result);
+    }
+
+    private void ValidateModReleaseFromWorkspace(string modProjectPath)
+    {
+        var mod = ModService.LoadMod(modProjectPath);
+        if (mod is null)
+        {
+            Dialog.Error(this, "Validate release", "The selected mod could not be loaded.");
+            return;
+        }
+        ModProjectService.ApplyDerivedFields(mod);
+        var enabled = mod.Suits.Where(entry => entry.Enabled).ToList();
+        var preflight = ValidateModReleaseAuthoring(mod, enabled);
+        ReleasePreflightForm.Show(this, mod.DisplayName, preflight.Result);
+    }
 
     private void BuildMod(string modProjectPath) => _ = BuildAndInstallModAsync(modProjectPath);
 
@@ -853,6 +941,7 @@ public sealed partial class MainForm
     /// </summary>
     private async Task BuildAndInstallModAsync(string modProjectPath)
     {
+        _lastModReleaseFailure = null;
         var progress = new ProgressDialog(this, "Building mod");
         _modReleaseProgress = progress;
         var built = false;
@@ -888,6 +977,11 @@ public sealed partial class MainForm
         }
         if (!built)
         {
+            if (_lastModReleaseFailure is not null)
+            {
+                ReleasePreflightForm.Show(this, _lastModReleaseFailure.ModName, _lastModReleaseFailure.Result);
+                return;
+            }
             Dialog.Error(this, "Build failed", "The mod did not finish packaging, so no files were installed. Check Diagnostics for the exact failed step.");
             return;
         }
@@ -997,6 +1091,17 @@ public sealed partial class MainForm
         var enabled = mod.Suits.Where(s => s.Enabled).ToList();
         if (enabled.Count == 0) { AppendLog("Build mod: no enabled suits."); return false; }
 
+        var preflight = ValidateModReleaseAuthoring(mod, enabled);
+        if (!preflight.Result.Passed)
+        {
+            _lastModReleaseFailure = new ModReleaseFailure(mod.DisplayName, preflight.Result);
+            AppendLog("Build mod ABORTED: release preflight found blockers.");
+            return false;
+        }
+
+        var outRoot = ModBuildRoot(mod.ModId);
+        Directory.CreateDirectory(outRoot);
+
         var projectRoot = _projectRootText.Text.Trim();
         var svc = new SuitProjectService(projectRoot);
         var tagRows = new List<PawnTagConfigService.TagRow>();
@@ -1043,9 +1148,6 @@ public sealed partial class MainForm
         }
 
         if (tagRows.Count == 0) { AppendLog("Build mod: nothing to build."); return false; }
-
-        var outRoot = ModBuildRoot(mod.ModId);
-        Directory.CreateDirectory(outRoot);
 
         // Fresh stage each build so a removed suit's assets don't linger in the trio.
         var stageRoot = Path.Combine(outRoot, "Stage");
@@ -1098,6 +1200,7 @@ public sealed partial class MainForm
             var mappings = LoadModMappings();
 
             var mergedSuits = 0;
+            var preparedSuits = new List<NativeSuitProject>();
             // No-rebase means suits keep their own /Game roots in one pak - two suits
             // sharing a DCMD package path would silently overwrite on merge. Catch it.
             var seenDcmd = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1130,18 +1233,78 @@ public sealed partial class MainForm
                 AppendLog($"  prepared '{suit.DisplayName}': playable + cutscene + DCMD + UIMD");
                 MergeContentRoot(suitContentRoot, stageContent);
                 RepatchStagedSuitText(stageContent, suit, entry.SuitId, stObjectPath, mappings);
+                preparedSuits.Add(suit);
                 mergedSuits++;
                 AppendLog($"  bundled suit '{suit.DisplayName}' ({entry.SuitId}) → {suit.TargetPackages!.Dcmd}");
             }
 
             ModReleaseStep("Validating the combined release…");
             var validationErrors = ValidateModReleaseStage(mod, manifest, stageContent);
+            try
+            {
+                var structural = new StageValidationService(stageContent, AppSettings.Current.EffectiveUsmapPath());
+                foreach (var suit in preparedSuits)
+                {
+                    foreach (var finding in structural.Validate(suit))
+                    {
+                        if (finding.Severity.Equals("ERROR", StringComparison.OrdinalIgnoreCase))
+                        {
+                            validationErrors.Add($"{suit.SlotId}: {finding.Message}");
+                        }
+                        else
+                        {
+                            preflight.Result.AddWarning("staged release", finding.Message, suit.SlotId);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                preflight.Result.AddWarning("staged release", $"Structural asset validation could not run: {ex.Message}");
+            }
             if (validationErrors.Count > 0)
             {
+                foreach (var error in validationErrors)
+                {
+                    preflight.Result.AddError("staged release", error);
+                }
+                _lastModReleaseFailure = new ModReleaseFailure(mod.DisplayName, preflight.Result);
                 AppendLog("Build mod ABORTED: combined stage validation failed.");
                 foreach (var error in validationErrors) AppendLog("  " + error);
                 return false;
             }
+
+            // Do this before retoc so a bad primary-asset row never produces a
+            // misleadingly successful package.
+            ModReleaseStep("Verifying the mod Asset Registry plugin...");
+            var registry = await new RegistryPluginService().BuildAsync(
+                outRoot,
+                mod.ModId,
+                mod.DisplayName,
+                manifestSuits.Select(suit => new RegistryPluginService.RegistryRow(suit.dcmd)),
+                line => AppendLog("  registry: " + line));
+            if (!registry.Succeeded || registry.Layout is null)
+            {
+                preflight.Result.AddError("Asset Registry", registry.Error);
+                if (!string.IsNullOrWhiteSpace(registry.VerificationLine))
+                {
+                    preflight.Result.AddError("Asset Registry", registry.VerificationLine);
+                }
+                _lastModReleaseFailure = new ModReleaseFailure(mod.DisplayName, preflight.Result);
+                AppendLog($"Build mod ABORTED: Asset Registry plugin failed: {registry.Error}");
+                if (!string.IsNullOrWhiteSpace(registry.VerificationLine))
+                {
+                    AppendLog("  registry verification: " + registry.VerificationLine);
+                }
+                return false;
+            }
+            preflight.Result.AddInfo("Asset Registry", $"Verified {registry.Rows.Count} PawnMetaData row(s).");
+            AppendLog($"  Asset Registry: {registry.Rows.Count} PawnMetaData row(s) -> {registry.Layout.RegistryPath}");
+            if (registry.Layout.IncludesCoreConfiguration)
+            {
+                AppendLog($"  SuitSlots core config: {registry.Layout.GameIniPath}");
+            }
+            AppendLog("  registry verification: " + registry.VerificationLine);
 
             File.WriteAllText(modJsonPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
             AppendLog($"  mod.json: {manifestSuits.Count} suit(s) -> {modJsonPath}");
@@ -1155,28 +1318,6 @@ public sealed partial class MainForm
                 AppendLog($"Build mod: retoc to-zen failed (exit {retocExit}). Loose files are valid; trio not produced.");
                 return false;
             }
-
-            // One cooked registry plugin per mod. The UE 5.6 commandlet verifies
-            // every primary ID before this release can be installed.
-            ModReleaseStep("Generating the mod Asset Registry plugin...");
-            var registry = await new RegistryPluginService().BuildAsync(
-                outRoot,
-                mod.ModId,
-                mod.DisplayName,
-                manifestSuits.Select(suit => new RegistryPluginService.RegistryRow(suit.dcmd)),
-                line => AppendLog("  registry: " + line));
-            if (!registry.Succeeded || registry.Layout is null)
-            {
-                AppendLog($"Build mod ABORTED: Asset Registry plugin failed: {registry.Error}");
-                if (!string.IsNullOrWhiteSpace(registry.VerificationLine))
-                {
-                    AppendLog("  registry verification: " + registry.VerificationLine);
-                }
-                return false;
-            }
-            AppendLog($"  Asset Registry: {registry.Rows.Count} PawnMetaData row(s) -> {registry.Layout.RegistryPath}");
-            AppendLog($"  Asset Registry config: {registry.Layout.GameIniPath}");
-            AppendLog("  registry verification: " + registry.VerificationLine);
 
             AppendLog($"Build mod '{mod.DisplayName}' COMPLETE — installable trio for {mergedSuits} suit(s):");
             AppendLog($"  {trioBase}.pak / .ucas / .utoc");
@@ -1318,6 +1459,12 @@ public sealed partial class MainForm
             if (!suitIds.Add(suit.suit_id)) errors.Add($"duplicate suit_id '{suit.suit_id}'.");
             if (string.IsNullOrWhiteSpace(suit.pawn_tag) || !pawnTags.Add(suit.pawn_tag))
                 errors.Add($"missing or duplicate PawnTag for suit '{suit.suit_id}'.");
+            if (!string.Equals(suit.display_name_key, $"Suit.{suit.suit_id}.Name", StringComparison.Ordinal) ||
+                !string.Equals(suit.description_key, $"Suit.{suit.suit_id}.Description", StringComparison.Ordinal) ||
+                !string.Equals(suit.locked_description_key, $"Suit.{suit.suit_id}.LockedDescription", StringComparison.Ordinal))
+            {
+                errors.Add($"StringTable keys are incomplete or do not match suit '{suit.suit_id}'.");
+            }
 
             foreach (var required in new[]
             {
@@ -1394,11 +1541,24 @@ public sealed partial class MainForm
 
     private async Task<int> RunRetocToZenAsync(string inputDir, string outUtoc)
     {
-        var retoc = AppSettings.Current.EffectiveRetocExePath();
+        var settings = AppSettings.Current;
+        var oodleRetoc = settings.EffectiveOodleRetocExePath();
+        var oodleRuntime = settings.EffectiveOodleRuntimeDllPath();
+        var useOodle = File.Exists(oodleRetoc) &&
+            !string.IsNullOrWhiteSpace(oodleRuntime) && File.Exists(oodleRuntime);
+        var retoc = useOodle ? oodleRetoc : settings.EffectiveRetocExePath();
         if (!File.Exists(retoc))
         {
             AppendLog($"retoc.exe not found: {retoc}. Open Setup and select it.");
             return -1;
+        }
+        if (useOodle)
+        {
+            AppendLog($"Packing with Oodle compression ({Path.GetFileName(oodleRuntime)}).");
+        }
+        else
+        {
+            AppendLog("Packing without Oodle compression. Configure the Oodle packer and local runtime in Setup for compact releases.");
         }
         Directory.CreateDirectory(Path.GetDirectoryName(outUtoc)!);
 
@@ -1411,6 +1571,14 @@ public sealed partial class MainForm
             RedirectStandardError = true,
             CreateNoWindow = true,
         };
+        if (useOodle)
+        {
+            var runtimeFolder = Path.GetDirectoryName(oodleRuntime)!;
+            var inheritedPath = Environment.GetEnvironmentVariable("PATH") ?? "";
+            psi.Environment["PATH"] = string.IsNullOrWhiteSpace(inheritedPath)
+                ? runtimeFolder
+                : runtimeFolder + Path.PathSeparator + inheritedPath;
+        }
         psi.ArgumentList.Add("to-zen");
         psi.ArgumentList.Add("--version");
         psi.ArgumentList.Add(GameAssetRefreshService.RetocEngineVersion);

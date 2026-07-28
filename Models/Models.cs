@@ -310,6 +310,8 @@ public sealed class SuitBaseProfile
 /// <c>/Game/Mods/&lt;ModId&gt;</c> content root, the <c>ST_&lt;ModId&gt;</c> StringTable,
 /// the <c>&lt;ModId&gt;PawnTags.ini</c>, the runtime manifest folder, and install
 /// tracking. It is IMMUTABLE after first release (changing it orphans installed files).
+/// The reserved <c>SuitSlots</c> release is also the one owner of the shared
+/// Asset Manager <c>Config/Game.ini</c>; other mod releases ship registry rows only.
 /// </summary>
 public sealed class NativeSuitModProject
 {

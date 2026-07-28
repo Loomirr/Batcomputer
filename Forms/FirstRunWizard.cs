@@ -57,6 +57,30 @@ public sealed class FirstRunWizard : Form
             },
             new()
             {
+                Title = "Oodle packer (optional)",
+                Blurb = "Compact mod releases use Batcomputer's Oodle-enabled retoc helper. " +
+                        "Portable author installs include this helper; it does not contain the proprietary Oodle runtime.",
+                Hint = "...\\Tools\\retoc-oodle\\retoc.exe. Skip until you have the compact-release helper.",
+                IsFile = true,
+                Filter = "retoc.exe|retoc.exe|Executables|*.exe|All files|*.*",
+                Optional = true,
+                Get = s => string.IsNullOrWhiteSpace(s.OodleRetocExePath) ? AppSettings.DefaultOodleRetocExePath() : s.OodleRetocExePath,
+                Set = (s, v) => s.OodleRetocExePath = v,
+            },
+            new()
+            {
+                Title = "Oodle runtime (optional)",
+                Blurb = "Choose oo2core_9_win64.dll from your own local UE 5.6 install. " +
+                        "Batcomputer uses it to make compact packages but never copies it into a mod or release.",
+                Hint = "Usually ...\\UE_5.6\\Engine\\Binaries\\DotNET\\AutomationTool\\oo2core_9_win64.dll.",
+                IsFile = true,
+                Filter = "Oodle runtime|oo2core*_win64.dll|DLLs|*.dll|All files|*.*",
+                Optional = true,
+                Get = s => string.IsNullOrWhiteSpace(s.OodleRuntimeDllPath) ? s.EffectiveOodleRuntimeDllPath() : s.OodleRuntimeDllPath,
+                Set = (s, v) => s.OodleRuntimeDllPath = v,
+            },
+            new()
+            {
                 Title = "Unreal Engine 5.6 (optional for now)",
                 Blurb = "Batcomputer uses UE 5.6 only when building a mod's startup Asset Registry plugin. " +
                         "Players who install your finished mod do not need Unreal. You can configure this later, " +

@@ -181,10 +181,10 @@ public sealed partial class MainForm
                 new()
                 {
                     Title = "Native cook profiles",
-                    Subtitle = "256px to 2K, template-backed",
+                    Subtitle = "proven BGRA8 templates, 1K to 2K",
                     Accent = Theme.Textures,
-                    OnClick = () => AppendLog("Texture notes: profiles use matching native Texture2D templates. Color and roughness masks can use compact 1024x1024 BC1; UI icons use 256px BC7/BC3; normal maps remain on the proven 2K BC5 template."),
-                    ToolTip = "Texture size and compression come from real native templates, including their mip layout. This is safer than changing a 2K asset header without matching mip payloads."
+                    OnClick = () => AppendLog("Texture notes: new imports use the proven uncompressed BGRA8 path. The older BC/DXT profiles are intentionally hidden until each format has passed the same FModel and in-game checks."),
+                    ToolTip = "Each profile uses a real native Texture2D template with matching mip layout. BGRA8 is the tested format for new imports."
                 },
                 new()
                 {
@@ -416,7 +416,7 @@ public sealed partial class MainForm
         var templateJson = cookPreset.TemplateJson;
         if (string.IsNullOrWhiteSpace(templateJson) || !File.Exists(templateJson))
         {
-            AppendLog("Texture import needs a proven Texture2D template JSON. Expected a standalone BGRA8/BC5/BC1/BC3 template under _generated.");
+            AppendLog("Texture import needs a proven BGRA8 Texture2D template JSON under _generated.");
             AppendLog($"Looked for: {templateJson}");
             return;
         }
@@ -636,14 +636,6 @@ public sealed partial class MainForm
     {
         var bgraPath = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_DroneControlBGRA8", "T_GA_DroneControl_BatGirl_AO.json");
         var bgra1kPath = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_CloudMaskBGRA8_1K", "T_CloudMask.json");
-        var bc5Path = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_BatarangBC5", "T_Batarang_N.json");
-        var suitIconBc7Path = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_SuitIconUI_BC7", "T_SuitIcon_NULL_BCA.json");
-        var suitIconDxt5Path = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_SuitIconUI_DXT5", "T_SuitIcon_NULL_BCA.json");
-        var uiDxt5Path = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_DebugMenuUI_DXT5", "T_DebugMenuStarImageBorder2.json");
-        var dxt5Path = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_BatclawLogo_DXT5", "T_DECAL_BatclawLogo.json");
-        var bc1Path = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_BatarangAO", "T_Batarang_AO.json");
-        var colorMaskBc1Path = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_EoMColorMask_DXT1", "T_TPAGE_Batman_TheBatman2025_ColourMask.json");
-
         var candidates = new List<TextureCookPreset>();
         void Add(string id, string label, string template, int width, int height, string pixelFormat)
         {
@@ -655,27 +647,24 @@ public sealed partial class MainForm
 
         if (textureKind.Contains("normal", StringComparison.OrdinalIgnoreCase))
         {
-            Add("normal-2k-bc5", "2K normal (proven)", bc5Path, 2048, 2048, "PF_BC5");
+            Add("normal-2k-bgra8", "2K BGRA8 normal", bgraPath, 2048, 2048, "PF_B8G8R8A8");
         }
         else if (IsColorMaskTextureKind(textureKind) ||
                  textureKind.Contains("rough", StringComparison.OrdinalIgnoreCase) ||
                  textureKind.Contains("spec", StringComparison.OrdinalIgnoreCase))
         {
-            Add("mask-1k-bc1", "1K compact mask (recommended)", colorMaskBc1Path, 1024, 1024, "PF_DXT1");
-            Add("mask-2k-bc1", "2K compressed mask", bc1Path, 2048, 2048, "PF_DXT1");
-            Add("mask-2k-bgra8", "2K uncompressed mask", bgraPath, 2048, 2048, "PF_B8G8R8A8");
+            Add("mask-1k-bgra8", "1K BGRA8 mask", bgra1kPath, 1024, 1024, "PF_B8G8R8A8");
+            Add("mask-2k-bgra8", "2K BGRA8 mask", bgraPath, 2048, 2048, "PF_B8G8R8A8");
         }
         else if (IsUiTextureKind(textureKind))
         {
-            Add("icon-256-bc7", "256px UI icon (recommended)", suitIconBc7Path, 256, 256, "PF_BC7");
-            Add("icon-256-bc3", "256px UI icon", suitIconDxt5Path, 256, 256, "PF_DXT5");
-            Add("ui-500-bc3", "500px UI texture", uiDxt5Path, 500, 500, "PF_DXT5");
+            Add("ui-1k-bgra8", "1K BGRA8 UI", bgra1kPath, 1024, 1024, "PF_B8G8R8A8");
+            Add("ui-2k-bgra8", "2K BGRA8 UI", bgraPath, 2048, 2048, "PF_B8G8R8A8");
         }
         else
         {
-            Add("character-2k-bc3", "2K compressed color (recommended)", dxt5Path, 2048, 2048, "PF_DXT5");
-            Add("character-2k-bgra8", "2K uncompressed color", bgraPath, 2048, 2048, "PF_B8G8R8A8");
-            Add("character-1k-bgra8", "1K uncompressed color (experimental)", bgra1kPath, 1024, 1024, "PF_B8G8R8A8");
+            Add("character-1k-bgra8", "1K BGRA8 color (proven)", bgra1kPath, 1024, 1024, "PF_B8G8R8A8");
+            Add("character-2k-bgra8", "2K BGRA8 color", bgraPath, 2048, 2048, "PF_B8G8R8A8");
         }
 
         return candidates;

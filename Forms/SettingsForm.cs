@@ -66,6 +66,12 @@ public sealed partial class SettingsForm : Form
         {
             new() { Key = "RetocExePath", Label = "retoc.exe", Section = "Tools", IsFile = true, Filter = "retoc.exe|retoc.exe|Executables|*.exe|All files|*.*",
                 Get = s => s.RetocExePath, Set = (s, v) => s.RetocExePath = v },
+            new() { Key = "OodleRetocExePath", Label = "Oodle packer (retoc.exe)", Section = "Tools", IsFile = true, Filter = "retoc.exe|retoc.exe|Executables|*.exe|All files|*.*",
+                Get = s => string.IsNullOrWhiteSpace(s.OodleRetocExePath) ? AppSettings.DefaultOodleRetocExePath() : s.OodleRetocExePath,
+                Set = (s, v) => s.OodleRetocExePath = v },
+            new() { Key = "OodleRuntimeDllPath", Label = "Oodle runtime (local UE 5.6)", Section = "Tools", IsFile = true, Filter = "Oodle runtime|oo2core*_win64.dll|DLLs|*.dll|All files|*.*",
+                Get = s => string.IsNullOrWhiteSpace(s.OodleRuntimeDllPath) ? s.EffectiveOodleRuntimeDllPath() : s.OodleRuntimeDllPath,
+                Set = (s, v) => s.OodleRuntimeDllPath = v },
             new() { Key = "UsmapPath", Label = "Mappings (.usmap)", Section = "Tools", IsFile = true, Filter = "Mappings|*.usmap|All files|*.*",
                 Get = s => s.UsmapPath, Set = (s, v) => s.UsmapPath = v },
             new() { Key = "UnrealEngineRoot", Label = "Unreal Engine 5.6 (Asset Registry writer)", Section = "Tools", IsFile = false, Filter = "",
@@ -220,7 +226,7 @@ public sealed partial class SettingsForm : Form
             AutoSize = false, Left = RowLabelX, Top = 16, Width = 690, Height = firstRun ? 40 : 22,
             ForeColor = Theme.OnDarkMuted, Font = Theme.Caption,
             Text = firstRun
-                ? "First-time setup: point the builder at retoc.exe, your .usmap, the game Content\\Paks folder, and an extracted Content dump (the Content folder or Content\\Characters\\Minifig)."
+                ? "First-time setup: point the builder at retoc.exe, your .usmap, the game Content\\Paks folder, and an extracted Content dump (the Content folder or Content\\Characters\\Minifig). Oodle compression is optional until you are ready to build compact releases."
                 : "Tool & game paths."
         };
         panel.Controls.Add(intro);
