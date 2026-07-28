@@ -26,6 +26,9 @@ gamedata/*.NEW.json
 # Old local source copies (may contain absolute machine paths)
 _source_snapshots/
 
+# Internal test harnesses are not distributed with the public tool.
+Tests/
+
 # OS
 Thumbs.db
 Desktop.ini

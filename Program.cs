@@ -23,11 +23,6 @@ internal static class Program
         // with no settings file present.
         AppSettings.Current = AppSettings.Load();
 
-        if (args.Length >= 1 && args[0].Equals("--self-test", StringComparison.OrdinalIgnoreCase))
-        {
-            return SelfTest.Run();
-        }
-
         if (args.Length >= 4 && args[0].Equals("--preview-probe", StringComparison.OrdinalIgnoreCase))
         {
             return ModelPreviewProbe.Run(args[1], args[2], args[3]);
