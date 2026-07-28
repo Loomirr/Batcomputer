@@ -1910,7 +1910,11 @@ public sealed partial class MainForm : Form
     private async Task RunIndexerAsync()
     {
         var projectRoot = _projectRootText.Text.Trim();
-        var script = Path.Combine(projectRoot, "tools", "Build-NativeSuitTemplateIndex.ps1");
+        var bundledScript = Path.Combine(AppSettings.ToolRoot, "Tools", "Build-NativeSuitTemplateIndex.ps1");
+        var usesBundledScript = File.Exists(bundledScript);
+        var script = usesBundledScript
+            ? bundledScript
+            : Path.Combine(projectRoot, "tools", "Build-NativeSuitTemplateIndex.ps1");
         if (!File.Exists(script))
         {
             AppendLog($"Indexer script not found: {script}");
@@ -1939,6 +1943,12 @@ public sealed partial class MainForm : Form
             psi.ArgumentList.Add(AppSettings.Current.EffectiveExportContentRoot());
             psi.ArgumentList.Add("-OutputRoot");
             psi.ArgumentList.Add(Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "NativeSuitTemplates"));
+            if (usesBundledScript)
+            {
+                // The portable indexer lives beside the app while a large workspace
+                // may intentionally sit on a different drive.
+                psi.ArgumentList.Add("-AllowExternalOutputRoot");
+            }
             using var process = Process.Start(psi);
             if (process is null)
             {

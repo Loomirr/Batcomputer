@@ -34,6 +34,12 @@ Tests/
 Tools/retoc-oodle/*.exe
 Tools/retoc-oodle/*.dll
 
+# UE creates these under the bundled registry-writer source on the author's machine.
+Tools/SuitSlotsRegistryWriter/Binaries/
+Tools/SuitSlotsRegistryWriter/DerivedDataCache/
+Tools/SuitSlotsRegistryWriter/Intermediate/
+Tools/SuitSlotsRegistryWriter/Saved/
+
 # OS
 Thumbs.db
 Desktop.ini

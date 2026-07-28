@@ -1,0 +1,13 @@
+{
+  "FileVersion": 3,
+  "EngineAssociation": "5.6",
+  "Category": "Tools",
+  "Description": "Writes small UE 5.6 cooked AssetRegistry.bin files for Suit Slots startup registration proofs.",
+  "Modules": [
+    {
+      "Name": "SuitSlotsRegistryWriter",
+      "Type": "Editor",
+      "LoadingPhase": "Default"
+    }
+  ]
+}

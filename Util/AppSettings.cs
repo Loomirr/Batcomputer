@@ -60,6 +60,11 @@ public sealed class AppSettings
     // Turn this on to keep them (e.g. to diff two game versions).
     public bool KeepPreviousExtracts { get; set; }
 
+    // Generated 3D previews can contain several exported models and textures. Keep the portable
+    // workspace tidy by removing older preview folders whenever a new preview is built. Authors
+    // can turn this off when they need to inspect or compare the generated viewer assets.
+    public bool AutoCleanPreviewFiles { get; set; } = true;
+
     // "Your Character" panel style: true = the minifig figure, false = the classic slot list.
     // Defaults to the figure; the list stays available for anyone who prefers the dense view.
     public bool UseMinifigCharacterPanel { get; set; } = true;
@@ -177,10 +182,14 @@ public sealed class AppSettings
     /// </summary>
     public bool IsUsable()
     {
+        var extractedContent = EffectiveExtractedContentRoot();
         return Directory.Exists(EffectiveProjectRoot())
             && File.Exists(EffectiveRetocExePath())
             && !string.IsNullOrWhiteSpace(EffectiveUsmapPath()) && File.Exists(EffectiveUsmapPath()!)
-            && Directory.Exists(EffectiveExtractedContentRoot())
+            // An empty portable Generated folder is the intentional first-run
+            // default, not an extracted game dump. Require the real Content
+            // shape so setup still offers the full extraction.
+            && Directory.Exists(Path.Combine(extractedContent, "Characters"))
             && Directory.Exists(EffectiveGamePaksRoot());
     }
 
@@ -232,6 +241,10 @@ public sealed class AppSettings
         }
     }
 
+    /// <summary>The empty workspace path shown on first run before an asset dump exists.</summary>
+    public static string DefaultFirstRunExtractedContentRoot() =>
+        GeneratedRootFor(DefaultProjectRoot());
+
     /// <summary>
     /// Where the tool keeps its work. For an installed copy this is simply the folder holding the
     /// exe, so <c>Generated\</c> sits alongside it. In the dev tree it walks up to the repo root so
@@ -251,32 +264,39 @@ public sealed class AppSettings
     /// </summary>
     public string? DescribeRootWritability()
     {
-        var root = ToolRoot;
-        try
+        var roots = new[] { ToolRoot, EffectiveProjectRoot() }
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        foreach (var root in roots)
         {
-            Directory.CreateDirectory(root);
-            var probe = Path.Combine(root, ".write-probe.tmp");
-            File.WriteAllText(probe, "");
-            File.Delete(probe);
-            return null;
+            try
+            {
+                Directory.CreateDirectory(root);
+                var probe = Path.Combine(root, ".write-probe.tmp");
+                File.WriteAllText(probe, "");
+                File.Delete(probe);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return $"The tool can't write to this workspace folder:\n{root}\n\n" +
+                       "Windows protects this location (Program Files and similar). Move the tool " +
+                       "somewhere like C:\\Tools\\Batcomputer, or set a different workspace in Settings.";
+            }
+            catch (Exception ex)
+            {
+                return $"The tool can't write to this workspace folder:\n{root}\n\n{ex.Message}";
+            }
         }
-        catch (UnauthorizedAccessException)
-        {
-            return $"The tool can't write to its own folder:\n{root}\n\n" +
-                   "Windows protects this location (Program Files and similar). Move the tool " +
-                   "somewhere like your Desktop or Documents, or set a different project root in Settings.";
-        }
-        catch (Exception ex)
-        {
-            return $"The tool can't write to its own folder:\n{root}\n\n{ex.Message}";
-        }
+        return null;
     }
 
     // A portable install can bundle retoc here; Setup still permits an external tool path.
     public static string DefaultRetocExePath()
     {
         var bundled = Path.Combine(ToolRoot, "Tools", "retoc", "retoc.exe");
-        return File.Exists(bundled) ? bundled : "";
+        // The Oodle-capable fork remains fully compatible with normal to-legacy
+        // extraction, so one bundled retoc covers both ordinary and compact builds.
+        return File.Exists(bundled) ? bundled : DefaultOodleRetocExePath();
     }
 
 

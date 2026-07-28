@@ -53,13 +53,14 @@ public sealed class FirstRunWizard : Form
         {
             new()
             {
-                Title = "retoc.exe",
-                Blurb = "The packer/unpacker that turns your staged assets into a .pak/.ucas/.utoc trio. " +
-                        "Without it the tool can browse and edit, but can't package.",
-                Hint = "Usually a retoc.exe you downloaded separately — point at the executable itself.",
+                Title = "retoc (included)",
+                Blurb = "Batcomputer includes an Oodle-capable retoc helper for extracting game assets and packing mod trios. " +
+                        "Keep the detected copy unless you deliberately use a different retoc build.",
+                Hint = "...\\Tools\\retoc-oodle\\retoc.exe. This bundled helper handles normal and compact releases.",
                 IsFile = true,
                 Filter = "retoc.exe|retoc.exe|Executables|*.exe|All files|*.*",
-                Get = s => s.RetocExePath, Set = (s, v) => s.RetocExePath = v,
+                Get = s => string.IsNullOrWhiteSpace(s.RetocExePath) ? AppSettings.DefaultRetocExePath() : s.RetocExePath,
+                Set = (s, v) => s.RetocExePath = v,
             },
             new()
             {
@@ -137,16 +138,18 @@ public sealed class FirstRunWizard : Form
                 Hint = "The Content folder itself, or Content\\Characters\\Minifig.",
                 Optional = true,
                 IsFile = false,
-                Get = s => s.ExtractedContentRoot, Set = (s, v) => s.ExtractedContentRoot = v,
+                Get = s => string.IsNullOrWhiteSpace(s.ExtractedContentRoot)
+                    ? AppSettings.DefaultFirstRunExtractedContentRoot()
+                    : s.ExtractedContentRoot,
+                Set = (s, v) => s.ExtractedContentRoot = v,
             },
             new()
             {
-                Title = "Project root",
-                Blurb = "Where your suits, mods and build output are saved — everything the tool " +
-                        "generates lands in a \"Generated\" folder under here.\r\n\r\n" +
-                        "Leave it blank to use the folder the tool is in. Extracted game dumps go here " +
-                        "too, so pick a drive with room (see the previous step).",
-                Hint = "Pick any folder you own — a new empty one is fine. Blank = next to the tool.",
+                Title = "Workspace folder",
+                Blurb = "Where your suits, mods and build output are saved. By default Batcomputer keeps its " +
+                        "Generated, Data, Runtime, and settings folders beside the app.\r\n\r\n" +
+                        "Leave this blank for a portable install. Choose another drive only when you want the large extracted game dump elsewhere.",
+                Hint = "Blank = next to Batcomputer.exe. Pick another writable folder only for a larger workspace.",
                 Optional = true,
                 IsFile = false,
                 Get = s => s.ProjectRoot, Set = (s, v) => s.ProjectRoot = v,

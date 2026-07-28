@@ -64,8 +64,9 @@ public sealed partial class SettingsForm : Form
 
         _rows = new List<PathRow>
         {
-            new() { Key = "RetocExePath", Label = "retoc.exe", Section = "Tools", IsFile = true, Filter = "retoc.exe|retoc.exe|Executables|*.exe|All files|*.*",
-                Get = s => s.RetocExePath, Set = (s, v) => s.RetocExePath = v },
+            new() { Key = "RetocExePath", Label = "retoc (included)", Section = "Tools", IsFile = true, Filter = "retoc.exe|retoc.exe|Executables|*.exe|All files|*.*",
+                Get = s => string.IsNullOrWhiteSpace(s.RetocExePath) ? AppSettings.DefaultRetocExePath() : s.RetocExePath,
+                Set = (s, v) => s.RetocExePath = v },
             new() { Key = "OodleRetocExePath", Label = "Oodle packer (retoc.exe)", Section = "Tools", IsFile = true, Filter = "retoc.exe|retoc.exe|Executables|*.exe|All files|*.*",
                 Get = s => string.IsNullOrWhiteSpace(s.OodleRetocExePath) ? AppSettings.DefaultOodleRetocExePath() : s.OodleRetocExePath,
                 Set = (s, v) => s.OodleRetocExePath = v },
@@ -80,7 +81,7 @@ public sealed partial class SettingsForm : Form
             new() { Key = "RegistryWriterProjectPath", Label = "SuitSlotsRegistryWriter (.uproject)", Section = "Tools", IsFile = true, Filter = "Unreal project|*.uproject|All files|*.*",
                 Get = s => string.IsNullOrWhiteSpace(s.RegistryWriterProjectPath) ? AppSettings.DefaultRegistryWriterProjectPath() : s.RegistryWriterProjectPath,
                 Set = (s, v) => s.RegistryWriterProjectPath = v },
-            new() { Key = "ProjectRoot", Label = "Project root (outputs base)", Section = "Project", IsFile = false, Filter = "",
+            new() { Key = "ProjectRoot", Label = "Workspace folder (blank = beside Batcomputer)", Section = "Project", IsFile = false, Filter = "",
                 Get = s => s.ProjectRoot, Set = (s, v) => s.ProjectRoot = v },
             new() { Key = "ExportContentRoot", Label = "Export Content root (staging source)", Section = "Project", IsFile = false, Filter = "",
                 Get = s => s.ExportContentRoot, Set = (s, v) => s.ExportContentRoot = v },
@@ -88,7 +89,7 @@ public sealed partial class SettingsForm : Form
                 Get = s => s.ExtractedContentRoot, Set = (s, v) => s.ExtractedContentRoot = v },
             new() { Key = "GamePaksRoot", Label = "Game Content\\Paks (asset refresh source)", Section = "Game", IsFile = false, Filter = "",
                 Get = s => s.GamePaksRoot, Set = (s, v) => s.GamePaksRoot = v },
-            new() { Key = "AssetExtractRoot", Label = "Extracted assets output (blank = Generated\\GameExtracts)", Section = "Project", IsFile = false, Filter = "",
+            new() { Key = "AssetExtractRoot", Label = "Extracted assets output (blank = workspace\\Generated\\GameExtracts)", Section = "Project", IsFile = false, Filter = "",
                 Get = s => s.AssetExtractRoot, Set = (s, v) => s.AssetExtractRoot = v },
             new() { Key = "GamePaksModFolder", Label = "Game install mod folder (~mods\\Slot)", Section = "Game", IsFile = false, Filter = "",
                 Get = s => s.GamePaksModFolder, Set = (s, v) => s.GamePaksModFolder = v }
@@ -132,6 +133,7 @@ public sealed partial class SettingsForm : Form
             _settings.UseMinifigCharacterPanel = _minifigToggle?.Checked ?? _settings.UseMinifigCharacterPanel;
             _settings.AnimationsEnabled = _animationsToggle?.Checked ?? _settings.AnimationsEnabled;
             _settings.KeepPreviousExtracts = _keepExtractsToggle?.Checked ?? _settings.KeepPreviousExtracts;
+            _settings.AutoCleanPreviewFiles = _autoCleanPreviewFilesToggle?.Checked ?? _settings.AutoCleanPreviewFiles;
             // Apply immediately so the change takes effect without a restart.
             Animator.Enabled = _settings.AnimationsEnabled;
             _settings.Save();
@@ -313,6 +315,7 @@ public sealed partial class SettingsForm : Form
     private ToggleSwitch? _minifigToggle;
     private ToggleSwitch? _animationsToggle;
     private ToggleSwitch? _keepExtractsToggle;
+    private ToggleSwitch? _autoCleanPreviewFilesToggle;
 
     private const int RowRightEdge = RowDotX + 14;
 
@@ -332,6 +335,14 @@ public sealed partial class SettingsForm : Form
 
         void ToggleRow(string title, string hint, ToggleSwitch toggle, Color? hintColor = null)
         {
+            var hintLeft = RowLabelX;
+            var hintTop = y + 28;
+            var hintWidth = RowRightEdge - hintLeft;
+            var hintHeight = Math.Max(18, TextRenderer.MeasureText(
+                hint,
+                Theme.Caption,
+                new Size(hintWidth, int.MaxValue),
+                TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl).Height);
             panel.Controls.Add(new Label
             {
                 Left = RowLabelX, Top = y + 2, Width = 320, Height = 20,
@@ -342,10 +353,10 @@ public sealed partial class SettingsForm : Form
             panel.Controls.Add(toggle);
             panel.Controls.Add(new Label
             {
-                Left = RowLabelX, Top = y + 28, Width = RowRightEdge - RowLabelX, Height = 18,
+                Left = hintLeft, Top = hintTop, Width = hintWidth, Height = hintHeight,
                 Text = hint, ForeColor = hintColor ?? Theme.OnDarkMuted, Font = Theme.Caption,
             });
-            y += 58;
+            y = hintTop + hintHeight + 12;
         }
 
         void ButtonRow(Button button, string hint)
@@ -388,6 +399,12 @@ public sealed partial class SettingsForm : Form
         ToggleRow("Keep previous asset extracts",
             "Off: a refresh deletes the dump it replaces (each is ~18 GB).",
             _keepExtractsToggle);
+
+        Section("3D VIEWER");
+        _autoCleanPreviewFilesToggle = new ToggleSwitch { Checked = _settings.AutoCleanPreviewFiles };
+        ToggleRow("Clean generated 3D previews automatically",
+            "On: older Generated\\Preview folders are removed before the next preview. Turn it off to keep generated models and textures for inspection.",
+            _autoCleanPreviewFilesToggle);
 
         Section("PATHS");
         // Re-run the guided setup when paths change or a fresh full asset extraction is needed.

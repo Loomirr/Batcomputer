@@ -8,8 +8,8 @@ package the result as an IoStore trio (`.pak` / `.ucas` / `.utoc`) that drops in
 folder. A companion UE4SS runtime mod (distributed separately) is what actually registers the
 finished suits in-game.
 
-> This repository is the builder tool only. It contains no game files, no extracted assets, no mined
-> catalog, and not the runtime DLL.
+> This repository is the builder tool only. It contains no game files, no extracted assets, and not
+> the runtime DLL. Its bundled catalog is reference metadata only, not game content.
 
 ## What it does
 
@@ -23,12 +23,19 @@ finished suits in-game.
 
 ## Requirements
 
-Two things the tool can't ship, which you point it at on first run:
+The portable author release already includes the tools it is allowed to ship:
 
-- **retoc.exe** - packs and unpacks IoStore archives.
+- **retoc-oodle** for normal asset extraction and mod packing.
+- **The template indexer** and the source/config for the UE 5.6 Asset Registry writer.
+- **The reference game-data catalog** used by the browser.
+
+You still point the tool at things which must stay local to your machine:
+
 - **A .usmap mappings file** for your game build - lets the tool read and write cooked assets.
+- **Your installed game** and, for compact Oodle builds, an Oodle runtime from your local UE 5.6 install.
+- **Unreal Engine 5.6** when building the static Asset Registry plugin. Players do not need it.
 
-To build from source you also need the **.NET 8 SDK**. (A published release is self-contained and
+To build from source you also need the **.NET 10 SDK**. (A published release is self-contained and
 needs no .NET install.)
 
 Nothing is hardcoded to a particular machine; every path is set in Setup.
@@ -46,8 +53,10 @@ silhouettes, which are compiled into the exe as embedded resources - so a build 
 Without them the tool still runs, it just degrades: the sidebar falls back to text glyphs and the
 character panel falls back to the slot list.
 
-Keep the tool somewhere you can write to. It stores its settings and its `Generated` output folder
-next to the executable, so `Program Files` won't work.
+Keep the tool somewhere you can write to, such as `C:\Tools\Batcomputer`. A default portable install
+keeps its settings, `Data`, `Runtime`, and `Generated` workspace beside `Batcomputer.exe`. Choose a
+different workspace in Settings only when you want the large extracted game dump on another drive;
+no data silently goes to AppData or `%TEMP%`.
 
 ## First run
 

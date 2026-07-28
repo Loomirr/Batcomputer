@@ -47,14 +47,18 @@ public static class ModelPreviewService
     /// <summary>
     /// Preview scratch lives in <c>Generated\Preview</c> beside the exe - not the system temp folder -
     /// so the tool stays portable and everything it writes is in one place the user controls.
-    /// Each build gets its own folder and older ones are deleted, so this never accumulates.
+    /// Each build gets its own folder. Older builds are removed by default, while the setting can
+    /// be switched off when an author needs to inspect the generated GLB and texture files.
     /// </summary>
     private static string NewPreviewRoot()
     {
         var root = Path.Combine(
             AppSettings.GeneratedRootFor(AppSettings.Current.EffectiveProjectRoot()), "Preview");
         Directory.CreateDirectory(root);
-        CleanPreviewRoot(root);
+        if (AppSettings.Current.AutoCleanPreviewFiles)
+        {
+            CleanPreviewRoot(root);
+        }
         return root;
     }
 

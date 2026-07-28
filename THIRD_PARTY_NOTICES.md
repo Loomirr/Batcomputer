@@ -2,7 +2,7 @@
 
 ## retoc-oodle
 
-Batcomputer can include `Tools\retoc-oodle\retoc.exe` in an author release.
+Batcomputer includes `Tools\retoc-oodle\retoc.exe` in an author release.
 That helper is built from the `Loomirr/retoc-oodle` fork of
 [`trumank/retoc`](https://github.com/trumank/retoc) and is licensed under the
 MIT License. Its complete license text is in `licenses/retoc-oodle-MIT.txt`.
