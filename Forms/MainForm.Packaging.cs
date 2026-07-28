@@ -412,7 +412,11 @@ public sealed partial class MainForm
         // resolve to null at runtime and render grey).
         _packageProgress?.Report("Staging materials and textures…");
         StageGeneratedMaterialsIntoContentRoot(_currentProject, contentRootToPackage);
-        StageGeneratedTexturesIntoContentRoot(_currentProject, contentRootToPackage);
+        if (!StageGeneratedTexturesIntoContentRoot(_currentProject, contentRootToPackage, out var textureStageError))
+        {
+            AppendLog("IoStore package aborted: " + textureStageError);
+            return;
+        }
 
         // Every suit needs its own DCMD (points to the menu icon + equipment + the
         // generated pawn/cutscene classes). Generate it into the pack content root.
@@ -597,7 +601,11 @@ public sealed partial class MainForm
         ReadFieldsIntoProject(_currentProject);
         var contentRoot = CurrentPackageContentRoot(_currentProject);
         StageGeneratedMaterialsIntoContentRoot(_currentProject, contentRoot);
-        StageGeneratedTexturesIntoContentRoot(_currentProject, contentRoot);
+        if (!StageGeneratedTexturesIntoContentRoot(_currentProject, contentRoot, out var textureStageError))
+        {
+            Dialog.Warn(this, "Package contents preview", textureStageError);
+            return;
+        }
         StageGeneratedDcmdIntoContentRoot(_currentProject, contentRoot);
 
         PackageContentPreviewService.Preview preview;
@@ -717,7 +725,11 @@ public sealed partial class MainForm
         ReadFieldsIntoProject(_currentProject);
         var contentRoot = CurrentPackageContentRoot(_currentProject);
         StageGeneratedMaterialsIntoContentRoot(_currentProject, contentRoot);
-        StageGeneratedTexturesIntoContentRoot(_currentProject, contentRoot);
+        if (!StageGeneratedTexturesIntoContentRoot(_currentProject, contentRoot, out var textureStageError))
+        {
+            AppendLog("V2 package preflight blocked: " + textureStageError);
+            return;
+        }
         StageGeneratedDcmdIntoContentRoot(_currentProject, contentRoot);
         var runtimeJson = StageRuntimeV2SuitJson(_currentProject);
         RunV2PackagePreflight(_currentProject, contentRoot, runtimeJson, logHeader: true);

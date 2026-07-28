@@ -107,7 +107,7 @@ public sealed partial class MainForm
     /// </summary>
     private void OpenMaterialFromBase(string miGamePath, bool editInPlace)
     {
-        var diskPath = ResolveMiDiskPath(miGamePath, preferExport: editInPlace);
+        var diskPath = ResolveMaterialDiskPath(miGamePath, preferExport: editInPlace);
         if (diskPath is null)
         {
             AppendLog(editInPlace
@@ -295,23 +295,22 @@ public sealed partial class MainForm
                 return;
             }
 
-            var dir = Path.Combine(AppSettings.Current.EffectiveExportContentRoot(), "Mods", mod);
-            if (Directory.Exists(dir))
+            foreach (var miPath in DiscoverUserMaterialPaths(mod))
             {
-                foreach (var uasset in Directory.EnumerateFiles(dir, "MI_*.uasset"))
+                var name = UnrealPathUtil.AssetName(miPath);
+                if (!MatchesToyboxSearch(search, name, miPath))
                 {
-                    var name = Path.GetFileNameWithoutExtension(uasset);
-                    var miPath = $"/Game/Mods/{mod}/{name}";
-                    if (!MatchesToyboxSearch(search, name, miPath)) continue;
-                    tiles.Add(new VirtualTilePanel.Tile
-                    {
-                        Title = name.Replace("MI_", ""),
-                        Subtitle = "your MI · drag to apply",
-                        Accent = Theme.Materials,
-                        DragPayload = new ToyboxDragPayload { Kind = "material", MaterialPath = miPath },
-                        MenuFactory = () => BuildMaterialTileMenu(miPath, isUserMade: true),
-                    });
+                    continue;
                 }
+
+                tiles.Add(new VirtualTilePanel.Tile
+                {
+                    Title = name.Replace("MI_", ""),
+                    Subtitle = "your MI · drag to apply",
+                    Accent = Theme.Materials,
+                    DragPayload = new ToyboxDragPayload { Kind = "material", MaterialPath = miPath },
+                    MenuFactory = () => BuildMaterialTileMenu(miPath, isUserMade: true),
+                });
             }
             ShowVirtualTiles(tiles, header);
             return;
@@ -347,6 +346,104 @@ public sealed partial class MainForm
             }).ToList(),
             header: $"Base-game materials{(folderFilter is null ? "" : $" · {folderFilter}")} for slot [{_toyboxSlotLabel}]. Drag onto a slot to apply (no extraction needed); right-click to use one as a base for a new material. Type in the search box to filter.",
             emptyMessage: "No game materials matched. Try <all game materials> or clear the search box.");
+    }
+
+    /// <summary>
+    /// User-made material instances can be in the optional export root, or in one of the
+    /// current suit's persisted authoring stages after a stage rebuild. The latter is the
+    /// authoritative source for older projects such as Electric, whose assignments are
+    /// valid even though their original export folder is no longer configured.
+    /// </summary>
+    private IReadOnlyList<string> DiscoverUserMaterialPaths(string mod)
+    {
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var expectedPrefix = $"/Game/Mods/{mod}/";
+
+        if (_currentProject is not null)
+        {
+            foreach (var assignment in _currentProject.MaterialAssignments)
+            {
+                var package = UnrealPathUtil.NormalizePackagePath(assignment.MiPackagePath);
+                if (package.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    paths.Add(package);
+                }
+            }
+        }
+
+        foreach (var contentRoot in GeneratedMaterialContentRoots(_currentProject))
+        {
+            var modRoot = Path.Combine(contentRoot, "Mods", mod);
+            if (!Directory.Exists(modRoot))
+            {
+                continue;
+            }
+
+            foreach (var uasset in Directory.EnumerateFiles(modRoot, "MI_*.uasset", SearchOption.AllDirectories))
+            {
+                var relative = Path.GetRelativePath(contentRoot, uasset)
+                    .Replace(Path.DirectorySeparatorChar, '/')
+                    .Replace(Path.AltDirectorySeparatorChar, '/');
+                if (!relative.StartsWith("Mods/", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                paths.Add("/Game/" + relative[..^".uasset".Length]);
+            }
+        }
+
+        return paths.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private string? ResolveMaterialDiskPath(string miGamePath, bool preferExport)
+    {
+        var diskPath = ResolveMiDiskPath(miGamePath, preferExport);
+        if (diskPath is not null || !preferExport || _currentProject is null)
+        {
+            return diskPath;
+        }
+
+        var package = UnrealPathUtil.NormalizePackagePath(miGamePath);
+        if (!package.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var relative = package["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar) + ".uasset";
+        foreach (var contentRoot in GeneratedMaterialContentRoots(_currentProject))
+        {
+            var candidate = Path.Combine(contentRoot, relative);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private IEnumerable<string> GeneratedMaterialContentRoots(NativeSuitProject? project)
+    {
+        var exportRoot = AppSettings.Current.EffectiveExportContentRoot();
+        if (!string.IsNullOrWhiteSpace(exportRoot))
+        {
+            yield return exportRoot;
+        }
+
+        if (project is null || string.IsNullOrWhiteSpace(project.SlotId))
+        {
+            yield break;
+        }
+
+        var generatedRoot = AppSettings.GeneratedRootFor(_projectRootText.Text.Trim());
+        var projectRoot = Path.Combine(generatedRoot, "NativeSuitGuiProjects", project.SlotId);
+        foreach (var stage in new[] { "GraftedPartStage", "GraftedTorso2Stage", "PatchedNameMapStage", "IoStore" })
+        {
+            yield return stage.Equals("IoStore", StringComparison.OrdinalIgnoreCase)
+                ? Path.Combine(projectRoot, stage, "Stage", "LEGOBatmanLotDK", "Content")
+                : Path.Combine(projectRoot, stage, "LEGOBatmanLotDK", "Content");
+        }
     }
 
     private void ApplyToyboxMaterial(string miPath)

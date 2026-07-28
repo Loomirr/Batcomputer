@@ -227,7 +227,7 @@ public sealed class ModReleaseValidationService
             if (string.IsNullOrWhiteSpace(texture.CookProfile))
             {
                 result.AddWarning("texture",
-                    $"'{label}' is a legacy texture with no recorded cook profile. It can build from its existing cooked output; use Change cook profile before a future recook.",
+                    $"'{label}' is a legacy texture with no recorded cook profile. Packaging will preserve its existing cooked output and stop if that output is incomplete; use Change cook profile before a future recook.",
                     suitId);
             }
             if (string.IsNullOrWhiteSpace(texture.TemplateJson) || !File.Exists(texture.TemplateJson))

@@ -627,11 +627,6 @@ public sealed partial class MainForm
         return entry;
     }
 
-    private static string DefaultTextureTemplateJson(string projectRoot, string textureKind = "")
-    {
-        return AvailableTextureCookPresets(projectRoot, textureKind).FirstOrDefault()?.TemplateJson ?? "";
-    }
-
     private static List<TextureCookPreset> AvailableTextureCookPresets(string projectRoot, string textureKind)
     {
         var bgraPath = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_DroneControlBGRA8", "T_GA_DroneControl_BatGirl_AO.json");
@@ -1354,31 +1349,47 @@ public sealed partial class MainForm
         return list.SelectedItem is GeneratedTextureListItem item ? item.Texture : null;
     }
 
-    private void StageGeneratedTexturesIntoContentRoot(NativeSuitProject project, string contentRootToPackage)
+    /// <summary>
+    /// Stages a suit's saved texture recipes without changing them. In particular,
+    /// a legacy texture with no CookProfile is allowed only when its complete
+    /// previously cooked output exists; packaging must never pick a newer donor or
+    /// rewrite that asset on the user's behalf.
+    /// </summary>
+    private bool StageGeneratedTexturesIntoContentRoot(NativeSuitProject project, string contentRootToPackage, out string error)
     {
-        ClearDedicatedGeneratedTextureStage(project, contentRootToPackage);
+        error = "";
 
         if (project.GeneratedTextures.Count == 0)
         {
+            ClearDedicatedGeneratedTextureStage(project, contentRootToPackage);
             WriteGeneratedTextureStageManifest(project, new List<string>());
-            return;
+            return true;
         }
 
+        var stageErrors = new List<string>();
+        foreach (var texture in project.GeneratedTextures)
+        {
+            if (!TryPrepareGeneratedTextureForStaging(texture, out var textureError))
+            {
+                stageErrors.Add(textureError);
+            }
+        }
+        if (stageErrors.Count > 0)
+        {
+            error = string.Join("\n", stageErrors);
+            foreach (var stageError in stageErrors)
+            {
+                AppendLog("Texture stage blocked: " + stageError);
+            }
+            return false;
+        }
+
+        ClearDedicatedGeneratedTextureStage(project, contentRootToPackage);
         var copied = 0;
-        var projectChanged = false;
         var stagedRelativeFiles = new List<string>();
         foreach (var texture in project.GeneratedTextures)
         {
-            if (string.IsNullOrWhiteSpace(texture.PackagePath) || string.IsNullOrWhiteSpace(texture.OutputRoot))
-            {
-                AppendLog($"Texture stage skipped '{texture.DisplayName}': missing package path or output root.");
-                continue;
-            }
-
-            projectChanged |= UpgradeGeneratedTextureTemplateIfAvailable(texture);
-            projectChanged |= UpgradeGeneratedTexturePackagePathIfNeeded(project, texture);
             var cookedContentRoot = Path.Combine(texture.OutputRoot, "Cooked", "LEGOBatmanLotDK", "Content");
-            EnsureGeneratedTextureCooked(texture, cookedContentRoot);
             var sourceBase = PackagePathToContentPath(cookedContentRoot, texture.PackagePath);
             var destBase = PackagePathToContentPath(contentRootToPackage, texture.PackagePath);
             var stagedThisTexture = 0;
@@ -1410,7 +1421,11 @@ public sealed partial class MainForm
 
             if (stagedThisTexture == 0)
             {
-                AppendLog($"Texture stage skipped '{texture.DisplayName}': required cooked files not found at {sourceBase}. Re-import the texture.");
+                // TryPrepareGeneratedTextureForStaging already verified this. Keep
+                // the guard for a file removed between validation and copy.
+                error = $"'{texture.DisplayName}' disappeared from its cooked output while staging. Re-import or recook that texture, then package again.";
+                AppendLog("Texture stage blocked: " + error);
+                return false;
             }
             else
             {
@@ -1419,143 +1434,53 @@ public sealed partial class MainForm
         }
 
         WriteGeneratedTextureStageManifest(project, stagedRelativeFiles);
-        if (projectChanged)
-        {
-            try
-            {
-                (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(project);
-            }
-            catch (Exception ex)
-            {
-                AppendLog($"Texture template upgrade save warning: {ex.Message}");
-            }
-        }
         AppendLog($"Staged {copied} generated texture file(s) into the pack content root.");
-    }
-
-    private bool UpgradeGeneratedTextureTemplateIfAvailable(GeneratedTextureEntry texture)
-    {
-        if (!string.IsNullOrWhiteSpace(texture.CookProfile))
-        {
-            return false;
-        }
-
-        var projectRoot = _projectRootText.Text.Trim();
-        var preferred = DefaultTextureTemplateJson(projectRoot, texture.Kind);
-        if (string.IsNullOrWhiteSpace(preferred) ||
-            !File.Exists(preferred) ||
-            string.Equals(Path.GetFullPath(preferred), Path.GetFullPath(texture.TemplateJson ?? ""), StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        var before = TextureTemplatePixelFormat(texture.TemplateJson ?? "");
-        var after = TextureTemplatePixelFormat(preferred);
-        texture.TemplateJson = preferred;
-        AppendLog($"Texture template upgraded '{texture.DisplayName}' ({texture.Kind}): {before} -> {after}. It will be recooked before staging.");
         return true;
     }
 
-    private bool UpgradeGeneratedTexturePackagePathIfNeeded(NativeSuitProject project, GeneratedTextureEntry texture)
+    private bool TryPrepareGeneratedTextureForStaging(GeneratedTextureEntry texture, out string error)
     {
-        if (string.IsNullOrWhiteSpace(texture.TemplateJson) ||
-            string.IsNullOrWhiteSpace(texture.PackagePath))
+        var label = string.IsNullOrWhiteSpace(texture.DisplayName) ? "unnamed texture" : texture.DisplayName;
+        if (string.IsNullOrWhiteSpace(texture.PackagePath) || string.IsNullOrWhiteSpace(texture.OutputRoot))
         {
+            error = $"'{label}' has no package path or cooked-output folder.";
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(texture.TemplateJson) || !File.Exists(texture.TemplateJson))
+        {
+            error = $"'{label}' has no readable saved donor template. Choose a cook profile before packaging it.";
             return false;
         }
 
-        var needsSameLengthPath = TextureTemplateNeedsSameLengthPath(texture.TemplateJson, texture.Kind);
-        var isStandaloneTemplate = TextureTemplateIsStandaloneUasset(texture.TemplateJson);
-        if (!needsSameLengthPath && !isStandaloneTemplate)
+        var cookedContentRoot = Path.Combine(texture.OutputRoot, "Cooked", "LEGOBatmanLotDK", "Content");
+        var sourceBase = PackagePathToContentPath(cookedContentRoot, texture.PackagePath);
+        var hasCompleteOutput = GeneratedTextureRequiredCookedFilesExist(sourceBase, texture.TemplateJson);
+        if (string.IsNullOrWhiteSpace(texture.CookProfile))
         {
-            // Do not reinterpret older non-standalone body/material entries.
-            // Their package path may intentionally be tied to a raw IoStore
-            // donor and they are outside this UI-path migration.
-            return false;
-        }
-
-        var currentName = UnrealPathUtil.AssetName(texture.PackagePath);
-        var index = TextureSlotIndexFromPackageBaseName(texture.PackageBaseName);
-        if (index <= 0)
-        {
-            index = Math.Max(1, project.GeneratedTextures.IndexOf(texture) + 1);
-        }
-
-        var modFolder = TextureModFolderForProject(project);
-        var newPackagePath = TexturePackagePathFromUserName(
-            texture.TemplateJson,
-            string.IsNullOrWhiteSpace(texture.DisplayName) ? currentName : texture.DisplayName,
-            index,
-            modFolder,
-            project.SlotId,
-            texture.Kind);
-
-        if (texture.PackagePath.Equals(newPackagePath, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        var oldPackagePath = texture.PackagePath;
-        texture.PackagePath = newPackagePath;
-        texture.ObjectPath = ToObjectPath(newPackagePath);
-        ReplaceGeneratedTexturePathReferences(project, oldPackagePath, newPackagePath);
-        var reason = needsSameLengthPath
-            ? "same-length fallback"
-            : "standalone clean path";
-        AppendLog($"Texture path migrated '{texture.DisplayName}' ({texture.Kind}, {reason}): {oldPackagePath} -> {newPackagePath}");
-        return true;
-    }
-
-    private static int TextureSlotIndexFromPackageBaseName(string packageBaseName)
-    {
-        if (string.IsNullOrWhiteSpace(packageBaseName))
-        {
-            return 0;
-        }
-
-        var marker = packageBaseName.LastIndexOf("_P", StringComparison.OrdinalIgnoreCase);
-        if (marker <= 0)
-        {
-            return 0;
-        }
-
-        var end = marker;
-        var start = end;
-        while (start > 0 && char.IsDigit(packageBaseName[start - 1]))
-        {
-            start--;
-        }
-
-        return start < end && int.TryParse(packageBaseName[start..end], out var value)
-            ? value
-            : 0;
-    }
-
-    private static string TextureModFolderForProject(NativeSuitProject project)
-    {
-        foreach (var path in new[] { project.TargetPackages.Dcmd, project.TargetPackages.Playable, project.TargetPackages.Cutscene })
-        {
-            var mod = ModFolderFromPackagePath(path);
-            if (!string.IsNullOrWhiteSpace(mod))
+            if (!hasCompleteOutput)
             {
-                return mod;
+                error = $"Legacy texture '{label}' has no cook profile and no complete existing cooked output. Choose a cook profile before packaging; Batcomputer will not silently migrate it.";
+                return false;
             }
+
+            AppendLog($"Legacy texture preserved '{label}': staging its existing cooked output without changing the donor or profile.");
+            error = "";
+            return true;
         }
 
-        return MakeSafeTextureToken(project.SlotId);
-    }
-
-    private static void ReplaceGeneratedTexturePathReferences(NativeSuitProject project, string oldPath, string newPath)
-    {
-        if (string.IsNullOrWhiteSpace(oldPath) || string.IsNullOrWhiteSpace(newPath))
+        if (!hasCompleteOutput && !EnsureGeneratedTextureCooked(texture, cookedContentRoot))
         {
-            return;
+            error = $"'{label}' could not regenerate its saved recipe. Check its PNG source and donor template, then try again.";
+            return false;
+        }
+        if (!GeneratedTextureRequiredCookedFilesExist(sourceBase, texture.TemplateJson))
+        {
+            error = $"'{label}' is still missing required cooked output files after staging preparation.";
+            return false;
         }
 
-        if (project.IconMenu.Equals(oldPath, StringComparison.OrdinalIgnoreCase)) project.IconMenu = newPath;
-        if (project.IconSuit.Equals(oldPath, StringComparison.OrdinalIgnoreCase)) project.IconSuit = newPath;
-        if (project.IconLeft.Equals(oldPath, StringComparison.OrdinalIgnoreCase)) project.IconLeft = newPath;
-        if (project.IconRight.Equals(oldPath, StringComparison.OrdinalIgnoreCase)) project.IconRight = newPath;
+        error = "";
+        return true;
     }
 
     private bool EnsureGeneratedTextureCooked(GeneratedTextureEntry texture, string cookedContentRoot)

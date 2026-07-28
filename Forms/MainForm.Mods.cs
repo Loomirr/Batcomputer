@@ -1226,6 +1226,8 @@ public sealed partial class MainForm
                 ModReleaseStep($"Preparing {suit.DisplayName} for the shared release…");
                 if (!PrepareSuitForMod(suit, svc, out var suitContentRoot, out var prepareError))
                 {
+                    preflight.Result.AddError("texture staging", prepareError, suit.SlotId);
+                    _lastModReleaseFailure = new ModReleaseFailure(mod.DisplayName, preflight.Result);
                     AppendLog($"Build mod ABORTED: could not prepare '{suit.DisplayName}': {prepareError}");
                     return false;
                 }
@@ -1389,7 +1391,11 @@ public sealed partial class MainForm
             }
 
             StageGeneratedMaterialsIntoContentRoot(suit, contentRoot);
-            StageGeneratedTexturesIntoContentRoot(suit, contentRoot);
+            if (!StageGeneratedTexturesIntoContentRoot(suit, contentRoot, out var textureStageError))
+            {
+                error = textureStageError;
+                return false;
+            }
             StageGeneratedDcmdIntoContentRoot(suit, contentRoot);
             StageLibraryAnimsIntoContentRoot(suit, contentRoot);
 
