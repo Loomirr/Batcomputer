@@ -1,4 +1,5 @@
 using Microsoft.Web.WebView2.WinForms;
+using System.Text.Json;
 
 namespace Batcomputer;
 
@@ -21,6 +22,9 @@ public sealed class ModelPreviewControl : UserControl
 
     private string? _pendingFolder;
     private bool _ready;
+
+    /// <summary>Raised when the in-viewer part mover asks the host to persist an alignment.</summary>
+    public event EventHandler<PreviewPlacementSaveRequestedEventArgs>? PlacementSaveRequested;
 
     public ModelPreviewControl()
     {
@@ -79,7 +83,7 @@ public sealed class ModelPreviewControl : UserControl
             // Own user-data folder per process: the default one is derived from the exe path, so a
             // second instance (or a leftover msedgewebview2 child) locks it and startup fails with
             // 0x800700AA "resource in use".
-            var userData = Path.Combine(Path.GetTempPath(), "Batcomputer.WebView2",
+            var userData = Path.Combine(AppSettings.RuntimeRoot, "WebView2",
                 Environment.ProcessId.ToString());
             Directory.CreateDirectory(userData);
             var env = await Microsoft.Web.WebView2.Core.CoreWebView2Environment.CreateAsync(
@@ -87,6 +91,8 @@ public sealed class ModelPreviewControl : UserControl
             await _web.EnsureCoreWebView2Async(env);
             _web.CoreWebView2.Settings.AreDevToolsEnabled = false;
             _web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+            _web.CoreWebView2.WebMessageReceived += (_, message) =>
+                HandleWebMessage(message.WebMessageAsJson);
             _web.DefaultBackgroundColor = Theme.WindowBg;
             _ready = true;
             return true;
@@ -99,6 +105,15 @@ public sealed class ModelPreviewControl : UserControl
         }
     }
 
+    private void HandleWebMessage(string json)
+    {
+        if (PreviewPlacementSaveRequestedEventArgs.TryParse(json, out var args) &&
+            IsHandleCreated && !IsDisposed)
+        {
+            BeginInvoke(() => PlacementSaveRequested?.Invoke(this, args));
+        }
+    }
+
     protected override void Dispose(bool disposing)
     {
         if (disposing)
@@ -106,5 +121,79 @@ public sealed class ModelPreviewControl : UserControl
             _web.Dispose();
         }
         base.Dispose(disposing);
+    }
+}
+
+public sealed class PreviewPlacementSaveRequestedEventArgs : EventArgs
+{
+    public PreviewPlacementSaveRequestedEventArgs(
+        string layoutKey,
+        string component,
+        float offsetX,
+        float offsetY,
+        float offsetZ,
+        int? uvChannel)
+    {
+        LayoutKey = layoutKey;
+        Component = component;
+        OffsetX = offsetX;
+        OffsetY = offsetY;
+        OffsetZ = offsetZ;
+        UvChannel = uvChannel;
+    }
+
+    public string LayoutKey { get; }
+    public string Component { get; }
+    public float OffsetX { get; }
+    public float OffsetY { get; }
+    public float OffsetZ { get; }
+    public int? UvChannel { get; }
+
+    public static bool TryParse(string json, out PreviewPlacementSaveRequestedEventArgs args)
+    {
+        args = null!;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            if (!root.TryGetProperty("type", out var type) ||
+                !string.Equals(type.GetString(), "save-placement", StringComparison.Ordinal) ||
+                !root.TryGetProperty("layout", out var layoutProperty) ||
+                string.IsNullOrWhiteSpace(layoutProperty.GetString()) ||
+                !root.TryGetProperty("component", out var componentProperty) ||
+                string.IsNullOrWhiteSpace(componentProperty.GetString()) ||
+                !root.TryGetProperty("offset", out var offset) ||
+                offset.ValueKind != JsonValueKind.Array ||
+                offset.GetArrayLength() != 3)
+            {
+                return false;
+            }
+
+            var values = offset.EnumerateArray().Select(value => value.GetSingle()).ToArray();
+            if (values.Any(value => !float.IsFinite(value)))
+            {
+                return false;
+            }
+
+            int? uvChannel = null;
+            if (root.TryGetProperty("uv", out var uvProperty) && uvProperty.ValueKind != JsonValueKind.Null)
+            {
+                if (uvProperty.ValueKind != JsonValueKind.Number || !uvProperty.TryGetInt32(out var value) ||
+                    value < 0 || value > 7)
+                {
+                    return false;
+                }
+                uvChannel = value;
+            }
+
+            args = new PreviewPlacementSaveRequestedEventArgs(
+                layoutProperty.GetString()!, componentProperty.GetString()!, values[0], values[1], values[2], uvChannel);
+            return true;
+        }
+        catch
+        {
+            // A malformed page message must never break the embedded preview.
+            return false;
+        }
     }
 }

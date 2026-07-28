@@ -3,7 +3,7 @@ using System.Reflection;
 namespace Batcomputer;
 
 /// <summary>
-/// Loads the tool's own artwork out of the assembly. <c>Assets\**\*.png</c> are compiled in as
+/// Loads the tool's own artwork out of the assembly. <c>Assets\**\*.png</c> and animated GIFs are compiled in as
 /// embedded resources, so a published single-file exe carries its icons and part silhouettes with
 /// no loose files to lose.
 ///
@@ -14,6 +14,10 @@ internal static class EmbeddedAssets
 {
     private static readonly Assembly Asm = typeof(EmbeddedAssets).Assembly;
     private static readonly Lazy<string[]> Names = new(() => Asm.GetManifestResourceNames());
+    // Image.FromStream requires the source stream to outlive an animated GIF. There is one small
+    // rail animation today, so holding its 55 KB backing stream for the process lifetime is both
+    // intentional and much safer than a frame that later disappears after GC.
+    private static readonly List<Stream> AnimatedImageStreams = new();
 
     /// <summary>
     /// Opens an asset by its logical path, e.g. <c>"Home.png"</c> or <c>"Parts/Head.png"</c>.
@@ -150,6 +154,27 @@ internal static class EmbeddedAssets
         try
         {
             return new Bitmap(source, size);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Loads an animated image without flattening it to a single bitmap frame.</summary>
+    public static Image? LoadAnimated(string relativePath)
+    {
+        try
+        {
+            var bytes = ReadBytes(relativePath);
+            if (bytes is null) return null;
+            var stream = new MemoryStream(bytes, writable: false);
+            var image = Image.FromStream(stream);
+            lock (AnimatedImageStreams)
+            {
+                AnimatedImageStreams.Add(stream);
+            }
+            return image;
         }
         catch
         {

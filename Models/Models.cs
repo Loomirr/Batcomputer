@@ -189,6 +189,13 @@ public sealed class NativeSuitProject
     public TemplateRecord? VisualSourceTemplate { get; set; }
     public TemplateRecord? VisualCutsceneSourceTemplate { get; set; }
     public TemplateRecord? StaticMeshComponentShapeTemplate { get; set; }
+
+    // A suit can use any character cutscene as its visual starting point while a
+    // separate, proven _Playable donor supplies the runtime machinery. Keep that
+    // relationship explicit instead of overloading PlayableTemplate to mean both.
+    // Older projects have no profile; BaseEligibilityService derives one from their
+    // existing templates when they are opened or validated.
+    public SuitBaseProfile? BaseProfile { get; set; }
     public List<NativeSuitRequirement> Requirements { get; set; } = new();
 
     // UI icon texture object paths (/Game/...) for the generated UIMD. Empty =
@@ -250,6 +257,11 @@ public sealed class NativeSuitProject
     // collide across repeated drops (the old imperative graft stacked duplicate exports).
     public List<SavedPartGraft> PartGrafts { get; set; } = new();
 
+    // Viewer-space nudges authored with the 3D part mover. These are intentionally separate from
+    // a donor's native transform: the preview keeps the game's authored placement as its base and
+    // applies only the small per-suit correction the user saved.
+    public List<SavedPreviewPartPlacement> PreviewPartPlacements { get; set; } = new();
+
     // Persisted change log shown in the Review screen - reopening a suit restores
     // the full history of what you changed and what you changed it to.
     public List<SavedChange> Changes { get; set; } = new();
@@ -268,6 +280,24 @@ public sealed class NativeSuitProject
     // files only; the final suit package stages them into the suit's IoStore trio.
     // Generated material instances can reference PackagePath/ObjectPath directly.
     public List<GeneratedTextureEntry> GeneratedTextures { get; set; } = new();
+}
+
+/// <summary>
+/// The two independent sides of a suit base. The visual source is allowed to be
+/// any character Blueprint/cutscene. The gameplay donor must be a real
+/// <c>_Playable</c> Blueprint because it owns movement, equipment and the runtime
+/// archetype. Both are persisted so reopening a suit cannot silently lose that
+/// choice.
+/// </summary>
+public sealed class SuitBaseProfile
+{
+    public string VisualBasePackage { get; set; } = "";
+    public string VisualBaseKind { get; set; } = ""; // cutscene | playable | character
+    public string VisualFamily { get; set; } = "";
+    public string GameplayDonorPackage { get; set; } = "";
+    public string GameplayFamily { get; set; } = "";
+    public string Eligibility { get; set; } = ""; // ready | missing-visual | missing-gameplay-donor
+    public string EligibilityDetail { get; set; } = "";
 }
 
 /// <summary>
@@ -326,6 +356,12 @@ public sealed class GeneratedTextureEntry
 {
     public string DisplayName { get; set; } = "";
     public string Kind { get; set; } = "Texture";
+    // The native template profile chosen for this texture. Keeping it on the entry
+    // prevents later staging from silently replacing an intentional compact cook.
+    public string CookProfile { get; set; } = "";
+    public int CookWidth { get; set; }
+    public int CookHeight { get; set; }
+    public string CookPixelFormat { get; set; } = "";
     public string SourcePng { get; set; } = "";
     public string PackagePath { get; set; } = "";
     public string ObjectPath { get; set; } = "";
@@ -468,6 +504,18 @@ public sealed class SavedPartGraftDonor
     public string ParentComponentOrVariableName { get; set; } = "";
     public string AttachSocket { get; set; } = "";
     public List<string> ComponentTags { get; set; } = new();
+}
+
+/// <summary>A saved viewer-only alignment and UV selection for one component.</summary>
+public sealed class SavedPreviewPartPlacement
+{
+    public string Component { get; set; } = "";
+    public float OffsetX { get; set; }
+    public float OffsetY { get; set; }
+    public float OffsetZ { get; set; }
+
+    // Null means use the mesh's authored/default UV channel.
+    public int? UvChannel { get; set; }
 }
 
 /// <summary>One entry in the suit's persisted change log (the Review screen).</summary>

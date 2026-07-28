@@ -53,7 +53,7 @@ public sealed class ModelPreviewForm : Form
             // Each preview gets its OWN WebView2 user-data folder. The default folder is derived from
             // the exe path, so a second instance (or a leftover msedgewebview2 child from a previous
             // run) holds a lock on it and the next launch dies with 0x800700AA "resource in use".
-            var userData = Path.Combine(Path.GetTempPath(), "Batcomputer.WebView2",
+            var userData = Path.Combine(AppSettings.RuntimeRoot, "WebView2",
                 Environment.ProcessId.ToString());
             Directory.CreateDirectory(userData);
             var env = await Microsoft.Web.WebView2.Core.CoreWebView2Environment.CreateAsync(
@@ -61,6 +61,7 @@ public sealed class ModelPreviewForm : Form
             await _web.EnsureCoreWebView2Async(env);
             _web.CoreWebView2.Settings.AreDevToolsEnabled = false;
             _web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+            _web.CoreWebView2.WebMessageReceived += (_, message) => SaveViewerPlacement(message.WebMessageAsJson);
             _web.DefaultBackgroundColor = Theme.WindowBg;
             if (_folder is not null)
             {
@@ -92,6 +93,23 @@ public sealed class ModelPreviewForm : Form
                      + ex.Message,
             });
         }
+    }
+
+    private static void SaveViewerPlacement(string json)
+    {
+        if (!PreviewPlacementSaveRequestedEventArgs.TryParse(json, out var placement))
+        {
+            return;
+        }
+
+        ViewerLayoutService.Save(
+            AppSettings.Current.EffectiveProjectRoot(),
+            placement.LayoutKey,
+            placement.Component,
+            placement.OffsetX,
+            placement.OffsetY,
+            placement.OffsetZ,
+            placement.UvChannel);
     }
 
     /// <summary>Minimal WebGL smoke test: a spinning cube, no external scripts. In-app render proof.</summary>

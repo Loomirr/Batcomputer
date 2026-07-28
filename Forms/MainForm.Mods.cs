@@ -9,8 +9,8 @@ namespace Batcomputer;
 /// <summary>
 /// Home-screen "Mods" section and the mod build. A mod bundles several suit projects
 /// into one release: one pak, one <c>&lt;ModId&gt;PawnTags.ini</c>, one <c>ST_&lt;ModId&gt;</c>
-/// StringTable, one <c>mod.json</c>. This partial owns the UI + orchestration; the
-/// asset work lives in ModProjectService / PawnTagConfigService / StringTableGenService.
+/// StringTable, one <c>mod.json</c>, and one plugin-local cooked AssetRegistry.bin.
+/// This partial owns the UI + orchestration; the asset work lives in focused services.
 /// </summary>
 public sealed partial class MainForm
 {
@@ -19,6 +19,347 @@ public sealed partial class MainForm
     /// <summary>Where a built mod's aggregate outputs land.</summary>
     private string ModBuildRoot(string modId) =>
         Path.Combine(AppSettings.GeneratedRootFor(_projectRootText.Text.Trim()), "NativeSuitModBuilds", modId);
+
+    /// <summary>
+    /// The command-bar entry point. A suit can be the only entry in a mod, but every
+    /// shippable export is still a mod-level trio with its registry and loose files.
+    /// </summary>
+    private async Task BuildModForCurrentSuitAsync()
+    {
+        if (_currentProject is null)
+        {
+            Dialog.Info(this, "Build mod", "Create or open a suit before building a mod.");
+            return;
+        }
+        if (!HasCurrentSuitBase())
+        {
+            Dialog.Info(this, "Build mod", "Set a playable and cutscene base before building this suit's mod.");
+            return;
+        }
+
+        ReadFieldsIntoProject(_currentProject);
+        var suits = _projectService ??= new SuitProjectService(_projectRootText.Text.Trim());
+        var suitPath = suits.SaveProject(_currentProject);
+        var matches = FindModsForSuit(suitPath, _currentProject.SlotId);
+        string? modPath;
+
+        if (matches.Count == 0)
+        {
+            var displayName = PromptForText(
+                "Create mod for this suit",
+                "Exports are mod-based. Give the new one-suit mod a display name:",
+                $"{_currentProject.DisplayName} Mod");
+            if (string.IsNullOrWhiteSpace(displayName))
+            {
+                return;
+            }
+
+            var modId = ModProjectService.DeriveModId(displayName);
+            if (string.IsNullOrWhiteSpace(modId))
+            {
+                Dialog.Warn(this, "Create mod", "That name does not contain a usable Mod ID.");
+                return;
+            }
+            if (ModService.ListMods().Any(m => string.Equals(m.ModId, modId, StringComparison.OrdinalIgnoreCase)))
+            {
+                Dialog.Warn(this, "Create mod", $"A mod with ID '{modId}' already exists. Add this suit to it from Home.");
+                return;
+            }
+
+            var mod = new NativeSuitModProject { ModId = modId, DisplayName = displayName.Trim() };
+            mod.Suits.Add(new ModSuitEntry
+            {
+                SuitProjectPath = ModService.MakeRelativeSuitProjectPath(suitPath),
+                SuitId = _currentProject.SlotId,
+                Enabled = true,
+                MenuOrder = 100,
+            });
+            modPath = ModService.SaveMod(mod);
+            AppendLog($"Created one-suit mod '{mod.DisplayName}' ({mod.ModId}) for this export.");
+            RefreshHomeTiles();
+        }
+        else if (matches.Count == 1)
+        {
+            modPath = matches[0].Path;
+        }
+        else
+        {
+            Dialog.Warn(this, "Choose a mod",
+                $"This suit belongs to {matches.Count} mods. Open the intended mod from Home and choose Build mod.\n\n" +
+                string.Join("\n", matches.Select(m => $"- {m.DisplayName} ({m.ModId})")));
+            return;
+        }
+
+        await BuildAndInstallModAsync(modPath);
+    }
+
+    private void InstallModForCurrentSuit()
+    {
+        if (_currentProject is null)
+        {
+            Dialog.Info(this, "Install mod", "Create or open a suit before installing a mod.");
+            return;
+        }
+        if (!HasCurrentSuitBase())
+        {
+            Dialog.Info(this, "Install mod", "Set a playable and cutscene base before installing this suit's mod.");
+            return;
+        }
+
+        var suits = _projectService ??= new SuitProjectService(_projectRootText.Text.Trim());
+        var suitPath = suits.SaveProject(_currentProject);
+        var matches = FindModsForSuit(suitPath, _currentProject.SlotId);
+        if (matches.Count == 1)
+        {
+            InstallMod(matches[0].Path);
+            return;
+        }
+
+        var detail = matches.Count == 0
+            ? "Build a mod for this suit first. The Build mod button can create a one-suit mod."
+            : "This suit belongs to more than one mod. Open the intended mod from Home and choose Install mod.";
+        Dialog.Info(this, "Install mod", detail);
+    }
+
+    private List<ModProjectService.ModSummary> FindModsForSuit(string suitPath, string suitId)
+    {
+        var result = new List<ModProjectService.ModSummary>();
+        foreach (var summary in ModService.ListMods())
+        {
+            var mod = ModService.LoadMod(summary.Path);
+            if (mod?.Suits is null)
+            {
+                continue;
+            }
+            if (mod.Suits.Any(entry =>
+                    string.Equals(entry.SuitId, suitId, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(ModService.ResolveSuitProjectPath(entry), suitPath, StringComparison.OrdinalIgnoreCase)))
+            {
+                result.Add(summary);
+            }
+        }
+        return result;
+    }
+
+    /// <summary>Chooses the mod the Home workspace is currently presenting.</summary>
+    private (ModProjectService.ModSummary? Summary, NativeSuitModProject? Project) ResolveHomeActiveMod(
+        IReadOnlyList<ModProjectService.ModSummary> mods)
+    {
+        ModProjectService.ModSummary? summary = null;
+        if (!string.IsNullOrWhiteSpace(_homeActiveModProjectPath))
+        {
+            summary = mods.FirstOrDefault(m => string.Equals(m.Path, _homeActiveModProjectPath, StringComparison.OrdinalIgnoreCase));
+        }
+
+        // When a saved suit is opened, favor the mod that owns it. This keeps Home's
+        // workspace coherent without pretending a suit belongs to an arbitrary mod.
+        if (summary is null && _currentProject is not null)
+        {
+            summary = mods.FirstOrDefault(m =>
+            {
+                var mod = ModService.LoadMod(m.Path);
+                return mod?.Suits.Any(entry => string.Equals(entry.SuitId, _currentProject.SlotId, StringComparison.OrdinalIgnoreCase)) == true;
+            });
+        }
+
+        summary ??= mods.FirstOrDefault();
+        if (summary is null)
+        {
+            _homeActiveModProjectPath = "";
+            return (null, null);
+        }
+
+        _homeActiveModProjectPath = summary.Path;
+        return (summary, ModService.LoadMod(summary.Path));
+    }
+
+    private void SelectHomeMod(string modProjectPath)
+    {
+        _homeActiveModProjectPath = modProjectPath;
+        RefreshHomeTiles();
+    }
+
+    /// <summary>Direct rail action for the Home-selected release collection.</summary>
+    private void BuildActiveModFromWorkspace()
+    {
+        var mods = ModService.ListMods().ToList();
+        var (summary, _) = ResolveHomeActiveMod(mods);
+        if (summary is null)
+        {
+            Dialog.Info(this, "Build mod", "Create or select a mod first. A mod can contain one suit or a whole collection.");
+            return;
+        }
+
+        var mod = ModService.LoadMod(summary.Path);
+        if (mod?.Suits.Any(entry => entry.Enabled) != true)
+        {
+            Dialog.Info(this, "Build mod", "Add at least one enabled suit to the active mod before building it.");
+            return;
+        }
+
+        BuildMod(summary.Path);
+    }
+
+    /// <summary>Build-focused rail screen for the currently active mod workspace.</summary>
+    private void RefreshBuildModTiles()
+    {
+        var mods = ModService.ListMods().ToList();
+        var (activeSummary, activeMod) = ResolveHomeActiveMod(mods);
+        var activeSuitCount = activeMod?.Suits.Count(entry => entry.Enabled) ?? 0;
+        var hasActiveMod = activeSummary is not null && activeMod is not null;
+        var hasBuild = hasActiveMod && File.Exists(Path.Combine(ModBuildRoot(activeSummary!.ModId), activeMod!.PackageBaseName + ".utoc"));
+
+        var hero = new VirtualTilePanel.HeroModel
+        {
+            Overline = "MOD RELEASE",
+            Title = hasActiveMod ? activeSummary!.DisplayName : "Choose a mod to build",
+            Subtitle = hasActiveMod
+                ? $"{activeSuitCount} enabled suit{(activeSuitCount == 1 ? "" : "s")} will build and install as one game release."
+                : "Select a saved mod or create one, then build and install it from here.",
+            ThumbAccent = Theme.Gold,
+            Chips = new List<(string, Color)>
+            {
+                (hasActiveMod ? "mod selected" : "no mod selected", hasActiveMod ? Theme.Research : Theme.Warn),
+                ($"{activeSuitCount} enabled suit{(activeSuitCount == 1 ? "" : "s")}", activeSuitCount > 0 ? Theme.Parts : Theme.OnDarkMuted),
+                (hasBuild ? "release built" : "not built", hasBuild ? Theme.Good : Theme.Warn),
+            },
+            Workflow = new[]
+            {
+                new VirtualTilePanel.HeroModel.WorkflowStep { Label = "1. MOD", Detail = hasActiveMod ? "mod selected" : "choose a mod", Accent = Theme.Research, Complete = hasActiveMod, Current = !hasActiveMod },
+                new VirtualTilePanel.HeroModel.WorkflowStep { Label = "2. SUITS", Detail = activeSuitCount > 0 ? "ready to package" : "add a suit", Accent = Theme.Base, Complete = activeSuitCount > 0, Current = hasActiveMod && activeSuitCount == 0 },
+                new VirtualTilePanel.HeroModel.WorkflowStep { Label = "3. BUILD", Detail = hasBuild ? "installed release" : "build and install", Accent = Theme.Gold, Current = hasActiveMod && activeSuitCount > 0 },
+            },
+        };
+
+        const string SectionRelease = "RELEASE";
+        const string SectionMods = "MODS";
+        var tiles = new List<VirtualTilePanel.Tile>();
+        if (hasActiveMod)
+        {
+            var modPath = activeSummary!.Path;
+            var modId = activeSummary.ModId;
+            if (activeSuitCount > 0)
+            {
+                tiles.Add(new VirtualTilePanel.Tile
+                {
+                    Section = SectionRelease,
+                    Title = $"Build {TrimMiddle(activeSummary.DisplayName, 20)}",
+                    Subtitle = "build and install your mod/suits to your game",
+                    Accent = Theme.Gold,
+                    OnClick = () => BuildMod(modPath),
+                });
+            }
+            else
+            {
+                tiles.Add(new VirtualTilePanel.Tile
+                {
+                    Section = SectionRelease,
+                    Title = "Add a suit first",
+                    Subtitle = "this mod has no enabled suits to build",
+                    Accent = Theme.Base,
+                    Dashed = true,
+                    OnClick = () => EditModSuits(modPath),
+                });
+            }
+            tiles.Add(new VirtualTilePanel.Tile
+            {
+                Section = SectionRelease,
+                Title = "Manage mod",
+                Subtitle = "identity, suits, output",
+                Accent = Theme.Research,
+                OnClick = () => OpenModDetails(modPath, modId),
+            });
+            if (hasBuild)
+            {
+                tiles.Add(new VirtualTilePanel.Tile
+                {
+                    Section = SectionRelease,
+                    Title = "Open build output",
+                    Subtitle = "inspect the release files",
+                    Accent = Theme.Inspector,
+                    OnClick = () => OpenModBuildOutput(modId),
+                });
+            }
+        }
+        else
+        {
+            tiles.Add(new VirtualTilePanel.Tile
+            {
+                Section = SectionRelease,
+                Title = "＋ New mod",
+                Subtitle = "start a release collection",
+                Accent = Theme.Gold,
+                Dashed = true,
+                OnClick = CreateModFlow,
+            });
+        }
+
+        foreach (var summary in mods.Take(8))
+        {
+            var captured = summary;
+            var isActive = hasActiveMod && string.Equals(captured.Path, activeSummary!.Path, StringComparison.OrdinalIgnoreCase);
+            tiles.Add(new VirtualTilePanel.Tile
+            {
+                Section = SectionMods,
+                Title = TrimMiddle(captured.DisplayName, 26),
+                Subtitle = isActive
+                    ? $"{captured.SuitCount} suit{(captured.SuitCount == 1 ? "" : "s")} · active"
+                    : $"{captured.SuitCount} suit{(captured.SuitCount == 1 ? "" : "s")} · select to build",
+                Accent = isActive ? Theme.Research : Theme.OnDarkMuted,
+                OnClick = () =>
+                {
+                    _homeActiveModProjectPath = captured.Path;
+                    RefreshBuildModTiles();
+                },
+                MenuFactory = () => BuildModTileMenu(captured.Path, captured.ModId),
+            });
+        }
+
+        ShowVirtualTiles(tiles, hero: hero);
+    }
+
+    /// <summary>
+    /// Creates a new suit as a real saved project and immediately attaches it to
+    /// the selected mod. This makes Home's "Add suit" action truthful: the suit
+    /// is already in the release collection before the user starts picking its base.
+    /// </summary>
+    private void StartNewSuitInMod(string modProjectPath)
+    {
+        var selectedMod = ModService.LoadMod(modProjectPath);
+        if (selectedMod is null)
+        {
+            Dialog.Error(this, "Add suit", "The selected mod could not be loaded.");
+            return;
+        }
+
+        StartNewSuit(project =>
+        {
+            try
+            {
+                var suits = _projectService ??= new SuitProjectService(_projectRootText.Text.Trim());
+                var suitPath = suits.SaveProject(project);
+                var mod = ModService.LoadMod(modProjectPath);
+                if (mod is null)
+                {
+                    throw new InvalidOperationException("The selected mod was removed while the new suit was being created.");
+                }
+
+                if (!mod.Suits.Any(entry => string.Equals(entry.SuitId, project.SlotId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    AddSuitEntries(mod, new[] { suitPath });
+                    ModService.SaveMod(mod);
+                }
+
+                _homeActiveModProjectPath = modProjectPath;
+                AppendLog($"Added new suit '{project.DisplayName}' to mod '{mod.DisplayName}'.");
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"Could not add the new suit to the selected mod: {ex.Message}");
+                Dialog.Error(this, "Add suit", ex.Message);
+            }
+        });
+    }
 
     private void AddModTiles(List<VirtualTilePanel.Tile> tiles)
     {
@@ -65,6 +406,8 @@ public sealed partial class MainForm
             Dialog.Error(this, "Could not open mod", $"Failed to read the mod project:\n{modProjectPath}");
             return;
         }
+
+        _homeActiveModProjectPath = modProjectPath;
 
         // Resolve each entry to a readable suit name, falling back to the cached id.
         var suits = new List<(string Suit, string Slot)>();
@@ -160,6 +503,7 @@ public sealed partial class MainForm
         AddSuitEntries(mod, picked);
 
         var saved = ModService.SaveMod(mod);
+        _homeActiveModProjectPath = saved;
         AppendLog($"Created mod '{mod.DisplayName}' ({modId}) with {mod.Suits.Count} suit(s): {saved}");
         RefreshHomeTiles();
     }
@@ -226,8 +570,27 @@ public sealed partial class MainForm
             return;
         }
         ModService.DeleteMod(modProjectPath);
+        if (string.Equals(_homeActiveModProjectPath, modProjectPath, StringComparison.OrdinalIgnoreCase))
+        {
+            _homeActiveModProjectPath = "";
+        }
         AppendLog($"Deleted mod project '{label}' (suits kept).");
         RefreshHomeTiles();
+    }
+
+    private enum ModInstallStatus { Complete, Partial, Failed }
+
+    private sealed class ModInstallResult
+    {
+        public ModInstallStatus Status;
+        public string ModName = "";
+        public string BuildOutput = "";
+        public string TrioDestination = "";
+        public string TagsDestination = "";
+        public string RegistryDestination = "";
+        public string AssetRegistryDestination = "";
+        public int FilesCopied;
+        public string Detail = "";
     }
 
     /// <summary>
@@ -237,24 +600,57 @@ public sealed partial class MainForm
     /// </summary>
     private void InstallMod(string modProjectPath)
     {
+        var result = InstallModCore(modProjectPath);
+        if (result.Status == ModInstallStatus.Failed)
+        {
+            Dialog.Error(this, "Install failed",
+                $"'{result.ModName}' was not installed.\n\n{result.Detail}\n\n" +
+                "Check that the game is closed and that the mod folder in Settings points at the " +
+                "game's Paks\\~mods directory.");
+        }
+        else if (result.Status == ModInstallStatus.Partial)
+        {
+            Dialog.Warn(this, "Install incomplete", result.Detail);
+        }
+    }
+
+    private ModInstallResult InstallModCore(string modProjectPath)
+    {
         var mod = ModService.LoadMod(modProjectPath);
-        if (mod is null) { AppendLog("Install mod: could not load project."); return; }
+        if (mod is null)
+        {
+            AppendLog("Install mod: could not load project.");
+            return new ModInstallResult { Status = ModInstallStatus.Failed, ModName = "this mod", Detail = "Could not load the mod project." };
+        }
         ModProjectService.ApplyDerivedFields(mod);
 
         var outRoot = ModBuildRoot(mod.ModId);
         var trioBase = Path.Combine(outRoot, mod.PackageBaseName);
+        var result = new ModInstallResult
+        {
+            ModName = mod.DisplayName,
+            BuildOutput = outRoot,
+            TrioDestination = AppSettings.Current.EffectiveGamePaksModFolder(),
+        };
         if (!File.Exists(trioBase + ".utoc"))
         {
             AppendLog($"Install mod: no built trio for '{mod.ModId}'. Right-click → Build mod first.");
-            return;
+            result.Status = ModInstallStatus.Failed;
+            result.Detail = "No built release trio was found. Build the mod first.";
+            return result;
         }
 
+        var installed = 0;
+        var trioFilesCopied = 0;
+        var tagsInstalled = false;
+        var registryInstalled = false;
+        var assetRegistryInstalled = false;
         try
         {
-            var installed = 0;
 
             // 1) trio → ~mods/Slot
-            var slotDest = AppSettings.Current.EffectiveGamePaksModFolder();
+            var slotDest = result.TrioDestination;
+            ModReleaseStep("Copying the IoStore release files…");
             Directory.CreateDirectory(slotDest);
             foreach (var ext in new[] { ".pak", ".ucas", ".utoc" })
             {
@@ -263,6 +659,7 @@ public sealed partial class MainForm
                 {
                     File.Copy(src, Path.Combine(slotDest, mod.PackageBaseName + ext), overwrite: true);
                     installed++;
+                    trioFilesCopied++;
                 }
             }
             AppendLog($"  trio → {slotDest}");
@@ -272,42 +669,72 @@ public sealed partial class MainForm
             {
                 AppendLog("  ⚠ could not locate the game's LEGOBatmanLotDK folder from settings — trio copied, but ini + mod.json were NOT installed. Set the game paks path in Setup.");
                 AppendLog($"Install mod '{mod.DisplayName}': {installed} trio file(s) only.");
-                return;
+                result.Status = ModInstallStatus.Partial;
+                result.FilesCopied = installed;
+                result.Detail = "The release trio was copied, but Batcomputer could not locate the game root to install PawnTags.ini and mod.json.";
+                return result;
             }
 
             // 2) <ModId>PawnTags.ini → Config/Tags
             var iniSrc = Path.Combine(outRoot, "LooseFiles", "LEGOBatmanLotDK", "Config", "Tags", $"{mod.ModId}PawnTags.ini");
+            result.TagsDestination = Path.Combine(gameRoot, "Config", "Tags");
+            ModReleaseStep("Installing the PawnTags configuration…");
             if (File.Exists(iniSrc))
             {
-                var tagsDest = Path.Combine(gameRoot, "Config", "Tags");
+                var tagsDest = result.TagsDestination;
                 Directory.CreateDirectory(tagsDest);
                 File.Copy(iniSrc, Path.Combine(tagsDest, $"{mod.ModId}PawnTags.ini"), overwrite: true);
                 installed++;
+                tagsInstalled = true;
                 AppendLog($"  {mod.ModId}PawnTags.ini → {tagsDest}");
             }
 
             // 3) mod.json → ue4ss/Mods/NewSuitSlotNative/SuitMods/<ModId>/
             var modJsonSrc = Path.Combine(outRoot, "mod.json");
+            result.RegistryDestination = Path.Combine(gameRoot, "Binaries", "Win64", "ue4ss", "Mods", "NewSuitSlotNative", "SuitMods", mod.ModId);
+            ModReleaseStep("Installing the mod registry entry…");
             if (File.Exists(modJsonSrc))
             {
-                var suitModsDest = Path.Combine(gameRoot, "Binaries", "Win64", "ue4ss", "Mods", "NewSuitSlotNative", "SuitMods", mod.ModId);
+                var suitModsDest = result.RegistryDestination;
                 Directory.CreateDirectory(suitModsDest);
                 File.Copy(modJsonSrc, Path.Combine(suitModsDest, "mod.json"), overwrite: true);
                 installed++;
+                registryInstalled = true;
                 AppendLog($"  mod.json → {suitModsDest}");
             }
 
             AppendLog($"Installed mod '{mod.DisplayName}' — {installed} file(s). Restart the game to load it.");
+            var plugin = RegistryPluginService.CreateLayout(outRoot, mod.ModId);
+            var installRoot = Directory.GetParent(gameRoot)?.FullName;
+            result.AssetRegistryDestination = string.IsNullOrWhiteSpace(installRoot)
+                ? ""
+                : Path.Combine(installRoot, "Engine", "Plugins", "Mods", plugin.PluginName);
+            ModReleaseStep("Installing the Asset Registry plugin...");
+            if (File.Exists(plugin.DescriptorPath) && File.Exists(plugin.RegistryPath) &&
+                !string.IsNullOrWhiteSpace(result.AssetRegistryDestination))
+            {
+                CopyDirectoryContents(plugin.PluginDirectory, result.AssetRegistryDestination, overwrite: true);
+                installed += Directory.EnumerateFiles(plugin.PluginDirectory, "*", SearchOption.AllDirectories).Count();
+                assetRegistryInstalled = true;
+                AppendLog($"  {plugin.PluginName} -> {result.AssetRegistryDestination}");
+            }
+
+            result.Status = trioFilesCopied == 3 && tagsInstalled && registryInstalled && assetRegistryInstalled
+                ? ModInstallStatus.Complete
+                : ModInstallStatus.Partial;
+            result.FilesCopied = installed;
+            result.Detail = result.Status == ModInstallStatus.Complete
+                ? "The release is installed. Restart the game before testing the mod."
+                : "Some expected release files were missing, so this install may be incomplete. Check Diagnostics before testing.";
+            return result;
         }
         catch (Exception ex)
         {
             AppendLog($"Install mod failed: {ex.Message}");
-            // The user pressed Install and expects the mod to be in the game. A log line they may
-            // never scroll to is not an answer.
-            Dialog.Error(this, "Install failed",
-                $"'{mod.DisplayName}' was not installed.\n\n{ex.Message}\n\n" +
-                "Check that the game is closed and that the mod folder in Settings points at the " +
-                "game's Paks\\~mods directory.");
+            result.Status = ModInstallStatus.Failed;
+            result.FilesCopied = installed;
+            result.Detail = ex.Message;
+            return result;
         }
     }
 
@@ -324,6 +751,18 @@ public sealed partial class MainForm
             cursor = cursor.Parent;
         }
         return null;
+    }
+
+    /// <summary>Copies only this mod's generated plugin files; other installed mods remain untouched.</summary>
+    private static void CopyDirectoryContents(string sourceDirectory, string destinationDirectory, bool overwrite)
+    {
+        foreach (var source in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(sourceDirectory, source);
+            var destination = Path.Combine(destinationDirectory, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Copy(source, destination, overwrite);
+        }
     }
 
     private void OpenModBuildOutput(string modId)
@@ -399,11 +838,90 @@ public sealed partial class MainForm
     }
 
     /// <summary>
-    /// Builds the mod's aggregate loose products: <c>&lt;ModId&gt;PawnTags.ini</c>,
-    /// <c>ST_&lt;ModId&gt;</c> StringTable (.uasset/.uexp), and <c>mod.json</c>. The combined
-    /// IoStore trio (all suits' cooked assets in one pak) is the remaining fan-in step.
+    /// Builds a mod's only release unit: its aggregate loose files and one combined
+    /// IoStore trio. Suit projects are authoring inputs; they are not exported alone.
     /// </summary>
-    private void BuildMod(string modProjectPath) => _ = BuildModAsync(modProjectPath);
+    private ProgressDialog? _modReleaseProgress;
+
+    private void ModReleaseStep(string detail) => _modReleaseProgress?.Report(detail);
+
+    private void BuildMod(string modProjectPath) => _ = BuildAndInstallModAsync(modProjectPath);
+
+    /// <summary>
+    /// The user-facing build command creates the release and immediately deploys that
+    /// exact successful build. A failed package never falls through to an older trio.
+    /// </summary>
+    private async Task BuildAndInstallModAsync(string modProjectPath)
+    {
+        var progress = new ProgressDialog(this, "Building mod");
+        _modReleaseProgress = progress;
+        var built = false;
+        ModInstallResult? install = null;
+        Exception? unexpected = null;
+        try
+        {
+            progress.SetStep("Building mod release");
+            ModReleaseStep("Reading the mod and its saved suits…");
+            built = await BuildModAsync(modProjectPath);
+            if (built)
+            {
+                progress.SetStep("Installing mod to game");
+                ModReleaseStep("Preparing the game installation…");
+                install = InstallModCore(modProjectPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            unexpected = ex;
+            AppendLog($"Build and install mod failed: {ex.Message}");
+        }
+        finally
+        {
+            _modReleaseProgress = null;
+            progress.Dispose();
+        }
+
+        if (unexpected is not null)
+        {
+            Dialog.Error(this, "Build failed", $"The mod was not installed.\n\n{unexpected.Message}");
+            return;
+        }
+        if (!built)
+        {
+            Dialog.Error(this, "Build failed", "The mod did not finish packaging, so no files were installed. Check Diagnostics for the exact failed step.");
+            return;
+        }
+        if (install is not null)
+        {
+            ShowModReleaseResult(install);
+        }
+    }
+
+    private void ShowModReleaseResult(ModInstallResult result)
+    {
+        var isComplete = result.Status == ModInstallStatus.Complete;
+        var isPartial = result.Status == ModInstallStatus.Partial;
+        var model = new Dialog.Model
+        {
+            WindowTitle = "Batcomputer - Mod release",
+            Title = isComplete ? "Mod built and installed" : isPartial ? "Mod built; install incomplete" : "Mod installation failed",
+            Subtitle = string.IsNullOrWhiteSpace(result.ModName) ? "Mod release" : result.ModName,
+            Message = result.Detail,
+            Severity = isComplete ? Dialog.Level.Good : isPartial ? Dialog.Level.Warn : Dialog.Level.Crit,
+            PrimaryText = "Done",
+            CalloutTitle = isComplete ? "Ready for an in-game test" : "Review the installation locations",
+            CalloutDetail = isComplete
+                ? "Restart the game before testing this mod."
+                : "The exact problem is recorded in Diagnostics as well.",
+        };
+        model.Chips.Add(($"{result.FilesCopied} file{(result.FilesCopied == 1 ? "" : "s")} copied", isComplete ? Theme.Good : Theme.Warn));
+        if (!string.IsNullOrWhiteSpace(result.BuildOutput)) model.Fields.Add(("Build output", result.BuildOutput));
+        if (!string.IsNullOrWhiteSpace(result.TrioDestination)) model.Fields.Add(("Pak files", result.TrioDestination));
+        if (!string.IsNullOrWhiteSpace(result.TagsDestination)) model.Fields.Add(("PawnTags", result.TagsDestination));
+        if (!string.IsNullOrWhiteSpace(result.RegistryDestination)) model.Fields.Add(("Suit manifest", result.RegistryDestination));
+        if (!string.IsNullOrWhiteSpace(result.AssetRegistryDestination)) model.Fields.Add(("Asset Registry", result.AssetRegistryDestination));
+        Dialog.Show(this, model);
+    }
 
     /// <summary>
     /// Rebuilds every saved mod, in sequence. The suit equivalent (<see cref="UpdateAllSuitsAsync"/>)
@@ -432,7 +950,7 @@ public sealed partial class MainForm
         var names = string.Join("\n", mods.Select(m => $"  {m.DisplayName}  ({m.SuitCount} suit{(m.SuitCount == 1 ? "" : "s")})"));
         if (!Dialog.Confirm(this,
                 $"Rebuild {mods.Count} mod{(mods.Count == 1 ? "" : "s")}?",
-                $"{names}\n\nEach mod is re-bundled from its suits' last packaged output. Build the suits first if they're stale.",
+                $"{names}\n\nEach mod is rebuilt from the latest saved state of its included suits.",
                 confirmText: "Rebuild all"))
         {
             return;
@@ -446,8 +964,8 @@ public sealed partial class MainForm
             try
             {
                 AppendLog($"--- {m.DisplayName} ({m.ModId}) ---");
-                await BuildModAsync(m.Path);
-                ok++;
+                if (await BuildModAsync(m.Path)) ok++;
+                else failed.Add(m.DisplayName);
             }
             catch (Exception ex)
             {
@@ -469,16 +987,18 @@ public sealed partial class MainForm
         }
     }
 
-    private async Task BuildModAsync(string modProjectPath)
+    private async Task<bool> BuildModAsync(string modProjectPath)
     {
         var mod = ModService.LoadMod(modProjectPath);
-        if (mod is null) { AppendLog("Build mod: could not load project."); return; }
+        if (mod is null) { AppendLog("Build mod: could not load project."); return false; }
         ModProjectService.ApplyDerivedFields(mod);
+        ModReleaseStep("Checking enabled suits and gameplay tags…");
 
         var enabled = mod.Suits.Where(s => s.Enabled).ToList();
-        if (enabled.Count == 0) { AppendLog("Build mod: no enabled suits."); return; }
+        if (enabled.Count == 0) { AppendLog("Build mod: no enabled suits."); return false; }
 
-        var svc = new SuitProjectService(_projectRootText.Text.Trim());
+        var projectRoot = _projectRootText.Text.Trim();
+        var svc = new SuitProjectService(projectRoot);
         var tagRows = new List<PawnTagConfigService.TagRow>();
         var stEntries = new Dictionary<string, string>(StringComparer.Ordinal);
         var manifestSuits = new List<ModManifestSuit>();
@@ -492,7 +1012,7 @@ public sealed partial class MainForm
             if (string.IsNullOrWhiteSpace(suit.PawnTag))
             {
                 AppendLog($"Build mod ABORTED: suit '{suit.DisplayName}' ({suit.SlotId}) has no PawnTag. Set one before building.");
-                return;
+                return false;
             }
 
             var suitId = entry.SuitId;
@@ -518,10 +1038,11 @@ public sealed partial class MainForm
                 playable = suit.TargetPackages.Playable,
                 cutscene = suit.TargetPackages.Cutscene,
                 dcmd = suit.TargetPackages.Dcmd,
+                uimd = DeriveUimdPackagePath(suit.TargetPackages.Dcmd),
             });
         }
 
-        if (tagRows.Count == 0) { AppendLog("Build mod: nothing to build."); return; }
+        if (tagRows.Count == 0) { AppendLog("Build mod: nothing to build."); return false; }
 
         var outRoot = ModBuildRoot(mod.ModId);
         Directory.CreateDirectory(outRoot);
@@ -534,24 +1055,27 @@ public sealed partial class MainForm
         // 1) PawnTags.ini (deterministic; throws on empty/duplicate tags).
         try
         {
+            ModReleaseStep("Generating PawnTags configuration…");
             var looseRoot = Path.Combine(outRoot, "LooseFiles");
             var ini = new PawnTagConfigService().Generate(looseRoot, mod.ModId, tagRows);
-            if (ini.Status != "created") { AppendLog($"Build mod: PawnTags.ini failed: {ini.Error}"); return; }
+            if (ini.Status != "created") { AppendLog($"Build mod: PawnTags.ini failed: {ini.Error}"); return false; }
             AppendLog($"  PawnTags.ini: {ini.RowCount} tag(s) -> {ini.OutputPath}");
         }
-        catch (Exception ex) { AppendLog($"Build mod ABORTED: {ex.Message}"); return; }
+        catch (Exception ex) { AppendLog($"Build mod ABORTED: {ex.Message}"); return false; }
 
         // 2) StringTable ST_<ModId>.
+        ModReleaseStep("Generating the mod StringTable…");
         var stBase = Path.Combine(outRoot, "Stage", "LEGOBatmanLotDK", "Content", "Mods", mod.ModId, "Localization", $"ST_{mod.ModId}");
         var st = new StringTableGenService(_projectRootText.Text.Trim()).Generate(stBase, mod.ModId, stEntries);
         if (st.Status != "created")
         {
             AppendLog($"Build mod: StringTable failed: {st.Error}");
-            return;
+            return false;
         }
         AppendLog($"  StringTable: {st.EntryCount} entries (namespace {st.TableNamespace}) -> {st.OutputUasset}");
 
-        // 3) mod.json (schema 3) - the DLL's aggregate index.
+        // 3) Build the schema-3 aggregate index. It is written only after the merged
+        // stage validates, so a failed build never claims assets that were not packaged.
         var manifest = new ModManifest
         {
             mod_id = mod.ModId,
@@ -563,11 +1087,9 @@ public sealed partial class MainForm
             suits = manifestSuits,
         };
         var modJsonPath = Path.Combine(outRoot, "mod.json");
-        File.WriteAllText(modJsonPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
-        AppendLog($"  mod.json: {manifestSuits.Count} suit(s) -> {modJsonPath}");
 
-        // 4) Combined IoStore trio: merge each suit's already-staged cooked content +
-        //    the mod StringTable into one stage (no rebasing - distinct /Game roots),
+        // 4) Combined IoStore trio: prepare each suit's current authoring stage,
+        //    merge it with the mod StringTable (no rebasing - distinct /Game roots),
         //    re-patch each suit's DCMD/UIMD text to the mod table, retoc to-zen ONCE.
         try
         {
@@ -585,78 +1107,95 @@ public sealed partial class MainForm
                 var suit = svc.LoadProject(abs);
                 if (suit is null) continue;
 
-                // Bundle the immutable output of the suit's last successful Package
-                // operation. CurrentPackageContentRoot() points at a mutable authoring
-                // stage, which may contain a stale DCMD and omit package-only products
-                // such as the generated UIMD and generated textures.
-                var suitContentRoot = LastPackagedSuitContentRoot(suit);
                 var dcmdPkg = suit.TargetPackages?.Dcmd;
 
                 if (!string.IsNullOrWhiteSpace(dcmdPkg) && !seenDcmd.Add(dcmdPkg!))
                 {
                     AppendLog($"Build mod ABORTED: two suits share the asset path '{dcmdPkg}'. Each suit needs its own /Game/Mods/<folder> root.");
-                    return;
+                    return false;
                 }
-                if (string.IsNullOrWhiteSpace(dcmdPkg) || !Directory.Exists(suitContentRoot))
+                if (string.IsNullOrWhiteSpace(dcmdPkg))
                 {
-                    AppendLog($"Build mod ABORTED: suit '{suit.DisplayName}' has no packaged cooked content yet.");
-                    AppendLog($"  Open that suit and Package it once (Base → Package), then rebuild the mod.");
-                    return;
-                }
-
-                var requiredPackages = new[]
-                {
-                    (Role: "playable", Package: suit.TargetPackages?.Playable),
-                    (Role: "cutscene", Package: suit.TargetPackages?.Cutscene),
-                    (Role: "DCMD", Package: dcmdPkg),
-                    (Role: "UIMD", Package: DeriveUimdPackagePath(dcmdPkg!)),
-                };
-                var missingRequired = requiredPackages
-                    .Where(p => string.IsNullOrWhiteSpace(p.Package) ||
-                                !HasCookedPackagePair(suitContentRoot, p.Package!))
-                    .Select(p => $"{p.Role}: {p.Package ?? "<unset>"}")
-                    .ToList();
-                if (missingRequired.Count > 0)
-                {
-                    AppendLog($"Build mod ABORTED: suit '{suit.DisplayName}' has an incomplete last packaged stage.");
-                    foreach (var missing in missingRequired)
-                        AppendLog($"  missing {missing}");
-                    AppendLog("  Open that suit and Package it again, confirm its preflight passes, then rebuild the mod.");
-                    return;
+                    AppendLog($"Build mod ABORTED: suit '{suit.DisplayName}' has no generated DCMD package path.");
+                    return false;
                 }
 
-                AppendLog($"  packaged source validated for '{suit.DisplayName}': playable + cutscene + DCMD + UIMD");
+                ModReleaseStep($"Preparing {suit.DisplayName} for the shared release…");
+                if (!PrepareSuitForMod(suit, svc, out var suitContentRoot, out var prepareError))
+                {
+                    AppendLog($"Build mod ABORTED: could not prepare '{suit.DisplayName}': {prepareError}");
+                    return false;
+                }
+
+                AppendLog($"  prepared '{suit.DisplayName}': playable + cutscene + DCMD + UIMD");
                 MergeContentRoot(suitContentRoot, stageContent);
                 RepatchStagedSuitText(stageContent, suit, entry.SuitId, stObjectPath, mappings);
                 mergedSuits++;
                 AppendLog($"  bundled suit '{suit.DisplayName}' ({entry.SuitId}) → {suit.TargetPackages!.Dcmd}");
             }
 
+            ModReleaseStep("Validating the combined release…");
+            var validationErrors = ValidateModReleaseStage(mod, manifest, stageContent);
+            if (validationErrors.Count > 0)
+            {
+                AppendLog("Build mod ABORTED: combined stage validation failed.");
+                foreach (var error in validationErrors) AppendLog("  " + error);
+                return false;
+            }
+
+            File.WriteAllText(modJsonPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
+            AppendLog($"  mod.json: {manifestSuits.Count} suit(s) -> {modJsonPath}");
+
             var trioBase = Path.Combine(outRoot, mod.PackageBaseName);
+            ModReleaseStep($"Packing {mod.PackageBaseName} into an IoStore trio…");
             AppendLog($"Packing combined trio ({mod.PackageBaseName}) with retoc…");
             var retocExit = await RunRetocToZenAsync(stageRoot, trioBase + ".utoc");
             if (retocExit != 0)
             {
                 AppendLog($"Build mod: retoc to-zen failed (exit {retocExit}). Loose files are valid; trio not produced.");
-                return;
+                return false;
             }
+
+            // One cooked registry plugin per mod. The UE 5.6 commandlet verifies
+            // every primary ID before this release can be installed.
+            ModReleaseStep("Generating the mod Asset Registry plugin...");
+            var registry = await new RegistryPluginService().BuildAsync(
+                outRoot,
+                mod.ModId,
+                mod.DisplayName,
+                manifestSuits.Select(suit => new RegistryPluginService.RegistryRow(suit.dcmd)),
+                line => AppendLog("  registry: " + line));
+            if (!registry.Succeeded || registry.Layout is null)
+            {
+                AppendLog($"Build mod ABORTED: Asset Registry plugin failed: {registry.Error}");
+                if (!string.IsNullOrWhiteSpace(registry.VerificationLine))
+                {
+                    AppendLog("  registry verification: " + registry.VerificationLine);
+                }
+                return false;
+            }
+            AppendLog($"  Asset Registry: {registry.Rows.Count} PawnMetaData row(s) -> {registry.Layout.RegistryPath}");
+            AppendLog($"  Asset Registry config: {registry.Layout.GameIniPath}");
+            AppendLog("  registry verification: " + registry.VerificationLine);
 
             AppendLog($"Build mod '{mod.DisplayName}' COMPLETE — installable trio for {mergedSuits} suit(s):");
             AppendLog($"  {trioBase}.pak / .ucas / .utoc");
             AppendLog($"  {mod.ModId}PawnTags.ini + mod.json also under {outRoot}");
             AppendLog($"  Install: trio → ~mods/Slot,  ini → Config/Tags,  mod.json → ue4ss/Mods/NewSuitSlotNative/SuitMods/{mod.ModId}/");
             RefreshHomeTiles();
+            return true;
         }
         catch (Exception ex)
         {
             AppendLog($"Build mod failed during trio packaging: {ex.Message}");
             // Packaging produced nothing shippable - say so rather than looking like it worked.
-            if (!_batchMode)
+            if (!_batchMode && _modReleaseProgress is null)
             {
                 Dialog.Error(this, "Build failed",
                     $"The mod did not finish packaging.\n\n{ex.Message}\n\n" +
                     "No pak was written, so nothing was installed. The log has the full sequence.");
             }
+            return false;
         }
     }
 
@@ -673,26 +1212,137 @@ public sealed partial class MainForm
     }
 
     /// <summary>
-    /// Returns the stable Content tree emitted by the suit's most recent successful
-    /// Package operation. Aggregate mod builds intentionally do not read the mutable
-    /// PatchedNameMap/GraftedPart authoring stages.
+    /// Materializes one suit's current saved authoring state into the stage that will
+    /// be merged into a mod. Only the aggregate mod owns a final retoc export.
     /// </summary>
-    private string LastPackagedSuitContentRoot(NativeSuitProject suit)
+    private bool PrepareSuitForMod(NativeSuitProject suit, SuitProjectService projectService,
+        out string contentRoot, out string error)
     {
-        return Path.Combine(
-            AppSettings.GeneratedRootFor(_projectRootText.Text.Trim()),
-            "NativeSuitGuiProjects",
-            suit.SlotId,
-            "IoStore",
-            "Stage",
-            "LEGOBatmanLotDK",
-            "Content");
+        contentRoot = "";
+        error = "";
+        try
+        {
+            if (EnsureCrossKindHeadGraftHidesBaseHead(suit))
+            {
+                projectService.SaveProject(suit);
+                AppendLog($"  saved Head:0 removal for '{suit.DisplayName}' cross-kind head graft.");
+            }
+
+            var gliderComponent = ActiveGliderVisualComponent(suit);
+            if (!string.IsNullOrWhiteSpace(gliderComponent))
+            {
+                if (RemoveSavedRemovalForComponent(suit, gliderComponent))
+                {
+                    projectService.SaveProject(suit);
+                    AppendLog($"  removed stale remove-component rule for '{suit.DisplayName}' glider '{gliderComponent}'.");
+                }
+                RestoreProtectedGliderComponent(suit, gliderComponent);
+            }
+
+            ApplySavedComponentRemovals(suit, logNoRemovals: false);
+            contentRoot = CurrentPackageContentRoot(suit);
+            if (!Directory.Exists(contentRoot))
+            {
+                error = "no staged content exists. Set a base and let the tool build its editable stage first.";
+                return false;
+            }
+
+            StageGeneratedMaterialsIntoContentRoot(suit, contentRoot);
+            StageGeneratedTexturesIntoContentRoot(suit, contentRoot);
+            StageGeneratedDcmdIntoContentRoot(suit, contentRoot);
+            StageLibraryAnimsIntoContentRoot(suit, contentRoot);
+
+            if (suit.UseCustomArchetype)
+            {
+                var archetype = new AnimArchetypeGraftService().ApplyToPackagedRoot(suit, contentRoot);
+                foreach (var line in archetype.Log) AppendLog("    archetype: " + line);
+                if (string.Equals(archetype.Status, "error", StringComparison.OrdinalIgnoreCase) ||
+                    !string.IsNullOrWhiteSpace(archetype.Error))
+                {
+                    error = archetype.Error ?? "custom archetype preparation failed.";
+                    return false;
+                }
+            }
+
+            // Grafting can replace the stage from the donor, so material bindings must
+            // be applied after the last possible stage rebuild.
+            ApplySavedMaterials(suit, logIfNone: false);
+
+            var requiredPackages = new[]
+            {
+                (Role: "playable", Package: suit.TargetPackages?.Playable),
+                (Role: "cutscene", Package: suit.TargetPackages?.Cutscene),
+                (Role: "DCMD", Package: suit.TargetPackages?.Dcmd),
+                (Role: "UIMD", Package: DeriveUimdPackagePath(suit.TargetPackages?.Dcmd ?? "")),
+            };
+            var stagedContentRoot = contentRoot;
+            var missing = requiredPackages
+                .Where(p => string.IsNullOrWhiteSpace(p.Package) || !HasCookedPackagePair(stagedContentRoot, p.Package!))
+                .Select(p => $"{p.Role}: {p.Package ?? "<unset>"}")
+                .ToList();
+            if (missing.Count > 0)
+            {
+                error = "required staged assets are missing: " + string.Join(", ", missing);
+                return false;
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
     }
 
     private static bool HasCookedPackagePair(string contentRoot, string packagePath)
     {
         var basePath = PackagePathToContentPath(contentRoot, packagePath);
         return File.Exists(basePath + ".uasset") && File.Exists(basePath + ".uexp");
+    }
+
+    /// <summary>Checks the aggregate stage matches the schema-3 mod registration contract.</summary>
+    private static List<string> ValidateModReleaseStage(NativeSuitModProject mod, ModManifest manifest, string contentRoot)
+    {
+        var errors = new List<string>();
+        if (string.IsNullOrWhiteSpace(mod.ModId)) errors.Add("mod_id is empty.");
+        if (string.IsNullOrWhiteSpace(mod.PackageBaseName)) errors.Add("package_base_name is empty.");
+        if (!string.Equals(manifest.string_table, StringTableGenService.ObjectPathFor(mod.ModId), StringComparison.Ordinal))
+            errors.Add("mod.json string_table does not point at the mod-owned StringTable.");
+        if (!HasCookedPackagePair(contentRoot, StringTableGenService.PackagePathFor(mod.ModId)))
+            errors.Add("mod-owned StringTable is missing its .uasset or .uexp.");
+
+        var suitIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pawnTags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var suit in manifest.suits)
+        {
+            if (!suitIds.Add(suit.suit_id)) errors.Add($"duplicate suit_id '{suit.suit_id}'.");
+            if (string.IsNullOrWhiteSpace(suit.pawn_tag) || !pawnTags.Add(suit.pawn_tag))
+                errors.Add($"missing or duplicate PawnTag for suit '{suit.suit_id}'.");
+
+            foreach (var required in new[]
+            {
+                (Role: "playable", Package: suit.playable),
+                (Role: "cutscene", Package: suit.cutscene),
+                (Role: "DCMD", Package: suit.dcmd),
+                (Role: "UIMD", Package: suit.uimd),
+            })
+            {
+                var normalized = UnrealPathUtil.NormalizePackagePath(required.Package);
+                if (string.IsNullOrWhiteSpace(required.Package) || !string.Equals(required.Package, normalized, StringComparison.Ordinal))
+                {
+                    errors.Add($"{suit.suit_id} {required.Role} is not a clean package path: '{required.Package}'.");
+                    continue;
+                }
+                if (!normalized.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase))
+                {
+                    errors.Add($"{suit.suit_id} {required.Role} must be under /Game/Mods/: '{normalized}'.");
+                    continue;
+                }
+                if (!HasCookedPackagePair(contentRoot, normalized))
+                    errors.Add($"{suit.suit_id} {required.Role} is missing its .uasset or .uexp: '{normalized}'.");
+            }
+        }
+        return errors;
     }
 
     /// <summary>
@@ -846,5 +1496,6 @@ public sealed partial class MainForm
         public string playable { get; set; } = "";
         public string cutscene { get; set; } = "";
         public string dcmd { get; set; } = "";
+        public string uimd { get; set; } = "";
     }
 }

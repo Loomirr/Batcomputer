@@ -13,11 +13,28 @@ namespace Batcomputer;
 /// </summary>
 public sealed partial class MainForm
 {
+    private sealed record TextureCookPreset(
+        string Id,
+        string Label,
+        string TemplateJson,
+        int Width,
+        int Height,
+        string PixelFormat)
+    {
+        public string Detail => $"{Width} x {Height} - {PixelFormat}";
+
+        public override string ToString() => $"{Label} - {Detail}";
+    }
+
     private static Image? TryLoadCategoryIcon(string category)
     {
-        var fileNames = category.Equals("Textures", StringComparison.OrdinalIgnoreCase)
-            ? new[] { "Textures.png", "Materials.png" }
-            : new[] { category + ".png" };
+        var fileNames = category.Equals("3D viewer", StringComparison.OrdinalIgnoreCase)
+            ? new[] { "3D.gif" }
+            : category.Equals("Build mod", StringComparison.OrdinalIgnoreCase)
+                ? new[] { "BuildMod.png" }
+            : category.Equals("Textures", StringComparison.OrdinalIgnoreCase)
+                ? new[] { "Textures.png", "Materials.png" }
+                : new[] { category + ".png" };
 
         foreach (var fileName in fileNames)
         {
@@ -163,11 +180,11 @@ public sealed partial class MainForm
             {
                 new()
                 {
-                    Title = "Current proof",
-                    Subtitle = "2048² PF_DXT5 / BC3",
+                    Title = "Native cook profiles",
+                    Subtitle = "256px to 2K, template-backed",
                     Accent = Theme.Textures,
-                    OnClick = () => AppendLog("Texture notes: the current cooker clones one known-good 2048x2048 PF_DXT5 template and duplicates it to a same-length /Game path."),
-                    ToolTip = "The working path uses external .ubulk mips and preserves the template's inline mips. FModel verified this for user-imported 2048x2048 PNG Texture2D assets."
+                    OnClick = () => AppendLog("Texture notes: profiles use matching native Texture2D templates. Color and roughness masks can use compact 1024x1024 BC1; UI icons use 256px BC7/BC3; normal maps remain on the proven 2K BC5 template."),
+                    ToolTip = "Texture size and compression come from real native templates, including their mip layout. This is safer than changing a 2K asset header without matching mip payloads."
                 },
                 new()
                 {
@@ -198,7 +215,7 @@ public sealed partial class MainForm
                 Accent = Theme.Textures,
                 Dashed = true,
                 OnClick = () => { _ = ImportTextureFromPngAsync(); },
-                ToolTip = "Imports a 2048x2048 PNG, cooks it through the template Texture2D duplicate path, and remembers the new /Game path on this suit."
+                ToolTip = "Imports a PNG using a selected native cook profile, then remembers its /Game path on this suit. Compact mask and icon profiles reduce the final mod size."
             }
         };
 
@@ -219,13 +236,14 @@ public sealed partial class MainForm
             tiles.Add(new VirtualTilePanel.Tile
             {
                 Title = TrimMiddle(title, 30),
-                Subtitle = $"{texture.Kind} · click copies path\n{TrimMiddle(texture.PackagePath, 38)}",
+                Subtitle = $"{texture.Kind} · {TextureCookDetail(texture)}\n{TrimMiddle(texture.PackagePath, 38)}",
                 Accent = exists ? Theme.Textures : Theme.OnDarkMuted,
                 Image = LoadTextureThumbnail(texture.SourcePng),
                 OnClick = () => CopyText(texture.PackagePath, $"Copied texture package path: {texture.PackagePath}"),
                 ToolTip =
                     $"Package: {texture.PackagePath}\n" +
                     $"Object: {TextureObjectPath(texture)}\n" +
+                    $"Cook: {TextureCookDetail(texture)}\n" +
                     $"PNG: {texture.SourcePng}\n" +
                     $"IoStore: {texture.IoStoreRoot}",
                 MenuFactory = () => BuildTextureTileMenu(texture),
@@ -241,6 +259,8 @@ public sealed partial class MainForm
         menu.Items.Add("Copy package path", null, (_, _) => CopyText(texture.PackagePath, $"Copied texture package path: {texture.PackagePath}"));
         menu.Items.Add("Copy object path", null, (_, _) => CopyText(TextureObjectPath(texture), $"Copied texture object path: {TextureObjectPath(texture)}"));
         menu.Items.Add("Copy source PNG path", null, (_, _) => CopyText(texture.SourcePng, $"Copied source PNG path: {texture.SourcePng}"));
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Change cook profile...", null, (_, _) => ChangeGeneratedTextureCookProfile(texture));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Open output folder", null, (_, _) => OpenTextureOutputFolder(texture));
         menu.Items.Add("Copy IoStore folder", null, (_, _) => CopyText(texture.IoStoreRoot, $"Copied IoStore folder: {texture.IoStoreRoot}"));
@@ -383,7 +403,7 @@ public sealed partial class MainForm
             return;
         }
 
-        var textureSettings = PromptForTextureImportSettings(Path.GetFileNameWithoutExtension(dlg.FileName));
+        var textureSettings = PromptForTextureImportSettings(Path.GetFileNameWithoutExtension(dlg.FileName), projectRoot);
         if (textureSettings is null || string.IsNullOrWhiteSpace(textureSettings.Value.Name))
         {
             AppendLog("Texture import cancelled (no texture name entered).");
@@ -392,7 +412,8 @@ public sealed partial class MainForm
 
         var requestedName = textureSettings.Value.Name;
         var textureKind = textureSettings.Value.Kind;
-        var templateJson = DefaultTextureTemplateJson(projectRoot, textureKind);
+        var cookPreset = textureSettings.Value.Preset;
+        var templateJson = cookPreset.TemplateJson;
         if (string.IsNullOrWhiteSpace(templateJson) || !File.Exists(templateJson))
         {
             AppendLog("Texture import needs a proven Texture2D template JSON. Expected a standalone BGRA8/BC5/BC1/BC3 template under _generated.");
@@ -410,7 +431,8 @@ public sealed partial class MainForm
             return;
         }
 
-        AppendLog($"Texture template selected: {Path.GetFileName(templateJson)} ({TextureTemplatePixelFormat(templateJson)})");
+        AppendLog($"Texture profile selected: {cookPreset.Label} ({cookPreset.Detail})");
+        AppendLog($"  template: {Path.GetFileName(templateJson)}");
         if (_currentProject.GeneratedTextures.Any(t =>
                 t.DisplayName.Equals(requestedName, StringComparison.OrdinalIgnoreCase)))
         {
@@ -519,7 +541,8 @@ public sealed partial class MainForm
                 outputPackagePath,
                 packageBaseName,
                 requestedName,
-                textureKind);
+                textureKind,
+                cookPreset);
 
             _currentProject.GeneratedTextures.RemoveAll(t =>
                 t.PackagePath.Equals(entry.PackagePath, StringComparison.OrdinalIgnoreCase));
@@ -550,12 +573,17 @@ public sealed partial class MainForm
         string outputPackagePath,
         string packageBaseName,
         string displayName,
-        string kind)
+        string kind,
+        TextureCookPreset cookPreset)
     {
         var entry = new GeneratedTextureEntry
         {
             DisplayName = displayName,
             Kind = string.IsNullOrWhiteSpace(kind) ? "Texture" : kind,
+            CookProfile = cookPreset.Id,
+            CookWidth = cookPreset.Width,
+            CookHeight = cookPreset.Height,
+            CookPixelFormat = cookPreset.PixelFormat,
             SourcePng = sourcePng,
             PackagePath = outputPackagePath,
             ObjectPath = ToObjectPath(outputPackagePath),
@@ -601,52 +629,151 @@ public sealed partial class MainForm
 
     private static string DefaultTextureTemplateJson(string projectRoot, string textureKind = "")
     {
+        return AvailableTextureCookPresets(projectRoot, textureKind).FirstOrDefault()?.TemplateJson ?? "";
+    }
+
+    private static List<TextureCookPreset> AvailableTextureCookPresets(string projectRoot, string textureKind)
+    {
         var bgraPath = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_DroneControlBGRA8", "T_GA_DroneControl_BatGirl_AO.json");
+        var bgra1kPath = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_CloudMaskBGRA8_1K", "T_CloudMask.json");
         var bc5Path = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_BatarangBC5", "T_Batarang_N.json");
         var suitIconBc7Path = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_SuitIconUI_BC7", "T_SuitIcon_NULL_BCA.json");
         var suitIconDxt5Path = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_SuitIconUI_DXT5", "T_SuitIcon_NULL_BCA.json");
         var uiDxt5Path = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_DebugMenuUI_DXT5", "T_DebugMenuStarImageBorder2.json");
         var dxt5Path = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_BatclawLogo_DXT5", "T_DECAL_BatclawLogo.json");
         var bc1Path = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_BatarangAO", "T_Batarang_AO.json");
+        var colorMaskBc1Path = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_EoMColorMask_DXT1", "T_TPAGE_Batman_TheBatman2025_ColourMask.json");
 
-        var preferredPaths = textureKind.Contains("normal", StringComparison.OrdinalIgnoreCase)
-            ? new[] { bc5Path, bgraPath, dxt5Path, bc1Path }
-            : textureKind.Contains("color mask", StringComparison.OrdinalIgnoreCase) ||
-              textureKind.Contains("colour mask", StringComparison.OrdinalIgnoreCase)
-                // Use the standalone BGRA8 shell for generated colour masks.
-                // The raw EoM/ColourMask donor contains split IoStore data-resource
-                // metadata that FModel does not reliably rediscover after a
-                // variable-length package/name rewrite. BGRA8 is already proven
-                // through the standalone texture path and preserves mask channels
-                // without compression quantization.
-                ? new[] { bgraPath, dxt5Path, bc1Path }
-            : textureKind.Contains("ui", StringComparison.OrdinalIgnoreCase) ||
-              textureKind.Contains("icon", StringComparison.OrdinalIgnoreCase)
-                ? new[] { suitIconBc7Path, bgraPath, suitIconDxt5Path, uiDxt5Path, dxt5Path, bc1Path }
-            : new[] { bgraPath, dxt5Path, bc1Path };
-
-        foreach (var path in preferredPaths)
+        var candidates = new List<TextureCookPreset>();
+        void Add(string id, string label, string template, int width, int height, string pixelFormat)
         {
-            if (File.Exists(path))
+            if (File.Exists(template))
             {
-                return path;
+                candidates.Add(new TextureCookPreset(id, label, template, width, height, pixelFormat));
             }
         }
 
-        foreach (var path in new[]
+        if (textureKind.Contains("normal", StringComparison.OrdinalIgnoreCase))
         {
-            Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureTemplateUnpacked_20260712", "TemplatePng.json"),
-            Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureTemplateUnpacked", "TemplatePng.json")
-        })
+            Add("normal-2k-bc5", "2K normal (proven)", bc5Path, 2048, 2048, "PF_BC5");
+        }
+        else if (IsColorMaskTextureKind(textureKind) ||
+                 textureKind.Contains("rough", StringComparison.OrdinalIgnoreCase) ||
+                 textureKind.Contains("spec", StringComparison.OrdinalIgnoreCase))
         {
-            if (File.Exists(path))
-            {
-                return path;
-            }
+            Add("mask-1k-bc1", "1K compact mask (recommended)", colorMaskBc1Path, 1024, 1024, "PF_DXT1");
+            Add("mask-2k-bc1", "2K compressed mask", bc1Path, 2048, 2048, "PF_DXT1");
+            Add("mask-2k-bgra8", "2K uncompressed mask", bgraPath, 2048, 2048, "PF_B8G8R8A8");
+        }
+        else if (IsUiTextureKind(textureKind))
+        {
+            Add("icon-256-bc7", "256px UI icon (recommended)", suitIconBc7Path, 256, 256, "PF_BC7");
+            Add("icon-256-bc3", "256px UI icon", suitIconDxt5Path, 256, 256, "PF_DXT5");
+            Add("ui-500-bc3", "500px UI texture", uiDxt5Path, 500, 500, "PF_DXT5");
+        }
+        else
+        {
+            Add("character-2k-bc3", "2K compressed color (recommended)", dxt5Path, 2048, 2048, "PF_DXT5");
+            Add("character-2k-bgra8", "2K uncompressed color", bgraPath, 2048, 2048, "PF_B8G8R8A8");
+            Add("character-1k-bgra8", "1K uncompressed color (experimental)", bgra1kPath, 1024, 1024, "PF_B8G8R8A8");
         }
 
-        var exportRoot = AppSettings.Current.EffectiveExportContentRoot();
-        return Path.Combine(exportRoot, "Mods", "ElectricLBM2", "T_Batman_ElectricLBM2_ColorMask.json");
+        return candidates;
+    }
+
+    private static string TextureCookDetail(GeneratedTextureEntry texture)
+    {
+        if (texture.CookWidth > 0 && texture.CookHeight > 0 && !string.IsNullOrWhiteSpace(texture.CookPixelFormat))
+        {
+            return $"{texture.CookWidth}x{texture.CookHeight} {texture.CookPixelFormat}";
+        }
+
+        return TextureTemplateSizeDetail(texture.TemplateJson);
+    }
+
+    private static string TextureTemplateSizeDetail(string? templateJson)
+    {
+        if (string.IsNullOrWhiteSpace(templateJson) || !File.Exists(templateJson))
+        {
+            return "unknown cook";
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(templateJson));
+            var root = FindTexture2DJsonRoot(doc.RootElement);
+            var width = root.TryGetProperty("SizeX", out var widthEl) && widthEl.TryGetInt32(out var widthValue) ? widthValue : 0;
+            var height = root.TryGetProperty("SizeY", out var heightEl) && heightEl.TryGetInt32(out var heightValue) ? heightValue : 0;
+            var pixelFormat = root.TryGetProperty("PixelFormat", out var formatEl) ? formatEl.GetString() ?? "unknown" : "unknown";
+            return width > 0 && height > 0 ? $"{width}x{height} {pixelFormat}" : pixelFormat;
+        }
+        catch
+        {
+            return "unknown cook";
+        }
+    }
+
+    private void ChangeGeneratedTextureCookProfile(GeneratedTextureEntry texture)
+    {
+        EnsureProject();
+        if (_currentProject is null)
+        {
+            return;
+        }
+
+        var projectRoot = _projectRootText.Text.Trim();
+        var preset = PromptForTextureCookPreset(texture.Kind, projectRoot, texture.CookProfile);
+        if (preset is null)
+        {
+            return;
+        }
+
+        if (string.Equals(texture.TemplateJson, preset.TemplateJson, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(texture.CookProfile, preset.Id, StringComparison.OrdinalIgnoreCase))
+        {
+            AppendLog($"Texture '{texture.DisplayName}' already uses {preset.Label}.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(texture.OutputRoot))
+        {
+            AppendLog($"Texture profile change skipped '{texture.DisplayName}': generated output folder is missing.");
+            return;
+        }
+
+        var oldTemplate = texture.TemplateJson;
+        var oldProfile = texture.CookProfile;
+        var oldWidth = texture.CookWidth;
+        var oldHeight = texture.CookHeight;
+        var oldPixelFormat = texture.CookPixelFormat;
+        texture.TemplateJson = preset.TemplateJson;
+        texture.CookProfile = preset.Id;
+        texture.CookWidth = preset.Width;
+        texture.CookHeight = preset.Height;
+        texture.CookPixelFormat = preset.PixelFormat;
+        var cookedContentRoot = Path.Combine(texture.OutputRoot, "Cooked", "LEGOBatmanLotDK", "Content");
+        if (!EnsureGeneratedTextureCooked(texture, cookedContentRoot))
+        {
+            texture.TemplateJson = oldTemplate;
+            texture.CookProfile = oldProfile;
+            texture.CookWidth = oldWidth;
+            texture.CookHeight = oldHeight;
+            texture.CookPixelFormat = oldPixelFormat;
+            AppendLog($"Texture '{texture.DisplayName}' kept its previous cook profile because the recook failed.");
+            return;
+        }
+
+        try
+        {
+            (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(_currentProject);
+            AppendLog($"Texture '{texture.DisplayName}' now uses {preset.Label} ({preset.Detail}).");
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Texture profile save warning: {ex.Message}");
+        }
+
+        RefreshToyboxTiles();
     }
 
     private static string TextureTemplatePixelFormat(string templateJson)
@@ -1319,6 +1446,11 @@ public sealed partial class MainForm
 
     private bool UpgradeGeneratedTextureTemplateIfAvailable(GeneratedTextureEntry texture)
     {
+        if (!string.IsNullOrWhiteSpace(texture.CookProfile))
+        {
+            return false;
+        }
+
         var projectRoot = _projectRootText.Text.Trim();
         var preferred = DefaultTextureTemplateJson(projectRoot, texture.Kind);
         if (string.IsNullOrWhiteSpace(preferred) ||
@@ -1437,13 +1569,13 @@ public sealed partial class MainForm
         if (project.IconRight.Equals(oldPath, StringComparison.OrdinalIgnoreCase)) project.IconRight = newPath;
     }
 
-    private void EnsureGeneratedTextureCooked(GeneratedTextureEntry texture, string cookedContentRoot)
+    private bool EnsureGeneratedTextureCooked(GeneratedTextureEntry texture, string cookedContentRoot)
     {
         if (string.IsNullOrWhiteSpace(texture.SourcePng) ||
             string.IsNullOrWhiteSpace(texture.TemplateJson) ||
             string.IsNullOrWhiteSpace(texture.PackagePath))
         {
-            return;
+            return false;
         }
 
         var sourceBase = PackagePathToContentPath(cookedContentRoot, texture.PackagePath);
@@ -1456,19 +1588,19 @@ public sealed partial class MainForm
 
         if (!needsRecook)
         {
-            return;
+            return true;
         }
 
         if (!File.Exists(texture.SourcePng))
         {
             AppendLog($"Texture recook skipped '{texture.DisplayName}': source PNG missing: {texture.SourcePng}");
-            return;
+            return false;
         }
 
         if (!File.Exists(texture.TemplateJson))
         {
             AppendLog($"Texture recook skipped '{texture.DisplayName}': template JSON missing: {texture.TemplateJson}");
-            return;
+            return false;
         }
 
         var nearestMips = UseNearestNeighborMipsForTextureKind(texture.Kind);
@@ -1494,10 +1626,11 @@ public sealed partial class MainForm
         if (!result.Status.Equals("created", StringComparison.OrdinalIgnoreCase))
         {
             AppendLog($"  texture recook failed: {result.Error?.Split('\n').FirstOrDefault() ?? result.Status}");
-            return;
+            return false;
         }
 
         AppendLog($"  texture recook ok: {texture.PackagePath}");
+        return true;
     }
 
     private static bool IsColorMaskTextureKind(string? kind) =>
@@ -1809,4 +1942,7 @@ public sealed partial class MainForm
         if (suitStem.EndsWith(suffix, StringComparison.Ordinal)) suitStem = suitStem[..^suffix.Length];
         return $"/Game/Mods/{mod}/UI/DA_UIMD_Batman_{suitStem}";
     }
+
+    internal static string DeriveUimdPackagePathForTest(string dcmdPackagePath) =>
+        DeriveUimdPackagePath(dcmdPackagePath);
 }

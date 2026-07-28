@@ -3,10 +3,9 @@ using System.Windows.Forms;
 namespace Batcomputer;
 
 /// <summary>
-/// A searchable list of base characters (every BP_*_Playable in the shipped
-/// catalog) so users pick a character instead of hand-browsing .uasset paths.
-/// The caller resolves the cutscene/DCMD siblings from the returned playable
-/// package (same folder, predictable naming).
+/// A searchable visual-base picker. Any character cutscene can supply a suit's
+/// appearance; a separate real playable supplies movement, equipment, and the
+/// runtime archetype when the visual source does not have its own machinery.
 /// </summary>
 public sealed partial class BaseCharacterPicker : Form
 {
@@ -15,8 +14,14 @@ public sealed partial class BaseCharacterPicker : Form
     private List<GameDataAsset> _all = new();
     private List<GameDataAsset> _view = new();
 
-    /// <summary>Selected playable /Game package path (no extension), or null.</summary>
-    public string? SelectedPlayablePackage { get; private set; }
+    /// <summary>Selected visual /Game package path (no extension), or null.</summary>
+    public string? SelectedVisualPackage { get; private set; }
+
+    /// <summary>
+    /// Compatibility alias for the gameplay-donor flow. In playables-only mode,
+    /// this is guaranteed to be a real _Playable package.
+    /// </summary>
+    public string? SelectedPlayablePackage => SelectedVisualPackage;
 
     /// <summary>True when the user asked to browse files manually instead.</summary>
     public bool BrowseManuallyRequested { get; private set; }
@@ -25,8 +30,9 @@ public sealed partial class BaseCharacterPicker : Form
 
     public BaseCharacterPicker() : this(false) { }
 
-    /// <param name="playablesOnly">When true, only proven _Playable heroes are shown -
-    /// used when picking a machinery donor (villains have no machinery to donate).</param>
+    /// <param name="playablesOnly">
+    /// When true, show only real _Playable characters for gameplay inheritance.
+    /// </param>
     public BaseCharacterPicker(bool playablesOnly)
     {
         _playablesOnly = playablesOnly;
@@ -37,94 +43,104 @@ public sealed partial class BaseCharacterPicker : Form
         }
 
         Controls.Clear();
-
-        Text = playablesOnly ? "Pick a character to inherit machinery from" : "Pick base character";
-        Width = 560;
-        Height = 560;
+        Text = playablesOnly ? "Pick a gameplay donor" : "Pick visual base";
+        Width = 600;
+        Height = 570;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
         MaximizeBox = false;
         BackColor = Theme.WindowBg;
         ForeColor = Theme.OnDark;
 
-        // Every character pawn BP - not just the ready-to-play _Playable heroes, but
-        // villains/NPCs (_Quest/_Boss/_Goon/_Civilian) too, so you can build on ANY
-        // character. Non-Playable bases are EXPERIMENTAL: they may lack the playable
-        // machinery (cutscene, ability archetype) the tool expects, and some villains are
-        // bigfigs (different skeleton → parts won't graft). Playables are ranked first.
         _all = GameDataService.Instance.AssetsOfClass("BlueprintGeneratedClass")
-            .Where(a => IsCharacterPawnBp(a.Path) &&
-                        (!_playablesOnly || CharType(a.Path) == "Playable"))
-            .OrderBy(a => CharTypeRank(a.Path))
-            .ThenBy(a => a.Path, StringComparer.OrdinalIgnoreCase)
+            .Where(asset => BaseEligibilityService.IsVisualCharacterPackage(asset.Path) &&
+                            (!_playablesOnly || BaseEligibilityService.IsGameplayDonorPackage(asset.Path)))
+            .OrderBy(asset => CharacterTypeRank(asset.Path))
+            .ThenBy(asset => asset.Path, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var lbl = new Label
+        var prompt = new Label
         {
             Text = playablesOnly
-                ? "Pick a hero — your villain/NPC base will inherit its abilities, equipment, animation, and cutscene."
-                : "Search characters (name, family, or type). Playables are proven; villains/NPCs are experimental.",
-            Left = 14, Top = 12, Width = 520, ForeColor = Theme.OnDark
+                ? "Pick a real playable. It supplies movement, equipment, animation, and runtime behavior."
+                : "Pick any character or cutscene for the visual starting point. Batcomputer asks for a playable donor when the visual source needs one.",
+            Left = 14,
+            Top = 12,
+            Width = 556,
+            Height = 42,
+            ForeColor = Theme.OnDark
         };
-        _search.Left = 14; _search.Top = 34; _search.Width = 520;
-        _search.BackColor = Theme.SlateDark; _search.ForeColor = Theme.OnDark;
+
+        _search.Left = 14;
+        _search.Top = 58;
+        _search.Width = 556;
+        _search.BackColor = Theme.SlateDark;
+        _search.ForeColor = Theme.OnDark;
         _search.TextChanged += (_, _) => ApplyFilter();
 
-        _list.Left = 14; _list.Top = 64; _list.Width = 520; _list.Height = 400;
-        _list.BackColor = Theme.SlateDark; _list.ForeColor = Theme.OnDark;
+        _list.Left = 14;
+        _list.Top = 88;
+        _list.Width = 556;
+        _list.Height = 376;
+        _list.BackColor = Theme.SlateDark;
+        _list.ForeColor = Theme.OnDark;
         _list.DoubleClick += (_, _) => Accept();
 
-        var browse = new Button { Text = "Browse files…", Left = 14, Top = 474, Width = 120, Height = 30 };
+        var browse = new Button { Text = "Browse files...", Left = 14, Top = 482, Width = 120, Height = 30 };
         Theme.StyleDarkButton(browse);
         browse.Click += (_, _) => { BrowseManuallyRequested = true; DialogResult = DialogResult.OK; Close(); };
 
-        var ok = new Button { Text = "Use as base", Left = 344, Top = 474, Width = 110, Height = 30 };
-        Theme.StyleGoldButton(ok);
-        ok.Click += (_, _) => Accept();
-        var cancel = new Button { Text = "Cancel", Left = 458, Top = 474, Width = 76, Height = 30, DialogResult = DialogResult.Cancel };
+        var accept = new Button { Text = playablesOnly ? "Use donor" : "Use visual base", Left = 380, Top = 482, Width = 110, Height = 30 };
+        Theme.StyleGoldButton(accept);
+        accept.Click += (_, _) => Accept();
+
+        var cancel = new Button { Text = "Cancel", Left = 494, Top = 482, Width = 76, Height = 30, DialogResult = DialogResult.Cancel };
         Theme.StyleDarkButton(cancel);
 
-        Controls.AddRange(new Control[] { lbl, _search, _list, browse, ok, cancel });
-        AcceptButton = ok;
+        Controls.AddRange(new Control[] { prompt, _search, _list, browse, accept, cancel });
+        AcceptButton = accept;
         CancelButton = cancel;
         ApplyFilter();
     }
 
     private void ApplyFilter()
     {
-        var q = _search.Text.Trim();
-        _view = string.IsNullOrWhiteSpace(q)
+        var query = _search.Text.Trim();
+        _view = string.IsNullOrWhiteSpace(query)
             ? _all
-            : _all.Where(a => a.Path.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                              DisplayName(a.Path).Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+            : _all.Where(asset => asset.Path.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                                  DisplayName(asset.Path).Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
+
         _list.BeginUpdate();
         _list.Items.Clear();
-        foreach (var a in _view)
+        foreach (var asset in _view)
         {
-            _list.Items.Add(DisplayName(a.Path));
+            _list.Items.Add(DisplayName(asset.Path));
         }
         _list.EndUpdate();
-        if (_list.Items.Count > 0) _list.SelectedIndex = 0;
+        if (_list.Items.Count > 0)
+        {
+            _list.SelectedIndex = 0;
+        }
     }
 
     private void Accept()
     {
-        var i = _list.SelectedIndex;
-        if (i < 0 || i >= _view.Count)
+        var index = _list.SelectedIndex;
+        if (index < 0 || index >= _view.Count)
         {
             return;
         }
-        SelectedPlayablePackage = _view[i].Path;
+
+        SelectedVisualPackage = _view[index].Path;
         DialogResult = DialogResult.OK;
         Close();
     }
 
-    // "Batman · The Batman 2025  [Playable]" - family, name, and the base TYPE so the
-    // user knows whether it's a proven playable or an experimental villain/NPC.
     private static string DisplayName(string packagePath)
     {
         var name = AssetName(packagePath).Replace("BP_", "");
-        foreach (var suffix in new[] { "_Playable", "_Quest", "_Boss", "_Goon", "_Civilian", "_Batcave" })
+        foreach (var suffix in new[] { "_Default_Cutscene", "_Cutscene", "_Playable", "_Quest", "_Boss", "_Goon", "_Civilian", "_Batcave" })
         {
             if (name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
             {
@@ -132,54 +148,45 @@ public sealed partial class BaseCharacterPicker : Form
                 break;
             }
         }
-        var segs = packagePath.Split('/');
-        var family = segs.Length >= 2 ? segs[^2] : "";
-        var type = CharType(packagePath);
-        var label = string.IsNullOrWhiteSpace(family) ? name.Replace('_', ' ') : $"{family}  ·  {name.Replace('_', ' ')}";
-        return type == "Playable" ? $"{label}   [Playable]" : $"{label}   [{type} — experimental]";
-    }
 
-    /// <summary>Is this a character pawn blueprint (not an archetype, equipment def, cutscene,
-    /// projectile, data asset, etc.)?</summary>
-    private static bool IsCharacterPawnBp(string path)
-    {
-        var n = AssetName(path);
-        if (!n.StartsWith("BP_", StringComparison.OrdinalIgnoreCase)) return false;
-        if (!path.Contains("/Characters/", StringComparison.OrdinalIgnoreCase)) return false;
-        if (path.Contains("/BP_Master/", StringComparison.OrdinalIgnoreCase)) return false;
-        foreach (var bad in new[]
+        var segments = packagePath.Split('/');
+        var family = segments.Length >= 2 ? segments[^2] : "";
+        var type = CharacterType(packagePath);
+        var label = string.IsNullOrWhiteSpace(family)
+            ? name.Replace('_', ' ')
+            : $"{family} - {name.Replace('_', ' ')}";
+        var role = type switch
         {
-            "Archetype", "_ED", "_Inst", "_Cutscene", "_CUT", "HoverData", "Projectile",
-            "Weapon", "_Data", "Upgrades", "_Ability", "Effect", "_Default_Civilian_",
-            "_Batcave" // batcave display-only variants — not useful as playable bases
-        })
-        {
-            if (n.Contains(bad, StringComparison.OrdinalIgnoreCase)) return false;
-        }
-        return true;
+            "Playable" => "Gameplay donor",
+            "Cutscene" => "Cutscene visual",
+            _ => type + " visual"
+        };
+        return $"{label}   [{role}]";
     }
 
-    private static string CharType(string path)
+    private static string CharacterType(string packagePath)
     {
-        var n = AssetName(path);
-        if (n.EndsWith("_Playable", StringComparison.OrdinalIgnoreCase)) return "Playable";
-        if (n.EndsWith("_Boss", StringComparison.OrdinalIgnoreCase)) return "Boss";
-        if (n.EndsWith("_Goon", StringComparison.OrdinalIgnoreCase)) return "Goon";
-        if (n.EndsWith("_Quest", StringComparison.OrdinalIgnoreCase)) return "Quest NPC";
-        if (n.EndsWith("_Civilian", StringComparison.OrdinalIgnoreCase)) return "Civilian";
-        if (n.EndsWith("_Batcave", StringComparison.OrdinalIgnoreCase)) return "Batcave";
-        return "Other";
+        var name = AssetName(packagePath);
+        if (name.Contains("_Cutscene", StringComparison.OrdinalIgnoreCase)) return "Cutscene";
+        if (name.EndsWith("_Playable", StringComparison.OrdinalIgnoreCase)) return "Playable";
+        if (name.EndsWith("_Boss", StringComparison.OrdinalIgnoreCase)) return "Boss";
+        if (name.EndsWith("_Goon", StringComparison.OrdinalIgnoreCase)) return "Goon";
+        if (name.EndsWith("_Quest", StringComparison.OrdinalIgnoreCase)) return "Quest NPC";
+        if (name.EndsWith("_Civilian", StringComparison.OrdinalIgnoreCase)) return "Civilian";
+        if (name.EndsWith("_Batcave", StringComparison.OrdinalIgnoreCase)) return "Batcave";
+        return "Character";
     }
 
-    private static int CharTypeRank(string path) => CharType(path) switch
+    private static int CharacterTypeRank(string packagePath) => CharacterType(packagePath) switch
     {
-        "Playable" => 0,
-        "Batcave" => 1,
-        "Quest NPC" => 2,
-        "Boss" => 3,
-        "Civilian" => 4,
-        "Goon" => 5,
-        _ => 6
+        "Cutscene" => 0,
+        "Playable" => 1,
+        "Batcave" => 2,
+        "Quest NPC" => 3,
+        "Boss" => 4,
+        "Civilian" => 5,
+        "Goon" => 6,
+        _ => 7
     };
 
     private static string AssetName(string packagePath) =>

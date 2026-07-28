@@ -172,7 +172,15 @@ public static class Dialog
                     Left = Pad + 86, Top = y, Width = W - Pad * 2 - 86, Height = 17,
                     Text = value, Font = Theme.Mono, ForeColor = Theme.OnDark, AutoEllipsis = true,
                 };
-                tips.SetToolTip(v, value);
+                tips.SetToolTip(v, value + "\n\nRight-click to copy path");
+                var copyMenu = new ContextMenuStrip();
+                copyMenu.Items.Add("Copy path", null, (_, _) =>
+                {
+                    try { Clipboard.SetText(value); }
+                    catch { /* clipboard may be busy */ }
+                });
+                l.ContextMenuStrip = copyMenu;
+                v.ContextMenuStrip = copyMenu;
                 body.Controls.Add(l);
                 body.Controls.Add(v);
                 y += 19;

@@ -39,6 +39,7 @@
   <ItemGroup>
     <!-- Compiled INTO the assembly (see EmbeddedAssets) so the exe carries its own art. -->
     <EmbeddedResource Include="Assets\**\*.png" />
+    <EmbeddedResource Include="Assets\**\*.gif" />
     <!-- Also embedded, so the window/taskbar icon works in the single-file build. -->
     <EmbeddedResource Include="Assets\Icon.ico" />
     <!-- Vendored three.js (MIT, r128) for the offline in-app 3D preview. Embedded so the exe carries

@@ -64,7 +64,7 @@ public sealed partial class MainForm
     }
 
     /// <summary>
-    /// The ☰ overflow menu - everything that isn't Package/Install, grouped by intent:
+    /// The ☰ overflow menu - everything that isn't Build mod/Install mod, grouped by intent:
     /// suit lifecycle, this-suit build tools, library-wide actions, then settings.
     /// </summary>
     private ContextMenuStrip BuildMainMenu()
@@ -80,7 +80,6 @@ public sealed partial class MainForm
         menu.Items.Add("Clean generated output…", null, (_, _) => CleanGeneratedOutputForCurrentSuit());
         menu.Items.Add(new ToolStripSeparator());
 
-        menu.Items.Add("Update ALL suits…", null, (_, _) => { _ = UpdateAllSuitsAsync(); });
         menu.Items.Add("Update ALL mods…", null, (_, _) => { _ = UpdateAllModsAsync(); });
         // Reuse the existing refresh menu (it already carries the research-profile warning).
         menu.Items.Add(new ToolStripMenuItem("Refresh game assets") { DropDown = BuildAssetRefreshMenu() });
@@ -171,9 +170,8 @@ public sealed partial class MainForm
     private Control CreatePackagePanel()
     {
         var box = new GroupBox { Dock = DockStyle.Fill, Text = "Package and install" };
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 7, Padding = new Padding(12) };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6, Padding = new Padding(12) };
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
@@ -181,37 +179,31 @@ public sealed partial class MainForm
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         box.Controls.Add(layout);
 
-        layout.Controls.Add(new Label { Dock = DockStyle.Fill, Text = "Build the IoStore pak trio from your edited stage, then install it into the game's mod folder." }, 0, 0);
+        layout.Controls.Add(new Label { Dock = DockStyle.Fill, Text = "Build and install mods. A mod may contain one suit, but the mod is always the release unit." }, 0, 0);
 
-        _packagePatchedIoStoreButton.Text = "Package current IoStore";
+        _packagePatchedIoStoreButton.Text = "Build mod for current suit";
         _packagePatchedIoStoreButton.Dock = DockStyle.Left;
         _packagePatchedIoStoreButton.Width = 220;
         layout.Controls.Add(_packagePatchedIoStoreButton, 0, 1);
 
-        _v2PreflightButton.Text = "Run V2 preflight";
-        _v2PreflightButton.Dock = DockStyle.Left;
-        _v2PreflightButton.Width = 220;
-        _v2PreflightButton.Click += (_, _) => RunV2PreflightFromUi();
-        layout.Controls.Add(_v2PreflightButton, 0, 2);
-
-        _installButton.Text = "Install into game (~mods\\Slot)";
+        _installButton.Text = "Install containing mod";
         _installButton.Dock = DockStyle.Left;
         _installButton.Width = 260;
-        _installButton.Click += (_, _) => InstallTrio();
-        layout.Controls.Add(_installButton, 0, 3);
+        _installButton.Click += (_, _) => InstallModForCurrentSuit();
+        layout.Controls.Add(_installButton, 0, 2);
 
         _verifyGameLogButton.Text = "Verify last UE4SS log";
         _verifyGameLogButton.Dock = DockStyle.Left;
         _verifyGameLogButton.Width = 220;
         _verifyGameLogButton.Click += (_, _) => VerifyLastGameLogForCurrentSuit();
-        layout.Controls.Add(_verifyGameLogButton, 0, 4);
+        layout.Controls.Add(_verifyGameLogButton, 0, 3);
 
         layout.Controls.Add(new Label
         {
             Dock = DockStyle.Fill,
             ForeColor = Color.DarkOrange,
             Text = "After install: launch the game, F8 probes paths, Ctrl+F8 runs the self-bounce donor test, F9 runs the old command swap. Remove older paks with the same /Game/Mods paths so the new trio wins the mount."
-        }, 0, 5);
+        }, 0, 4);
         return box;
     }
 

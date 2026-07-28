@@ -255,6 +255,55 @@ internal static class TextureDecodeService
     }
 
     /// <summary>
+    /// Exports the green channel of the game's RAO map as a conventional grayscale AO texture.
+    /// The recovered EoM material wiring uses RAO.G for ambient-occlusion mixing; three.js samples
+    /// an aoMap from its red channel, so copy the value into RGB rather than binding RAO directly.
+    /// </summary>
+    public static bool TryExportRaoGreenAsAo(UTexture2D rao, string destPath)
+    {
+        var d = TryDecode(rao);
+        if (d is null)
+        {
+            return false;
+        }
+        try
+        {
+            using var bmp = new Bitmap(d.Width, d.Height, PixelFormat.Format32bppArgb);
+            var bits = bmp.LockBits(new Rectangle(0, 0, d.Width, d.Height), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+            try
+            {
+                var row = new byte[d.Width * 4];
+                for (var y = 0; y < d.Height; y++)
+                {
+                    for (var x = 0; x < d.Width; x++)
+                    {
+                        var ao = d.Pixels[y * d.Width + x].g;
+                        var o = x * 4;
+                        row[o + 0] = ao;
+                        row[o + 1] = ao;
+                        row[o + 2] = ao;
+                        row[o + 3] = 255;
+                    }
+                    System.Runtime.InteropServices.Marshal.Copy(row, 0, bits.Scan0 + y * bits.Stride, row.Length);
+                }
+            }
+            finally
+            {
+                bmp.UnlockBits(bits);
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+            bmp.Save(destPath, ImageFormat.Png);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"    RAO AO export failed for {rao.Name}: {ex.Message.Split('\n')[0]}");
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Bakes the shared LEGO mouth sheet into a drawable mouth.
     ///
     /// T_LEGOface_Mouth_BC is pure white RGB with the shape entirely in ALPHA: the opaque region is
@@ -508,6 +557,61 @@ internal static class TextureDecodeService
     /// Writes <paramref name="texture"/> to <paramref name="destPath"/> as PNG. Returns false when the
     /// format isn't one we decode or the texture has no usable mip.
     /// </summary>
+    /// Bakes a face print for MULTIPLY compositing over the head. The zone textures are white masks
+    /// with the shape in ALPHA; the colour is the material's "<feature> Tint". Drawing them as a lit
+    /// overlay double-lights the ink and washes it out to bright orange. Baking
+    /// rgb = lerp(white, tint, alpha) with alpha forced opaque lets the viewer multiply the sheet
+    /// over the head: untouched where the mask is empty, tinted where the print is, and shaded by
+    /// the head underneath rather than by its own light.
+    public static bool TryBakeFacePrint(UTexture2D texture, string destPath, Color tint)
+    {
+        try
+        {
+            var mip = texture.GetFirstMip();
+            if (mip?.BulkData?.Data is not { Length: > 0 } data || Codec(texture.Format) is not { } codec)
+            {
+                return false;
+            }
+            var pixels = new BcDecoder().DecodeRaw(data, mip.SizeX, mip.SizeY, codec);
+            if (pixels.Length < mip.SizeX * mip.SizeY)
+            {
+                return false;
+            }
+            using var bmp = new Bitmap(mip.SizeX, mip.SizeY, PixelFormat.Format32bppArgb);
+            var rect = new Rectangle(0, 0, mip.SizeX, mip.SizeY);
+            var bits = bmp.LockBits(rect, ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+            try
+            {
+                var row = new byte[mip.SizeX * 4];
+                for (var y = 0; y < mip.SizeY; y++)
+                {
+                    for (var x = 0; x < mip.SizeX; x++)
+                    {
+                        var px = pixels[(y * mip.SizeX) + x];
+                        var a = px.a / 255f;
+                        row[(x * 4) + 0] = (byte)(255 + ((tint.B - 255) * a));
+                        row[(x * 4) + 1] = (byte)(255 + ((tint.G - 255) * a));
+                        row[(x * 4) + 2] = (byte)(255 + ((tint.R - 255) * a));
+                        row[(x * 4) + 3] = 255;
+                    }
+                    System.Runtime.InteropServices.Marshal.Copy(
+                        row, 0, bits.Scan0 + (y * bits.Stride), row.Length);
+                }
+            }
+            finally
+            {
+                bmp.UnlockBits(bits);
+            }
+            Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+            bmp.Save(destPath, ImageFormat.Png);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public static bool TryExportPng(UTexture2D texture, string destPath, bool reconstructNormalZ = false,
         bool keepAlpha = false)
     {

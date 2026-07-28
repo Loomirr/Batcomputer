@@ -14,7 +14,6 @@ public sealed partial class MainForm
     private FlowLayoutPanel? _viewerSources;
     private string _viewerSource = "My suits";
     private List<CharacterCatalogService.Entry> _viewerEntries = new();
-
     private TableLayoutPanel? _viewerHostLayout;
     private Control? _viewerPanel;
 
@@ -37,6 +36,8 @@ public sealed partial class MainForm
         _toyboxTileGrid.Visible = false;
         _viewerPanel.Visible = true;
         _viewerPanel.BringToFront();
+        SetViewerWorkspaceExpanded(true);
+        RefreshViewerCustomSuits();
     }
 
     private void HideViewerPanel()
@@ -44,6 +45,34 @@ public sealed partial class MainForm
         if (_viewerPanel is not null)
         {
             _viewerPanel.Visible = false;
+        }
+        SetViewerWorkspaceExpanded(false);
+    }
+
+    /// <summary>Lets the viewer use the designer space normally occupied by character + inspector.</summary>
+    private void SetViewerWorkspaceExpanded(bool expanded)
+    {
+        if (_toyboxBodyLayout is null || _toyboxWorkspaceSplit is null || _viewerHostLayout is null)
+        {
+            return;
+        }
+
+        _yourCharacter.Visible = !expanded;
+        _toyboxBodyLayout.ColumnStyles[1].Width = expanded ? 0 : 340;
+        _toyboxWorkspaceSplit.Panel2Collapsed = expanded;
+
+        // The viewer has its own source/search controls, so reclaim the browser-only toolbar and
+        // footer row while it is open. The normal toybox restores exactly when another category is
+        // selected.
+        _viewerHostLayout.RowStyles[0].Height = expanded ? 0 : 40;
+        _viewerHostLayout.RowStyles[2].Height = expanded ? 0 : 26;
+        if (_viewerHostLayout.GetControlFromPosition(0, 0) is { } toolbar)
+        {
+            toolbar.Visible = !expanded;
+        }
+        if (_viewerHostLayout.GetControlFromPosition(0, 2) is { } footer)
+        {
+            footer.Visible = !expanded;
         }
     }
 
@@ -134,6 +163,7 @@ public sealed partial class MainForm
         right.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         _viewer = new ModelPreviewControl { Dock = DockStyle.Fill };
+        _viewer.PlacementSaveRequested += (_, args) => SaveViewerPlacement(args);
         right.Controls.Add(_viewer, 0, 0);
 
         _viewerStatus = new Label
@@ -164,6 +194,19 @@ public sealed partial class MainForm
         {
             _viewerStatus!.Text = "Could not read the character list: " + ex.Message.Split('\n')[0];
         }
+        RefreshViewerList();
+    }
+
+    /// <summary>Refreshes only local suit projects; the expensive pak catalogue remains cached.</summary>
+    private void RefreshViewerCustomSuits()
+    {
+        if (_viewerList is null)
+        {
+            return;
+        }
+
+        _viewerEntries.RemoveAll(entry => entry.Origin == CharacterCatalogService.Source.CustomSuit);
+        _viewerEntries.AddRange(CharacterCatalogService.CustomSuits(AppSettings.Current.EffectiveProjectRoot()));
         RefreshViewerList();
     }
 
@@ -219,21 +262,38 @@ public sealed partial class MainForm
         }
         if (entry.Origin == CharacterCatalogService.Source.CustomSuit)
         {
-            // Custom suits are assembled from the project's own base + parts, which the packaging
-            // path resolves. Until that is wired in, preview the base the suit is built from.
-            _viewerStatus!.Text = $"{entry.Name}: custom suit preview is not wired up yet.";
-            _viewer?.ShowMessage("Custom suit preview is coming next - "
-                                 + "playable and cutscene characters work now.");
+            var project = string.IsNullOrWhiteSpace(entry.ProjectPath)
+                ? null
+                : new SuitProjectService(AppSettings.Current.EffectiveProjectRoot()).LoadProject(entry.ProjectPath);
+            if (project is null)
+            {
+                _viewerStatus!.Text = $"{entry.Name}: the saved suit project could not be read.";
+                _viewer?.ShowMessage("Could not read this suit project.");
+                return;
+            }
+            ShowCharacterInViewer(string.Empty, entry.Name, project);
             return;
         }
         ShowCharacterInViewer(entry.ObjectPath, entry.Name);
     }
 
     /// <summary>Builds and shows a character; used by the tab and by "View in 3D" on My character.</summary>
-    private async void ShowCharacterInViewer(string objectPath, string label)
+    private async void ShowCharacterInViewer(string objectPath, string label, NativeSuitProject? project = null)
     {
+        if (project is not null && EnsureCrossKindHeadGraftHidesBaseHead(project))
+        {
+            try
+            {
+                new SuitProjectService(AppSettings.Current.EffectiveProjectRoot()).SaveProject(project);
+                AppendLog($"Viewer: saved Head:0 removal for cross-kind head graft on '{project.DisplayName}'.");
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"Viewer: could not save cross-kind head removal: {ex.Message}");
+            }
+        }
         _viewer?.ShowMessage($"Building {label}...");
-        _viewerStatus!.Text = $"Building {label} - decoding meshes, materials and expressions...";
+        _viewerStatus!.Text = $"Building {label} - decoding meshes, materials and parts...";
         _viewerLoadButton!.Enabled = false;
         try
         {
@@ -241,9 +301,13 @@ public sealed partial class MainForm
             var paks = settings.GamePaksRoot ?? string.Empty;
             var usmap = settings.EffectiveUsmapPath() ?? string.Empty;
             var folder = await Task.Run(() =>
-                ModelPreviewService.BuildPreviewCharacter(paks, usmap, objectPath));
+                project is null
+                    ? ModelPreviewService.BuildPreviewCharacter(paks, usmap, objectPath)
+                    : ModelPreviewService.BuildPreviewSuit(paks, usmap, project, settings.EffectiveProjectRoot()));
             await _viewer!.ShowFolderAsync(folder);
-            _viewerStatus.Text = $"{label} - drag to orbit, scroll to zoom.";
+            _viewerStatus.Text = project is null
+                ? $"{label} - drag to orbit, scroll to zoom."
+                : $"{label} - drag to orbit, scroll to zoom. Part adjustments stay in the 3D viewer.";
         }
         catch (Exception ex)
         {
@@ -257,27 +321,44 @@ public sealed partial class MainForm
         }
     }
 
-    /// <summary>Jumps to the viewer tab and loads the base the current suit is built on.</summary>
+    private void SaveViewerPlacement(PreviewPlacementSaveRequestedEventArgs args)
+    {
+        var component = args.Component.Trim();
+        if (component.Length == 0 || string.IsNullOrWhiteSpace(args.LayoutKey))
+        {
+            return;
+        }
+
+        var isZero = Math.Abs(args.OffsetX) < 0.00001f &&
+                     Math.Abs(args.OffsetY) < 0.00001f &&
+                     Math.Abs(args.OffsetZ) < 0.00001f;
+        if (!ViewerLayoutService.Save(
+                AppSettings.Current.EffectiveProjectRoot(),
+                args.LayoutKey,
+                component,
+                args.OffsetX,
+                args.OffsetY,
+                args.OffsetZ,
+                args.UvChannel))
+        {
+            _viewerStatus!.Text = "Could not save that viewer alignment.";
+            return;
+        }
+
+        _viewerStatus!.Text = isZero && args.UvChannel is null
+            ? $"{component}: viewer overrides reset."
+            : $"{component}: viewer alignment and UV saved.";
+    }
+
+    /// <summary>Jumps to the viewer tab and loads the current suit with its saved edits.</summary>
     private void ViewCurrentSuitIn3D()
     {
         SelectComboValue(_toyboxCategoryCombo, ViewerCategory);
-        var basePath = _currentProject?.PlayableTemplate?.Uasset;
-        if (string.IsNullOrWhiteSpace(basePath))
+        if (_currentProject?.PlayableTemplate is null)
         {
             _viewer?.ShowMessage("Pick a base character first, then view the suit in 3D.");
             return;
         }
-        // The project stores a file path; the preview wants the mounted object path.
-        var objectPath = basePath.Replace('\\', '/');
-        var idx = objectPath.IndexOf("LEGOBatmanLotDK/", StringComparison.OrdinalIgnoreCase);
-        if (idx >= 0)
-        {
-            objectPath = objectPath[idx..];
-        }
-        if (objectPath.EndsWith(".uasset", StringComparison.OrdinalIgnoreCase))
-        {
-            objectPath = objectPath[..^".uasset".Length];
-        }
-        ShowCharacterInViewer(objectPath, _currentProject?.DisplayName ?? "Current suit");
+        ShowCharacterInViewer(string.Empty, _currentProject.DisplayName, _currentProject);
     }
 }

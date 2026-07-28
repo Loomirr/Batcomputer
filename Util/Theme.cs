@@ -51,6 +51,7 @@ internal static class Theme
         "Faces" => Faces,
         "Gliders" => Gliders,
         "Textures" => Textures,
+        "Build mod" => Gold,
         "Research" => Research,
         _ => Inspector
     };

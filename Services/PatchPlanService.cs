@@ -4,17 +4,20 @@ public static class PatchPlanService
 {
     public static NativeSuitProject CreateProjectFromRecommendedPlan(RecommendedDonorPlan plan)
     {
+        var playable = plan.ThomasSource ?? plan.PlayableDonor;
+        var cutscene = plan.ThomasCutsceneSource ?? plan.CutsceneDonor;
         var project = new NativeSuitProject
         {
             SlotId = plan.SlotId,
             DisplayName = "Thomas Wayne",
             Description = "Native suit prototype generated from template donors.",
             TargetPackages = plan.TargetPackages,
-            PlayableTemplate = plan.ThomasSource ?? plan.PlayableDonor,
-            CutsceneTemplate = plan.ThomasCutsceneSource ?? plan.CutsceneDonor,
+            PlayableTemplate = playable,
+            CutsceneTemplate = cutscene,
             DcmdTemplate = plan.ThomasDcmdSource ?? plan.DcmdDonor,
             VisualSourceTemplate = plan.ThomasSource,
             VisualCutsceneSourceTemplate = plan.ThomasCutsceneSource,
+            BaseProfile = BaseEligibilityService.CreateProfile(cutscene?.PackagePath, playable?.PackagePath),
             StaticMeshComponentShapeTemplate = plan.StaticMeshComponentShapeDonor
         };
 

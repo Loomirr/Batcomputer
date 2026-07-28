@@ -27,6 +27,7 @@ public sealed partial class MainForm
         outer.Controls.Add(commandBar, 0, 0);
 
         var body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Padding = new Padding(6), BackColor = Theme.PanelBg };
+        _toyboxBodyLayout = body;
         body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 82));
         // Wider than the old 226 list column: the minifig figure is width-bound (its height follows
         // its width), and it needs side gutters for the callout labels.
@@ -82,7 +83,7 @@ public sealed partial class MainForm
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         _toyboxCategoryCombo.DropDownStyle = ComboBoxStyle.DropDownList;
-        var categories = new List<object> { "Home", "Base", "Materials", "Textures", "Parts", "Faces", "Equipment", "Gliders", "Animations", "3D viewer", "Review" };
+        var categories = new List<object> { "Home", "Base", "Materials", "Textures", "Parts", "Equipment", "Gliders", "Animations", "3D viewer", "Build mod", "Review" };
         if (AppSettings.Current.ShowResearchTools)
         {
             categories.Add("Research");
@@ -153,6 +154,7 @@ public sealed partial class MainForm
         toyLayout.Controls.Add(_toyboxSelectionLabel, 0, 2);
 
         var rightSplit = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Vertical, Margin = new Padding(3) };
+        _toyboxWorkspaceSplit = rightSplit;
         var rightSplitSet = false;
         rightSplit.SizeChanged += (_, _) =>
         {
@@ -258,7 +260,7 @@ public sealed partial class MainForm
         var right = new FlowLayoutPanel
         {
             Dock = DockStyle.Right,
-            Width = 420,
+            Width = 540,
             FlowDirection = FlowDirection.RightToLeft,
             BackColor = Color.Transparent,
             WrapContents = false,
@@ -268,22 +270,29 @@ public sealed partial class MainForm
         _menuButton.Text = "☰";
         _menuButton.Width = 36; _menuButton.Height = 34; _menuButton.Margin = new Padding(6, 0, 0, 0);
         Theme.StyleDarkButton(_menuButton);
-        _menuButton.ForeColor = Theme.OnDarkMuted;
+        _menuButton.ForeColor = Theme.Gold;
         _menuButton.Click += (_, _) =>
         {
             var menu = BuildMainMenu();
             menu.Show(_menuButton, new Point(_menuButton.Width - menu.Width, _menuButton.Height));
         };
 
-        _toyboxInstallButton.Text = "↓  Install";
-        _toyboxInstallButton.Width = 98; _toyboxInstallButton.Height = 34; _toyboxInstallButton.Margin = new Padding(6, 0, 0, 0);
+        _toyboxInstallButton.Text = "↓  Install mod";
+        _toyboxInstallButton.Width = 112; _toyboxInstallButton.Height = 34; _toyboxInstallButton.Margin = new Padding(6, 0, 0, 0);
         Theme.StyleDarkButton(_toyboxInstallButton);
-        _toyboxInstallButton.Click += (_, _) => InstallTrio();
+        _toyboxInstallButton.Click += (_, _) => InstallModForCurrentSuit();
 
-        _toyboxPackageButton.Text = "●  Package";
+        _toyboxPackageButton.Text = "●  Build mod";
         _toyboxPackageButton.Width = 120; _toyboxPackageButton.Height = 34; _toyboxPackageButton.Margin = new Padding(6, 0, 0, 0);
         Theme.StyleGoldButton(_toyboxPackageButton);
-        _toyboxPackageButton.Click += async (_, _) => await PackagePatchedIoStoreAsync();
+        _toyboxPackageButton.Click += async (_, _) => await BuildModForCurrentSuitAsync();
+
+        _toyboxSaveButton.Text = "Save suit";
+        _toyboxSaveButton.Width = 90; _toyboxSaveButton.Height = 34; _toyboxSaveButton.Margin = new Padding(6, 0, 0, 0);
+        Theme.StyleDarkButton(_toyboxSaveButton);
+        _toyboxSaveButton.Enabled = false;
+        _toyboxToolTip.SetToolTip(_toyboxSaveButton, "Save the current suit project");
+        _toyboxSaveButton.Click += (_, _) => SaveCurrentSuit();
 
         // Kept alive off-bar: still referenced by other code paths.
         _settingsButton.Text = "Settings";
@@ -320,6 +329,7 @@ public sealed partial class MainForm
         right.Controls.Add(_menuButton);
         right.Controls.Add(_toyboxInstallButton);
         right.Controls.Add(_toyboxPackageButton);
+        right.Controls.Add(_toyboxSaveButton);
         right.Controls.Add(_toyboxStatusChip);
         header.Controls.Add(right);
 
@@ -402,7 +412,7 @@ public sealed partial class MainForm
     private Control CreateCategoryRail()
     {
         var rail = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, BackColor = Theme.PanelBg, Padding = new Padding(4, 6, 4, 6) };
-        var cats = new[] { ("Home", "⌂"), ("Base", "◱"), ("Materials", "◈"), ("Textures", "▣"), ("Parts", "◆"), ("Faces", "☺"), ("Equipment", "★"), ("Gliders", "︾"), ("Animations", "➤"), ("3D viewer", "◐"), ("Review", "✎"), ("Research", "⌕") };
+        var cats = new[] { ("Home", "⌂"), ("Base", "◱"), ("Materials", "◈"), ("Textures", "▣"), ("Parts", "◆"), ("Equipment", "★"), ("Gliders", "︾"), ("Animations", "➤"), ("3D viewer", "◐"), ("Build mod", "▰"), ("Review", "✎"), ("Research", "⌕") };
 
         // Load PNGs per category instead of requiring every category to have one.
         // Home/Textures can fall back to glyphs without disabling the real bundled
@@ -422,17 +432,61 @@ public sealed partial class MainForm
 
     private void UpdateToyboxChips()
     {
-        var hasBase = !string.IsNullOrWhiteSpace(_slotIdText.Text.Trim());
+        var hasBase = HasCurrentSuitBase();
         // The dot is drawn by the pill, so the text is just the label now.
         _toyboxStatusChip.Text = hasBase ? "base set" : "no base yet";
         _toyboxStatusChip.ForeColor = hasBase ? Color.FromArgb(191, 233, 216) : Theme.OnDarkMuted;
         _statusChipAccent = hasBase ? Theme.Good : Theme.Warn;
         _toyboxStatusChip.Invalidate();
 
-        _toyboxPackageButton.Enabled = hasBase;
-        _toyboxInstallButton.Enabled = hasBase;
+        var hasOpenSuit = _currentProject is not null;
+        SetHeaderCommandState(_toyboxSaveButton, hasOpenSuit, isPrimary: false,
+            readyHint: "Save the current suit project",
+            unavailableHint: "Create or open a suit before saving.");
+        SetHeaderCommandState(_toyboxPackageButton, hasOpenSuit && hasBase, isPrimary: true,
+            readyHint: "Build and install the current suit's mod",
+            unavailableHint: "Set a visual base and gameplay donor before building a mod.");
+        SetHeaderCommandState(_toyboxInstallButton, hasOpenSuit && hasBase, isPrimary: false,
+            readyHint: "Install the built mod for the current suit",
+            unavailableHint: "Set a visual base, gameplay donor, and build a mod before installing.");
 
         RefreshHeaderMeta();
+    }
+
+    /// <summary>A generated slot name is not a base. A visual source and a real playable donor are both required.</summary>
+    private bool HasCurrentSuitBase() => BaseEligibilityService.Evaluate(_currentProject).IsReady;
+
+    /// <summary>
+    /// WinForms turns disabled button labels nearly black on this dark theme. Keep the command text
+    /// readable and let the command itself explain the missing prerequisite instead.
+    /// </summary>
+    private void SetHeaderCommandState(Button button, bool available, bool isPrimary, string readyHint, string unavailableHint)
+    {
+        button.Enabled = true;
+        if (available)
+        {
+            if (isPrimary)
+            {
+                Theme.StyleGoldButton(button);
+            }
+            else
+            {
+                Theme.StyleDarkButton(button);
+                button.ForeColor = Theme.Gold;
+            }
+            _toyboxToolTip.SetToolTip(button, readyHint);
+            return;
+        }
+
+        button.FlatStyle = FlatStyle.Flat;
+        button.FlatAppearance.BorderSize = 1;
+        button.FlatAppearance.BorderColor = Theme.SlateLight;
+        button.FlatAppearance.MouseOverBackColor = Theme.Slate;
+        button.FlatAppearance.MouseDownBackColor = Theme.Slate;
+        button.BackColor = Theme.SlateDark;
+        button.ForeColor = Theme.Gold;
+        button.Cursor = Cursors.Default;
+        _toyboxToolTip.SetToolTip(button, unavailableHint);
     }
 
     /// <summary>A one-line summary of what the selected base grants - most importantly
@@ -491,9 +545,9 @@ public sealed partial class MainForm
             {
                 return;
             }
-            if (!picker.BrowseManuallyRequested && !string.IsNullOrWhiteSpace(picker.SelectedPlayablePackage))
+            if (!picker.BrowseManuallyRequested && !string.IsNullOrWhiteSpace(picker.SelectedVisualPackage))
             {
-                _ = ApplyBaseCharacterFromCatalog(picker.SelectedPlayablePackage!);
+                _ = ApplyBaseCharacterFromCatalog(picker.SelectedVisualPackage!);
                 return;
             }
         }
@@ -508,6 +562,12 @@ public sealed partial class MainForm
     /// </summary>
     private async Task ApplyBaseCharacterFromCatalog(string playablePackage)
     {
+        if (BaseEligibilityService.IsCutsceneVisualPackage(playablePackage))
+        {
+            await ApplyVisualCutsceneBaseFromCatalog(playablePackage);
+            return;
+        }
+
         var stem = playablePackage[(playablePackage.LastIndexOf('/') + 1)..];
         var baseStem = stem.EndsWith("_Playable", StringComparison.OrdinalIgnoreCase)
             ? stem[..^"_Playable".Length]  // BP_Batman_1966
@@ -522,6 +582,7 @@ public sealed partial class MainForm
             AppendLog($"Base character not extracted on disk: {playableDisk}. Extract that character's folder, or use 'Browse files…'.");
             return;
         }
+        var visualSource = TemplateFromUasset(playableDisk, "visual-character", extracted);
         var folderDisk = Path.GetDirectoryName(playableDisk)!;
 
         // The cutscene/DCMD sibling naming isn't a clean swap - e.g.
@@ -550,6 +611,9 @@ public sealed partial class MainForm
 
         var cutsceneDisk = FindSibling("_Cutscene", "BP_", null);
         var dcmdDisk = FindSibling("_Playable", "BP_", "DA_DCMD_"); // DA_DCMD_<X>_Playable
+        var visualCutsceneSource = cutsceneDisk is null
+            ? null
+            : TemplateFromUasset(cutsceneDisk, "visual-cutscene", extracted);
 
         _basePlayableText.Text = playableDisk;
         _baseCutsceneText.Text = cutsceneDisk ?? "";
@@ -633,7 +697,15 @@ public sealed partial class MainForm
             AppendLog($"Base: {stem}  (cutscene {Path.GetFileNameWithoutExtension(cutsceneDisk)}{(dcmdDisk is null ? ", no DCMD" : ", DCMD " + Path.GetFileNameWithoutExtension(dcmdDisk))})");
         }
 
-        await UseAsBase();
+        if (!await UseAsBase())
+        {
+            return;
+        }
+
+        if (_currentProject is not null)
+        {
+            RecordBaseProfile(visualSource, visualCutsceneSource, _currentProject.PlayableTemplate);
+        }
         // Reskin: paint the donor's working playable + cutscene with the villain's body + face
         // materials (context "both" so gameplay AND cutscenes look like the villain).
         if (_currentProject is not null && (!string.IsNullOrWhiteSpace(villainVisual.BodyMi) || !string.IsNullOrWhiteSpace(villainVisual.FaceMi)))
@@ -747,6 +819,280 @@ public sealed partial class MainForm
         UpdateToyboxChips();
         SelectComboValue(_toyboxCategoryCombo, "Materials");
         _session.RaiseChanged(); // UI Phase 2: single project-state refresh (Your Character + Inspector)
+    }
+
+    private async Task ApplyVisualCutsceneBaseFromCatalog(string visualCutscenePackage)
+    {
+        var extracted = AppSettings.Current.EffectiveExtractedContentRoot();
+        var visualDisk = PackageToExtractedUasset(visualCutscenePackage, extracted);
+        var visual = TemplateFromUasset(visualDisk, "visual-cutscene", extracted);
+        if (visual is null)
+        {
+            AppendLog($"Visual cutscene is not extracted on disk: {visualDisk}. Extract that character folder, then try again.");
+            return;
+        }
+
+        var gameplay = TemplateFromUasset(FindPlayableSiblingForVisual(visualDisk) ?? "", "playable", extracted);
+        if (!IsEligibleGameplayDonor(gameplay, extracted, out var donorDetail))
+        {
+            AppendLog($"Visual source '{visual.Stem}' needs a gameplay donor: {donorDetail}");
+            var donorPackage = PromptForMachineryDonor();
+            if (string.IsNullOrWhiteSpace(donorPackage))
+            {
+                AppendLog("Visual base not staged. Pick a gameplay donor to provide movement, equipment, and runtime behavior.");
+                return;
+            }
+            gameplay = TemplateFromUasset(PackageToExtractedUasset(donorPackage, extracted), "playable", extracted);
+            if (!IsEligibleGameplayDonor(gameplay, extracted, out donorDetail))
+            {
+                AppendLog($"The selected gameplay donor cannot be used: {donorDetail}");
+                return;
+            }
+        }
+
+        var dcmdDisk = FindDcmdSiblingForPlayable(gameplay!.Uasset);
+        _basePlayableText.Text = gameplay.Uasset;
+        _baseCutsceneText.Text = visual.Uasset;
+        _baseDcmdText.Text = dcmdDisk ?? "";
+
+        if (!await UseAsBase())
+        {
+            return;
+        }
+
+        RecordBaseProfile(visual, visual, gameplay);
+        ApplyVisualSourceMaterials(visual);
+        await ApplyVisualAttachmentsToGameplayDonorAsync(visual.PackagePath);
+
+        var visualFamily = _currentProject?.BaseProfile?.VisualFamily;
+        var donorFamily = _currentProject?.BaseProfile?.GameplayFamily;
+        RecordChange("Base", _suitNameText.Text.Trim(),
+            $"visual {visual.Stem} ({(string.IsNullOrWhiteSpace(visualFamily) ? "unknown" : visualFamily)}) + gameplay {gameplay.Stem} ({(string.IsNullOrWhiteSpace(donorFamily) ? "unknown" : donorFamily)})");
+        AppendLog($"Visual base = {visual.Stem}; gameplay donor = {gameplay.Stem}. The donor supplies movement, equipment, and runtime behavior.");
+        UpdateToyboxChips();
+        SelectComboValue(_toyboxCategoryCombo, "Materials");
+        _session.RaiseChanged();
+    }
+
+    private static string PackageToExtractedUasset(string packagePath, string extractedRoot)
+    {
+        var package = UnrealPathUtil.NormalizePackagePath(packagePath);
+        return package.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase)
+            ? Path.Combine(extractedRoot, package["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar) + ".uasset")
+            : "";
+    }
+
+    private static string? FindPlayableSiblingForVisual(string visualUasset)
+    {
+        var folder = Path.GetDirectoryName(visualUasset);
+        if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
+        {
+            return null;
+        }
+
+        var visualStem = Path.GetFileNameWithoutExtension(visualUasset);
+        var key = BaseEligibilityService.CharacterStem(visualStem);
+        var exact = "BP_" + key + "_Playable";
+        return Directory.EnumerateFiles(folder, "*.uasset")
+            .OrderBy(path => Path.GetFileNameWithoutExtension(path).Equals(exact, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(path => path.Length)
+            .FirstOrDefault(path =>
+            {
+                var name = Path.GetFileNameWithoutExtension(path);
+                return name.EndsWith("_Playable", StringComparison.OrdinalIgnoreCase) &&
+                       BaseEligibilityService.CharacterStem(name).Equals(key, StringComparison.OrdinalIgnoreCase);
+            });
+    }
+
+    private static string? FindDcmdSiblingForPlayable(string playableUasset)
+    {
+        var folder = Path.GetDirectoryName(playableUasset);
+        if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
+        {
+            return null;
+        }
+
+        var playableStem = Path.GetFileNameWithoutExtension(playableUasset);
+        var dcmdStem = "DA_DCMD_" + (playableStem.StartsWith("BP_", StringComparison.OrdinalIgnoreCase)
+            ? playableStem["BP_".Length..]
+            : playableStem);
+        var exact = Path.Combine(folder, dcmdStem + ".uasset");
+        if (File.Exists(exact))
+        {
+            return exact;
+        }
+
+        return Directory.EnumerateFiles(folder, "*.uasset")
+            .FirstOrDefault(path => Path.GetFileNameWithoutExtension(path)
+                .Equals(dcmdStem, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private bool IsEligibleGameplayDonor(TemplateRecord? donor, string contentRoot, out string detail)
+    {
+        if (donor is null || !BaseEligibilityService.IsGameplayDonorPackage(donor.PackagePath))
+        {
+            detail = "it is not a _Playable character Blueprint";
+            return false;
+        }
+
+        var detected = AnimArchetypeGraftService.DetectDonor(donor.Uasset, contentRoot, UiMappings());
+        if (detected is null || !detected.Valid)
+        {
+            detail = "it has no readable runtime archetype";
+            return false;
+        }
+
+        detail = $"{(string.IsNullOrWhiteSpace(detected.Family) ? "playable" : detected.Family)} runtime family";
+        return true;
+    }
+
+    private void RecordBaseProfile(TemplateRecord? visualSource, TemplateRecord? visualCutsceneSource, TemplateRecord? gameplayDonor)
+    {
+        if (_currentProject is null || gameplayDonor is null)
+        {
+            return;
+        }
+
+        var visual = visualCutsceneSource ?? visualSource ?? _currentProject.CutsceneTemplate;
+        if (visual is null)
+        {
+            return;
+        }
+
+        _currentProject.VisualSourceTemplate = visualSource ?? visual;
+        _currentProject.VisualCutsceneSourceTemplate = visualCutsceneSource ??
+            (BaseEligibilityService.IsCutsceneVisualPackage(visual.PackagePath) ? visual : null);
+        var profile = BaseEligibilityService.CreateProfile(visual.PackagePath, gameplayDonor.PackagePath);
+        var detected = AnimArchetypeGraftService.DetectDonor(
+            gameplayDonor.Uasset,
+            AppSettings.Current.EffectiveExtractedContentRoot(),
+            UiMappings());
+        if (detected is { Valid: true } && !string.IsNullOrWhiteSpace(detected.Family))
+        {
+            profile.GameplayFamily = detected.Family;
+        }
+        _currentProject.BaseProfile = profile;
+        try
+        {
+            (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject);
+        }
+        catch
+        {
+            // The stage remains usable; the next normal save will persist the profile.
+        }
+    }
+
+    private void ApplyVisualSourceMaterials(TemplateRecord visualSource)
+    {
+        if (_currentProject is null)
+        {
+            return;
+        }
+
+        var folder = visualSource.PackagePath.Split('/', StringSplitOptions.RemoveEmptyEntries).Reverse().Skip(1).FirstOrDefault() ?? "";
+        var (bodyMi, faceMi) = AnimArchetypeGraftService.ExtractCharacterMaterials(visualSource.Uasset, folder, UiMappings());
+        if (string.IsNullOrWhiteSpace(bodyMi) && string.IsNullOrWhiteSpace(faceMi))
+        {
+            AppendLog($"No body or face material override was found on visual source {visualSource.Stem}; keeping the donor materials.");
+            return;
+        }
+
+        _currentProject.MaterialAssignments.RemoveAll(m =>
+            m.Slot == 0 &&
+            (m.Component.Equals("CharacterMesh0", StringComparison.OrdinalIgnoreCase) ||
+             m.Component.Equals("Face", StringComparison.OrdinalIgnoreCase)));
+        if (!string.IsNullOrWhiteSpace(bodyMi))
+        {
+            _currentProject.MaterialAssignments.Add(new SavedMaterialAssignment { Component = "CharacterMesh0", Slot = 0, MiPackagePath = bodyMi, Context = "both" });
+        }
+        if (!string.IsNullOrWhiteSpace(faceMi))
+        {
+            _currentProject.MaterialAssignments.Add(new SavedMaterialAssignment { Component = "Face", Slot = 0, MiPackagePath = faceMi, Context = "both" });
+        }
+
+        try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject); } catch { /* best effort */ }
+        ApplySavedMaterials(_currentProject, logIfNone: false);
+        AppendLog("Applied the visual source's body and face materials to the gameplay donor.");
+    }
+
+    private async Task ApplyVisualAttachmentsToGameplayDonorAsync(string visualSourcePackage)
+    {
+        if (_currentProject is null || _partIndex is null)
+        {
+            return;
+        }
+
+        var sourceParts = _partIndex.Parts
+            .Where(p => p.SourcePackagePath.Equals(visualSourcePackage, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var attachments = sourceParts
+            .Where(IsTransplantableVillainPart)
+            .GroupBy(OccupancyGroupOf, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+
+        foreach (var source in attachments)
+        {
+            var playable = source.Context.Equals("playable", StringComparison.OrdinalIgnoreCase)
+                ? source
+                : FindCounterpartPart(source, "playable") ?? source;
+            var cutscene = source.Context.Equals("cutscene", StringComparison.OrdinalIgnoreCase)
+                ? source
+                : FindCounterpartPart(source, "cutscene") ?? source;
+            UpsertPartGraft(source.Slot, false, playable, cutscene);
+        }
+
+        var sourceKinds = sourceParts
+            .Select(p => VisualKindOf(p.Slot))
+            .Where(kind => !string.IsNullOrWhiteSpace(kind))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var hidden = new List<string>();
+        try
+        {
+            var protectedGlider = ActiveGliderVisualComponent(_currentProject);
+            var donorComponents = new ComponentRemoveService(_projectRootText.Text.Trim())
+                .ListScsComponentNames(_currentProject.SlotId, _currentProject.TargetPackages.Playable, "");
+            foreach (var component in donorComponents)
+            {
+                var kind = VisualKindOf(component);
+                if (IsCoreKeepComponent(component, kind) || sourceKinds.Contains(kind) ||
+                    (!string.IsNullOrWhiteSpace(protectedGlider) && protectedGlider.Equals(component, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                var key = ToyboxSlotKey(component, 0);
+                if (_currentProject.Requirements.Any(r =>
+                        r.Kind.Equals("remove-component", StringComparison.OrdinalIgnoreCase) &&
+                        r.TargetComponent.Equals(key, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                _currentProject.Requirements.Add(new NativeSuitRequirement
+                {
+                    Id = $"remove-{component}-0".Replace(' ', '-').ToLowerInvariant(),
+                    Kind = "remove-component",
+                    SourcePackage = _currentProject.TargetPackages.Playable,
+                    TargetComponent = key,
+                    Notes = $"Auto-hidden on visual-base select: {UnrealPathUtil.AssetName(visualSourcePackage)} has no '{kind}' part."
+                });
+                hidden.Add(component);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"  visual attachment cleanup skipped: {ex.Message}");
+        }
+
+        if (attachments.Count == 0 && hidden.Count == 0)
+        {
+            return;
+        }
+
+        try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject); } catch { /* best effort */ }
+        AppendLog($"Applied {attachments.Count} visual attachment(s) and hid {hidden.Count} donor-only part(s).");
+        await RebuildGraftStageFromDeclarativeAsync();
     }
 
     private void OpenBaseWizardManual()
@@ -867,6 +1213,9 @@ public sealed partial class MainForm
         {
             case "Home":
                 _toyboxTypeCombo.Items.Add("Overview");
+                break;
+            case "Build mod":
+                _toyboxTypeCombo.Items.Add("Release workspace");
                 break;
             case "Base":
                 _toyboxTypeCombo.Items.Add("Base suit");
@@ -1064,94 +1413,242 @@ public sealed partial class MainForm
         }
     }
 
-    /// <summary>Home / overview: a readiness summary header + quick-action and recent-suit tiles.</summary>
+    /// <summary>
+    /// Home follows the actual release hierarchy: choose a mod, build its suits,
+    /// then build one mod release. Saved suits remain visible when no mod is active,
+    /// but an active workspace only shows the suits that will ship together.
+    /// </summary>
     private void RefreshHomeTiles()
     {
-        var slot = _slotIdText.Text.Trim();
-        var name = _suitNameText.Text.Trim();
-        var hasBase = !string.IsNullOrWhiteSpace(slot) && !string.IsNullOrWhiteSpace(_targetPlayableText.Text.Trim());
-        var pak = CurrentPackageBaseName();
-
-        var pkgBuilt = false;
-        try
-        {
-            var utoc = Path.Combine(AppSettings.GeneratedRootFor(_projectRootText.Text.Trim()), "NativeSuitGuiProjects", slot, "IoStore", pak + ".utoc");
-            if (!string.IsNullOrWhiteSpace(slot) && File.Exists(utoc)) pkgBuilt = true;
-        }
-        catch { /* best effort */ }
-
-        var hasSuit = !string.IsNullOrWhiteSpace(name) && name != NoSuitTitle;
         var partCount = _partIndex?.Parts.Count ?? 0;
-        var suitCount = 0;
-        try { suitCount = new SuitProjectService(_projectRootText.Text.Trim()).ListProjects().Count(); } catch { }
+        var suitService = new SuitProjectService(_projectRootText.Text.Trim());
+        var savedSuits = new List<SuitProjectService.ProjectSummary>();
+        var savedMods = new List<ModProjectService.ModSummary>();
+        try { savedSuits = suitService.ListProjects().ToList(); } catch { /* no saved suits yet */ }
+        try { savedMods = ModService.ListMods().ToList(); } catch { /* no saved mods yet */ }
 
-        // Adaptive hero: identity + at-a-glance chips replace the old debug text block.
+        var (activeSummary, activeMod) = ResolveHomeActiveMod(savedMods);
+        var activeEntries = activeMod?.Suits
+            .OrderBy(entry => entry.MenuOrder)
+            .ToList() ?? new List<ModSuitEntry>();
+        var suitsByPath = savedSuits.ToDictionary(summary => summary.Path, StringComparer.OrdinalIgnoreCase);
+        var activeSuits = activeEntries.Select(entry =>
+        {
+            var resolved = ModService.ResolveSuitProjectPath(entry);
+            suitsByPath.TryGetValue(resolved, out var summary);
+            summary ??= savedSuits.FirstOrDefault(candidate =>
+                string.Equals(candidate.SlotId, entry.SuitId, StringComparison.OrdinalIgnoreCase));
+            return (Entry: entry, Summary: summary);
+        }).ToList();
+
+        var hasActiveMod = activeSummary is not null && activeMod is not null;
+        var activeSuitCount = activeEntries.Count;
+        var currentSlot = _slotIdText.Text.Trim();
+        var currentSuitIsInActiveMod = hasActiveMod && activeEntries.Any(entry =>
+            string.Equals(entry.SuitId, currentSlot, StringComparison.OrdinalIgnoreCase));
+
         var chips = new List<(string, Color)>
         {
-            (hasBase ? "base set" : "no base", hasBase ? Theme.Good : Theme.Warn),
-            ($"{suitCount} suit{(suitCount == 1 ? "" : "s")}", Theme.Parts),
+            (hasActiveMod ? "active mod" : "no active mod", hasActiveMod ? Theme.Research : Theme.Warn),
+            ($"{(hasActiveMod ? activeSuitCount : savedSuits.Count)} suit{((hasActiveMod ? activeSuitCount : savedSuits.Count) == 1 ? "" : "s")}", Theme.Parts),
             (partCount > 0 ? $"{partCount} parts" : "index not built", partCount > 0 ? Theme.Materials : Theme.OnDarkMuted),
         };
-        if (hasBase) chips.Add((pkgBuilt ? "packaged" : "not packaged", pkgBuilt ? Theme.Good : Theme.OnDarkMuted));
 
         var hero = new VirtualTilePanel.HeroModel
         {
-            Title = hasSuit ? name : "Start building",
-            Subtitle = hasSuit
-                ? (hasBase ? $"{UnrealPathUtil.AssetName(_targetPlayableText.Text.Trim())} · pak {pak}" : "no base yet — pick a base character")
-                : "Create a new suit or open a saved one below.",
-            Badge = hasSuit ? (hasBase ? "Ready" : "Needs base") : "",
-            BadgeColor = hasBase ? Theme.Good : Theme.Warn,
-            ThumbAccent = Theme.Parts,
+            Overline = "MOD WORKSPACE",
+            Title = hasActiveMod ? activeSummary!.DisplayName : "Start your first mod",
+            Subtitle = hasActiveMod
+                ? $"{activeSuitCount} suit{(activeSuitCount == 1 ? "" : "s")} grouped into one mod release."
+                : "Create or select a mod first, then add the suits that ship together.",
+            Badge = "",
+            ThumbAccent = hasActiveMod ? Theme.Research : Theme.Gold,
             Chips = chips,
-        };
-        if (hasSuit)
-        {
-            try { hero.Thumb = LoadSuitCoverForCurrent(); } catch { }
-        }
-
-        const string SectionSuit = "SUIT";
-        const string SectionBuild = "BUILD";
-        const string SectionRecent = "YOUR SUITS";
-
-        var tiles = new List<VirtualTilePanel.Tile>
-        {
-            new() { Section = SectionSuit, Title = "＋ New suit", Subtitle = "start fresh", Accent = Theme.Base, Dashed = true, OnClick = StartNewSuit },
-            new() { Section = SectionSuit, Title = "Open suit", Subtitle = "browse projects", Accent = Theme.Base, OnClick = LoadSuit },
-            new() { Section = SectionSuit, Title = hasBase ? "Change base" : "Pick base", Subtitle = hasBase ? "swap character" : "start here", Accent = Theme.Base, OnClick = OpenBaseWizard },
-        };
-        if (hasBase)
-        {
-            tiles.Add(new() { Section = SectionSuit, Title = "Pak name", Subtitle = $"{pak}\nclick to rename", Accent = Theme.Gold, OnClick = EditPackageBaseName });
-
-            tiles.Add(new() { Section = SectionBuild, Title = "Validate", Subtitle = "preflight checks", Accent = Theme.Materials, OnClick = RunV2PreflightFromUi });
-            tiles.Add(new() { Section = SectionBuild, Title = "Preview package", Subtitle = "what will ship", Accent = Theme.Materials, OnClick = ShowPackageContentsPreview });
-            tiles.Add(new() { Section = SectionBuild, Title = "Rebase suit", Subtitle = "to current dump", Accent = Theme.Base, OnClick = RebaseCurrentSuitToActiveDump });
-            tiles.Add(new() { Section = SectionBuild, Title = "Clean output", Subtitle = "clear staged files", Accent = Theme.Inspector, OnClick = CleanGeneratedOutputForCurrentSuit });
-            tiles.Add(new() { Section = SectionBuild, Title = "Package", Subtitle = "build + trio", Accent = Theme.Gold, OnClick = () => { _ = PackagePatchedIoStoreAsync(); } });
-        }
-
-        try
-        {
-            foreach (var p in new SuitProjectService(_projectRootText.Text.Trim()).ListProjects().Take(10))
+            Workflow = new[]
             {
-                var path = p.Path;
+                new VirtualTilePanel.HeroModel.WorkflowStep
+                {
+                    Label = "1. MOD",
+                    Detail = hasActiveMod ? "mod selected" : "choose a mod",
+                    Accent = Theme.Research,
+                    Complete = hasActiveMod,
+                    Current = !hasActiveMod,
+                },
+                new VirtualTilePanel.HeroModel.WorkflowStep
+                {
+                    Label = "2. SUITS",
+                    Detail = hasActiveMod
+                        ? (activeSuitCount > 0 ? "add or edit" : "next: add a suit")
+                        : "select a mod first",
+                    Accent = Theme.Base,
+                    Current = hasActiveMod && activeSuitCount == 0,
+                },
+                new VirtualTilePanel.HeroModel.WorkflowStep
+                {
+                    Label = "3. BUILD",
+                    Detail = activeSuitCount > 0 ? "release when ready" : "add a suit first",
+                    Accent = Theme.Gold,
+                    Current = hasActiveMod && activeSuitCount > 0,
+                },
+            },
+        };
+
+        const string SectionMod = "MODS";
+        const string SectionSuits = "2. SUITS";
+        const string SectionBuild = "3. BUILD MOD";
+        const string SectionSavedSuits = "SAVED SUITS";
+        var tiles = new List<VirtualTilePanel.Tile>();
+
+        tiles.Add(new()
+        {
+            Section = SectionMod,
+            Title = "＋ New mod",
+            Subtitle = "start a release collection",
+            Accent = Theme.Gold,
+            Dashed = true,
+            OnClick = CreateModFlow,
+        });
+
+        foreach (var mod in savedMods.Take(6))
+        {
+            var captured = mod;
+            var isActive = hasActiveMod && string.Equals(captured.Path, activeSummary!.Path, StringComparison.OrdinalIgnoreCase);
+            tiles.Add(new VirtualTilePanel.Tile
+            {
+                Section = SectionMod,
+                Title = TrimMiddle(captured.DisplayName, 26),
+                Subtitle = isActive
+                    ? $"{captured.SuitCount} suit{(captured.SuitCount == 1 ? "" : "s")} · current mod"
+                    : $"{captured.SuitCount} suit{(captured.SuitCount == 1 ? "" : "s")} · select workspace",
+                Accent = isActive ? Theme.Research : Theme.OnDarkMuted,
+                OnClick = () => SelectHomeMod(captured.Path),
+                MenuFactory = () => BuildModTileMenu(captured.Path, captured.ModId),
+            });
+        }
+
+        if (!hasActiveMod)
+        {
+            tiles.Add(new VirtualTilePanel.Tile
+            {
+                Section = SectionSavedSuits,
+                Title = "All suits",
+                Subtitle = $"{savedSuits.Count} saved in the tool",
+                Accent = Theme.Parts,
+                OnClick = LoadSuit,
+            });
+            foreach (var suit in savedSuits.Take(10))
+            {
+                var captured = suit;
                 tiles.Add(new VirtualTilePanel.Tile
                 {
-                    Section = SectionRecent,
-                    Title = TrimMiddle(p.DisplayName, 26),
-                    Subtitle = $"reopen · {p.Modified:MMM d}",
+                    Section = SectionSavedSuits,
+                    Title = TrimMiddle(captured.DisplayName, 26),
+                    Subtitle = $"saved suit · {captured.Modified:MMM d}",
                     Accent = Theme.Parts,
-                    Image = LoadSuitCoverImage(p),
-                    OnClick = () => OpenRecentProject(path),
-                    MenuFactory = () => BuildSuitTileMenu(p),
+                    Image = LoadSuitCoverImage(captured),
+                    OnClick = () => OpenRecentProject(captured.Path),
+                    MenuFactory = () => BuildSuitTileMenu(captured),
+                });
+            }
+            ShowVirtualTiles(tiles, hero: hero);
+            return;
+        }
+
+        var modPath = activeSummary!.Path;
+        var modName = activeSummary.DisplayName;
+        tiles.Add(new VirtualTilePanel.Tile
+        {
+            Section = SectionSuits,
+            Title = "＋ Add a suit",
+            Subtitle = "create inside this mod",
+            Accent = Theme.Base,
+            Dashed = true,
+            OnClick = () => StartNewSuitInMod(modPath),
+        });
+        tiles.Add(new VirtualTilePanel.Tile
+        {
+            Section = SectionSuits,
+            Title = "Manage suits",
+            Subtitle = "add or remove saved suits",
+            Accent = Theme.Base,
+            OnClick = () => EditModSuits(modPath),
+        });
+        tiles.Add(new VirtualTilePanel.Tile
+        {
+            Section = SectionSuits,
+            Title = "All suits",
+            Subtitle = $"{savedSuits.Count} saved in the tool",
+            Accent = Theme.Parts,
+            OnClick = LoadSuit,
+        });
+
+        foreach (var (entry, summary) in activeSuits.Take(10))
+        {
+            var capturedEntry = entry;
+            var capturedSummary = summary;
+            var title = capturedSummary is null ? capturedEntry.SuitId : TrimMiddle(capturedSummary.DisplayName, 26);
+            tiles.Add(new VirtualTilePanel.Tile
+            {
+                Section = SectionSuits,
+                Title = title,
+                Subtitle = capturedSummary is null ? "missing saved suit" : $"reopen · {capturedSummary.Modified:MMM d}",
+                Accent = Theme.Parts,
+                Image = capturedSummary is null ? null : LoadSuitCoverImage(capturedSummary),
+                OnClick = capturedSummary is null ? () => EditModSuits(modPath) : () => OpenRecentProject(capturedSummary.Path),
+                MenuFactory = capturedSummary is null ? null : () => BuildSuitTileMenu(capturedSummary),
+            });
+        }
+
+        if (activeSuitCount == 0)
+        {
+            tiles.Add(new VirtualTilePanel.Tile
+            {
+                Section = SectionBuild,
+                Title = "Add a suit first",
+                Subtitle = $"{modName} needs a suit before it can build",
+                Accent = Theme.Gold,
+                Dashed = true,
+                OnClick = () => StartNewSuitInMod(modPath),
+            });
+        }
+        else
+        {
+            tiles.Add(new VirtualTilePanel.Tile
+            {
+                Section = SectionBuild,
+                Title = $"Build {TrimMiddle(modName, 20)}",
+                Subtitle = "build and install your mod/suits to your game",
+                Accent = Theme.Gold,
+                OnClick = () => BuildMod(modPath),
+            });
+            tiles.Add(new VirtualTilePanel.Tile
+            {
+                Section = SectionBuild,
+                Title = "Manage mod",
+                Subtitle = "identity, suits, output",
+                Accent = Theme.Research,
+                OnClick = () => OpenModDetails(modPath, activeSummary.ModId),
+            });
+            if (currentSuitIsInActiveMod && !string.IsNullOrWhiteSpace(_targetPlayableText.Text.Trim()))
+            {
+                tiles.Add(new VirtualTilePanel.Tile
+                {
+                    Section = SectionBuild,
+                    Title = "Validate current suit",
+                    Subtitle = "preflight checks",
+                    Accent = Theme.Materials,
+                    OnClick = RunV2PreflightFromUi,
+                });
+                tiles.Add(new VirtualTilePanel.Tile
+                {
+                    Section = SectionBuild,
+                    Title = "Preview current suit",
+                    Subtitle = "inspect package contents",
+                    Accent = Theme.Materials,
+                    OnClick = ShowPackageContentsPreview,
                 });
             }
         }
-        catch { /* no projects dir yet */ }
-
-        // A mod bundles several suits into one pak + one PawnTags.ini + one StringTable.
-        AddModTiles(tiles);
 
         ShowVirtualTiles(tiles, hero: hero);
     }
@@ -1160,17 +1657,19 @@ public sealed partial class MainForm
     /// that only appear once a base is picked (progressive disclosure).</summary>
     private void RefreshBaseTiles()
     {
-        var hasBase = !string.IsNullOrWhiteSpace(_slotIdText.Text.Trim()) && !string.IsNullOrWhiteSpace(_targetPlayableText.Text.Trim());
-        var baseName = hasBase ? UnrealPathUtil.AssetName(_targetPlayableText.Text.Trim()) : "";
+        var profile = _currentProject?.BaseProfile;
+        var hasBase = HasCurrentSuitBase();
+        var visualPackage = profile?.VisualBasePackage ?? _currentProject?.CutsceneTemplate?.PackagePath ?? "";
+        var gameplayPackage = profile?.GameplayDonorPackage ?? _currentProject?.PlayableTemplate?.PackagePath ?? "";
+        var baseName = hasBase ? UnrealPathUtil.AssetName(visualPackage) : "";
         var summary = hasBase ? BaseInheritanceSummary() : "";
         var glideOk = summary.StartsWith("✓", StringComparison.Ordinal);
 
         var chips = new List<(string, Color)>();
         if (hasBase)
         {
-            chips.Add(("playable", Theme.Good));
-            var hasCutscene = !string.IsNullOrWhiteSpace(_targetCutsceneText.Text.Trim());
-            chips.Add((hasCutscene ? "cutscene" : "no cutscene", hasCutscene ? Theme.Good : Theme.OnDarkMuted));
+            chips.Add(("visual " + (string.IsNullOrWhiteSpace(profile?.VisualFamily) ? "base" : profile.VisualFamily), Theme.Base));
+            chips.Add(("gameplay " + (string.IsNullOrWhiteSpace(profile?.GameplayFamily) ? "donor" : profile.GameplayFamily), Theme.Good));
             chips.Add((glideOk ? "glide visual" : "no glide", glideOk ? Theme.Gliders : Theme.Warn));
         }
 
@@ -1178,8 +1677,8 @@ public sealed partial class MainForm
         {
             Title = hasBase ? baseName : "Pick a base character",
             Subtitle = hasBase
-                ? $"Building on {_targetPlayableText.Text.Trim()} — abilities & animation family are inherited."
-                : "Choose the character your suit inherits abilities, equipment, and animations from.",
+                ? $"Visual: {UnrealPathUtil.AssetName(visualPackage)}. Gameplay donor: {UnrealPathUtil.AssetName(gameplayPackage)} — movement, equipment, and animations are inherited."
+                : "Choose any character or cutscene for the look, then pair it with a playable donor for runtime behavior.",
             Badge = hasBase ? "Base set" : "No base",
             BadgeColor = hasBase ? Theme.Good : Theme.Warn,
             ThumbAccent = Theme.Base,
@@ -1190,7 +1689,7 @@ public sealed partial class MainForm
         const string SectionIdentity = "IDENTITY";
         var tiles = new List<VirtualTilePanel.Tile>
         {
-            new() { Section = SectionBase, Title = hasBase ? "Change base" : "Pick base character", Subtitle = hasBase ? "swap character" : "start here", Accent = Theme.Base, Dashed = !hasBase, OnClick = OpenBaseWizard },
+            new() { Section = SectionBase, Title = hasBase ? "Change visual base" : "Pick visual base", Subtitle = hasBase ? "visual + gameplay donor" : "start with a character or cutscene", Accent = Theme.Base, Dashed = !hasBase, OnClick = OpenBaseWizard },
         };
         if (hasBase)
         {
@@ -1211,14 +1710,22 @@ public sealed partial class MainForm
 
         if (category == ViewerCategory)
         {
+            SetHomeInspectorCollapsed(false);
             ShowViewerPanel();
             return;
         }
         HideViewerPanel();
+        SetHomeInspectorCollapsed(category == "Home");
 
         if (category == "Home")
         {
             RefreshHomeTiles();
+            return;
+        }
+
+        if (category == "Build mod")
+        {
+            RefreshBuildModTiles();
             return;
         }
 
@@ -1301,6 +1808,18 @@ public sealed partial class MainForm
         }
 
         RefreshEquipmentCompatTiles(type);
+    }
+
+    /// <summary>
+    /// Home is the mod workspace, not an edit surface. It keeps the character overview visible but
+    /// gives the workspace the inspector's width; choosing any authoring category restores it.
+    /// </summary>
+    private void SetHomeInspectorCollapsed(bool collapsed)
+    {
+        if (_toyboxWorkspaceSplit is not null)
+        {
+            _toyboxWorkspaceSplit.Panel2Collapsed = collapsed;
+        }
     }
 
     /// <summary>
@@ -1952,7 +2471,7 @@ public sealed partial class MainForm
         }
     }
 
-    private async Task UseAsBase()
+    private async Task<bool> UseAsBase()
     {
         var contentRoot = AppSettings.Current.EffectiveExtractedContentRoot();
         var playable = TemplateFromUasset(_basePlayableText.Text.Trim(), "playable", contentRoot);
@@ -1960,18 +2479,30 @@ public sealed partial class MainForm
         if (playable is null)
         {
             AppendLog("Playable base .uasset not found, or not under the Extracted content root (see Settings).");
-            return;
+            return false;
         }
         if (cutscene is null)
         {
             AppendLog("Cutscene base .uasset not found, or not under the Extracted content root (see Settings).");
-            return;
+            return false;
+        }
+
+        var baseEligibility = BaseEligibilityService.Evaluate(cutscene.PackagePath, playable.PackagePath);
+        if (!baseEligibility.IsReady)
+        {
+            AppendLog($"Base not staged: {baseEligibility.Detail}");
+            return false;
+        }
+        if (!IsEligibleGameplayDonor(playable, contentRoot, out var donorDetail))
+        {
+            AppendLog($"Base not staged: the playable donor is not ready ({donorDetail}). Pick a real playable donor for movement, equipment, and runtime behavior.");
+            return false;
         }
 
         EnsureProject();
         if (_currentProject is null || _projectService is null)
         {
-            return;
+            return false;
         }
 
         DeriveOutputs();
@@ -1979,9 +2510,12 @@ public sealed partial class MainForm
         _currentProject.PlayableTemplate = playable;
         _currentProject.CutsceneTemplate = cutscene;
         _currentProject.DcmdTemplate = TemplateFromUasset(_baseDcmdText.Text.Trim(), "dcmd", contentRoot);
+        _currentProject.VisualSourceTemplate = cutscene;
+        _currentProject.VisualCutsceneSourceTemplate = cutscene;
+        _currentProject.BaseProfile = BaseEligibilityService.CreateProfile(cutscene.PackagePath, playable.PackagePath);
         if (!ValidateUseAsBaseTargetPackages(_currentProject))
         {
-            return;
+            return false;
         }
         UpdateSelectedLabels();
 
@@ -2042,7 +2576,9 @@ public sealed partial class MainForm
         {
             AppendLog("Use-as-base failed:");
             AppendLog(ex.ToString());
+            return false;
         }
+        return true;
     }
 
     private void ApplyResearchToolsVisibility()

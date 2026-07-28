@@ -123,7 +123,8 @@ public sealed partial class MainForm
     private void PopulateToyboxSlots()
     {
         _characterSlots.Clear();
-        _characterSlots.AddRange(DiscoverToyboxSlots());
+        _characterSlots.AddRange(DiscoverToyboxSlots()
+            .Where(slot => !slot.Component.Contains("face", StringComparison.OrdinalIgnoreCase)));
 
         // The figure needs its part art. A build made without Assets/ has none, so fall back to
         // the slot list rather than showing an empty panel.
@@ -245,6 +246,41 @@ public sealed partial class MainForm
             requirement.Kind.Equals("remove-component", StringComparison.OrdinalIgnoreCase) &&
             RequirementTargetsComponent(requirement.TargetComponent, component));
         return project.Requirements.Count != before;
+    }
+
+    /// <summary>
+    /// A static hair/helmet cloned into a Batman-style base cannot reuse the occupied
+    /// <c>Head</c> SCS slot, so it is added as (for example) <c>Head_2</c>. In that
+    /// case the original Head is the donor cowl, not the shared minifig head, and must
+    /// be removed for the selected character's own head visual to be authoritative.
+    /// </summary>
+    private static bool HasCrossKindHeadGraft(NativeSuitProject project) =>
+        project.PartGrafts.Any(graft =>
+            graft.Slot.Equals("Head", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(graft.ResolvedComponent) &&
+            !RequirementTargetsComponent(graft.ResolvedComponent, graft.Slot));
+
+    internal static bool CrossKindHeadGraftNeedsCowlRemovalForTest(NativeSuitProject project) =>
+        HasCrossKindHeadGraft(project);
+
+    private bool EnsureCrossKindHeadGraftHidesBaseHead(NativeSuitProject project)
+    {
+        if (!HasCrossKindHeadGraft(project) || project.Requirements.Any(requirement =>
+                requirement.Kind.Equals("remove-component", StringComparison.OrdinalIgnoreCase) &&
+                RequirementTargetsComponent(requirement.TargetComponent, "Head")))
+        {
+            return false;
+        }
+
+        project.Requirements.Add(new NativeSuitRequirement
+        {
+            Id = "remove-head-0",
+            Kind = "remove-component",
+            SourcePackage = project.TargetPackages.Playable,
+            TargetComponent = ToyboxSlotKey("Head", 0),
+            Notes = "Hidden because a cross-kind head graft replaces the donor cowl."
+        });
+        return true;
     }
 
     /// <summary>
@@ -2358,11 +2394,10 @@ public sealed partial class MainForm
                     {
                         RemoveSavedRemovalForComponent(_currentProject, graftedSlot);
                     }
-                    // Component-instance model: a cross-kind part (e.g. hair
-                    // added under "Head_2" because "Head" held the cowl) now COEXISTS with the base
-                    // occupant instead of auto-hiding it - hair and cowl are different occupancy
-                    // groups. To get a hair-only look, remove the cowl explicitly (right-click). Same
-                    // occupancy-group replacement is already handled at the graft level (UpsertPartGraft).
+                    if (EnsureCrossKindHeadGraftHidesBaseHead(_currentProject))
+                    {
+                        AppendLog("  cross-kind head graft replaces the donor cowl; queued Head:0 for removal.");
+                    }
                 }
             }
             catch (Exception ex)

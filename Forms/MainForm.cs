@@ -140,6 +140,8 @@ public sealed partial class MainForm : Form
     // Toybox (simple builder) controls.
     // The "Your Character" panel is a designer-editable control owning its row flow.
     private readonly YourCharacterControl _yourCharacter = new();
+    private TableLayoutPanel? _toyboxBodyLayout;
+    private SplitContainer? _toyboxWorkspaceSplit;
 
     private readonly FlowLayoutPanel _toyboxTileFlow = new();
 
@@ -164,6 +166,8 @@ public sealed partial class MainForm : Form
     private readonly Button _toyboxPackageButton = new();
 
     private readonly Button _toyboxInstallButton = new();
+
+    private readonly Button _toyboxSaveButton = new();
 
     // The Inspector is a designer-editable control owning its tree/info/buttons.
     private readonly InspectorControl _inspector = new();
@@ -194,6 +198,10 @@ public sealed partial class MainForm : Form
     private string _toyboxSlotLabel => _selection.Label;
 
     private string _lastAutoPackageBaseName = "";
+
+    // Home is mod-first. This is intentionally a session selection rather than a derived output:
+    // the user may keep several mods open and choose which collection they are working on.
+    private string _homeActiveModProjectPath = "";
 
     private int _toyboxSlot => _selection.Slot;
 
@@ -385,7 +393,28 @@ public sealed partial class MainForm : Form
             Cursor = Cursors.Hand,
             Tag = category
         };
-        if (TryLoadCategoryIcon(category) is { } icon)
+        if (category.Equals("3D viewer", StringComparison.OrdinalIgnoreCase) &&
+            EmbeddedAssets.LoadAnimated("3D.gif") is { } animatedIcon)
+        {
+            // PictureBox owns animated GIF playback; Button.Image would render only a static frame.
+            b.Text = category;
+            b.TextAlign = ContentAlignment.BottomCenter;
+            b.Padding = new Padding(0, 0, 0, 2);
+            var animation = new PictureBox
+            {
+                Image = animatedIcon,
+                BackColor = Color.Transparent,
+                SizeMode = PictureBoxSizeMode.Zoom,
+                Size = new Size(23, 23),
+                TabStop = false,
+            };
+            void PlaceAnimation() => animation.Location = new Point((b.ClientSize.Width - animation.Width) / 2, 3);
+            PlaceAnimation();
+            b.Resize += (_, _) => PlaceAnimation();
+            animation.Click += (_, _) => b.PerformClick();
+            b.Controls.Add(animation);
+        }
+        else if (TryLoadCategoryIcon(category) is { } icon)
         {
             // Icon stacked above the label, with the whole block centered in the
             // button so the icon lines up over its text.
@@ -483,7 +512,7 @@ public sealed partial class MainForm : Form
         switch (category)
         {
             case "Base":
-                _toyboxPrimaryActionButton.Text = "＋ Set base suit";
+                _toyboxPrimaryActionButton.Text = "＋ Set visual base";
                 _toyboxPrimaryActionButton.Visible = true;
                 break;
             case "Materials":
@@ -502,6 +531,10 @@ public sealed partial class MainForm : Form
                 _toyboxPrimaryActionButton.Text = "Copy summary";
                 _toyboxPrimaryActionButton.Visible = true;
                 break;
+            case "Build mod":
+                _toyboxPrimaryActionButton.Text = "Build active mod";
+                _toyboxPrimaryActionButton.Visible = true;
+                break;
             default:
                 _toyboxPrimaryActionButton.Visible = false;
                 break;
@@ -516,6 +549,7 @@ public sealed partial class MainForm : Form
             case "Materials": OpenMaterialWizard(applyToSelectedSlot: false); break;
             case "Textures": await ImportTextureFromPngAsync(); break;
             case "Review": CopyChangeSummary(); break;
+            case "Build mod": BuildActiveModFromWorkspace(); break;
         }
     }
 
@@ -624,7 +658,7 @@ public sealed partial class MainForm : Form
     private void LoadSuit()
     {
         var svc = new SuitProjectService(_projectRootText.Text.Trim());
-        using var dlg = new LoadSuitDialog(svc.ListProjects());
+        using var dlg = new LoadSuitDialog(svc.ListProjects(), DeleteSavedSuit);
         if (dlg.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(dlg.SelectedPath))
         {
             return;
@@ -658,7 +692,7 @@ public sealed partial class MainForm : Form
     /// suit stays saved in its own project file (reopen via Open suit). Prompting for
     /// a name up front also prevents nameless placeholder projects.
     /// </summary>
-    private void StartNewSuit()
+    private void StartNewSuit(Action<NativeSuitProject>? afterCreated = null)
     {
         if (!Dialog.Confirm(this,
                 "Start a new suit?",
@@ -706,6 +740,7 @@ public sealed partial class MainForm : Form
         _lastAutoPackageBaseName = "";
 
         ReadFieldsIntoProject(_currentProject);
+        afterCreated?.Invoke(_currentProject);
         AppendLog($"Started new suit '{name}' (mod {mod}). Next: Base → Pick base character to choose the character to build from.");
         SelectComboValue(_toyboxCategoryCombo, "Base");
         _session.RaiseChanged(); // UI Phase 2: single project-state refresh (Your Character + Inspector)
@@ -821,7 +856,7 @@ public sealed partial class MainForm : Form
     /// the export content root; base-game MIs in the extracted content root. We
     /// try both, preferring the expected root for the tile kind.
     /// </summary>
-    private static string? ResolveMiDiskPath(string miGamePath, bool preferExport)
+    internal static string? ResolveMiDiskPath(string miGamePath, bool preferExport)
     {
         var pkg = miGamePath.Contains('.') ? miGamePath[..miGamePath.IndexOf('.')] : miGamePath;
         if (!pkg.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
@@ -846,14 +881,12 @@ public sealed partial class MainForm : Form
     private static readonly (string Label, string Component, int Slot)[] ToyboxSlots =
     {
         ("Body", "CharacterMesh0", 0),
-        ("Face", "Face", 0),
         ("Head / cowl", "Head", 0),
         ("Cape LOD0", "Cape", 0),
         ("Cape LOD1", "Cape", 1),
         ("Cape LOD2", "Cape", 2),
         ("Gliding LOD0", "Torso", 0),
         ("Gliding LOD1", "Torso", 1),
-        ("Hip / belt", "Hip", 0),
     };
 
     private readonly HashSet<string> _customSlotKeys = new(StringComparer.Ordinal);
@@ -1045,14 +1078,14 @@ public sealed partial class MainForm : Form
         RefreshHomeTiles();
     }
 
-    private void DeleteSavedSuit(SuitProjectService.ProjectSummary summary, bool deleteFromGame, bool deleteFromTool)
+    private bool DeleteSavedSuit(SuitProjectService.ProjectSummary summary, bool deleteFromGame, bool deleteFromTool)
     {
         var svc = new SuitProjectService(_projectRootText.Text.Trim());
         var project = svc.LoadProject(summary.Path);
         if (project is null)
         {
             AppendLog($"Delete skipped: could not load {summary.Path}");
-            return;
+            return false;
         }
 
         var target = deleteFromGame && deleteFromTool
@@ -1063,7 +1096,7 @@ public sealed partial class MainForm : Form
                 $"This removes it from {target}. It cannot be undone from the builder.",
                 confirmText: "Delete suit", severity: Dialog.Level.Crit))
         {
-            return;
+            return false;
         }
 
         try
@@ -1084,11 +1117,13 @@ public sealed partial class MainForm : Form
 
             AppendLog($"Deleted '{project.DisplayName}' from {target}.");
             RefreshHomeTiles();
+            return true;
         }
         catch (Exception ex)
         {
             AppendLog($"Suit delete failed: {ex.Message}");
             Dialog.Error(this, "Delete suit failed", ex.Message);
+            return false;
         }
     }
 
@@ -1293,81 +1328,229 @@ public sealed partial class MainForm : Form
         }
     }
 
-    private (string Name, string Kind)? PromptForTextureImportSettings(string suggestedName)
+    private (string Name, string Kind, TextureCookPreset Preset)? PromptForTextureImportSettings(string suggestedName, string projectRoot)
     {
+        const int Width = 560;
+        const int Padding = 18;
         using var form = new Form
         {
-            Text = "Texture import",
+            Text = "Batcomputer - Texture import",
             StartPosition = FormStartPosition.CenterParent,
-            Size = new Size(560, 238),
+            ClientSize = new Size(Width, 340),
             MinimizeBox = false,
             MaximizeBox = false,
             FormBorderStyle = FormBorderStyle.FixedDialog,
+            ShowInTaskbar = false,
             BackColor = Theme.WindowBg,
-            ForeColor = Theme.OnDark
+            ForeColor = Theme.OnDark,
+            Font = Theme.Body
         };
 
-        var label = new Label
+        form.Shown += (_, _) => Theme.UseDarkTitleBar(form);
+        var header = new Panel { Left = 0, Top = 0, Width = Width, Height = 72, BackColor = Theme.WindowBg };
+        header.Controls.Add(new Panel { Left = Padding, Top = 18, Width = 3, Height = 36, BackColor = Theme.Textures });
+        header.Controls.Add(new Label
         {
-            Text = "Enter a unique texture name and what you plan to use it for. The cooked asset will be stored under a Textures folder and the safe name will be embedded into the /Game path.",
-            Dock = DockStyle.Top,
-            Height = 62,
-            Padding = new Padding(12, 10, 12, 0),
-            ForeColor = Theme.OnDark
-        };
-        var kind = new ComboBox
+            Left = Padding + 12, Top = 14, Width = Width - Padding * 2 - 12, Height = 16,
+            Text = "TEXTURES", Font = Theme.Eyebrow, ForeColor = Theme.Textures
+        });
+        header.Controls.Add(new Label
         {
-            Dock = DockStyle.Top,
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Height = 28,
-            Margin = new Padding(12)
+            Left = Padding + 12, Top = 31, Width = Width - Padding * 2 - 12, Height = 22,
+            Text = "Import texture", Font = Theme.Heading, ForeColor = Theme.OnDark
+        });
+
+        var fields = new RoundedPanel
+        {
+            Left = Padding, Top = 80, Width = Width - Padding * 2, Height = 190,
+            BackColor = Theme.CardBg, BorderColor = Theme.LineSoft, CornerRadius = Theme.RadiusSm
         };
-        kind.Items.AddRange(new object[] { "Character texture", "Color mask", "UI icon", "Normal map", "Roughness/spec mask", "Other texture" });
+
+        var input = new TextBox
+        {
+            Text = MakeSafeTextureToken(suggestedName),
+            BorderStyle = BorderStyle.None,
+            BackColor = Theme.Slate,
+            ForeColor = Theme.OnDark,
+            Font = Theme.Body
+        };
+        AddTextureDialogField(fields, "TEXTURE NAME", input, 14);
+
+        var kind = new ThemedDropDown { Height = 34 };
+        foreach (var textureKind in new[] { "Character texture", "Color mask", "UI icon", "Normal map", "Roughness/spec mask", "Other texture" })
+        {
+            kind.Items.Add(textureKind);
+        }
         var guessedKind = GuessTextureImportKind(suggestedName);
         kind.SelectedItem = guessedKind;
         if (kind.SelectedIndex < 0)
         {
             kind.SelectedIndex = 0;
         }
-        Theme.StyleDarkCombo(kind);
+        AddTextureDialogField(fields, "USE", kind, 74);
 
-        var input = new TextBox
-        {
-            Text = MakeSafeTextureToken(suggestedName),
-            Dock = DockStyle.Top,
-            Margin = new Padding(12),
-            Height = 28
-        };
-        Theme.StyleDarkInput(input);
+        var profile = new ThemedDropDown { Height = 34 };
+        AddTextureDialogField(fields, "NATIVE COOK PROFILE", profile, 134);
 
-        var buttons = new FlowLayoutPanel
+        void ReloadProfiles()
         {
-            Dock = DockStyle.Bottom,
-            Height = 48,
-            FlowDirection = FlowDirection.RightToLeft,
-            Padding = new Padding(8),
-            BackColor = Theme.PanelBg
+            profile.Items.Clear();
+            foreach (var preset in AvailableTextureCookPresets(projectRoot, kind.SelectedItem?.ToString() ?? "Texture"))
+            {
+                profile.Items.Add(preset);
+            }
+
+            if (profile.Items.Count > 0)
+            {
+                profile.SelectedIndex = 0;
+            }
+        }
+
+        kind.SelectedIndexChanged += (_, _) => ReloadProfiles();
+        ReloadProfiles();
+
+        var footer = new Panel
+        {
+            Left = 0, Top = 286, Width = Width, Height = 54, BackColor = Theme.SlateDark
         };
-        var ok = new Button { Text = "Import", DialogResult = DialogResult.OK, Width = 86, Height = 28 };
-        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Width = 86, Height = 28 };
+        footer.Paint += (_, e) =>
+        {
+            using var pen = new Pen(Theme.LineSoft);
+            e.Graphics.DrawLine(pen, 0, 0, footer.Width, 0);
+        };
+        var ok = new Button { Text = "Import", DialogResult = DialogResult.OK, Width = 96, Height = 32, Left = Width - Padding - 96, Top = 11 };
+        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Width = 90, Height = 32, Left = Width - Padding - 96 - 98, Top = 11 };
         Theme.StyleGoldButton(ok);
-        Theme.StyleSmallDarkButton(cancel);
-        buttons.Controls.Add(ok);
-        buttons.Controls.Add(cancel);
+        Theme.StyleDarkButton(cancel);
+        footer.Controls.Add(ok);
+        footer.Controls.Add(cancel);
 
-        form.Controls.Add(buttons);
-        form.Controls.Add(kind);
-        form.Controls.Add(input);
-        form.Controls.Add(label);
+        form.Controls.Add(header);
+        form.Controls.Add(fields);
+        form.Controls.Add(footer);
         form.AcceptButton = ok;
         form.CancelButton = cancel;
+        input.Select();
 
         if (form.ShowDialog(this) != DialogResult.OK)
         {
             return null;
         }
 
-        return (input.Text.Trim(), kind.SelectedItem?.ToString() ?? "Texture");
+        return profile.SelectedItem is TextureCookPreset preset
+            ? (input.Text.Trim(), kind.SelectedItem?.ToString() ?? "Texture", preset)
+            : null;
+    }
+
+    private static void AddTextureDialogField(RoundedPanel parent, string label, Control input, int top)
+    {
+        parent.Controls.Add(new Label
+        {
+            Left = 14, Top = top, Width = parent.Width - 28, Height = 15,
+            Text = label, Font = Theme.Eyebrow, ForeColor = Theme.OnDarkMuted, BackColor = Color.Transparent
+        });
+        if (input is ThemedDropDown)
+        {
+            input.Left = 14;
+            input.Top = top + 17;
+            input.Width = parent.Width - 28;
+            input.Height = 34;
+            input.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            parent.Controls.Add(input);
+            return;
+        }
+
+        var wrap = new RoundedPanel
+        {
+            Left = 14, Top = top + 17, Width = parent.Width - 28, Height = 34,
+            BackColor = Theme.Slate, BorderColor = Theme.SlateLight, CornerRadius = Theme.RadiusSm
+        };
+        input.Left = 10;
+        input.Top = (wrap.Height - input.Height) / 2;
+        input.Width = wrap.Width - 20;
+        input.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        wrap.Controls.Add(input);
+        parent.Controls.Add(wrap);
+    }
+
+    private TextureCookPreset? PromptForTextureCookPreset(string textureKind, string projectRoot, string? currentProfileId)
+    {
+        var presets = AvailableTextureCookPresets(projectRoot, textureKind);
+        if (presets.Count == 0)
+        {
+            AppendLog($"No native cook templates are available for '{textureKind}'.");
+            return null;
+        }
+
+        const int Width = 540;
+        const int Padding = 18;
+        using var form = new Form
+        {
+            Text = "Batcomputer - Texture cook profile",
+            StartPosition = FormStartPosition.CenterParent,
+            ClientSize = new Size(Width, 238),
+            MinimizeBox = false,
+            MaximizeBox = false,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            ShowInTaskbar = false,
+            BackColor = Theme.WindowBg,
+            ForeColor = Theme.OnDark,
+            Font = Theme.Body
+        };
+
+        form.Shown += (_, _) => Theme.UseDarkTitleBar(form);
+        var header = new Panel { Left = 0, Top = 0, Width = Width, Height = 72, BackColor = Theme.WindowBg };
+        header.Controls.Add(new Panel { Left = Padding, Top = 18, Width = 3, Height = 36, BackColor = Theme.Textures });
+        header.Controls.Add(new Label
+        {
+            Left = Padding + 12, Top = 14, Width = Width - Padding * 2 - 12, Height = 16,
+            Text = "TEXTURES", Font = Theme.Eyebrow, ForeColor = Theme.Textures
+        });
+        header.Controls.Add(new Label
+        {
+            Left = Padding + 12, Top = 31, Width = Width - Padding * 2 - 12, Height = 22,
+            Text = "Change cook profile", Font = Theme.Heading, ForeColor = Theme.OnDark
+        });
+
+        var fields = new RoundedPanel
+        {
+            Left = Padding, Top = 80, Width = Width - Padding * 2, Height = 82,
+            BackColor = Theme.CardBg, BorderColor = Theme.LineSoft, CornerRadius = Theme.RadiusSm
+        };
+        var profile = new ThemedDropDown { Height = 34 };
+        foreach (var preset in presets)
+        {
+            profile.Items.Add(preset);
+        }
+        var currentIndex = presets.FindIndex(p => p.Id.Equals(currentProfileId, StringComparison.OrdinalIgnoreCase));
+        profile.SelectedIndex = currentIndex >= 0 ? currentIndex : 0;
+        AddTextureDialogField(fields, "NATIVE COOK PROFILE", profile, 14);
+
+        var footer = new Panel
+        {
+            Left = 0, Top = 184, Width = Width, Height = 54, BackColor = Theme.SlateDark
+        };
+        footer.Paint += (_, e) =>
+        {
+            using var pen = new Pen(Theme.LineSoft);
+            e.Graphics.DrawLine(pen, 0, 0, footer.Width, 0);
+        };
+        var ok = new Button { Text = "Recook", DialogResult = DialogResult.OK, Width = 96, Height = 32, Left = Width - Padding - 96, Top = 11 };
+        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Width = 90, Height = 32, Left = Width - Padding - 96 - 98, Top = 11 };
+        Theme.StyleGoldButton(ok);
+        Theme.StyleDarkButton(cancel);
+        footer.Controls.Add(ok);
+        footer.Controls.Add(cancel);
+
+        form.Controls.Add(header);
+        form.Controls.Add(fields);
+        form.Controls.Add(footer);
+        form.AcceptButton = ok;
+        form.CancelButton = cancel;
+
+        return form.ShowDialog(this) == DialogResult.OK
+            ? profile.SelectedItem as TextureCookPreset
+            : null;
     }
 
     private static string MakeFixedLengthModFolderName(string value, int index, int targetLength)
@@ -1560,7 +1743,7 @@ public sealed partial class MainForm : Form
         _uassetNameMapPatchButton.Click += (_, _) => PatchNameMapsWithUAssetApi();
         _graftTorso2Button.Click += async (_, _) => await GraftTorso2Async();
         _graftSelectedPartButton.Click += async (_, _) => await GraftSelectedPartsAsync();
-        _packagePatchedIoStoreButton.Click += async (_, _) => await PackagePatchedIoStoreAsync();
+        _packagePatchedIoStoreButton.Click += async (_, _) => await BuildModForCurrentSuitAsync();
         _playableGrid.SelectionChanged += (_, _) => PickPlayableFromGrid();
         _cutsceneGrid.SelectionChanged += (_, _) => PickCutsceneFromGrid();
         _refreshPartGridButton.Click += (_, _) => LoadPartIndexAndRefreshGrid();
@@ -1915,6 +2098,28 @@ public sealed partial class MainForm : Form
         ReadFieldsIntoProject(_currentProject);
         var path = _projectService.SaveProject(_currentProject);
         AppendLog($"Saved project: {path}");
+    }
+
+    /// <summary>Saves the open suit from the visible builder command bar.</summary>
+    private void SaveCurrentSuit()
+    {
+        if (_currentProject is null)
+        {
+            return;
+        }
+
+        try
+        {
+            ReadFieldsIntoProject(_currentProject);
+            var projectService = _projectService ??= new SuitProjectService(_projectRootText.Text.Trim());
+            var path = projectService.SaveProject(_currentProject);
+            AppendLog($"Saved suit: {path}");
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Save suit failed: {ex.Message}");
+            Dialog.Error(this, "Save suit failed", ex.Message);
+        }
     }
 
     private void CreatePatchPlan()

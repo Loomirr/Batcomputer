@@ -10,8 +10,7 @@ namespace Batcomputer;
 /// <see cref="RegionActivated"/> fires the region key so MainForm can select the matching slot.
 ///
 /// Regions follow how the game splits a character: Body is CharacterMesh0 (torso, arms, hands,
-/// legs, feet), with Head, Cape, Belt and Shoulders as separate components. Face has no geometry
-/// of its own - it is a chip beside the head that acts as the face drop target.
+/// legs, feet), with Head, Cape, Belt and Shoulders as separate components.
 /// </summary>
 public sealed class MinifigDiagram : Control
 {
@@ -19,7 +18,7 @@ public sealed class MinifigDiagram : Control
 
     /// <summary>Canonical region keys. MainForm classifies component names onto these.</summary>
     public static readonly string[] Regions =
-        { "Head", "Face", "Cape", "Body", "Belt", "Shoulders", "Glider", "Equipment" };
+        { "Head", "Cape", "Body", "Belt", "Shoulders", "Glider", "Equipment" };
 
     /// <summary>Accessory slots shown in the tray under the figure (drag targets, not body parts).</summary>
     public static readonly string[] GearRegions = { "Glider", "Equipment" };
@@ -211,7 +210,6 @@ public sealed class MinifigDiagram : Control
         ("Shoulders", "Shoulders", 0.90f, 0.55f), // on the right pauldron pad — dead centre is just the thin collar bar
         ("Belt",      "Belt",      0.5f, 0.5f),
         ("Cape",      "Cape",      0.84f, 0.90f), // the flare beside the legs — the only part of the cape not hidden by the body
-        ("Face",      "Face",      1.0f, 0.5f), // just outside the chip, so it doesn't cover the label
     };
 
     /// <summary>
@@ -347,16 +345,6 @@ public sealed class MinifigDiagram : Control
             _hit[file] = new RectangleF(_figure.X + x * fw, _figure.Y + y * fw, dw, dw / a.Aspect);
         }
 
-        // Face chip: a labelled drop target beside the head (the head art itself is the Head slot).
-        if (_hit.TryGetValue("Head", out var head))
-        {
-            var size = TextRenderer.MeasureText("Face", Theme.Caption);
-            var chipW = size.Width + 16;
-            var chipH = 20f;
-            var chipX = Math.Min(Width - Pad - chipW, head.Right + 26f);
-            _hit["Face"] = new RectangleF(chipX, head.Top + head.Height * 0.52f - chipH / 2f, chipW, chipH);
-        }
-
         var trayW = Math.Min(availW, MaxTrayW);
         var trayX = (Width - trayW) / 2f;
         var trayY = _trayTop;
@@ -410,7 +398,6 @@ public sealed class MinifigDiagram : Control
         }
 
         DrawBadges(g);
-        DrawFaceChip(g);
         DrawGearTray(g);
         DrawMaterialsPanel(g, active, info);
         DrawDropHint(g);

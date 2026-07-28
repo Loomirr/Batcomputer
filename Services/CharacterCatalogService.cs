@@ -32,7 +32,10 @@ internal static class CharacterCatalogService
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
     private static string CachePath =>
-        Path.Combine(AppContext.BaseDirectory, "Batcomputer.characters.json");
+        Path.Combine(AppSettings.CacheRoot, "characters.json");
+
+    private static string LegacyCachePath =>
+        Path.Combine(AppSettings.ToolRoot, "Batcomputer.characters.json");
 
     /// <summary>Loads the cached catalogue, or scans the paks when there is no cache yet.</summary>
     public static List<Entry> Load(string paksDir, string usmapPath, bool forceRescan = false)
@@ -44,6 +47,7 @@ internal static class CharacterCatalogService
         var scanned = Scan(paksDir, usmapPath);
         try
         {
+            Directory.CreateDirectory(AppSettings.CacheRoot);
             File.WriteAllText(CachePath, JsonSerializer.Serialize(scanned, Json));
         }
         catch
@@ -57,8 +61,9 @@ internal static class CharacterCatalogService
     {
         try
         {
-            return File.Exists(CachePath)
-                ? JsonSerializer.Deserialize<List<Entry>>(File.ReadAllText(CachePath))
+            var path = File.Exists(CachePath) ? CachePath : LegacyCachePath;
+            return File.Exists(path)
+                ? JsonSerializer.Deserialize<List<Entry>>(File.ReadAllText(path))
                 : null;
         }
         catch
@@ -143,27 +148,25 @@ internal static class CharacterCatalogService
     /// <summary>The user's own suit projects, read from the project root.</summary>
     public static List<Entry> CustomSuits(string projectRoot)
     {
-        var list = new List<Entry>();
         try
         {
-            var suitsDir = Path.Combine(projectRoot, "Suits");
-            if (!Directory.Exists(suitsDir))
-            {
-                return list;
-            }
-            foreach (var dir in Directory.EnumerateDirectories(suitsDir))
-            {
-                var json = Directory.EnumerateFiles(dir, "*.json").FirstOrDefault();
-                if (json is not null)
-                {
-                    list.Add(new Entry(Path.GetFileName(dir), Source.CustomSuit, string.Empty, json));
-                }
-            }
+            // SuitProjectService is the authoritative location for projects made by this tool.
+            // The old "Suits" directory scan was a legacy path, which left My suits empty even
+            // though the Home screen could see the same saved projects.
+            return new SuitProjectService(projectRoot)
+                .ListProjects()
+                .Select(project => new Entry(
+                    project.DisplayName,
+                    Source.CustomSuit,
+                    string.Empty,
+                    project.Path))
+                .OrderBy(entry => entry.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
         catch
         {
             // Missing or unreadable project root - just show nothing under custom suits.
+            return new List<Entry>();
         }
-        return list.OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 }

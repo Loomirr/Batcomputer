@@ -45,6 +45,16 @@ public sealed class VirtualTilePanel : Panel
     /// </summary>
     public sealed class HeroModel
     {
+        public sealed class WorkflowStep
+        {
+            public string Label = "";
+            public string Detail = "";
+            public Color Accent = Theme.Base;
+            public bool Complete;
+            public bool Current;
+        }
+
+        public string Overline = "";
         public string Title = "";
         public string Subtitle = "";
         public string Badge = "";
@@ -52,12 +62,15 @@ public sealed class VirtualTilePanel : Panel
         public Image? Thumb;
         public Color ThumbAccent = Theme.Base;
         public IReadOnlyList<(string Text, Color Dot)> Chips = Array.Empty<(string, Color)>();
+        public IReadOnlyList<WorkflowStep> Workflow = Array.Empty<WorkflowStep>();
     }
 
     public HeroModel? Hero { get; private set; }
 
     private const int HeroCardH = 76;
     private const int HeroChipH = 24;
+
+    private int HeroCardHeight() => Hero?.Workflow.Count > 0 ? 100 : HeroCardH;
 
     /// <summary>Sets (or clears) the hero header, disposing the previous hero's thumbnail.</summary>
     public void SetHero(HeroModel? hero)
@@ -72,7 +85,7 @@ public sealed class VirtualTilePanel : Panel
     private int HeroBlockHeight()
     {
         if (Hero is null) return 0;
-        var h = HeroCardH;
+        var h = HeroCardHeight();
         if (Hero.Chips.Count > 0) h += 8 + HeroChipH;
         return h + Gap;
     }
@@ -306,13 +319,16 @@ public sealed class VirtualTilePanel : Panel
     private static readonly Font HeroSubFont = new("Segoe UI", 8.75f);
     private static readonly Font HeroChipFont = new("Segoe UI", 8.25f, FontStyle.Bold);
     private static readonly Font HeroBadgeFont = new("Segoe UI", 8f, FontStyle.Bold);
+    private static readonly Font HeroOverlineFont = new("Segoe UI", 7.5f, FontStyle.Bold);
+    private static readonly Font HeroWorkflowLabelFont = new("Segoe UI", 7.5f, FontStyle.Bold);
+    private static readonly Font HeroWorkflowDetailFont = new("Segoe UI", 7f);
 
     /// <summary>Paints the adaptive hero card + stat chips at content-space top <paramref name="top"/>.</summary>
     private void DrawHero(Graphics g, int top)
     {
         if (Hero is null) return;
         var usableW = Math.Max(80, ClientSize.Width - Gap * 2);
-        var card = new Rectangle(Gap, top, usableW, HeroCardH);
+        var card = new Rectangle(Gap, top, usableW, HeroCardHeight());
 
         Theme.FillRoundedCard(g, card, Theme.CardHi, Theme.LineSoft, Theme.Radius);
         // Gold accent bar on the left edge.
@@ -347,21 +363,63 @@ public sealed class VirtualTilePanel : Panel
         }
         x = thumb.Right + 14;
 
-        // Title + optional badge pill.
-        var titleSize = TextRenderer.MeasureText(g, Hero.Title, HeroTitleFont, new Size(usableW, 24), TextFormatFlags.NoPadding);
-        TextRenderer.DrawText(g, Hero.Title, HeroTitleFont,
-            new Rectangle(x, card.Top + 14, usableW - x - 12, 24), Theme.OnDark,
-            TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
-        if (!string.IsNullOrEmpty(Hero.Badge))
+        var titleRight = card.Right - 12;
+        var drawWorkflow = false;
+        var stepBounds = new List<(Rectangle Bounds, HeroModel.WorkflowStep Step)>();
+        if (Hero.Workflow.Count > 0)
         {
-            var badgeX = x + Math.Min(titleSize.Width, usableW - x - 120) + 10;
-            DrawPill(g, ref badgeX, card.Top + 16, Hero.Badge, Hero.BadgeColor, HeroBadgeFont,
+            const int stepGap = 5;
+            const int minTextW = 138;
+            const int minStepW = 72;
+            var available = card.Right - 12 - x;
+            var gapTotal = stepGap * (Hero.Workflow.Count - 1);
+            if (available >= minTextW + minStepW * Hero.Workflow.Count + gapTotal + 10)
+            {
+                var stepW = Math.Min(108, Math.Max(minStepW,
+                    (available - minTextW - gapTotal) / Hero.Workflow.Count));
+                var stepsW = stepW * Hero.Workflow.Count + gapTotal;
+                var start = card.Right - 12 - stepsW;
+                titleRight = start - 10;
+                for (var i = 0; i < Hero.Workflow.Count; i++)
+                {
+                    stepBounds.Add((new Rectangle(start + i * (stepW + stepGap), card.Top + 13, stepW, 54), Hero.Workflow[i]));
+                }
+                drawWorkflow = true;
+            }
+        }
+
+        var hasOverline = !string.IsNullOrWhiteSpace(Hero.Overline);
+        var overlineTop = card.Top + 10;
+        var titleTop = card.Top + (hasOverline ? 24 : 14);
+        var subtitleTop = card.Top + (hasOverline ? 48 : 40);
+        if (hasOverline)
+        {
+            TextRenderer.DrawText(g, Hero.Overline, HeroOverlineFont,
+                new Rectangle(x, overlineTop, Math.Max(0, titleRight - x), 14), Hero.ThumbAccent,
+                TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+        }
+
+        // Title + optional badge pill.
+        var titleWidth = Math.Max(0, titleRight - x);
+        var titleSize = TextRenderer.MeasureText(g, Hero.Title, HeroTitleFont, new Size(titleWidth, 24), TextFormatFlags.NoPadding);
+        TextRenderer.DrawText(g, Hero.Title, HeroTitleFont,
+            new Rectangle(x, titleTop, titleWidth, 24), Theme.OnDark,
+            TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+        if (!string.IsNullOrEmpty(Hero.Badge) && !drawWorkflow)
+        {
+            var badgeX = x + Math.Min(titleSize.Width, titleWidth - 120) + 10;
+            DrawPill(g, ref badgeX, titleTop + 2, Hero.Badge, Hero.BadgeColor, HeroBadgeFont,
                 filled: true, dot: false);
         }
 
         TextRenderer.DrawText(g, Hero.Subtitle, HeroSubFont,
-            new Rectangle(x, card.Top + 40, usableW - x - 12, 20), Theme.OnDarkMuted,
+            new Rectangle(x, subtitleTop, titleWidth, 20), Theme.OnDarkMuted,
             TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+
+        foreach (var (bounds, step) in stepBounds)
+        {
+            DrawWorkflowStep(g, bounds, step);
+        }
 
         // Stat chips row.
         if (Hero.Chips.Count > 0)
@@ -374,6 +432,23 @@ public sealed class VirtualTilePanel : Panel
                 cx += 8;
             }
         }
+    }
+
+    private static void DrawWorkflowStep(Graphics g, Rectangle bounds, HeroModel.WorkflowStep step)
+    {
+        var fill = step.Current
+            ? Theme.Blend(step.Accent, Theme.CardBg, 0.24)
+            : Theme.Slate;
+        var border = Theme.Blend(step.Accent, Theme.LineSoft, step.Current || step.Complete ? 0.72 : 0.42);
+        Theme.FillRoundedCard(g, bounds, fill, border, 6);
+
+        var accent = step.Complete ? Theme.Good : step.Accent;
+        TextRenderer.DrawText(g, step.Label, HeroWorkflowLabelFont,
+            new Rectangle(bounds.Left + 8, bounds.Top + 7, bounds.Width - 16, 15), accent,
+            TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+        TextRenderer.DrawText(g, step.Detail, HeroWorkflowDetailFont,
+            new Rectangle(bounds.Left + 8, bounds.Top + 25, bounds.Width - 16, 20), Theme.OnDarkMuted,
+            TextFormatFlags.Left | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
     }
 
     /// <summary>Draws a rounded pill starting at <paramref name="x"/> and advances x past it.</summary>

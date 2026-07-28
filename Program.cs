@@ -60,6 +60,14 @@ internal static class Program
             return 0;
         }
 
+        if (args.Length >= 4 && args[0].Equals("--preview-character-folder", StringComparison.OrdinalIgnoreCase))
+        {
+            var bodyMesh = args.Length >= 5 ? args[4] : null;
+            var folder = ModelPreviewService.BuildPreviewCharacter(args[1], args[2], args[3], bodyMesh);
+            Console.WriteLine(folder);
+            return 0;
+        }
+
         if (args.Length >= 2 && args[0].Equals("--create-recommended-project", StringComparison.OrdinalIgnoreCase))
         {
             var projectRoot = args[1];

@@ -1,9 +1,8 @@
 namespace Batcomputer;
 
 /// <summary>
-/// Modal "create new material" wizard: pick a base game MI, read its texture
-/// params, point them at your own texture paths, name it, generate. Reuses
-/// MaterialGenService. On OK, <see cref="ResultMiPackagePath"/> holds the new MI.
+/// Modal material forge: clone a base MI, map its texture parameters, then generate the new MI.
+/// The workflow remains deliberately small, while the surface matches the rest of Batcomputer.
 /// </summary>
 public sealed partial class MaterialWizard : Form
 {
@@ -12,8 +11,9 @@ public sealed partial class MaterialWizard : Form
     private readonly TextBox _baseText = new();
     private readonly TextBox _nameText = new();
     private readonly DataGridView _grid = new();
-    private readonly ComboBox _generatedTextureCombo = new();
+    private readonly ThemedDropDown _generatedTextureCombo = new();
     private readonly Label _status = new();
+    private readonly Label _titleLabel = new();
     private readonly List<GeneratedTextureEntry> _generatedTextures = new();
 
     public string? ResultMiPackagePath { get; private set; }
@@ -32,8 +32,8 @@ public sealed partial class MaterialWizard : Form
         if (generatedTextures is not null)
         {
             _generatedTextures.AddRange(generatedTextures
-                .Where(t => !string.IsNullOrWhiteSpace(t.PackagePath))
-                .OrderBy(t => t.DisplayName, StringComparer.OrdinalIgnoreCase));
+                .Where(texture => !string.IsNullOrWhiteSpace(texture.PackagePath))
+                .OrderBy(texture => texture.DisplayName, StringComparer.OrdinalIgnoreCase));
         }
 
         InitializeComponent();
@@ -42,93 +42,192 @@ public sealed partial class MaterialWizard : Form
             return;
         }
 
+        BuildModernLayout(suggestedName);
+    }
+
+    private void BuildModernLayout(string suggestedName)
+    {
+        const int width = 780;
+        const int padding = 18;
+        const int innerWidth = width - padding * 2;
         Controls.Clear();
 
-        Text = "Create new material";
-        Width = 720;
-        Height = 520;
+        Text = "Batcomputer - Material forge";
+        ClientSize = new Size(width, 590);
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
         MaximizeBox = false;
+        ShowInTaskbar = false;
+        BackColor = Theme.WindowBg;
+        ForeColor = Theme.OnDark;
+        Font = Theme.Body;
+        Shown += (_, _) => Theme.UseDarkTitleBar(this);
 
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6, Padding = new Padding(12) };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
-        Controls.Add(root);
+        var header = new Panel { Left = 0, Top = 0, Width = width, Height = 68, BackColor = Theme.WindowBg };
+        header.Controls.Add(new Panel { Left = padding, Top = 17, Width = 3, Height = 36, BackColor = Theme.Materials });
+        header.Controls.Add(new Label
+        {
+            Left = padding + 12, Top = 13, Width = innerWidth - 12, Height = 16,
+            Text = "MATERIALS", Font = Theme.Eyebrow, ForeColor = Theme.Materials
+        });
+        _titleLabel.SetBounds(padding + 12, 30, innerWidth - 12, 22);
+        _titleLabel.Text = "Create material";
+        _titleLabel.Font = Theme.Heading;
+        _titleLabel.ForeColor = Theme.OnDark;
+        header.Controls.Add(_titleLabel);
 
-        // Base MI row + read.
-        var baseRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 2 };
-        baseRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        baseRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));
-        baseRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));
-        baseRow.Controls.Add(new Label { Text = "Base game material (.uasset) to clone:", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
-        _baseText.Dock = DockStyle.Fill;
-        baseRow.Controls.Add(_baseText, 0, 1);
-        var browse = new Button { Text = "Browse…", Dock = DockStyle.Fill };
+        var sourceCard = new RoundedPanel
+        {
+            Left = padding, Top = 76, Width = innerWidth, Height = 130,
+            BackColor = Theme.CardBg, BorderColor = Theme.LineSoft, CornerRadius = Theme.RadiusSm
+        };
+        sourceCard.Controls.Add(MakeFieldLabel("BASE MATERIAL", 14, 13, innerWidth - 28));
+        sourceCard.Controls.Add(MakeInputSurface(_baseText, new Rectangle(14, 31, 500, 34)));
+        var browse = new Button { Text = "Browse...", Left = 522, Top = 31, Width = 88, Height = 34 };
+        Theme.StyleDarkButton(browse);
         browse.Click += (_, _) => Browse();
-        baseRow.Controls.Add(browse, 1, 1);
-        var read = new Button { Text = "Read params", Dock = DockStyle.Fill };
+        sourceCard.Controls.Add(browse);
+        var read = new Button { Text = "Read parameters", Left = 618, Top = 31, Width = 104, Height = 34 };
+        Theme.StyleDarkButton(read);
         read.Click += (_, _) => ReadParams();
-        baseRow.Controls.Add(read, 2, 1);
-        root.Controls.Add(baseRow, 0, 0);
+        sourceCard.Controls.Add(read);
 
-        // Name row.
-        var nameRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
-        nameRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
-        nameRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        nameRow.Controls.Add(new Label { Text = "New material name:", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
-        _nameText.Dock = DockStyle.Fill;
+        sourceCard.Controls.Add(MakeFieldLabel("MATERIAL NAME", 14, 74, innerWidth - 28));
         _nameText.Text = suggestedName;
-        nameRow.Controls.Add(_nameText, 1, 0);
-        root.Controls.Add(nameRow, 0, 1);
+        sourceCard.Controls.Add(MakeInputSurface(_nameText, new Rectangle(14, 92, innerWidth - 28, 34)));
 
-        var generatedTextureRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 1 };
-        generatedTextureRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
-        generatedTextureRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        generatedTextureRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 145));
-        generatedTextureRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 95));
-        generatedTextureRow.Controls.Add(new Label { Text = "Generated texture:", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
-        _generatedTextureCombo.Dock = DockStyle.Fill;
-        _generatedTextureCombo.DropDownStyle = ComboBoxStyle.DropDownList;
+        var textureCard = new RoundedPanel
+        {
+            Left = padding, Top = 218, Width = innerWidth, Height = 84,
+            BackColor = Theme.CardBg, BorderColor = Theme.LineSoft, CornerRadius = Theme.RadiusSm
+        };
+        textureCard.Controls.Add(MakeFieldLabel("GENERATED TEXTURE", 14, 13, innerWidth - 28));
+        _generatedTextureCombo.SetBounds(14, 31, 370, 34);
+        _generatedTextureCombo.Placeholder = "Select generated texture";
         PopulateGeneratedTextureCombo();
-        generatedTextureRow.Controls.Add(_generatedTextureCombo, 1, 0);
-        var useTexture = new Button { Text = "Use for selected param", Dock = DockStyle.Fill };
+        textureCard.Controls.Add(_generatedTextureCombo);
+        var useTexture = new Button { Text = "Use selected", Left = 392, Top = 31, Width = 170, Height = 34 };
+        Theme.StyleDarkButton(useTexture);
         useTexture.Click += (_, _) => UseGeneratedTextureForSelectedParam();
-        generatedTextureRow.Controls.Add(useTexture, 2, 0);
-        var copyTexture = new Button { Text = "Copy path", Dock = DockStyle.Fill };
+        textureCard.Controls.Add(useTexture);
+        var copyTexture = new Button { Text = "Copy path", Left = 570, Top = 31, Width = 152, Height = 34 };
+        Theme.StyleDarkButton(copyTexture);
         copyTexture.Click += (_, _) => CopySelectedGeneratedTexturePath();
-        generatedTextureRow.Controls.Add(copyTexture, 3, 0);
-        root.Controls.Add(generatedTextureRow, 0, 2);
+        textureCard.Controls.Add(copyTexture);
 
-        // Params grid.
-        _grid.Dock = DockStyle.Fill;
-        _grid.AllowUserToAddRows = false;
-        _grid.RowHeadersVisible = false;
-        _grid.AutoGenerateColumns = false;
+        var parametersCard = new RoundedPanel
+        {
+            Left = padding, Top = 314, Width = innerWidth, Height = 210,
+            BackColor = Theme.CardBg, BorderColor = Theme.LineSoft, CornerRadius = Theme.RadiusSm
+        };
+        parametersCard.Controls.Add(MakeFieldLabel("TEXTURE PARAMETERS", 14, 13, innerWidth - 28));
+        _grid.SetBounds(14, 37, innerWidth - 28, 148);
+        StyleParameterGrid();
         _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Param", HeaderText = "Parameter", ReadOnly = true, Width = 150 });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Current", HeaderText = "Current texture", ReadOnly = true, Width = 220 });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "YourTexture", HeaderText = "Your texture path (/Game/…)", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
-        root.Controls.Add(_grid, 0, 3);
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "YourTexture", HeaderText = "Your texture path (/Game/...)", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
+        parametersCard.Controls.Add(_grid);
+        _status.SetBounds(14, 190, innerWidth - 28, 16);
+        _status.Text = "Read a base material to load its texture parameters.";
+        _status.Font = Theme.Caption;
+        _status.ForeColor = Theme.OnDarkMuted;
+        _status.AutoEllipsis = true;
+        parametersCard.Controls.Add(_status);
 
-        _status.Dock = DockStyle.Fill;
-        _status.ForeColor = Color.DimGray;
-        _status.Text = "Pick a base MI and click Read params, then fill in your texture paths.";
-        root.Controls.Add(_status, 0, 4);
-
-        // Buttons.
-        var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
-        var cancel = new Button { Text = "Cancel", Width = 90, DialogResult = DialogResult.Cancel };
-        var generate = new Button { Text = "Generate", Width = 120 };
+        var footer = new Panel { Left = 0, Top = 536, Width = width, Height = 54, BackColor = Theme.SlateDark };
+        footer.Paint += (_, e) =>
+        {
+            using var pen = new Pen(Theme.LineSoft);
+            e.Graphics.DrawLine(pen, 0, 0, footer.Width, 0);
+        };
+        var generate = new Button { Text = "Generate", Width = 104, Height = 32, Left = width - padding - 104, Top = 11 };
         Theme.StyleGoldButton(generate);
         generate.Click += (_, _) => Generate();
-        buttons.Controls.Add(cancel);
-        buttons.Controls.Add(generate);
-        root.Controls.Add(buttons, 0, 5);
+        var cancel = new Button { Text = "Cancel", Width = 90, Height = 32, Left = width - padding - 104 - 98, Top = 11, DialogResult = DialogResult.Cancel };
+        Theme.StyleDarkButton(cancel);
+        footer.Controls.Add(generate);
+        footer.Controls.Add(cancel);
+
+        Controls.Add(header);
+        Controls.Add(sourceCard);
+        Controls.Add(textureCard);
+        Controls.Add(parametersCard);
+        Controls.Add(footer);
+        AcceptButton = generate;
         CancelButton = cancel;
+        _baseText.Select();
+    }
+
+    private static Label MakeFieldLabel(string text, int left, int top, int width) => new()
+    {
+        Left = left,
+        Top = top,
+        Width = width,
+        Height = 15,
+        Text = text,
+        Font = Theme.Eyebrow,
+        ForeColor = Theme.OnDarkMuted,
+        BackColor = Color.Transparent,
+    };
+
+    private static RoundedPanel MakeInputSurface(TextBox input, Rectangle bounds)
+    {
+        var surface = new RoundedPanel
+        {
+            Bounds = bounds,
+            BackColor = Theme.Slate,
+            BorderColor = Theme.SlateLight,
+            CornerRadius = Theme.RadiusSm,
+        };
+        input.BorderStyle = BorderStyle.None;
+        input.BackColor = Theme.Slate;
+        input.ForeColor = Theme.OnDark;
+        input.Font = Theme.Body;
+        input.Left = 10;
+        input.Top = (surface.Height - input.Height) / 2;
+        input.Width = surface.Width - 20;
+        input.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        surface.Controls.Add(input);
+        return surface;
+    }
+
+    private void StyleParameterGrid()
+    {
+        _grid.AllowUserToAddRows = false;
+        _grid.AllowUserToDeleteRows = false;
+        _grid.AllowUserToResizeRows = false;
+        _grid.RowHeadersVisible = false;
+        _grid.AutoGenerateColumns = false;
+        _grid.BorderStyle = BorderStyle.None;
+        _grid.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
+        _grid.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
+        _grid.EnableHeadersVisualStyles = false;
+        _grid.BackgroundColor = Theme.SlateDark;
+        _grid.GridColor = Theme.LineSoft;
+        _grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
+        {
+            BackColor = Theme.Slate,
+            ForeColor = Theme.OnDarkMuted,
+            SelectionBackColor = Theme.Slate,
+            SelectionForeColor = Theme.OnDarkMuted,
+            Font = Theme.Caption,
+            Alignment = DataGridViewContentAlignment.MiddleLeft,
+        };
+        _grid.DefaultCellStyle = new DataGridViewCellStyle
+        {
+            BackColor = Theme.CardBg,
+            ForeColor = Theme.OnDark,
+            SelectionBackColor = Theme.Tint(Theme.Materials),
+            SelectionForeColor = Theme.OnDark,
+            Font = Theme.Body,
+            Padding = new Padding(4, 0, 4, 0),
+        };
+        _grid.AlternatingRowsDefaultCellStyle = new DataGridViewCellStyle
+        {
+            BackColor = Theme.Slate,
+            ForeColor = Theme.OnDark,
+        };
+        _grid.RowTemplate.Height = 28;
     }
 
     /// <summary>
@@ -146,19 +245,33 @@ public sealed partial class MaterialWizard : Form
         {
             _nameText.Text = newName;
         }
-        Text = editInPlace ? "Edit material" : "New material from base";
+
+        Text = editInPlace ? "Batcomputer - Edit material" : "Batcomputer - New material from base";
+        _titleLabel.Text = editInPlace ? "Edit material" : "New material from base";
         if (File.Exists(baseUassetDiskPath))
         {
-            try { ReadParams(); } catch { /* leave grid empty; user can re-read */ }
+            try { ReadParams(); } catch { /* Leave the grid empty; user can re-read. */ }
         }
     }
 
     private void Browse()
     {
-        using var dlg = new OpenFileDialog { Filter = "Material Instance (*.uasset)|*.uasset|All files|*.*" };
-        var start = AppSettings.Current.EffectiveExtractedContentRoot();
-        if (Directory.Exists(start)) dlg.InitialDirectory = start;
-        if (dlg.ShowDialog(this) == DialogResult.OK) _baseText.Text = dlg.FileName;
+        using var picker = new MaterialCatalogPicker();
+        if (picker.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(picker.SelectedPackagePath))
+        {
+            return;
+        }
+
+        var diskPath = MainForm.ResolveMiDiskPath(picker.SelectedPackagePath, preferExport: false);
+        if (diskPath is null)
+        {
+            Dialog.Warn(this, "Material not extracted",
+                $"{picker.SelectedPackagePath} is in the shipped catalog, but its cooked .uasset was not found under your extracted content root. Extract that character's content, then choose the material again.");
+            return;
+        }
+
+        _baseText.Text = diskPath;
+        ReadParams();
     }
 
     private void PopulateGeneratedTextureCombo()
@@ -172,6 +285,7 @@ public sealed partial class MaterialWizard : Form
             return;
         }
 
+        _generatedTextureCombo.Enabled = true;
         foreach (var texture in _generatedTextures)
         {
             _generatedTextureCombo.Items.Add(new GeneratedTextureChoice(texture));
@@ -199,8 +313,8 @@ public sealed partial class MaterialWizard : Form
         }
 
         row.Cells["YourTexture"].Value = texture.PackagePath;
-        var param = row.Cells["Param"].Value?.ToString() ?? "parameter";
-        _status.Text = $"Set {param} -> {texture.PackagePath}";
+        var parameter = row.Cells["Param"].Value?.ToString() ?? "parameter";
+        _status.Text = $"Set {parameter} -> {texture.PackagePath}";
     }
 
     private void CopySelectedGeneratedTexturePath()
@@ -231,6 +345,7 @@ public sealed partial class MaterialWizard : Form
             _status.Text = $"Base MI not found: {path}";
             return;
         }
+
         var info = new MaterialGenService(_projectRoot).ReadTemplate(path);
         _grid.Rows.Clear();
         if (info.Status != "ok")
@@ -238,27 +353,31 @@ public sealed partial class MaterialWizard : Form
             _status.Text = $"Read failed: {info.Status} {info.Error}";
             return;
         }
-        foreach (var p in info.TextureParams)
+
+        foreach (var parameter in info.TextureParams)
         {
-            _grid.Rows.Add(p.Name, p.CurrentTexturePath, "");
+            _grid.Rows.Add(parameter.Name, parameter.CurrentTexturePath, "");
         }
-        _status.Text = $"{info.TextureParams.Count} texture params. Fill 'Your texture path' for the ones you want to override.";
+        _status.Text = $"{info.TextureParams.Count} texture parameters loaded. Set paths only for the parameters you want to override.";
     }
 
     private void Generate()
     {
         var basePath = _baseText.Text.Trim();
         var name = _nameText.Text.Trim();
-        if (!File.Exists(basePath)) { _status.Text = "Pick a valid base MI first."; return; }
+        if (!File.Exists(basePath)) { _status.Text = "Pick a valid base material first."; return; }
         if (string.IsNullOrWhiteSpace(name)) { _status.Text = "Enter a material name."; return; }
 
         var outputPackage = $"/Game/Mods/{_modFolder}/{name}";
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (DataGridViewRow row in _grid.Rows)
         {
-            var pn = row.Cells["Param"].Value?.ToString() ?? "";
-            var tex = row.Cells["YourTexture"].Value?.ToString()?.Trim() ?? "";
-            if (!string.IsNullOrWhiteSpace(pn) && !string.IsNullOrWhiteSpace(tex)) map[pn] = tex;
+            var parameter = row.Cells["Param"].Value?.ToString() ?? "";
+            var texture = row.Cells["YourTexture"].Value?.ToString()?.Trim() ?? "";
+            if (!string.IsNullOrWhiteSpace(parameter) && !string.IsNullOrWhiteSpace(texture))
+            {
+                map[parameter] = texture;
+            }
         }
         if (map.Count == 0) { _status.Text = "Enter at least one texture path to override."; return; }
 
@@ -273,6 +392,7 @@ public sealed partial class MaterialWizard : Form
             _status.Text = $"Generate failed: {result.Status} {result.Error}";
             return;
         }
+
         ResultMiPackagePath = outputPackage;
         DialogResult = DialogResult.OK;
         Close();
@@ -297,7 +417,10 @@ public sealed partial class MaterialWizard : Form
             var name = string.IsNullOrWhiteSpace(Texture.DisplayName)
                 ? UnrealPathUtil.AssetName(Texture.PackagePath)
                 : Texture.DisplayName;
-            return $"{name} - {Texture.Kind} - {Texture.PackagePath}";
+            var cook = Texture.CookWidth > 0 && Texture.CookHeight > 0 && !string.IsNullOrWhiteSpace(Texture.CookPixelFormat)
+                ? $"{Texture.CookWidth}x{Texture.CookHeight} {Texture.CookPixelFormat}"
+                : Texture.Kind;
+            return $"{name} - {cook}";
         }
     }
 }

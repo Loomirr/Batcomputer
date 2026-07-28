@@ -57,6 +57,30 @@ public sealed class FirstRunWizard : Form
             },
             new()
             {
+                Title = "Unreal Engine 5.6 (optional for now)",
+                Blurb = "Batcomputer uses UE 5.6 only when building a mod's startup Asset Registry plugin. " +
+                        "Players who install your finished mod do not need Unreal. You can configure this later, " +
+                        "but Build Mod needs it before it can create a complete native release.",
+                Hint = "Usually C:\\Program Files\\Epic Games\\UE_5.6",
+                IsFile = false,
+                Optional = true,
+                Get = s => string.IsNullOrWhiteSpace(s.UnrealEngineRoot) ? AppSettings.DefaultUnrealEngineRoot() : s.UnrealEngineRoot,
+                Set = (s, v) => s.UnrealEngineRoot = v,
+            },
+            new()
+            {
+                Title = "SuitSlotsRegistryWriter project (optional for now)",
+                Blurb = "This small UE project writes and round-trip verifies the cooked AssetRegistry.bin " +
+                        "for every enabled suit in a mod. Keep it beside Batcomputer under Tools when making a portable author install.",
+                Hint = "…\\Tools\\SuitSlotsRegistryWriter\\SuitSlotsRegistryWriter.uproject",
+                IsFile = true,
+                Filter = "Unreal project|*.uproject|All files|*.*",
+                Optional = true,
+                Get = s => string.IsNullOrWhiteSpace(s.RegistryWriterProjectPath) ? AppSettings.DefaultRegistryWriterProjectPath() : s.RegistryWriterProjectPath,
+                Set = (s, v) => s.RegistryWriterProjectPath = v,
+            },
+            new()
+            {
                 Title = "Mappings (.usmap)",
                 Blurb = "Tells the tool how the game's assets are laid out. Needed to read and write " +
                         "anything from the game.",

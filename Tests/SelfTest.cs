@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 
 namespace Batcomputer;
 
@@ -23,9 +24,16 @@ internal static class SelfTest
         PawnTagValidation();
         PawnTagSuggestion();
         GeneratedRootResolution();
+        ViewerLayoutPersistence();
         UnrealPathNormalization();
+        ModReleaseConventions();
+        RegistryPluginConventions();
+        CrossKindHeadGraftRules();
+        TextureCookProfilePersistence();
+        ModernSelectorConstruction();
         GameplayTagLeaf();
         GlideVisualUnknownVsAbsent();
+        VisualBaseAndGameplayDonorRules();
 
         Console.WriteLine(new string('-', 60));
         Console.WriteLine($"{_passed} passed, {Failures.Count} failed");
@@ -109,8 +117,8 @@ internal static class SelfTest
     }
 
     /// <summary>
-    /// The pre-rename output folder is still honoured. Getting this wrong orphans every suit a
-    /// long-time user has already built.
+    /// Portable installs default beside the executable, while configured projects retain their
+    /// historical Generated/_generated location.
     /// </summary>
     private static void GeneratedRootResolution()
     {
@@ -119,16 +127,12 @@ internal static class SelfTest
         try
         {
             Directory.CreateDirectory(temp);
-            Equal("defaults to Generated when neither exists",
+            Equal("configured project defaults to Generated",
                 Path.Combine(temp, "Generated"), AppSettings.GeneratedRootFor(temp));
 
             Directory.CreateDirectory(Path.Combine(temp, "_generated"));
-            Equal("prefers an existing _generated",
+            Equal("configured project preserves an existing _generated folder",
                 Path.Combine(temp, "_generated"), AppSettings.GeneratedRootFor(temp));
-
-            Directory.CreateDirectory(Path.Combine(temp, "Generated"));
-            Equal("prefers Generated once both exist",
-                Path.Combine(temp, "Generated"), AppSettings.GeneratedRootFor(temp));
         }
         finally
         {
@@ -147,6 +151,194 @@ internal static class SelfTest
             UnrealPathUtil.NormalizePackagePath("/Game/Mods/X/Characters/BP_Y"));
         Equal("asset name is the leaf",
             "BP_Y", UnrealPathUtil.AssetName("/Game/Mods/X/Characters/BP_Y"));
+    }
+
+    /// <summary>
+    /// The native DLL reads schema-3 mod.json paths directly. Keep the derived mod
+    /// root, StringTable, and UI metadata package paths in lockstep with that contract.
+    /// </summary>
+    private static void ModReleaseConventions()
+    {
+        Console.WriteLine("Mod release conventions");
+        var mod = new NativeSuitModProject { ModId = "MyBatmanPack" };
+        ModProjectService.ApplyDerivedFields(mod);
+
+        Equal("mod package name is derived from ModId", "MyBatmanPack_P", mod.PackageBaseName);
+        Equal("mod content root is owned by ModId", "/Game/Mods/MyBatmanPack", mod.ContentRoot);
+        Equal("mod StringTable path is owned by ModId",
+            "/Game/Mods/MyBatmanPack/Localization/ST_MyBatmanPack.ST_MyBatmanPack", mod.StringTablePackage);
+        Equal("DCMD derives the matching UIMD package",
+            "/Game/Mods/MyBatmanPack/UI/DA_UIMD_Batman_TestSuit",
+            MainForm.DeriveUimdPackagePathForTest(
+                "/Game/Mods/MyBatmanPack/Characters/DA_DCMD_Batman_TestSuit_Playable.DA_DCMD_Batman_TestSuit_Playable"));
+    }
+
+    /// <summary>The generated registry remains one plugin per mod and its writer contract stays exact.</summary>
+    private static void RegistryPluginConventions()
+    {
+        Console.WriteLine("Asset Registry plugin");
+        var layout = RegistryPluginService.CreateLayout(Path.Combine(Path.GetTempPath(), "bc_registry"), "MyBatmanPack");
+        Check("registry plugin is owned by the mod ID",
+            layout.PluginDirectory.EndsWith(Path.Combine("Engine", "Plugins", "Mods", "MyBatmanPackRegistry"), StringComparison.Ordinal));
+        Equal("registry descriptor uses the mod-owned plugin name", "MyBatmanPackRegistry.uplugin", Path.GetFileName(layout.DescriptorPath));
+        Equal("registry binary has the stock AssetRegistry filename", "AssetRegistry.bin", Path.GetFileName(layout.RegistryPath));
+        Equal("registry config has the stock Game.ini filename", "Game.ini", Path.GetFileName(layout.GameIniPath));
+        Check("registry config extends PawnMetaData scanning to /Game/Mods",
+            RegistryPluginService.BuildGameIni().Contains("(Path=\"/Game/Mods\")", StringComparison.Ordinal));
+
+        var rows = new[]
+        {
+            new RegistryPluginService.RegistryRow("/Game/Mods/MyBatmanPack/Characters/DA_DCMD_Batman_Alpha"),
+            new RegistryPluginService.RegistryRow("/Game/Mods/MyBatmanPack/Characters/DA_DCMD_Batman_Beta.DA_DCMD_Batman_Beta"),
+        };
+        Check("clean mod DCMD rows pass registry validation", RegistryPluginService.ValidateRows(rows).Count == 0);
+        Check("duplicate DCMD primary IDs block the registry",
+            RegistryPluginService.ValidateRows(new[]
+            {
+                new RegistryPluginService.RegistryRow("/Game/Mods/A/Characters/DA_DCMD_Batman_Same"),
+                new RegistryPluginService.RegistryRow("/Game/Mods/B/Characters/DA_DCMD_Batman_Same"),
+            }).Any(error => error.Contains("collides", StringComparison.OrdinalIgnoreCase)));
+        Check("writer verification requires every expected primary row",
+            RegistryPluginService.VerificationMatches(
+                "SUIT_SLOTS_REGISTRY_WRITER_RESULT cooked_header=yes expected_primary_rows=2 exact_primary_rows=2 exact_primary_ids=2 all_expected_rows=yes all_expected_primary_ids=yes sentinel_enabled=yes sentinel_exact_row=yes sentinel_exact_primary_id=yes",
+                2));
+    }
+
+    /// <summary>A grafted hair component named Head_2 must replace a donor Head cowl.</summary>
+    private static void CrossKindHeadGraftRules()
+    {
+        Console.WriteLine("Cross-kind head grafts");
+        var hair = new NativeSuitProject
+        {
+            PartGrafts = new List<SavedPartGraft>
+            {
+                new() { Slot = "Head", ResolvedComponent = "Head_2" },
+            },
+        };
+        Check("Head_2 hair graft hides the donor Head cowl",
+            MainForm.CrossKindHeadGraftNeedsCowlRemovalForTest(hair));
+
+        var direct = new NativeSuitProject
+        {
+            PartGrafts = new List<SavedPartGraft>
+            {
+                new() { Slot = "Head", ResolvedComponent = "Head" },
+            },
+        };
+        Check("same-slot head replacement does not add a redundant removal",
+            !MainForm.CrossKindHeadGraftNeedsCowlRemovalForTest(direct));
+    }
+
+    /// <summary>Compact cook choices must survive saving a suit project for later staging.</summary>
+    private static void TextureCookProfilePersistence()
+    {
+        Console.WriteLine("Texture cook profile");
+        var project = new NativeSuitProject
+        {
+            GeneratedTextures = new List<GeneratedTextureEntry>
+            {
+                new()
+                {
+                    DisplayName = "Mask",
+                    CookProfile = "mask-1k-bc1",
+                    CookWidth = 1024,
+                    CookHeight = 1024,
+                    CookPixelFormat = "PF_DXT1",
+                }
+            }
+        };
+
+        var restored = JsonSerializer.Deserialize<NativeSuitProject>(JsonSerializer.Serialize(project));
+        var texture = restored?.GeneratedTextures.SingleOrDefault();
+        Check("compact cook profile persists with the texture",
+            texture is not null && texture.CookProfile == "mask-1k-bc1" &&
+            texture.CookWidth == 1024 && texture.CookHeight == 1024 &&
+            texture.CookPixelFormat == "PF_DXT1");
+    }
+
+    /// <summary>The owner-drawn selector and material forge must construct without a visible form.</summary>
+    private static void ModernSelectorConstruction()
+    {
+        Console.WriteLine("Modern selector");
+        using var selector = new ThemedDropDown();
+        selector.Items.Add("First");
+        selector.Items.Add("Second");
+        selector.SelectedItem = "First";
+        Check("themed selector accepts transparent parent rendering",
+            selector.SelectedIndex == 0 && string.Equals(selector.SelectedItem?.ToString(), "First", StringComparison.Ordinal));
+        using var selectorOptions = selector.CreatePopupOptionsForTest();
+        Check("themed selector popup options construct for a ToolStrip host", selectorOptions.Controls.Count > 0);
+
+        using var wizard = new MaterialWizard(Path.GetTempPath(), "SelfTest", "MI_SelfTest");
+        Check("material forge constructs with the themed selector", wizard.Controls.Count > 0);
+
+        using var materialPicker = new MaterialCatalogPicker();
+        Check("catalog-backed material picker constructs without an OS file dialog", materialPicker.Controls.Count > 0);
+
+        var homeHero = new VirtualTilePanel.HeroModel
+        {
+            Overline = "MOD WORKSPACE",
+            Title = "SelfTest Mod",
+            Subtitle = "Two suits grouped into one mod release.",
+            Workflow = new[]
+            {
+                new VirtualTilePanel.HeroModel.WorkflowStep { Label = "1. MOD", Detail = "mod selected", Accent = Theme.Research, Complete = true },
+                new VirtualTilePanel.HeroModel.WorkflowStep { Label = "2. SUITS", Detail = "add or edit", Accent = Theme.Base, Current = true },
+                new VirtualTilePanel.HeroModel.WorkflowStep { Label = "3. BUILD", Detail = "release when ready", Accent = Theme.Gold },
+            },
+        };
+        using var homeGrid = new VirtualTilePanel { Size = new Size(760, 320) };
+        homeGrid.SetHero(homeHero);
+        homeGrid.SetTiles(new[] { new VirtualTilePanel.Tile { Section = "1. MOD", Title = "SelfTest", Accent = Theme.Research } });
+        using var homeBitmap = new Bitmap(760, 320);
+        try
+        {
+            homeGrid.DrawToBitmap(homeBitmap, new Rectangle(Point.Empty, homeBitmap.Size));
+            Check("mod workflow hero paints in the virtual tile grid", homeGrid.Hero?.Workflow.Count == 3);
+        }
+        catch (Exception ex)
+        {
+            Check("mod workflow hero paints in the virtual tile grid", false, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// The part mover must have a home outside a suit project: a stock character preview should be
+    /// able to remember an alignment, and returning an axis to zero should clear that entry again.
+    /// </summary>
+    private static void ViewerLayoutPersistence()
+    {
+        Console.WriteLine("Viewer layout");
+        var temp = Path.Combine(Path.GetTempPath(), "bc_viewer_layout_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var key = ViewerLayoutService.CharacterKey(
+                "LEGOBatmanLotDK\\Content\\Characters\\Minifig\\BruceWayne\\BP_Test");
+            Check("character key normalizes path separators",
+                key == "character:legobatmanlotdk/content/characters/minifig/brucewayne/bp_test");
+
+            Check("viewer placement writes to sidecar",
+                ViewerLayoutService.Save(temp, key, "Hip", 0.1f, -0.05f, 0f));
+            var saved = ViewerLayoutService.Load(temp, key).SingleOrDefault();
+            Check("viewer placement reloads without a project",
+                saved is not null && saved.Component == "Hip" &&
+                Math.Abs(saved.OffsetX - 0.1f) < 0.00001f &&
+                Math.Abs(saved.OffsetY + 0.05f) < 0.00001f);
+
+            ViewerLayoutService.Save(temp, key, "Hip", 0f, 0f, 0f, 2);
+            saved = ViewerLayoutService.Load(temp, key).SingleOrDefault();
+            Check("UV-only viewer override is persisted",
+                saved is not null && saved.UvChannel == 2 &&
+                Math.Abs(saved.OffsetX) < 0.00001f && Math.Abs(saved.OffsetY) < 0.00001f);
+
+            ViewerLayoutService.Save(temp, key, "Hip", 0f, 0f, 0f, null);
+            Check("reset clears both alignment and UV viewer overrides",
+                ViewerLayoutService.Load(temp, key).Count == 0);
+        }
+        finally
+        {
+            try { Directory.Delete(temp, recursive: true); } catch { /* temp cleanup */ }
+        }
     }
 
     /// <summary>
@@ -193,5 +385,42 @@ internal static class SelfTest
         Equal("underscores become word breaks", "BatmanJoker", MainForm.ToGameplayTagLeafForTest("batman_joker"));
         Equal("existing PascalCase survives", "ElectricSuit", MainForm.ToGameplayTagLeafForTest("ElectricSuit"));
         Equal("digits are kept", "Batman2025", MainForm.ToGameplayTagLeafForTest("batman 2025"));
+    }
+
+    /// <summary>
+    /// A cutscene is a legitimate visual source, but it can never impersonate the
+    /// runtime donor. This keeps the broad creative picker separate from the
+    /// narrow gameplay safety gate.
+    /// </summary>
+    private static void VisualBaseAndGameplayDonorRules()
+    {
+        Console.WriteLine("Visual base and gameplay donor");
+        const string visual = "/Game/Characters/Minifig/Joker/BP_Joker_Default_Cutscene";
+        const string donor = "/Game/Characters/Minifig/Batman/BP_Batman_TheBatman2025_Playable";
+
+        Check("a character cutscene is accepted as a visual base",
+            BaseEligibilityService.IsVisualCharacterPackage(visual) &&
+            BaseEligibilityService.IsCutsceneVisualPackage(visual));
+        Check("a cutscene cannot be used as the gameplay donor",
+            !BaseEligibilityService.IsGameplayDonorPackage(visual));
+        Check("a real playable is accepted as the gameplay donor",
+            BaseEligibilityService.IsGameplayDonorPackage(donor));
+
+        var ready = BaseEligibilityService.Evaluate(visual, donor);
+        Check("cutscene visual plus playable donor is base-ready", ready.IsReady);
+
+        var blocked = BaseEligibilityService.Evaluate(visual, visual);
+        Check("visual-only selection is blocked from staging", !blocked.IsReady &&
+            blocked.Detail.Contains("_Playable", StringComparison.Ordinal));
+
+        var project = new NativeSuitProject
+        {
+            BaseProfile = BaseEligibilityService.CreateProfile(visual, donor)
+        };
+        var restored = JsonSerializer.Deserialize<NativeSuitProject>(JsonSerializer.Serialize(project));
+        Check("visual and gameplay base choices persist with the suit",
+            restored?.BaseProfile?.VisualBasePackage == visual &&
+            restored.BaseProfile.GameplayDonorPackage == donor &&
+            restored.BaseProfile.Eligibility == "ready");
     }
 }

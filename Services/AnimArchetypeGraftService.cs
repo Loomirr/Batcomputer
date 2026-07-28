@@ -173,13 +173,42 @@ public sealed class AnimArchetypeGraftService
         }
     }
 
+    /// <summary>
+    /// Resolves a saved template to a live .uasset. A package path survives an Extract
+    /// Game Assets refresh while the absolute path recorded in an older suit project does not.
+    /// </summary>
+    private static string? ResolveTemplateUasset(TemplateRecord? template, string extractedContentRoot)
+    {
+        if (template is null)
+        {
+            return null;
+        }
+        if (!string.IsNullOrWhiteSpace(template.Uasset) && File.Exists(template.Uasset))
+        {
+            return template.Uasset;
+        }
+        if (!string.IsNullOrWhiteSpace(template.PackagePath))
+        {
+            var refreshed = PackageToBase(extractedContentRoot, template.PackagePath) + ".uasset";
+            if (File.Exists(refreshed))
+            {
+                return refreshed;
+            }
+        }
+        return null;
+    }
+
     public static DonorInfo? DetectDonorForProject(NativeSuitProject project, string contentRoot, Usmap? mappings)
     {
         // 1) The base character's OWN machinery (normal heroes have a BP_CAT_Archetype).
-        var basePlayable = project.PlayableTemplate?.Uasset;
-        if (!string.IsNullOrWhiteSpace(basePlayable) && File.Exists(basePlayable))
+        // Saved projects retain absolute donor paths after an extract refresh, so resolve
+        // the stable /Game package path against the active extract before looking at the
+        // generated stage.
+        var extractedRoot = AppSettings.Current.EffectiveExtractedContentRoot();
+        var basePlayable = ResolveTemplateUasset(project.PlayableTemplate, extractedRoot);
+        if (!string.IsNullOrWhiteSpace(basePlayable))
         {
-            var d = DetectDonor(basePlayable, AppSettings.Current.EffectiveExtractedContentRoot(), mappings);
+            var d = DetectDonor(basePlayable, extractedRoot, mappings);
             if (d is not null && d.Valid)
             {
                 return d;

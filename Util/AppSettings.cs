@@ -37,6 +37,13 @@ public sealed class AppSettings
     // Game Content\Paks folder used by the one-click asset refresh workflow.
     public string? GamePaksRoot { get; set; }
 
+    // Unreal Engine 5.6 is used only by mod authors to run the verified static
+    // AssetRegistry writer. Players installing a finished mod do not need it.
+    public string? UnrealEngineRoot { get; set; }
+
+    // The small UE project containing SuitSlotsRegistryWriterCommandlet.
+    public string? RegistryWriterProjectPath { get; set; }
+
     // Developer-only character research surfaces. Kept off for the normal builder
     // workflow, but user-toggleable so the research tools remain available.
     public bool ShowResearchTools { get; set; }
@@ -62,8 +69,21 @@ public sealed class AppSettings
         PropertyNameCaseInsensitive = true
     };
 
+    /// <summary>The folder containing the running executable and all tool-owned state.</summary>
+    public static string ToolRoot =>
+        AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+    /// <summary>Small persistent tool data such as reusable indexes and downloaded mappings.</summary>
+    public static string DataRoot => Path.Combine(ToolRoot, "Data");
+
+    /// <summary>Tool-owned caches that can be rebuilt from configured game inputs.</summary>
+    public static string CacheRoot => Path.Combine(DataRoot, "Cache");
+
+    /// <summary>Ephemeral runtime state which must stay beside the executable, not in %TEMP%.</summary>
+    public static string RuntimeRoot => Path.Combine(ToolRoot, "Runtime");
+
     public static string SettingsFilePath =>
-        Path.Combine(AppContext.BaseDirectory, "Batcomputer.settings.json");
+        Path.Combine(ToolRoot, "Batcomputer.settings.json");
 
     public static bool SettingsFileExists => File.Exists(SettingsFilePath);
 
@@ -123,6 +143,12 @@ public sealed class AppSettings
     public string EffectiveGamePaksRoot() =>
         UsableDir(GamePaksRoot) ?? DefaultGamePaksRoot();
 
+    public string EffectiveUnrealEngineRoot() =>
+        UsableDir(UnrealEngineRoot) ?? DefaultUnrealEngineRoot();
+
+    public string EffectiveRegistryWriterProjectPath() =>
+        UsableFile(RegistryWriterProjectPath) ?? DefaultRegistryWriterProjectPath();
+
     /// <summary>
     /// A settings file is "complete" for silent startup when the paths the tool
     /// genuinely needs to function resolve to something that exists.
@@ -145,20 +171,23 @@ public sealed class AppSettings
         ExtractedContentRoot = DefaultExtractedContentRoot(),
         ExportContentRoot = DefaultExportContentRoot(),
         GamePaksModFolder = DefaultGamePaksModFolder(),
-        GamePaksRoot = DefaultGamePaksRoot()
+        GamePaksRoot = DefaultGamePaksRoot(),
+        UnrealEngineRoot = DefaultUnrealEngineRoot(),
+        RegistryWriterProjectPath = DefaultRegistryWriterProjectPath()
     };
 
     // ---- Built-in defaults (the original hardcoded paths) --------------------
 
-    /// <summary>Folder name for everything the tool generates, directly under the project root.</summary>
+    /// <summary>Folder name for everything the tool generates.</summary>
     public const string GeneratedFolderName = "Generated";
 
-    /// <summary>The pre-release name of that folder, still honoured if a project already uses it.</summary>
+    /// <summary>The pre-release name of that folder, still honoured by configured project roots.</summary>
     private const string LegacyGeneratedFolderName = "_generated";
 
     /// <summary>
-    /// Output folder for a project root. Uses an existing _generated folder if one is there,
-    /// otherwise Generated.
+    /// Output folder for a project root. A portable install defaults its project root to the folder
+    /// containing the executable, while a user-configured project continues to use its existing
+    /// Generated or _generated folder.
     /// </summary>
     public static string GeneratedRootFor(string projectRoot)
     {
@@ -169,12 +198,9 @@ public sealed class AppSettings
             {
                 return current;
             }
+
             var legacy = Path.Combine(projectRoot, LegacyGeneratedFolderName);
-            if (Directory.Exists(legacy))
-            {
-                return legacy;
-            }
-            return current;
+            return Directory.Exists(legacy) ? legacy : current;
         }
         catch
         {
@@ -189,26 +215,9 @@ public sealed class AppSettings
     /// </summary>
     public static string DefaultProjectRoot()
     {
-        var dir = AppContext.BaseDirectory;
-        while (!string.IsNullOrWhiteSpace(dir))
-        {
-            if (File.Exists(Path.Combine(dir, "CMakeLists.txt")) &&
-                Directory.Exists(Path.Combine(dir, "NewSuitSlotNative")))
-            {
-                return dir.TrimEnd(Path.DirectorySeparatorChar);
-            }
-
-            var parent = Directory.GetParent(dir);
-            if (parent is null)
-            {
-                break;
-            }
-            dir = parent.FullName;
-        }
-
         // Installed layout: everything lives next to the exe. No AppData fallback - if this folder
         // isn't writable the app warns (see DescribeRootWritability) rather than silently relocating.
-        return AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+        return ToolRoot;
     }
 
     /// <summary>
@@ -218,7 +227,7 @@ public sealed class AppSettings
     /// </summary>
     public string? DescribeRootWritability()
     {
-        var root = EffectiveProjectRoot();
+        var root = ToolRoot;
         try
         {
             Directory.CreateDirectory(root);
@@ -239,18 +248,39 @@ public sealed class AppSettings
         }
     }
 
-    // retoc.exe has no standard install location - the user points at it in Setup.
-    public static string DefaultRetocExePath() => "";
+    // A portable install can bundle retoc here; Setup still permits an external tool path.
+    public static string DefaultRetocExePath()
+    {
+        var bundled = Path.Combine(ToolRoot, "Tools", "retoc", "retoc.exe");
+        return File.Exists(bundled) ? bundled : "";
+    }
 
     public static string? DefaultUsmapPath()
     {
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var candidates = new[]
         {
+            BundledUsmapPath() ?? "",
             Path.Combine(GeneratedRootFor(DefaultProjectRoot()), "PartGraphProbe", "input", "Dinner.usmap"),
             Path.Combine(local, "UAssetGUI", "Mappings", "Dinner.usmap")
         };
         return candidates.FirstOrDefault(File.Exists) ?? candidates[0];
+    }
+
+    /// <summary>Returns a mapping bundled with the portable tool, regardless of its versioned name.</summary>
+    public static string? BundledUsmapPath()
+    {
+        try
+        {
+            var root = Path.Combine(DataRoot, "Mappings");
+            return Directory.Exists(root)
+                ? Directory.EnumerateFiles(root, "*.usmap").OrderBy(path => path, StringComparer.OrdinalIgnoreCase).FirstOrDefault()
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public static string DefaultExtractedContentRoot()
@@ -258,6 +288,7 @@ public sealed class AppSettings
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var candidates = new[]
         {
+            Path.Combine(DataRoot, "Extracted", "LEGOBatmanLotDK", "Content"),
             Path.Combine(local, "UAssetGUI", "Extracted", "LEGOBatmanLotDK", "Content")
         };
         return candidates.FirstOrDefault(Directory.Exists) ?? candidates[0];
@@ -271,6 +302,46 @@ public sealed class AppSettings
 
     public static string DefaultGamePaksRoot() =>
         Path.GetFullPath(Path.Combine(DefaultGamePaksModFolder(), "..", ".."));
+
+    /// <summary>Default UE 5.6 install used by the verified registry commandlet.</summary>
+    public static string DefaultUnrealEngineRoot()
+    {
+        const string epic56 = @"C:\Program Files\Epic Games\UE_5.6";
+        return Directory.Exists(epic56) ? epic56 : "";
+    }
+
+    /// <summary>
+    /// Finds a bundled registry-writer project in a portable install or its sibling
+    /// project in this development tree. The setting remains available for authors
+    /// who place the writer elsewhere.
+    /// </summary>
+    public static string DefaultRegistryWriterProjectPath()
+    {
+        var relative = Path.Combine("Tools", "SuitSlotsRegistryWriter", "SuitSlotsRegistryWriter.uproject");
+        var bundled = Path.Combine(ToolRoot, relative);
+        if (File.Exists(bundled))
+        {
+            return bundled;
+        }
+
+        try
+        {
+            for (var cursor = new DirectoryInfo(ToolRoot); cursor is not null; cursor = cursor.Parent)
+            {
+                var candidate = Path.Combine(cursor.FullName, relative);
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+        }
+        catch
+        {
+            // A missing writer is reported when Build Mod needs it.
+        }
+
+        return "";
+    }
 
     // ---- helpers ------------------------------------------------------------
 

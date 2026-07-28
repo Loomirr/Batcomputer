@@ -73,18 +73,40 @@ public static class ModelPreviewService
         => BuildPreview(paksDir, usmapPath, new[] { objectPath });
 
     /// <summary>
-    /// Assembles the character from a playable BP: reads its skeletal-mesh components, collects the
-    /// mesh each points to, and previews them together. The body (CharacterMesh0) is assigned at
-    /// runtime, so it is passed in separately when known.
-    /// </summary>
-    /// <summary>The shared minifig body used by CharacterMesh0 (assigned at runtime, so not on the BP).</summary>
-    private const string DefaultBodyMesh = "/Game/Characters/LEGOfig/SK_LEGOfig_Minifig_Body.SK_LEGOfig_Minifig_Body";
-
-    /// <summary>
     /// The bare head piece. Also runtime-assigned, and separate from both the face print
     /// (SK_LEGOface) and the cowl (the BP's "Head" component), which layer on top of it.
     /// </summary>
     private const string DefaultHeadMesh = "/Game/Characters/LEGOfig/SK_LEGOfig_Minifig_Head.SK_LEGOfig_Minifig_Head";
+
+    // Faces are deliberately suspended while the face-material research is rebuilt. Keeping this
+    // gate at assembly time means neither the experimental face mesh nor its diagnostic panels can
+    // leak into an otherwise useful body/parts preview.
+    private static readonly bool IncludeFacePreview = false;
+
+    /// <summary>Project-specific data layered over a base character preview.</summary>
+    public sealed class CharacterPreviewOptions
+    {
+        public IReadOnlyCollection<string> HiddenComponents { get; init; } = Array.Empty<string>();
+        public IReadOnlyCollection<PreviewAdditionalPart> AdditionalParts { get; init; } = Array.Empty<PreviewAdditionalPart>();
+        public IReadOnlyCollection<PreviewMaterialOverride> MaterialOverrides { get; init; } = Array.Empty<PreviewMaterialOverride>();
+        public IReadOnlyCollection<SavedPreviewPartPlacement> PlacementOverrides { get; init; } = Array.Empty<SavedPreviewPartPlacement>();
+        public string? ViewerLayoutKey { get; init; }
+        public string? ViewerLayoutProjectRoot { get; init; }
+        public bool AllowPartMover { get; init; } = true;
+    }
+
+    /// <summary>A component added by a saved part graft, without needing to mount the staged package.</summary>
+    public sealed record PreviewAdditionalPart(
+        string ComponentName,
+        string MeshPath,
+        bool IsStaticAttachment,
+        string? ParentComponent = null,
+        string? AttachSocket = null,
+        IReadOnlyList<string>? MaterialPaths = null,
+        bool ReplaceExisting = true);
+
+    /// <summary>An explicit material assignment stored on a suit project.</summary>
+    public sealed record PreviewMaterialOverride(string ComponentName, int Slot, string MaterialPath);
 
     /// <summary>
     /// A mesh to preview. <paramref name="AttachToHead"/> marks the local-authored head attachments
@@ -93,7 +115,75 @@ public static class ModelPreviewService
     /// </summary>
     private readonly record struct PreviewPart(
         string MeshPath, bool AttachToHead, bool IsHeadPiece = false, FPackageIndex[]? Overrides = null,
-        bool IsStaticAttachment = false);
+        bool IsStaticAttachment = false, string ComponentName = "", PreviewComponentTransform? Transform = null,
+        BlueprintAttachment? Attachment = null, Vector3? AttachmentOffset = null,
+        IReadOnlyDictionary<int, string>? MaterialPaths = null,
+        SavedPreviewPartPlacement? Adjustment = null);
+
+    /// <summary>
+    /// The SCS is the Blueprint's real component hierarchy. Component templates themselves often
+    /// omit AttachParent/AttachSocketName after cooking, so this data is required to place a part.
+    /// </summary>
+    private sealed record BlueprintAttachment(string? ParentName, string? SocketName);
+
+    /// <summary>
+    /// The final state of one visual component after applying the selected Blueprint over each of
+    /// its authored character/archetype parents. Cooked child templates commonly contain only a
+    /// material override, so resolving a whole component at once would lose the inherited mesh.
+    /// </summary>
+    private sealed record ResolvedBlueprintComponent(
+        string Key,
+        string? MeshPath,
+        FPackageIndex[]? Overrides,
+        bool IsStaticAttachment,
+        PreviewComponentTransform? Transform,
+        BlueprintAttachment? Attachment,
+        bool Hidden,
+        string SourcePackage,
+        string? HeadReferenceBodyPath = null);
+
+    private sealed record PreviewComponentTransform(Vector3 Translation, System.Numerics.Quaternion Rotation, Vector3 Scale)
+    {
+        public bool IsIdentity =>
+            Translation.LengthSquared() < 0.0000001f
+            && Math.Abs(Rotation.X) < 0.000001f
+            && Math.Abs(Rotation.Y) < 0.000001f
+            && Math.Abs(Rotation.Z) < 0.000001f
+            && Math.Abs(Rotation.W - 1f) < 0.000001f
+            && Vector3.DistanceSquared(Scale, Vector3.One) < 0.0000001f;
+    }
+
+    /// <summary>
+    /// Applies a Blueprint component transform to geometry bounds using the same scale, rotation,
+    /// translation order as three.js. Static hair used to be centred from untransformed bounds and
+    /// then had this transform applied in the viewer, so a non-zero yaw or relative location could
+    /// pull the finished part away from the head.
+    /// </summary>
+    private static (Vector3 Min, Vector3 Max) TransformBounds(
+        (Vector3 Min, Vector3 Max) bounds, PreviewComponentTransform? transform)
+    {
+        if (transform is null)
+        {
+            return bounds;
+        }
+
+        var min = new Vector3(float.MaxValue);
+        var max = new Vector3(float.MinValue);
+        for (var x = 0; x <= 1; x++)
+        for (var y = 0; y <= 1; y++)
+        for (var z = 0; z <= 1; z++)
+        {
+            var point = new Vector3(
+                x == 0 ? bounds.Min.X : bounds.Max.X,
+                y == 0 ? bounds.Min.Y : bounds.Max.Y,
+                z == 0 ? bounds.Min.Z : bounds.Max.Z);
+            point *= transform.Scale;
+            point = Vector3.Transform(point, transform.Rotation) + transform.Translation;
+            min = Vector3.Min(min, point);
+            max = Vector3.Max(max, point);
+        }
+        return (min, max);
+    }
 
     /// <summary>
     /// World position of a bone in the UE reference skeleton, converted to the exported glTF's space.
@@ -134,73 +224,747 @@ public static class ModelPreviewService
     /// Component name -> body bone the attachment hangs off. Body-skinned parts (body, cape) carry the
     /// full skeleton and need no attach bone. Extend this as more attachment slots are supported.
     /// </summary>
-    private static string? AttachBoneFor(string componentName) => componentName switch
+    private static string? AttachBoneFor(string componentName, string? socketName = null)
     {
-        var n when n.StartsWith("Face", StringComparison.OrdinalIgnoreCase) => "Head_Attach_01",
-        var n when n.StartsWith("Head", StringComparison.OrdinalIgnoreCase) => "Head_Attach_01",
-        _ => null,
-    };
-
-    public static string BuildPreviewCharacter(string paksDir, string usmapPath, string bpPath, string? bodyMeshPath = null)
-    {
-        var provider = MakeProvider(paksDir, usmapPath);
-        var bodyPath = string.IsNullOrWhiteSpace(bodyMeshPath) ? DefaultBodyMesh : bodyMeshPath!;
-        var parts = new List<PreviewPart> { new(bodyPath, AttachToHead: false) };
-
-        // Resolve attach points once, off the body's reference skeleton.
-        var attachPoints = new Dictionary<string, Vector3>(StringComparer.OrdinalIgnoreCase);
-        if (provider.LoadPackageObject(bodyPath) is USkeletalMesh bodyMesh)
+        // Prefer the Blueprint's explicit attachment relationship over a component-name guess.
+        // An explicit SCS socket is stronger evidence than a component name. Several long-hair
+        // components are named Hair but attach at Spine_02_Socket, so treating every "Hair" as a
+        // head piece centres ponytails and back hair on the skull.
+        if (!string.IsNullOrWhiteSpace(socketName))
         {
-            foreach (var boneName in new[] { "Head_Attach_01" })
+            return socketName.Contains("Head", StringComparison.OrdinalIgnoreCase)
+                   || socketName.Contains("Face", StringComparison.OrdinalIgnoreCase)
+                ? "Head_Attach_01"
+                : null;
+        }
+
+        return componentName switch
+        {
+            var n when n.StartsWith("Face", StringComparison.OrdinalIgnoreCase) => "Head_Attach_01",
+            var n when n.StartsWith("Head", StringComparison.OrdinalIgnoreCase) => "Head_Attach_01",
+            var n when n.StartsWith("Hair", StringComparison.OrdinalIgnoreCase) => "Head_Attach_01",
+            var n when n.StartsWith("Hat", StringComparison.OrdinalIgnoreCase) => "Head_Attach_01",
+            var n when n.StartsWith("Helmet", StringComparison.OrdinalIgnoreCase) => "Head_Attach_01",
+            _ => null,
+        };
+    }
+
+    private static PreviewComponentTransform? ReadComponentTransform(UObject component)
+    {
+        var loc = component.GetOrDefault<FVector>("RelativeLocation");
+        var rot = component.GetOrDefault<FRotator>("RelativeRotation");
+        var scale = component.GetOrDefault<FVector>("RelativeScale3D");
+
+        var translation = new Vector3(loc.X / 100f, loc.Z / 100f, -loc.Y / 100f);
+        var scaleVector = Math.Abs(scale.X) < 0.000001f
+                          && Math.Abs(scale.Y) < 0.000001f
+                          && Math.Abs(scale.Z) < 0.000001f
+            ? Vector3.One
+            : new Vector3(scale.X, scale.Z, scale.Y);
+        var rotation = UeRotatorToGltf(rot);
+        var transform = new PreviewComponentTransform(translation, rotation, scaleVector);
+        return transform.IsIdentity ? null : transform;
+    }
+
+    private static System.Numerics.Quaternion UeRotatorToGltf(FRotator rot)
+    {
+        if (Math.Abs(rot.Pitch) < 0.000001f
+            && Math.Abs(rot.Yaw) < 0.000001f
+            && Math.Abs(rot.Roll) < 0.000001f)
+        {
+            return System.Numerics.Quaternion.Identity;
+        }
+
+        static float Rad(float deg) => deg * (MathF.PI / 180f);
+        // Unreal rotators are applied as yaw(Z), pitch(Y), roll(X). Convert that UE-space
+        // quaternion into CUE4Parse's glTF basis: (X,Y,Z)UE -> (X,Z,-Y)glTF.
+        var yaw = System.Numerics.Quaternion.CreateFromAxisAngle(Vector3.UnitZ, Rad(rot.Yaw));
+        var pitch = System.Numerics.Quaternion.CreateFromAxisAngle(Vector3.UnitY, Rad(rot.Pitch));
+        var roll = System.Numerics.Quaternion.CreateFromAxisAngle(Vector3.UnitX, Rad(rot.Roll));
+        var ue = System.Numerics.Quaternion.Normalize(yaw * pitch * roll);
+        var basis = System.Numerics.Quaternion.CreateFromAxisAngle(Vector3.UnitX, -MathF.PI / 2f);
+        return System.Numerics.Quaternion.Normalize(basis * ue * System.Numerics.Quaternion.Inverse(basis));
+    }
+
+    private static Dictionary<string, BlueprintAttachment> ReadBlueprintAttachments(IEnumerable<UObject> exports)
+    {
+        var result = new Dictionary<string, BlueprintAttachment>(StringComparer.OrdinalIgnoreCase);
+        foreach (var node in exports.Where(e => e.ExportType.Contains("SCS_Node", StringComparison.OrdinalIgnoreCase)))
+        {
+            static string? NameValue(UObject o, string property)
             {
-                var p = BoneWorldInGltfSpace(bodyMesh, boneName);
-                if (p is not null)
+                var value = o.GetOrDefault<FName>(property).Text;
+                return string.IsNullOrWhiteSpace(value) || value.Equals("None", StringComparison.OrdinalIgnoreCase)
+                    ? null
+                    : value;
+            }
+
+            var attachment = new BlueprintAttachment(
+                NameValue(node, "ParentComponentOrVariableName"),
+                NameValue(node, "AttachToName"));
+            var templateName = node.GetOrDefault<FPackageIndex>("ComponentTemplate")?.ResolvedObject?.Name.Text;
+            var variableName = NameValue(node, "InternalVariableName");
+            if (!string.IsNullOrWhiteSpace(templateName))
+            {
+                result[templateName] = attachment;
+            }
+            if (!string.IsNullOrWhiteSpace(variableName))
+            {
+                result[variableName] = attachment;
+            }
+        }
+        return result;
+    }
+
+    private static BlueprintAttachment? AttachmentFor(
+        UObject component, IReadOnlyDictionary<string, BlueprintAttachment> scsAttachments)
+    {
+        if (scsAttachments.TryGetValue(component.Name, out var fromScs))
+        {
+            return fromScs;
+        }
+        if (scsAttachments.TryGetValue(ComponentFromSlotKey(component.Name), out fromScs))
+        {
+            return fromScs;
+        }
+
+        // Inherited/native templates may not have an SCS node in this package, but their cooked
+        // component data can still retain the equivalent fields.
+        var parent = component.GetOrDefault<FPackageIndex>("AttachParent")?.ResolvedObject?.Name.Text;
+        var socket = component.GetOrDefault<FName>("AttachSocketName").Text;
+        parent = string.IsNullOrWhiteSpace(parent) || parent.Equals("None", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : parent;
+        socket = string.IsNullOrWhiteSpace(socket) || socket.Equals("None", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : socket;
+        return parent is null && socket is null ? null : new BlueprintAttachment(parent, socket);
+    }
+
+    private static bool HasProperty(UObject component, string property) =>
+        component.Properties.Any(tag => tag.Name.Text.Equals(property, StringComparison.OrdinalIgnoreCase));
+
+    private static bool TryAttachmentFor(
+        UObject component,
+        IReadOnlyDictionary<string, BlueprintAttachment> scsAttachments,
+        out BlueprintAttachment? attachment)
+    {
+        if (scsAttachments.TryGetValue(component.Name, out attachment) ||
+            scsAttachments.TryGetValue(ComponentFromSlotKey(component.Name), out attachment))
+        {
+            return true;
+        }
+
+        if (HasProperty(component, "AttachParent") || HasProperty(component, "AttachSocketName"))
+        {
+            attachment = AttachmentFor(component, scsAttachments);
+            return true;
+        }
+
+        attachment = null;
+        return false;
+    }
+
+    private static bool? ReadComponentHidden(UObject component)
+    {
+        var hasVisibility = false;
+        var hidden = false;
+        if (HasProperty(component, "bHidden") && component.GetOrDefault<bool>("bHidden"))
+        {
+            hasVisibility = true;
+            hidden = true;
+        }
+        else if (HasProperty(component, "bHidden"))
+        {
+            hasVisibility = true;
+        }
+        if (HasProperty(component, "bHiddenInGame") && component.GetOrDefault<bool>("bHiddenInGame"))
+        {
+            hasVisibility = true;
+            hidden = true;
+        }
+        else if (HasProperty(component, "bHiddenInGame"))
+        {
+            hasVisibility = true;
+        }
+        if (HasProperty(component, "bVisible"))
+        {
+            hasVisibility = true;
+            hidden |= !component.GetOrDefault<bool>("bVisible");
+        }
+
+        return hasVisibility ? hidden : null;
+    }
+
+    private static bool HasComponentTransform(UObject component) =>
+        HasProperty(component, "RelativeLocation") ||
+        HasProperty(component, "RelativeRotation") ||
+        HasProperty(component, "RelativeScale3D");
+
+    private static string? MeshPathFor(UObject component) =>
+        (component.GetOrDefault<FPackageIndex>("SkeletalMeshAsset")
+         ?? component.GetOrDefault<FPackageIndex>("SkeletalMesh")
+         ?? component.GetOrDefault<FPackageIndex>("StaticMesh"))?.ResolvedObject?.GetPathName();
+
+    private static bool IsCharacterMeshComponent(UObject component) =>
+        component.Name.Contains("CharacterMesh", StringComparison.OrdinalIgnoreCase);
+
+    private static IEnumerable<string> ImportedPackageNames(object package)
+    {
+        if (package is CUE4Parse.UE4.Assets.IoPackage io)
+        {
+            return io.ImportedPackages.Value
+                .Where(imported => imported is not null)
+                .Select(imported => imported!.Name)
+                .Where(name => !string.IsNullOrWhiteSpace(name));
+        }
+
+        return Array.Empty<string>();
+    }
+
+    private static bool IsVisualBlueprintPackage(string packagePath)
+    {
+        var assetName = Path.GetFileName(packagePath);
+        return assetName.StartsWith("BP_", StringComparison.OrdinalIgnoreCase) &&
+               !assetName.Contains("Component", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int VisualBlueprintParentPriority(string packagePath)
+    {
+        var assetName = Path.GetFileName(packagePath);
+        if (assetName.StartsWith("BP_CAT_Archetype_", StringComparison.OrdinalIgnoreCase))
+        {
+            // A playable BP inherits character-specific body overrides from its CAT archetype.
+            return 0;
+        }
+        if (packagePath.Contains("/BP_Master/", StringComparison.OrdinalIgnoreCase))
+        {
+            return 2;
+        }
+        return 1;
+    }
+
+    /// <summary>
+    /// Returns the selected Blueprint followed by the character Blueprint parents that actually
+    /// contribute component templates. The package dependency list is the cooked representation of
+    /// that inheritance chain: a Robin playable references its CAT archetype, which in turn
+    /// references BP_Playable. We deliberately inspect only visual Blueprints, never a generic mesh
+    /// fallback, so a smallfig, creature, or custom mod body remains the one its BP selected.
+    /// </summary>
+    private static IReadOnlyList<string> ResolveVisualBlueprintSourcePaths(
+        DefaultFileProvider provider, string selectedBpPath)
+    {
+        var result = new List<string>();
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void Visit(string packagePath)
+        {
+            if (string.IsNullOrWhiteSpace(packagePath) || !visited.Add(packagePath))
+            {
+                return;
+            }
+
+            result.Add(packagePath);
+            try
+            {
+                var package = provider.LoadPackage(packagePath);
+                foreach (var parent in ImportedPackageNames(package)
+                             .Where(IsVisualBlueprintPackage)
+                             .OrderBy(VisualBlueprintParentPriority)
+                             .ThenBy(path => path, StringComparer.OrdinalIgnoreCase))
                 {
-                    attachPoints[boneName] = p.Value;
-                    _headAttachPoint = p.Value;
-                    Console.WriteLine($"  attach '{boneName}' -> ({p.Value.X:0.###}, {p.Value.Y:0.###}, {p.Value.Z:0.###})");
+                    Visit(parent);
                 }
-                else
-                {
-                    Console.WriteLine($"  ! attach bone '{boneName}' not in body skeleton");
-                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  could not read visual BP parent {packagePath}: {ex.Message.Split('\n')[0]}");
             }
         }
 
-        // The head piece is authored in world space like the body/cape - it already sits on the neck.
-        // Its material slot is genuinely empty in the asset (the game binds one at runtime), so there
-        // is nothing to read; it takes the face material's skin tint instead.
-        parts.Add(new PreviewPart(DefaultHeadMesh, AttachToHead: false, IsHeadPiece: true));
+        Visit(selectedBpPath);
+        return result;
+    }
+
+    /// <summary>
+    /// Merges visual component template properties from parent to child. This mirrors Unreal's
+    /// Blueprint inheritance closely enough for cooked character assets: a child with only a body
+    /// material preserves its parent mesh, while a child with a new mesh, transform, or visibility
+    /// setting replaces only that aspect of the inherited component.
+    /// </summary>
+    private static IReadOnlyList<ResolvedBlueprintComponent> ResolveVisualBlueprintComponents(
+        DefaultFileProvider provider, string selectedBpPath)
+    {
+        var resolved = new Dictionary<string, ResolvedBlueprintComponent>(StringComparer.OrdinalIgnoreCase);
+        var sourcePaths = ResolveVisualBlueprintSourcePaths(provider, selectedBpPath);
+
+        // Resolve root-to-leaf so the selected playable/cutscene BP is authoritative.
+        foreach (var sourcePath in sourcePaths.Reverse())
+        {
+            try
+            {
+                var package = provider.LoadPackage(sourcePath);
+                var scsAttachments = ReadBlueprintAttachments(package.GetExports());
+                foreach (var component in package.GetExports())
+                {
+                    var isSkeletal = component.ExportType.Contains("SkeletalMeshComponent", StringComparison.OrdinalIgnoreCase);
+                    var isStatic = component.ExportType.Contains("StaticMeshComponent", StringComparison.OrdinalIgnoreCase);
+                    if (!isSkeletal && !isStatic)
+                    {
+                        continue;
+                    }
+
+                    var isBody = IsCharacterMeshComponent(component);
+                    var key = isBody ? "CharacterMesh0" : ComponentFromSlotKey(component.Name);
+                    var meshPath = MeshPathFor(component);
+                    var hasMesh = !string.IsNullOrWhiteSpace(meshPath);
+                    var hasOverrides = HasProperty(component, "OverrideMaterials");
+                    var overrides = component.GetOrDefault<FPackageIndex[]>("OverrideMaterials");
+                    var hasTransform = HasComponentTransform(component);
+                    var transform = hasTransform ? ReadComponentTransform(component) : null;
+                    var hasAttachment = TryAttachmentFor(component, scsAttachments, out var attachment);
+                    var hidden = ReadComponentHidden(component);
+
+                    if (resolved.TryGetValue(key, out var inherited))
+                    {
+                        var referenceBody = inherited.HeadReferenceBodyPath;
+                        if (isBody && hasMesh && !string.Equals(meshPath, inherited.MeshPath, StringComparison.OrdinalIgnoreCase))
+                        {
+                            // The previous body is the rig the shared native head was authored against.
+                            referenceBody = inherited.MeshPath ?? referenceBody;
+                        }
+
+                        resolved[key] = inherited with
+                        {
+                            MeshPath = hasMesh ? meshPath : inherited.MeshPath,
+                            Overrides = hasOverrides ? overrides : inherited.Overrides,
+                            IsStaticAttachment = hasMesh ? isStatic : inherited.IsStaticAttachment,
+                            Transform = hasTransform ? transform : inherited.Transform,
+                            Attachment = hasAttachment ? attachment : inherited.Attachment,
+                            Hidden = hidden ?? inherited.Hidden,
+                            SourcePackage = hasMesh ? sourcePath : inherited.SourcePackage,
+                            HeadReferenceBodyPath = referenceBody,
+                        };
+                    }
+                    else
+                    {
+                        resolved[key] = new ResolvedBlueprintComponent(
+                            key,
+                            hasMesh ? meshPath : null,
+                            hasOverrides ? overrides : null,
+                            isStatic,
+                            transform,
+                            attachment,
+                            hidden ?? false,
+                            sourcePath);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  skipping unreadable visual BP {sourcePath}: {ex.Message.Split('\n')[0]}");
+            }
+        }
+
+        return resolved.Values
+            .OrderBy(component => !component.Key.Equals("CharacterMesh0", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    private static Vector3? ResolveBodyAttachmentPoint(
+        USkeletalMesh? bodyMesh, BlueprintAttachment? attachment, string componentName, string meshPath)
+    {
+        if (bodyMesh is null)
+        {
+            return null;
+        }
+
+        var socket = attachment?.SocketName;
+        var parentIsBody = attachment?.ParentName is { } parent && IsBodyMeshParent(parent);
+        string? bone = null;
+        if (parentIsBody && !string.IsNullOrWhiteSpace(socket))
+        {
+            // The cooked meshes in LotDK have zero serialized sockets. These socket-to-bone mappings
+            // are the native LEGOfig rig anchors and let parts remain in their authored local space.
+            bone = socket switch
+            {
+                var s when s.Equals("Root", StringComparison.OrdinalIgnoreCase) => "Root",
+                var s when s.StartsWith("HeadStud", StringComparison.OrdinalIgnoreCase) => "Head_Attach_01",
+                var s when s.StartsWith("Head", StringComparison.OrdinalIgnoreCase) => "Head",
+                var s when s.Contains("Babyfig_Face", StringComparison.OrdinalIgnoreCase) => "Head",
+                var s when s.Contains("Chest", StringComparison.OrdinalIgnoreCase) => "Chest",
+                var s when s.Contains("Neck", StringComparison.OrdinalIgnoreCase) => "Neck",
+                var s when s.Contains("Hip", StringComparison.OrdinalIgnoreCase)
+                           || s.Contains("Pelvis", StringComparison.OrdinalIgnoreCase)
+                           || s.Contains("Waist", StringComparison.OrdinalIgnoreCase)
+                           || s.Contains("Belt", StringComparison.OrdinalIgnoreCase) => "Pelvis",
+                var s when s.Contains("Spine_01", StringComparison.OrdinalIgnoreCase) => "Spine_01",
+                var s when s.Contains("Spine_02", StringComparison.OrdinalIgnoreCase) => "Spine_02",
+                var s when s.Contains("Spine_03", StringComparison.OrdinalIgnoreCase) => "Spine_03",
+                var s when s.Contains("Spine", StringComparison.OrdinalIgnoreCase) => "Spine_03",
+                var s when s.Contains("WristRoll_L", StringComparison.OrdinalIgnoreCase) => "WristRoll_L",
+                var s when s.Contains("WristRoll_R", StringComparison.OrdinalIgnoreCase) => "WristRoll_R",
+                var s when s.Contains("Hand_L", StringComparison.OrdinalIgnoreCase) => "Hand_L_Attach_01",
+                var s when s.Contains("Hand_R", StringComparison.OrdinalIgnoreCase) => "Hand_R_Attach_01",
+                _ => null,
+            };
+        }
+
+        // Many static Hip components lose their SCS parent/socket while cooking. A utility belt is
+        // authored around its local origin, so leaving it at origin puts it by the feet. Its role is
+        // unambiguous in both the component name and the mesh package; anchor it to the body pelvis.
+        if (bone is null && (componentName.Contains("Hip", StringComparison.OrdinalIgnoreCase)
+                             || componentName.Contains("Belt", StringComparison.OrdinalIgnoreCase)
+                             || meshPath.Contains("/Hip/", StringComparison.OrdinalIgnoreCase)
+                             || meshPath.Contains("Belt", StringComparison.OrdinalIgnoreCase)))
+        {
+            bone = "Pelvis";
+            Console.WriteLine($"  {componentName}: no serialized hip socket; fallback -> Pelvis");
+        }
+        if (bone is null)
+        {
+            return null;
+        }
+        if (bone.Equals("Head_Attach_01", StringComparison.OrdinalIgnoreCase))
+        {
+            return HeadAttachmentPoint(bodyMesh);
+        }
+        return BoneWorldInGltfSpace(bodyMesh, bone);
+    }
+
+    /// <summary>
+    /// SCS nodes spell the native body parent two ways: playable Blueprints use
+    /// <c>CharacterMesh0</c>, while many indexed donor records preserve the editor label
+    /// <c>Mesh (CharacterMesh0)</c>. Both attach to the same runtime LEGOfig skeleton.
+    /// </summary>
+    private static bool IsBodyMeshParent(string parent) =>
+        parent.Equals("CharacterMesh0", StringComparison.OrdinalIgnoreCase)
+        || parent.Equals("Mesh", StringComparison.OrdinalIgnoreCase)
+        || parent.Contains("CharacterMesh0", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Builds a preview of a saved suit by layering its project edits over the donor BP.</summary>
+    public static string BuildPreviewSuit(
+        string paksDir,
+        string usmapPath,
+        NativeSuitProject project,
+        string projectRoot)
+    {
+        var basePath = MountedObjectPath(project.PlayableTemplate?.Uasset);
+        if (string.IsNullOrWhiteSpace(basePath))
+        {
+            throw new InvalidOperationException("This suit has no playable base character yet.");
+        }
+
+        var liveParts = new PartIndexService(projectRoot).LoadPartIndex()?.Parts;
+        var additions = new List<PreviewAdditionalPart>();
+        foreach (var graft in project.PartGrafts ?? Enumerable.Empty<SavedPartGraft>())
+        {
+            var donor = graft.Playable ?? graft.Cutscene;
+            if (donor is null || string.IsNullOrWhiteSpace(donor.MeshObjectPath))
+            {
+                continue;
+            }
+
+            var component = string.IsNullOrWhiteSpace(graft.ResolvedComponent)
+                ? graft.Slot
+                : graft.ResolvedComponent;
+            if (string.IsNullOrWhiteSpace(component))
+            {
+                component = donor.TemplateSlot;
+            }
+            if (string.IsNullOrWhiteSpace(component))
+            {
+                component = donor.MeshObjectPath.Split('.').LastOrDefault() ?? "GraftedPart";
+            }
+
+            var live = liveParts?.FirstOrDefault(part =>
+                part.SourcePackagePath.Equals(donor.SourcePackagePath, StringComparison.OrdinalIgnoreCase) &&
+                part.MeshObjectPath.Equals(donor.MeshObjectPath, StringComparison.OrdinalIgnoreCase) &&
+                (string.IsNullOrWhiteSpace(donor.Context) ||
+                 part.Context.Equals(donor.Context, StringComparison.OrdinalIgnoreCase)));
+            var materialPaths = live?.Materials
+                .Select(material => material.ObjectPath)
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .ToList();
+
+            // Older project files preserved the donor mesh identity but not always its SCS parent
+            // and socket. The part index retains both, so prefer the explicit saved values and
+            // heal the missing fields from the live record before falling back to the small set of
+            // LEGO attachment conventions below. Without this, a grafted hair mesh can be exported
+            // at world origin even though the indexed donor says it belongs on the head stud.
+            var parent = string.IsNullOrWhiteSpace(donor.ParentComponentOrVariableName)
+                ? live?.ParentComponentOrVariableName
+                : donor.ParentComponentOrVariableName;
+            var socket = string.IsNullOrWhiteSpace(donor.AttachSocket)
+                ? live?.AttachSocket
+                : donor.AttachSocket;
+            var inferredAttachment = InferAttachment(component, donor.MeshObjectPath);
+            parent = string.IsNullOrWhiteSpace(parent) ? inferredAttachment.Parent : parent;
+            socket = string.IsNullOrWhiteSpace(socket) ? inferredAttachment.Socket : socket;
+
+            additions.Add(new PreviewAdditionalPart(
+                component,
+                donor.MeshObjectPath,
+                donor.MeshKind.Equals("StaticMesh", StringComparison.OrdinalIgnoreCase),
+                parent,
+                socket,
+                materialPaths,
+                ReplaceExisting: true));
+        }
+
+        var hidden = project.Requirements
+            .Where(requirement => requirement.Kind.Equals("remove-component", StringComparison.OrdinalIgnoreCase))
+            .Select(requirement => ComponentFromSlotKey(requirement.TargetComponent))
+            .Where(component => !string.IsNullOrWhiteSpace(component))
+            .ToList();
+        var materials = project.MaterialAssignments
+            .Where(material => material.Context is "both" or "playable")
+            .Where(material => !IsFaceComponent(material.Component, null))
+            .Where(material => material.Slot >= 0 && !string.IsNullOrWhiteSpace(material.MiPackagePath))
+            .Select(material => new PreviewMaterialOverride(material.Component, material.Slot, material.MiPackagePath))
+            .ToList();
+
+        var layoutKey = ViewerLayoutService.SuitKey(project);
+        ViewerLayoutService.ImportLegacyIfEmpty(projectRoot, layoutKey, project.PreviewPartPlacements);
+
+        return BuildPreviewCharacter(paksDir, usmapPath, basePath, previewOptions: new CharacterPreviewOptions
+        {
+            HiddenComponents = hidden,
+            AdditionalParts = additions,
+            MaterialOverrides = materials,
+            ViewerLayoutKey = layoutKey,
+            ViewerLayoutProjectRoot = projectRoot,
+            AllowPartMover = true,
+        });
+    }
+
+    private static string? MountedObjectPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        var normalized = path.Replace('\\', '/');
+        if (normalized.EndsWith(".uasset", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized[..^".uasset".Length];
+        }
+        if (normalized.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase) ||
+            normalized.StartsWith("LEGOBatmanLotDK/Content/", StringComparison.OrdinalIgnoreCase))
+        {
+            return normalized;
+        }
+
+        const string contentRoot = "LEGOBatmanLotDK/Content/";
+        var contentIndex = normalized.IndexOf(contentRoot, StringComparison.OrdinalIgnoreCase);
+        return contentIndex >= 0 ? normalized[contentIndex..] : null;
+    }
+
+    private static string ComponentFromSlotKey(string? component)
+    {
+        var value = component?.Trim() ?? "";
+        var colon = value.LastIndexOf(':');
+        if (colon > 0)
+        {
+            value = value[..colon];
+        }
+        const string generated = "_GEN_VARIABLE";
+        return value.EndsWith(generated, StringComparison.OrdinalIgnoreCase)
+            ? value[..^generated.Length]
+            : value;
+    }
+
+    private static bool SameComponent(string? left, string? right) =>
+        ComponentFromSlotKey(left).Equals(ComponentFromSlotKey(right), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Last-resort attachment conventions for legacy graft records with no SCS metadata.</summary>
+    private static (string? Parent, string? Socket) InferAttachment(string component, string meshPath)
+    {
+        var name = ComponentFromSlotKey(component);
+        if (name.StartsWith("Head", StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith("Hair", StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith("Hat", StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith("Helmet", StringComparison.OrdinalIgnoreCase) ||
+            meshPath.Contains("/Hair/", StringComparison.OrdinalIgnoreCase) ||
+            meshPath.Contains("/Hat/", StringComparison.OrdinalIgnoreCase) ||
+            meshPath.Contains("/Helmet/", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("CharacterMesh0", "HeadStud_Attach_Socket");
+        }
+
+        if (name.Contains("Hip", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("Belt", StringComparison.OrdinalIgnoreCase) ||
+            meshPath.Contains("/Hip/", StringComparison.OrdinalIgnoreCase) ||
+            meshPath.Contains("Belt", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("CharacterMesh0", "Hip_Socket");
+        }
+
+        return (null, null);
+    }
+
+    private static bool IsFaceComponent(string? component, string? meshPath) =>
+        (!string.IsNullOrWhiteSpace(component) &&
+         component.Contains("Face", StringComparison.OrdinalIgnoreCase)) ||
+        (!string.IsNullOrWhiteSpace(meshPath) &&
+         meshPath.Contains("LEGOface", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Static hair meshes are authored just above the shared head anchor. A small viewer-only lift
+    /// gives them the same resting alignment as the in-game character, while preserving the real
+    /// Blueprint socket, transform, and any per-character placement the user has saved.
+    /// </summary>
+    private static SavedPreviewPartPlacement? DefaultStaticHairHeadAdjustment(PreviewPart part)
+    {
+        var attachesToHead = AttachBoneFor(part.ComponentName, part.Attachment?.SocketName)
+            ?.Equals("Head_Attach_01", StringComparison.OrdinalIgnoreCase) == true;
+        return part.IsStaticAttachment && attachesToHead &&
+               part.MeshPath.Contains("/Hair/", StringComparison.OrdinalIgnoreCase)
+            ? new SavedPreviewPartPlacement
+            {
+                Component = part.ComponentName,
+                OffsetY = 0.05f,
+            }
+            : null;
+    }
+
+    private static Vector3? HeadAttachmentPoint(USkeletalMesh mesh) =>
+        BoneWorldInGltfSpace(mesh, "Head_Attach_01") ?? BoneWorldInGltfSpace(mesh, "Head");
+
+    /// <summary>
+    /// The shared bare LEGO head only belongs on LEGOfig-derived bodies. A creature can have a
+    /// perfectly valid bone named "Head", but layering the minifig head over it is never correct.
+    /// The body asset path is the stable distinction exposed by the cooked Blueprints.
+    /// </summary>
+    private static bool IsLegoFigureBody(string meshPath) =>
+        meshPath.Contains("/LEGOfig/", StringComparison.OrdinalIgnoreCase) ||
+        meshPath.Contains("LEGOfig_", StringComparison.OrdinalIgnoreCase) ||
+        meshPath.Contains("/Smallfig/", StringComparison.OrdinalIgnoreCase);
+
+    public static string BuildPreviewCharacter(
+        string paksDir,
+        string usmapPath,
+        string bpPath,
+        string? bodyMeshPath = null,
+        CharacterPreviewOptions? previewOptions = null)
+    {
+        var options = previewOptions ?? new CharacterPreviewOptions();
+        var viewerLayoutKey = string.IsNullOrWhiteSpace(options.ViewerLayoutKey)
+            ? ViewerLayoutService.CharacterKey(bpPath, bodyMeshPath)
+            : options.ViewerLayoutKey!;
+        var viewerLayoutRoot = string.IsNullOrWhiteSpace(options.ViewerLayoutProjectRoot)
+            ? AppSettings.Current.EffectiveProjectRoot()
+            : options.ViewerLayoutProjectRoot!;
+        var viewerPlacements = ViewerLayoutService.Load(viewerLayoutRoot, viewerLayoutKey);
+        var provider = MakeProvider(paksDir, usmapPath);
+        var resolvedComponents = ResolveVisualBlueprintComponents(provider, bpPath);
+        var resolvedBody = resolvedComponents.FirstOrDefault(component =>
+            component.Key.Equals("CharacterMesh0", StringComparison.OrdinalIgnoreCase));
+        var bodyPath = !string.IsNullOrWhiteSpace(bodyMeshPath)
+            ? bodyMeshPath!
+            : resolvedBody?.MeshPath;
+        var parts = new List<PreviewPart>();
+        if (string.IsNullOrWhiteSpace(bodyPath))
+        {
+            Console.WriteLine("  no CharacterMesh0 mesh was found in this Blueprint's visual inheritance chain; no body fallback was added.");
+        }
+        else
+        {
+            parts.Add(new PreviewPart(
+                bodyPath,
+                AttachToHead: false,
+                Overrides: resolvedBody?.Overrides,
+                ComponentName: "CharacterMesh0"));
+            var source = string.IsNullOrWhiteSpace(bodyMeshPath)
+                ? resolvedBody?.SourcePackage ?? bpPath
+                : "explicit preview argument";
+            Console.WriteLine($"  body mesh from visual BP chain: {source} -> {bodyPath}");
+            if (resolvedBody?.Overrides is { Length: > 0 })
+            {
+                Console.WriteLine($"  body material: {resolvedBody.Overrides[0]?.ResolvedObject?.GetPathName()}");
+            }
+        }
+
+        // The standard head mesh is authored against the regular minifig's head anchor. Shift it
+        // by the delta to the active body's own anchor so smallfigs inherit the correct neck height
+        // without a hand-tuned Robin special case. Bodies with no compatible head anchor are not
+        // minifigs at all (creatures, vehicles, etc.), so they must not receive a LEGO head.
+        var bodyMesh = string.IsNullOrWhiteSpace(bodyPath)
+            ? null
+            : provider.LoadPackageObject(bodyPath) as USkeletalMesh;
+        var bodyHeadPoint = bodyMesh is null ? null : HeadAttachmentPoint(bodyMesh);
+        if (bodyMesh is not null)
+        {
+            if (bodyHeadPoint is { } point)
+            {
+                _headAttachPoint = point;
+                Console.WriteLine($"  body head anchor -> ({point.X:0.###}, {point.Y:0.###}, {point.Z:0.###})");
+            }
+            else
+            {
+                Console.WriteLine("  body has no minifig head anchor; omitting the default LEGO head.");
+            }
+        }
+
+        var hasAuthoredBareHead = resolvedComponents.Any(component =>
+            !component.Key.Equals("CharacterMesh0", StringComparison.OrdinalIgnoreCase) &&
+            component.MeshPath?.Contains("LEGOfig_Minifig_Head", StringComparison.OrdinalIgnoreCase) == true);
+        if (bodyHeadPoint is { } activeHeadPoint && !string.IsNullOrWhiteSpace(bodyPath) &&
+            IsLegoFigureBody(bodyPath) && !hasAuthoredBareHead)
+        {
+            var referenceHeadPoint = activeHeadPoint;
+            var referenceBodyPath = string.IsNullOrWhiteSpace(bodyMeshPath)
+                ? resolvedBody?.HeadReferenceBodyPath
+                : null;
+            if (!string.IsNullOrWhiteSpace(referenceBodyPath))
+            {
+                try
+                {
+                    var inheritedBody = provider.LoadPackageObject(referenceBodyPath) as USkeletalMesh;
+                    referenceHeadPoint = inheritedBody is null
+                        ? activeHeadPoint
+                        : HeadAttachmentPoint(inheritedBody) ?? activeHeadPoint;
+                }
+                catch
+                {
+                    // An unreadable inherited body merely leaves the native head at the active rig anchor.
+                }
+            }
+            var headOffset = activeHeadPoint - referenceHeadPoint;
+            parts.Add(new PreviewPart(
+                DefaultHeadMesh,
+                AttachToHead: false,
+                IsHeadPiece: true,
+                ComponentName: "__BareHead",
+                AttachmentOffset: headOffset));
+        }
 
         _bpCharacter = System.Text.RegularExpressions.Regex
             .Match(Path.GetFileNameWithoutExtension(bpPath), @"^BP_([A-Za-z0-9]+)")
             .Groups[1].Value is { Length: > 0 } bpName ? bpName : null;
 
-        var bp = provider.LoadPackage(bpPath);
-        foreach (var exp in bp.GetExports())
+        foreach (var component in resolvedComponents)
         {
-            var isSkeletal = exp.ExportType.Contains("SkeletalMeshComponent", StringComparison.OrdinalIgnoreCase);
-            var isStatic = exp.ExportType.Contains("StaticMeshComponent", StringComparison.OrdinalIgnoreCase);
-            if (!isSkeletal && !isStatic)
+            if (component.Key.Equals("CharacterMesh0", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
-            // Hair and other rigid head pieces are STATIC meshes (SM_HAIR_*), not skeletal ones -
-            // skipping them is why every character without a cowl came out bald.
-            var meshRef = exp.GetOrDefault<FPackageIndex>("SkeletalMeshAsset")
-                          ?? exp.GetOrDefault<FPackageIndex>("SkeletalMesh")
-                          ?? exp.GetOrDefault<FPackageIndex>("StaticMesh");
-            var path = meshRef?.ResolvedObject?.GetPathName();
+            var path = component.MeshPath;
             if (string.IsNullOrWhiteSpace(path))
             {
-                // CharacterMesh0 carries no mesh (assigned at runtime) but DOES carry the body's real
-                // material, e.g. MI_Batman_89_EOM. Hand it to the body mesh we substituted in.
-                if (exp.Name.Contains("CharacterMesh", StringComparison.OrdinalIgnoreCase) &&
-                    exp.GetOrDefault<FPackageIndex[]>("OverrideMaterials") is { Length: > 0 } bodyMats)
-                {
-                    parts[0] = parts[0] with { Overrides = bodyMats };
-                    Console.WriteLine($"  body material from {exp.Name}: {bodyMats[0]?.ResolvedObject?.GetPathName()}");
-                }
+                continue;
+            }
+            var componentName = component.Key;
+            if (component.Hidden)
+            {
+                Console.WriteLine($"  {componentName}: hidden by Blueprint component state");
+                continue;
+            }
+            if ((!IncludeFacePreview && IsFaceComponent(componentName, path)) ||
+                options.HiddenComponents.Any(hidden => SameComponent(hidden, componentName)) ||
+                options.AdditionalParts.Any(extra => extra.ReplaceExisting && SameComponent(extra.ComponentName, componentName)))
+            {
                 continue;
             }
             // The glide cape (Torso slot) is only shown while gliding - skip it for the standing look.
@@ -210,12 +974,70 @@ public static class ModelPreviewService
             }
             // The character's real look lives in the component's override materials (e.g.
             // MI_Batman_89_EOM), not in the base mesh's own material slots.
-            var overrides = exp.GetOrDefault<FPackageIndex[]>("OverrideMaterials");
-            parts.Add(new PreviewPart(path, AttachToHead: AttachBoneFor(exp.Name) is not null,
-                Overrides: overrides, IsStaticAttachment: isStatic));
+            var attachment = component.Attachment;
+            var attachmentOffset = ResolveBodyAttachmentPoint(bodyMesh, attachment, componentName, path);
+            if (attachment is not null)
+            {
+                Console.WriteLine($"  {componentName}: parent={attachment.ParentName ?? "(none)"}"
+                                  + $" socket={attachment.SocketName ?? "(none)"}"
+                                  + (attachmentOffset is { } p
+                                      ? $" -> ({p.X:0.###}, {p.Y:0.###}, {p.Z:0.###})"
+                                      : ""));
+            }
+            parts.Add(new PreviewPart(path, AttachToHead: AttachBoneFor(componentName, attachment?.SocketName) is not null,
+                Overrides: component.Overrides, IsStaticAttachment: component.IsStaticAttachment,
+                ComponentName: componentName, Transform: component.Transform, Attachment: attachment,
+                AttachmentOffset: attachmentOffset));
         }
 
-        return BuildPreviewCore(provider, parts);
+        foreach (var extra in options.AdditionalParts)
+        {
+            if (string.IsNullOrWhiteSpace(extra.MeshPath) ||
+                (!IncludeFacePreview && IsFaceComponent(extra.ComponentName, extra.MeshPath)) ||
+                options.HiddenComponents.Any(hidden => SameComponent(hidden, extra.ComponentName)))
+            {
+                continue;
+            }
+
+            var attachment = new BlueprintAttachment(extra.ParentComponent, extra.AttachSocket);
+            var attachmentOffset = ResolveBodyAttachmentPoint(bodyMesh, attachment, extra.ComponentName, extra.MeshPath);
+            var materialPaths = extra.MaterialPaths?
+                .Select((path, index) => (path, index))
+                .Where(item => !string.IsNullOrWhiteSpace(item.path))
+                .ToDictionary(item => item.index, item => item.path);
+            parts.Add(new PreviewPart(
+                extra.MeshPath,
+                AttachToHead: AttachBoneFor(extra.ComponentName, extra.AttachSocket) is not null,
+                IsStaticAttachment: extra.IsStaticAttachment,
+                ComponentName: ComponentFromSlotKey(extra.ComponentName),
+                Attachment: attachment,
+                AttachmentOffset: attachmentOffset,
+                MaterialPaths: materialPaths));
+        }
+
+        for (var i = 0; i < parts.Count; i++)
+        {
+            var part = parts[i];
+            var materialPaths = part.MaterialPaths is null
+                ? new Dictionary<int, string>()
+                : new Dictionary<int, string>(part.MaterialPaths);
+            foreach (var material in options.MaterialOverrides.Where(material => SameComponent(material.ComponentName, part.ComponentName)))
+            {
+                materialPaths[material.Slot] = material.MaterialPath;
+            }
+            var adjustment = viewerPlacements
+                .FirstOrDefault(placement => SameComponent(placement.Component, part.ComponentName))
+                ?? options.PlacementOverrides
+                    .FirstOrDefault(placement => SameComponent(placement.Component, part.ComponentName))
+                ?? DefaultStaticHairHeadAdjustment(part);
+            parts[i] = part with
+            {
+                MaterialPaths = materialPaths.Count == 0 ? null : materialPaths,
+                Adjustment = adjustment,
+            };
+        }
+
+        return BuildPreviewCore(provider, parts, options.AllowPartMover, viewerLayoutKey);
     }
 
     /// <summary>Exports each mesh to glTF and writes the viewer that loads them into one scene.</summary>
@@ -223,7 +1045,11 @@ public static class ModelPreviewService
         => BuildPreviewCore(MakeProvider(paksDir, usmapPath),
             objectPaths.Select(p => new PreviewPart(p, AttachToHead: false)).ToList());
 
-    private static string BuildPreviewCore(DefaultFileProvider provider, IReadOnlyList<PreviewPart> parts)
+    private static string BuildPreviewCore(
+        DefaultFileProvider provider,
+        IReadOnlyList<PreviewPart> parts,
+        bool allowPartMover = false,
+        string? viewerLayoutKey = null)
     {
         var options = new ExporterOptions
         {
@@ -258,27 +1084,25 @@ public static class ModelPreviewService
             ApplyOverrideMaterials(mesh, part);
             ReportSlots(mesh, part);
 
-            // Skin source: the component's override material if it has one, else the mesh's own.
-            var matObj = (part.Overrides is { Length: > 0 } ovr
-                ? ovr[0]?.ResolvedObject?.Load()
-                : (mesh as USkeletalMesh)?.Materials?.FirstOrDefault()?.Load())
-                as CUE4Parse.UE4.Assets.Exports.Material.UUnrealMaterial;
             // The head has no bound material; fall back to the LEGO skin tone so it is not untextured.
             var headSkin = part.IsHeadPiece ? SkinTone : (Color?)null;
 
             // Resolve EVERY slot separately: a mesh's sections have different materials (the cowl's
             // shell vs its eyes, the cape's LOD variants), so one texture must not be sprayed across all.
             var slotShading = new List<SlotShading>();
-            var slotMats = (mesh as USkeletalMesh)?.Materials;
+            var slotMats = MeshSlotMaterials(mesh);
             var disabledSlots = DisabledSectionSlots(mesh);
-            for (var si = 0; si < (slotMats?.Length ?? 0); si++)
+            for (var si = 0; si < slotMats.Count; si++)
             {
-                var slotOverride = part.Overrides is not null && si < part.Overrides.Length
-                    ? part.Overrides[si]?.ResolvedObject?.Load() : null;
-                var slotMat = slotOverride ?? slotMats![si]?.Load();
+                var slotMat = ResolvePreviewMaterial(provider, part, si)
+                              ?? (part.Overrides is not null && si < part.Overrides.Length
+                                  ? part.Overrides[si]?.ResolvedObject?.Load()
+                                  : null)
+                              ?? slotMats[si];
                 if (si == 0 && part.MeshPath.Contains("LEGOface", StringComparison.OrdinalIgnoreCase))
                 {
                     _faceMaterial = slotMat;
+                    _faceMeshPath = part.MeshPath;
                 }
                 var resolved = ResolveSlot(provider, slotMat, previewDir);
                 if (disabledSlots.Contains(si))
@@ -308,6 +1132,14 @@ public static class ModelPreviewService
 
             // Hair and other static parts report no material slots of their own - their look lives
             // entirely in the component's override. Without this they render untextured.
+            if (slotShading.Count == 0 && part.MaterialPaths is { Count: > 0 } savedMaterials)
+            {
+                foreach (var (_, materialPath) in savedMaterials.OrderBy(entry => entry.Key))
+                {
+                    var solo = ResolveSlot(provider, ResolvePreviewMaterial(provider, part, materialPath), previewDir);
+                    slotShading.Add(solo);
+                }
+            }
             if (slotShading.Count == 0 && part.Overrides is { Length: > 0 } soloOverride)
             {
                 var solo = ResolveSlot(provider, soloOverride[0]?.ResolvedObject?.Load(), previewDir);
@@ -359,8 +1191,53 @@ public static class ModelPreviewService
             throw new InvalidOperationException("No meshes could be exported for preview.");
         }
 
-        WriteViewerAssets(previewDir, PrepareFaceFeatures(provider, previewDir, AlignToHead(previewDir, models)));
+        var placed = AlignToHead(previewDir, models);
+        if (IncludeFacePreview)
+        {
+            placed = PrepareFaceFeatures(provider, previewDir, placed);
+        }
+        WriteViewerAssets(previewDir, placed, allowPartMover, viewerLayoutKey);
         return previewDir;
+    }
+
+    private static CUE4Parse.UE4.Assets.Exports.Material.UUnrealMaterial? ResolvePreviewMaterial(
+        DefaultFileProvider provider,
+        PreviewPart part,
+        int slot)
+    {
+        if (part.MaterialPaths is null || !part.MaterialPaths.TryGetValue(slot, out var path) ||
+            string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+        try
+        {
+            return provider.LoadPackageObject(path) as CUE4Parse.UE4.Assets.Exports.Material.UUnrealMaterial;
+        }
+        catch (Exception ex)
+        {
+            // User-made /Game/Mods assets live in the staged output rather than the stock paks.
+            // Their package cannot be decoded by this read-only provider yet; keep the donor slot
+            // instead of blanking the model and make the limitation visible in diagnostics.
+            Console.WriteLine($"  material preview fallback '{path}': {ex.Message.Split('\n')[0]}");
+            return null;
+        }
+    }
+
+    private static CUE4Parse.UE4.Assets.Exports.Material.UUnrealMaterial? ResolvePreviewMaterial(
+        DefaultFileProvider provider,
+        PreviewPart part,
+        string path)
+    {
+        try
+        {
+            return provider.LoadPackageObject(path) as CUE4Parse.UE4.Assets.Exports.Material.UUnrealMaterial;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  material preview fallback '{path}': {ex.Message.Split('\n')[0]}");
+            return null;
+        }
     }
 
     /// <summary>
@@ -407,16 +1284,28 @@ public static class ModelPreviewService
     private readonly record struct PlacedModel(
         string File, Vector3 Offset, List<SlotShading> Slots, bool IsBody, bool IsFace = false, bool IsHead = false)
     {
+        /// <summary>Authored component transform from the BP, converted into glTF space.</summary>
+        public PreviewComponentTransform? Transform { get; init; }
+        /// <summary>Stable component identity used by the project-aware part mover.</summary>
+        public string ComponentName { get; init; } = "";
+        /// <summary>Saved small translation layered over the Blueprint's authored placement.</summary>
+        public SavedPreviewPartPlacement? Adjustment { get; init; }
         /// <summary>Triangle counts of the reordered face index buffer: [base, mouth, hidden].</summary>
         public int[]? FaceGroups { get; init; }
         /// <summary>Preview-relative path of the mouth feature print (alpha = cutout).</summary>
         public string? MouthTex { get; init; }
         /// <summary>Alternate expression feature bands: (ExtraUV0 slot id, triangle count).</summary>
-        public List<(int Band, int Tris, string? Tex, Color? Tint)>? Bands { get; init; }
+        public List<FaceBand>? Bands { get; init; }
         /// <summary>True when the character binds a dummy to the mouth feature (draw nothing).</summary>
         public bool MouthHidden { get; init; }
         /// <summary>Facial rig pose (bone name -> local transform, glTF space) from the expression anim.</summary>
         public Dictionary<string, Dictionary<int, Dictionary<string, (Vector3 P, System.Numerics.Quaternion Q, Vector3 S)>>>? Poses { get; init; }
+        /// <summary>
+        /// Material-parameter curves from the same expression clips as <see cref="Poses"/>. The
+        /// outer mouth, teeth, tongue, eyelids, and eye highlights are driven by these curves in
+        /// the game; posing the bones alone cannot reproduce a face.
+        /// </summary>
+        public Dictionary<string, Dictionary<int, Dictionary<string, float>>>? Curves { get; init; }
     }
 
     /// <summary>
@@ -433,8 +1322,10 @@ public static class ModelPreviewService
     /// quaternion (x, z, y, w) - the axis swap alone, W is NOT negated - and scale (X, Z, Y).
     /// </summary>
     private static Dictionary<int, Dictionary<string, (Vector3 P, System.Numerics.Quaternion Q, Vector3 S)>>? LoadFacePose(
-        DefaultFileProvider provider, string expression, string? character)
+        DefaultFileProvider provider, string expression, string? character,
+        out Dictionary<int, Dictionary<string, float>>? materialCurves)
     {
+        materialCurves = null;
         // Expression sets, best first. A character's own folder wins; otherwise use the SHARED
         // sets the game ships for this rig: LEGOface_Superhero (Batman's face material is
         // MI_LEGOface-Defaults_Superhero) then the generic LEGOface_Expressions. Both pose the rig
@@ -445,25 +1336,61 @@ public static class ModelPreviewService
         // the two differ and the animation folders are keyed on the blueprint's name. Only then
         // fall back to the shared sets, which pose the same rig at root scale 1.0.
         var candidates = new List<string>();
+        // A character's face AnimBP commonly references an AnimMontage (AM_*) rather than the
+        // source sequence (A_*). Bruce Wayne's Neutral state is exactly that: the montage loops
+        // A_Idle_BruceWayne_LEGOface on its Expression slot. Try both asset forms together so a
+        // direct sequence remains preferred when the game actually uses one.
+        void AddAnimationCandidate(string sequencePath)
+        {
+            candidates.Add(sequencePath);
+            candidates.Add(sequencePath.Replace("/A_", "/AM_", StringComparison.Ordinal));
+        }
         foreach (var who in new[] { character, _bpCharacter }.Where(w => !string.IsNullOrWhiteSpace(w)).Distinct())
         {
-            candidates.Add($"/Game/Animation/LEGOface/LEGOface_{who}/A_{expression}_{who}_LEGOface");
-            candidates.Add($"/Game/Animation/LEGOface/LEGOface_{who}/A_{expression}_{who}_LEGOFace");
-            candidates.Add($"/Game/Animation/LEGOfig/{who}/Movement/A_{expression}_{who}_LEGOface");
-            candidates.Add($"/Game/Animation/LEGOfig/{who}/Movement/A_{expression}_{who}_LEGOFace");
+            AddAnimationCandidate($"/Game/Animation/LEGOface/LEGOface_{who}/A_{expression}_{who}_LEGOface");
+            AddAnimationCandidate($"/Game/Animation/LEGOface/LEGOface_{who}/A_{expression}_{who}_LEGOFace");
+            AddAnimationCandidate($"/Game/Animation/LEGOfig/{who}/Movement/A_{expression}_{who}_LEGOface");
+            AddAnimationCandidate($"/Game/Animation/LEGOfig/{who}/Movement/A_{expression}_{who}_LEGOFace");
             // Some characters keep their face animation one level deeper, under Attachments/
             // (Batman: Movement/A_Idle_Batman_LEGOface, Bruce: Movement/Attachments/A_Idle_BruceWayne_LEGOface).
-            candidates.Add($"/Game/Animation/LEGOfig/{who}/Movement/Attachments/A_{expression}_{who}_LEGOface");
-            candidates.Add($"/Game/Animation/LEGOfig/{who}/Movement/Attachments/A_{expression}_{who}_LEGOFace");
+            AddAnimationCandidate($"/Game/Animation/LEGOfig/{who}/Movement/Attachments/A_{expression}_{who}_LEGOface");
+            AddAnimationCandidate($"/Game/Animation/LEGOfig/{who}/Movement/Attachments/A_{expression}_{who}_LEGOFace");
         }
-        candidates.Add($"/Game/Animation/LEGOface/LEGOface_Superhero/A_{expression}_LEGOFace_Superhero");
-        candidates.Add($"/Game/Animation/LEGOface/LEGOface_Expressions/A_{expression}_LEGOFace");
+        // The character's own anim blueprint names the folder its expressions live in (Bruce Wayne
+        // -> LEGOface_Batman). That is the character's own declaration, so it outranks the shared
+        // sets - but it usually only ships a Neutral, hence the fallbacks below.
+        if (_faceAnimHome is not null)
+        {
+            foreach (var who in new[] { character, _bpCharacter, null }
+                     .Where(w => w is null || !string.IsNullOrWhiteSpace(w)).Distinct())
+            {
+                var suffix = who is null ? "" : "_" + who;
+                AddAnimationCandidate($"{_faceAnimHome}/A_{expression}{suffix}_LEGOface");
+                AddAnimationCandidate($"{_faceAnimHome}/A_{expression}{suffix}_LEGOFace");
+            }
+        }
+        // Then the shared set that matches this character's RIG. Only a Superhero face mesh is posed
+        // by the Superhero sequences; everyone else uses the generic ones. Falling through to
+        // Superhero for every character was giving ordinary faces a cowled hero's expressions.
+        var superheroRig = _faceMeshPath?.Contains("Superhero", StringComparison.OrdinalIgnoreCase) == true;
+        if (superheroRig)
+        {
+            AddAnimationCandidate($"/Game/Animation/LEGOface/LEGOface_Superhero/A_{expression}_LEGOFace_Superhero");
+            AddAnimationCandidate($"/Game/Animation/LEGOface/LEGOface_Expressions/A_{expression}_LEGOFace");
+        }
+        else
+        {
+            AddAnimationCandidate($"/Game/Animation/LEGOface/LEGOface_Expressions/A_{expression}_LEGOFace");
+            AddAnimationCandidate($"/Game/Animation/LEGOface/LEGOface_Superhero/A_{expression}_LEGOFace_Superhero");
+        }
 
         foreach (var path in candidates)
         {
             try
             {
-                if (provider.LoadPackageObject(path) is not UAnimSequence anim)
+                var source = provider.LoadPackageObject(path);
+                var anim = ResolveAnimationSequence(source);
+                if (anim is null)
                 {
                     continue;
                 }
@@ -479,6 +1406,10 @@ public static class ModelPreviewService
                     continue;
                 }
                 var refBones = skel.ReferenceSkeleton.FinalRefBoneInfo;
+                // Animation tracks are not guaranteed to be stored in reference-skeleton order.
+                // UE serialises the authoritative mapping beside the compressed tracks; ignoring it
+                // can put an eyelid or lip transform on a neighbouring bone and visibly warp a face.
+                var trackToSkeleton = ReadAnimMember(anim, "CompressedTrackToSkeletonMapTable") as Array;
 
                 // Sample a fixed frame partway in. These sequences ease into the expression, hold
                 // it, then relax, so neither frame 0 nor the last key is the pose - and a
@@ -494,7 +1425,7 @@ public static class ModelPreviewService
                 {
 
                 var pose = new Dictionary<string, (Vector3, System.Numerics.Quaternion, Vector3)>();
-                for (var i = 0; i < seq.Tracks.Count && i < refBones.Length; i++)
+                for (var i = 0; i < seq.Tracks.Count; i++)
                 {
                     var tr = seq.Tracks[i];
                     if (tr.KeyPos.Length == 0 && tr.KeyQuat.Length == 0)
@@ -505,7 +1436,18 @@ public static class ModelPreviewService
                     // It is not a pose - it is the donor character's fit: Bane's expressions scale
                     // AttachRoot by 1.485 for his larger head. Applying it inflates the whole face
                     // rig and lifts it off the skull.
-                    if (refBones[i].ParentIndex < 0)
+                    var boneIndex = i;
+                    if (trackToSkeleton is not null && i < trackToSkeleton.Length)
+                    {
+                        boneIndex = ReadAnimInt(ReadAnimMember(trackToSkeleton.GetValue(i)!, "BoneTreeIndex", "BoneIndex"))
+                                    ?? i;
+                    }
+                    if (boneIndex < 0 || boneIndex >= refBones.Length)
+                    {
+                        continue;
+                    }
+                    var refBone = refBones[boneIndex];
+                    if (refBone.ParentIndex < 0)
                     {
                         continue;
                     }
@@ -517,14 +1459,26 @@ public static class ModelPreviewService
                     // unused features toward zero) to form the expression. Dropping it leaves every
                     // shell at bind size, which renders as slabs across the face.
                     var s = tr.KeyScale.Length > 0 ? tr.KeyScale[Math.Min(bestFrame, tr.KeyScale.Length - 1)] : new FVector(1, 1, 1);
-                    pose[refBones[i].Name.Text] = (
+                    pose[refBone.Name.Text] = (
                         new Vector3(p.X / 100f, p.Z / 100f, p.Y / 100f),
                         new System.Numerics.Quaternion(q.X, q.Z, q.Y, q.W),
                         new Vector3(s.X, s.Z, s.Y));
                 }
                 byFrame[bestFrame] = pose;
                 }
-                Console.WriteLine($"  face pose '{expression}': {byFrame.Count} frames {string.Join("/", byFrame.Keys)} of {frameCount} from {path.Split('/')[^1]}");
+                var sampleTracks = byFrame.Count > 0
+                    ? string.Join(", ", byFrame.Values.First().Keys.Take(6))
+                    : "(none)";
+                var sourceName = source.Name == anim.Name
+                    ? anim.Name
+                    : $"{source.Name} -> {anim.Name}";
+                Console.WriteLine($"  face pose '{expression}': {byFrame.Count} frames {string.Join("/", byFrame.Keys)} of {frameCount} from {sourceName}");
+                Console.WriteLine($"      tracks: {(byFrame.Count > 0 ? byFrame.Values.First().Count : 0)} -> {sampleTracks}");
+                materialCurves = LoadFaceMaterialCurves(anim, byFrame.Keys, frameCount);
+                if (materialCurves?.Count > 0)
+                {
+                    Console.WriteLine($"      material curves: {materialCurves.Values.First().Count} at each sampled frame");
+                }
                 return byFrame;
             }
             catch
@@ -532,6 +1486,221 @@ public static class ModelPreviewService
                 // Try the next candidate path.
             }
         }
+        return null;
+    }
+
+    /// <summary>
+    /// Skeletal meshes expose their material references directly, while static attachment meshes
+    /// keep them inside StaticMaterials structs. Treating the latter as slotless skips native hair,
+    /// hats, and props whenever their component does not happen to provide an override.
+    /// </summary>
+    private static IReadOnlyList<UObject?> MeshSlotMaterials(UObject mesh)
+    {
+        if (mesh is USkeletalMesh skeletal)
+        {
+            return skeletal.Materials?.Select(material => material?.Load()).ToArray()
+                   ?? Array.Empty<UObject?>();
+        }
+
+        if (mesh is UStaticMesh stat)
+        {
+            var staticMaterials = stat.GetOrDefault<FStructFallback[]>("StaticMaterials");
+            if (staticMaterials is not null)
+            {
+                return staticMaterials.Select(material =>
+                    material.GetOrDefault<FPackageIndex>("MaterialInterface")?.ResolvedObject?.Load()
+                    ?? material.GetOrDefault<FPackageIndex>("Material")?.ResolvedObject?.Load())
+                    .ToArray();
+            }
+        }
+
+        return Array.Empty<UObject?>();
+    }
+
+    /// <summary>
+    /// Reads the named float curves embedded in a face <see cref="UAnimSequence"/>. Unreal applies
+    /// these as dynamic-material parameters while the pose plays: e.g. <c>teethuoffsetv</c> slides
+    /// the upper-teeth sheet into the mouth and <c>mouthhide</c> turns the whole shell off. CUE4Parse
+    /// exposes this cooked data, but its rich-curve types are implementation details, so keep the
+    /// small reflection bridge here rather than depending on a private parser type.
+    /// </summary>
+    private static Dictionary<int, Dictionary<string, float>>? LoadFaceMaterialCurves(
+        UAnimSequence anim, IEnumerable<int> sampleFrames, int frameCount)
+    {
+        const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Instance
+                                                    | System.Reflection.BindingFlags.Public
+                                                    | System.Reflection.BindingFlags.NonPublic;
+        try
+        {
+            var type = anim.GetType();
+            var names = type.GetField("CompressedCurveNames", flags)?.GetValue(anim) as Array;
+            var curveData = type.GetField("CompressedCurveData", flags)?.GetValue(anim);
+            var floatCurves = curveData is null ? null : ReadAnimMember(curveData, "FloatCurves") as Array;
+            if (names is null || floatCurves is null || floatCurves.Length == 0)
+            {
+                return null;
+            }
+
+            var decoded = new List<(string Name, List<(float Time, float Value)> Keys)>();
+            for (var i = 0; i < floatCurves.Length; i++)
+            {
+                var name = i < names.Length
+                    ? ReadAnimMember(names.GetValue(i)!, "DisplayName")?.ToString()
+                    : null;
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    continue;
+                }
+                var curve = floatCurves.GetValue(i);
+                var rich = curve is null ? null : ReadAnimMember(curve, "FloatCurve", "Curve");
+                var rawKeys = rich is null ? null : ReadAnimMember(rich, "Keys");
+                var keys = rawKeys switch
+                {
+                    Array a => a.Cast<object?>(),
+                    System.Collections.IEnumerable e => e.Cast<object?>(),
+                    _ => Enumerable.Empty<object?>(),
+                };
+                var values = new List<(float Time, float Value)>();
+                foreach (var key in keys)
+                {
+                    if (key is null) continue;
+                    var time = ReadAnimFloat(ReadAnimMember(key, "Time"));
+                    var value = ReadAnimFloat(ReadAnimMember(key, "Value"));
+                    if (time is { } t && value is { } v)
+                    {
+                        values.Add((t, v));
+                    }
+                }
+                values.Sort((a, b) => a.Time.CompareTo(b.Time));
+                if (values.Count > 0)
+                {
+                    decoded.Add((name!, values));
+                }
+            }
+            if (decoded.Count == 0)
+            {
+                return null;
+            }
+
+            var result = new Dictionary<int, Dictionary<string, float>>();
+            foreach (var frame in sampleFrames)
+            {
+                var time = anim.SequenceLength * frame / Math.Max(1, frameCount - 1);
+                var values = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+                foreach (var (name, keys) in decoded)
+                {
+                    values[name] = SampleRichCurve(keys, time);
+                }
+                result[frame] = values;
+            }
+            return result;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"      material curve decode failed: {ex.Message.Split('\n')[0]}");
+            return null;
+        }
+    }
+
+    private static object? ReadAnimMember(object target, params string[] names)
+    {
+        const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Instance
+                                                    | System.Reflection.BindingFlags.Public
+                                                    | System.Reflection.BindingFlags.NonPublic;
+        foreach (var name in names)
+        {
+            var field = target.GetType().GetField(name, flags);
+            if (field is not null)
+            {
+                return field.GetValue(target);
+            }
+            var property = target.GetType().GetProperty(name, flags);
+            if (property is not null && property.GetIndexParameters().Length == 0)
+            {
+                return property.GetValue(target);
+            }
+        }
+        return null;
+    }
+
+    private static float? ReadAnimFloat(object? value) => value switch
+    {
+        float f => f,
+        double d => (float)d,
+        int i => i,
+        long l => l,
+        _ when value is not null && float.TryParse(value.ToString(),
+            System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsed) => parsed,
+        _ => null,
+    };
+
+    private static int? ReadAnimInt(object? value) => value switch
+    {
+        byte b => b,
+        short s => s,
+        int i => i,
+        long l when l is >= int.MinValue and <= int.MaxValue => (int)l,
+        _ when value is not null && int.TryParse(value.ToString(),
+            System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var parsed) => parsed,
+        _ => null,
+    };
+
+    private static float SampleRichCurve(IReadOnlyList<(float Time, float Value)> keys, float time)
+    {
+        if (time <= keys[0].Time) return keys[0].Value;
+        if (time >= keys[^1].Time) return keys[^1].Value;
+        for (var i = 1; i < keys.Count; i++)
+        {
+            if (time > keys[i].Time) continue;
+            var left = keys[i - 1];
+            var right = keys[i];
+            var span = Math.Max(0.000001f, right.Time - left.Time);
+            var t = Math.Clamp((time - left.Time) / span, 0f, 1f);
+            // UE's curve keys in these clips are authored at every sample, so a linear sample
+            // mirrors their rendered value without having to reconstruct private tangent types.
+            return left.Value + (right.Value - left.Value) * t;
+        }
+        return keys[^1].Value;
+    }
+
+    /// <summary>
+    /// Returns the sequence played by an animation asset. Face blueprints use both UAnimSequence
+    /// and UAnimMontage assets; the latter stores its playable source under
+    /// SlotAnimTracks -> AnimTrack -> AnimSegments -> AnimReference. Reading the cooked data here
+    /// follows the same asset relationship the post-process AnimBP uses at runtime.
+    /// </summary>
+    private static UAnimSequence? ResolveAnimationSequence(UObject source)
+    {
+        if (source is UAnimSequence direct)
+        {
+            return direct;
+        }
+
+        static FStructFallback? StructValue(object? value) =>
+            value as FStructFallback
+            ?? (value as FScriptStruct)?.StructType as FStructFallback;
+
+        var tracks = source.GetOrDefault<UScriptArray>("SlotAnimTracks");
+        foreach (var trackEntry in tracks?.Properties ?? [])
+        {
+            var track = StructValue(trackEntry.GenericValue);
+            var animTrackValue = track?.Properties
+                .FirstOrDefault(p => p.Name.Text.Equals("AnimTrack", StringComparison.OrdinalIgnoreCase))
+                ?.Tag?.GenericValue;
+            var animTrack = StructValue(animTrackValue);
+            var segments = animTrack?.GetOrDefault<UScriptArray>("AnimSegments");
+            foreach (var segmentEntry in segments?.Properties ?? [])
+            {
+                var segment = StructValue(segmentEntry.GenericValue);
+                var reference = segment?.GetOrDefault<FPackageIndex>("AnimReference")
+                    ?.ResolvedObject?.Load();
+                if (reference is UAnimSequence sequence)
+                {
+                    return sequence;
+                }
+            }
+        }
+
         return null;
     }
 
@@ -564,32 +1733,221 @@ public static class ModelPreviewService
     /// remaining bands are the paired features, resolved left/right by the sign of z.
     /// </summary>
     /// <summary>
-    /// Which face feature each ExtraUV0 band draws: the texture parameter and its tint parameter.
+    /// Reads the face material's "Enable Zone NN (Feature)" static switches, which are the game's
+    /// OWN statement of which ExtraUV0 band draws which feature and whether it is enabled at all.
+    /// The zone number IS the band number. Walks the parent chain so inherited zones are seen.
     ///
-    /// Every LEGO face feature is a WHITE STENCIL (shape in alpha, RGB pure white) coloured by a
-    /// "&lt;feature&gt; Tint" vector parameter - brows are white sheets tinted 442E2B, skin is tinted
-    /// D28856. The head is split into LOWER and UPPER halves, each with an Under (skin) and Over
-    /// (print) layer; missing HeadUpperUnder is what left ordinary faces with no top half.
-    /// Bands were identified by cycling each one alone in the viewer (press B).
+    /// This replaces guessing band -> feature from geometry: a character with no "Enable Zone" for
+    /// a layer simply does not draw it (which is why Bruce Wayne must not show the Jim Gordon
+    /// stubble bound to his HeadLowerOver parameter).
     /// </summary>
-    private static (string Tex, string? Tint)[] ParamsForBand(int band, float centreZ) => band switch
+    /// Every static switch (name, value) on the instance and its parent chain. The child instance is
+    /// yielded first, so callers naturally see its override before an inherited controller default.
+    private static IEnumerable<(string Name, bool Value)> MaterialStaticSwitches(UObject? material, int depth = 0)
     {
-        8 => new[] { ("HeadLowerUnder BC", (string?)"HeadLowerUnder Tint") },
-        7 => new[] { ("HeadLowerOver BC", (string?)null) },
-        0 => new[] { ("HeadUpperUnder BC", (string?)"HeadUpperUnder Tint") },
-        3 => new[] { ("HeadUpperOver BC", (string?)null) },
-        13 => new[] { ("Mouth BC", (string?)null) },
-        1 or 2 => centreZ < 0
-            ? new[] { ("BrowL BC", (string?)"BrowL Tint") }
-            : new[] { ("BrowR BC", (string?)"BrowR Tint") },
-        // Bands 11/12 are the LASH quads. Deliberately NOT drawn: the game ships exactly one lash
-        // texture (T_LEGOface_Lash_Generic_Female_A_BC - there is no male variant) and binds it on
-        // male faces too, with no matching "Lash Tint", so it rendered as a white swoosh above the
-        // eye. A bound parameter is not evidence the game draws the layer.
-        // Remaining bands are alternate variants / unused feature quads: left undrawn until a
-        // character is found that binds them, rather than guessed at.
-        _ => Array.Empty<(string, string?)>(),
+        while (material is not null && depth++ < 6)
+        {
+            var statics = material.GetOrDefault<FStructFallback>("StaticParametersRuntime");
+            foreach (var prop in statics?.Properties ?? new List<CUE4Parse.UE4.Assets.Objects.FPropertyTag>())
+            {
+                if (prop.Tag?.GenericValue is not CUE4Parse.UE4.Assets.Objects.UScriptArray arr)
+                {
+                    continue;
+                }
+                foreach (var item in arr.Properties)
+                {
+                    // Entries come through either as a bare FStructFallback or wrapped in an
+                    // FScriptStruct depending on the property tag - unwrap both.
+                    var sf = item.GenericValue as FStructFallback
+                             ?? (item.GenericValue as CUE4Parse.UE4.Assets.Objects.FScriptStruct)
+                                ?.StructType as FStructFallback;
+                    var name = sf?.GetOrDefault<FStructFallback>("ParameterInfo")
+                                 ?.GetOrDefault<FName>("Name").Text;
+                    if (name is not null)
+                    {
+                        yield return (name, sf!.GetOrDefault<bool>("Value"));
+                    }
+                }
+            }
+            material = material.GetOrDefault<FPackageIndex>("Parent")?.ResolvedObject?.Load();
+        }
+    }
+
+    private static bool? FindStaticSwitch(UObject? material, string name)
+    {
+        foreach (var (candidate, value) in MaterialStaticSwitches(material))
+        {
+            if (string.Equals(candidate, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    /// The complete zone vocabulary, read off all 312 MI_FACE_* materials in the shipped paks.
+    /// A character's own instance only lists the zones it OVERRIDES, so zones it inherits from the
+    /// (stripped) master material never appear in its switch list - this table is how those are
+    /// recovered. Zone number == the ExtraUV0 integer band on SK_LEGOface.
+    /// The colours the master material defaults to, recovered by censusing every "<feature> Tint"
+    /// set across all 312 face materials in the shipped paks (probe mode "facetints:"). Cooking
+    /// strips the master's own defaults, but where dozens of characters agree on a value that value
+    /// IS the intended one - measured rather than guessed. Notably no character ever tints an eye:
+    /// the eye is a white sclera with separate pupil/eyelid shells, not one dark disc.
+    private static readonly Dictionary<string, Color> FaceFeatureDefaultTint = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["BrowFull"] = Color.FromArgb(255, 0x42, 0x24, 0x1B),
+        ["BrowL"] = Color.FromArgb(255, 0x04, 0x04, 0x05),       // n=174, #040405 x49
+        ["BrowR"] = Color.FromArgb(255, 0x04, 0x04, 0x05),       // n=169, #040405 x44
+        ["BrowUnder"] = Color.FromArgb(255, 0xA4, 0x3F, 0x18),
+        ["EyeL"] = Color.FromArgb(255, 0x04, 0x04, 0x05),        // M_LEGOface default linear #040405
+        ["EyeR"] = Color.FromArgb(255, 0x04, 0x04, 0x05),
+        ["EyeBackL"] = Color.FromArgb(255, 0x6B, 0x2A, 0x10),    // "Eye L Back Tint" n=17
+        ["EyeBackR"] = Color.FromArgb(255, 0x6B, 0x2A, 0x10),
+        ["EyelidUpperL"] = Color.FromArgb(255, 0x04, 0x04, 0x05),
+        ["EyelidUpperR"] = Color.FromArgb(255, 0x04, 0x04, 0x05),
+        ["EyelidLowerL"] = Color.FromArgb(255, 0x04, 0x04, 0x05),
+        ["EyelidLowerR"] = Color.FromArgb(255, 0x04, 0x04, 0x05),
+        ["Glasses"] = Color.FromArgb(255, 0x05, 0x04, 0x05),     // n=38
+        ["HeadLowerOver"] = Color.FromArgb(255, 0x05, 0x04, 0x05),
+        ["HeadLowerUnder"] = Color.FromArgb(255, 0xA4, 0x3F, 0x18),
+        ["HeadUpperOver"] = Color.FromArgb(255, 0x0F, 0x07, 0x06),
+        ["HeadUpperUnder"] = Color.FromArgb(255, 0xA4, 0x3F, 0x18),
+        ["LashL"] = Color.FromArgb(255, 0x05, 0x04, 0x05),
+        ["LashR"] = Color.FromArgb(255, 0x05, 0x04, 0x05),
+        ["MaskSuperhero"] = Color.FromArgb(255, 0x04, 0x04, 0x05),
+        ["Mouth"] = Color.FromArgb(255, 0x04, 0x04, 0x05),       // n=5, #040405 x3
+        ["MouthInside"] = Color.FromArgb(255, 0x00, 0x08, 0x16),
+        ["TeethT"] = Color.FromArgb(255, 0xE7, 0xD6, 0xC0),     // master Eye/Teeth cream, linear
+        ["TeethB"] = Color.FromArgb(255, 0xE7, 0xD6, 0xC0),
+        ["Tongue"] = Color.FromArgb(255, 0x8D, 0x00, 0x00),      // master Tongue Tint, linear
     };
+
+    /// The master's own layer ordering. UE pushes each coincident shell back with a Pixel Depth
+    /// Offset; these are the measured values, and using them replaces guessing at polygon offsets.
+    private static readonly Dictionary<string, float> FaceFeaturePdo = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["HeadLowerOver"] = 0.15f, ["Mouth"] = 0.2f, ["MouthInside"] = 0.2f,
+        ["EyeL"] = 0.5f, ["EyeR"] = 0.5f,
+        ["EyelidUpperL"] = 0.6f, ["EyelidUpperR"] = 0.6f,
+        ["EyelidLowerL"] = 0.6f, ["EyelidLowerR"] = 0.6f,
+        ["BrowUnder"] = 0.9f, ["Glasses"] = 1.0f,
+        ["HeadUpperUnder"] = 1.4f, ["HeadUpperOver"] = 1.4f,
+        ["EyeBackL"] = 1.5f, ["EyeBackR"] = 1.5f,
+    };
+
+    /// One ExtraUV0 band of the face, with EVERY map its material declares - not just the base
+    /// colour. The cooked instance still carries BC/NML/MMR (plus Prestine variants), the roughness
+    /// and metallic scalars and the emissive set; binding all of them is what makes a face render
+    /// as the game's material rather than as a flat coloured decal.
+    public sealed record FaceBand(
+        int Band, int Tris, string? Tex, Color? Tint, int Mode, string Feature, float Pdo,
+        string? Nrm = null, string? Orm = null, float? Roughness = null, float? Metallic = null,
+        string? Emissive = null, Color? EmissiveColour = null, float? EmissiveStrength = null,
+        FaceUvLayer? EyeSpecLayer = null,
+        FaceMouthLayers? MouthLayers = null);
+
+    /// <summary>
+    /// One of the mouth's material-only layers. Teeth and tongue share Mouth's geometry/UV shell;
+    /// Unreal moves their sheets with the scalar parameters named by <see cref="CurvePrefix"/>.
+    /// </summary>
+    public sealed record FaceUvLayer(
+        string? Tex, Color Tint, string CurvePrefix,
+        float OffsetU, float OffsetV, float Rotation, float ScaleU, float ScaleV);
+
+    /// <summary>
+    /// The master M_LEGOface shader composites these three maps over the black mouth rim. They are
+    /// kept with band 13 so all three remain correctly skinned by the same lip bones.
+    /// </summary>
+    public sealed record FaceMouthLayers(FaceUvLayer? TeethU, FaceUvLayer? TeethD, FaceUvLayer? Tongue);
+
+    private static readonly Dictionary<int, string> FaceZoneVocabulary = new()
+    {
+        [0] = "BrowFull", [1] = "BrowL", [2] = "BrowR", [3] = "BrowUnder",
+        [4] = "EyeL", [5] = "EyeR", [6] = "Glasses",
+        [7] = "HeadLowerOver", [8] = "HeadLowerUnder",
+        [9] = "HeadUpperOver", [10] = "HeadUpperUnder",
+        [11] = "LashL", [12] = "LashR", [13] = "Mouth", [14] = "MouthInside",
+        // 15-22 carry no name in the master's switches ("Enable Zone 16", ...). These are pinned by
+        // matching each band's dominant skin weight against the parameter families: the band driven
+        // by EyelidDeform_DL is EyelidLowerL, the band driven by EyeBack_L is Eye Back L, and so on.
+        [15] = "Zone15", [16] = "EyelidLowerL", [17] = "EyelidLowerR",
+        [18] = "EyelidUpperL", [19] = "EyelidUpperR", [20] = "Zone20",
+        [21] = "EyeBackL", [22] = "EyeBackR",
+    };
+
+    private static Dictionary<int, string> EnabledFaceZones(UObject? material, int depth = 0)
+    {
+        var zones = new Dictionary<int, string>();
+        foreach (var (name, value) in MaterialStaticSwitches(material, depth))
+        {
+            if (!value)
+            {
+                continue;
+            }
+            var m = System.Text.RegularExpressions.Regex.Match(
+                name, @"^Enable Zone (\d+)\s*\(([^)]+)\)");
+            if (m.Success && int.TryParse(m.Groups[1].Value, out var zone))
+            {
+                zones.TryAdd(zone, m.Groups[2].Value.Trim());
+            }
+        }
+        return zones;
+    }
+
+    /// "<feature> CustomColour Off/On" is the game's own per-character declaration that a face zone
+    /// is RECOLOURED. Every zone that ships a "<feature> Tint" sets it; the zones that do not
+    /// (eyes, mouth interior, lashes) deliberately keep the master material's colour, which for a
+    /// printed feature is near-black. Reading the switch rather than guessing from the presence of
+    /// a tint is what makes the face pipeline correct for any character without calibration.
+    private static HashSet<string> TintedFaceFeatures(UObject? material)
+    {
+        var tinted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, value) in MaterialStaticSwitches(material))
+        {
+            if (!value)
+            {
+                continue;
+            }
+            var m = System.Text.RegularExpressions.Regex.Match(
+                name, @"^(.+?)\s+CustomColour\s+Off/On$");
+            if (m.Success)
+            {
+                tinted.Add(m.Groups[1].Value.Trim());
+            }
+        }
+        return tinted;
+    }
+
+    /// <summary>
+    /// Candidate parameter names for a zone's feature. The switch spells it "EyeL" while the
+    /// parameter is "Eye L BC", so a couple of spacing variants are tried.
+    /// </summary>
+    private static IEnumerable<string> FeatureNameVariants(string feature)
+    {
+        yield return feature;
+        var spaced = System.Text.RegularExpressions.Regex.Replace(feature, @"^(Eye|Brow|Lash)([LR])$", "$1 $2");
+        if (spaced != feature)
+        {
+            yield return spaced;
+        }
+        var eyeBack = System.Text.RegularExpressions.Regex.Match(feature, @"^EyeBack([LR])$");
+        if (eyeBack.Success)
+        {
+            yield return $"Eye Back {eyeBack.Groups[1].Value}";
+            yield return $"Eye {eyeBack.Groups[1].Value} Back";
+        }
+        var eyelid = System.Text.RegularExpressions.Regex.Match(feature, @"^Eyelid(Upper|Lower)([LR])$");
+        if (eyelid.Success)
+        {
+            yield return $"Eyelid{eyelid.Groups[1].Value} {eyelid.Groups[2].Value}";
+            yield return $"Eyelid {eyelid.Groups[1].Value} {eyelid.Groups[2].Value}";
+        }
+        if (feature.StartsWith("Mouth", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return "Mouth";
+        }
+    }
 
     /// <summary>Face material of the current build, so feature bands can read their own params.</summary>
     private static UObject? _faceMaterial;
@@ -609,6 +1967,53 @@ public static class ModelPreviewService
     /// </summary>
     private static string? _bpCharacter;
 
+    /// The face mesh this character actually wears. The game ships five (SK_LEGOface,
+    /// _Superhero, _Batman, _Joker89, _MrFreeze_BaR) and the rig decides which shared expression
+    /// set applies - a Superhero face is posed by the _Superhero sequences, everyone else by the
+    /// generic ones. Previously every character fell through to Superhero.
+    private static string? _faceMeshPath;
+
+    /// Folder the character's own face anim blueprint points at, e.g. Bruce Wayne's
+    /// ABP_LEGOface_BruceWayne references /Game/Animation/LEGOface/LEGOface_Batman/. A cooked anim
+    /// blueprint keeps its dependency list even though the graph is stripped, so this is the
+    /// character's own declaration of where its expressions live.
+    private static string? _faceAnimHome;
+
+    /// Reads the character's face anim blueprint and returns the LEGOface animation folder it
+    /// references, or null when it ships none.
+    private static string? ResolveFaceAnimHome(DefaultFileProvider provider, string? who)
+    {
+        if (string.IsNullOrWhiteSpace(who))
+        {
+            return null;
+        }
+        try
+        {
+            var pkg = provider.LoadPackage(
+                $"/Game/Characters/Attachments/LEGOface/ABP_LEGOface_{who}");
+            if (pkg is not CUE4Parse.UE4.Assets.IoPackage io)
+            {
+                return null;
+            }
+            foreach (var dep in io.ImportedPackages.Value)
+            {
+                var n = dep?.Name;
+                if (n is null) continue;
+                var m = System.Text.RegularExpressions.Regex.Match(
+                    n, @"^(/Game/Animation/LEGOface/[^/]+)/");
+                if (m.Success)
+                {
+                    return m.Groups[1].Value;
+                }
+            }
+        }
+        catch
+        {
+            // No face anim blueprint for this character - fall back to the shared sets.
+        }
+        return null;
+    }
+
     /// <summary>
     /// True for the placeholder textures the game binds to features a character does not use
     /// (T_Dummy_Alpha_Off / T_Dummy_NML). They are fully transparent, so the feature draws nothing.
@@ -617,7 +2022,129 @@ public static class ModelPreviewService
         t.Name.Contains("Dummy", StringComparison.OrdinalIgnoreCase)
         || t.Name.Contains("Alpha_Off", StringComparison.OrdinalIgnoreCase);
 
-    private const string DefaultMouthTexPath = "/Game/Characters/Textures/Attachments/LEGOface/T_LEGOface_Mouth_BC";
+    // The cooked M_LEGOface has no serialised expression graph, but its streaming table names these
+    // direct master defaults. Ordinary faces inherit this distressed mouth stencil even when their
+    // instance's Mouth BC override is a dummy.
+    private const string DefaultMouthTexPath =
+        "/Game/Characters/Textures/Attachments/LEGOface/T_LEGOface_Mouth_DIST_BC";
+    private const string DefaultMouthNormalTexPath =
+        "/Game/Characters/Textures/Attachments/LEGOface/T_LEGOface_Mouth_DIST_DNRM";
+    private const string DefaultTeethUTexPath =
+        "/Game/Characters/Textures/Attachments/LEGOface/T_LEGOface_Teeth_U_BC";
+    private const string DefaultTeethDTexPath =
+        "/Game/Characters/Textures/Attachments/LEGOface/T_LEGOface_Teeth_D_BC";
+    private const string DefaultTongueTexPath =
+        "/Game/Characters/Textures/Attachments/LEGOface/T_LEGOface_Tongue_DIST_BC";
+    private const string DefaultEyeSpecTexPath =
+        "/Game/Characters/Textures/Attachments/LEGOface/T_LEGOface_EyeSpec_BC";
+    private const string DefaultEyeTexPath =
+        "/Game/Characters/Textures/Attachments/LEGOface/T_LEGOface_Eye_DIST_BC";
+    private const string DefaultEyeNormalTexPath =
+        "/Game/Characters/Textures/Attachments/LEGOface/T_LEGOface_Eye_DIST_DNRM";
+
+    /// <summary>
+    /// Resolve one animated layer that the cooked master normally supplies itself. Material
+    /// instances may override the art or tint (Oswald's teeth, for example); when they do not, use
+    /// the exact default texture imported by M_LEGOface rather than substituting a drawn shape.
+    /// </summary>
+    private static FaceUvLayer? ResolveMouthLayer(
+        DefaultFileProvider provider, string previewDir, UObject? material,
+        string materialPrefix, string curvePrefix, string defaultTexturePath,
+        Color defaultTint, float defaultOffsetV)
+    {
+        var texture = FindFirstRealTexture(material,
+            materialPrefix + " BC Prestine", materialPrefix + " BC");
+        if (texture is null)
+        {
+            try { texture = provider.LoadPackageObject(defaultTexturePath) as UTexture2D; }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"      {materialPrefix} default texture failed: {ex.Message.Split('\n')[0]}");
+            }
+        }
+        if (texture is null)
+        {
+            return null;
+        }
+
+        var rel = "textures/" + MakeSafeName(texture.Name) + "_mouth-layer.png";
+        var dest = Path.Combine(previewDir, rel.Replace('/', Path.DirectorySeparatorChar));
+        if (!File.Exists(dest) && !TextureDecodeService.TryExportPng(texture, dest, keepAlpha: true))
+        {
+            return null;
+        }
+
+        float Scalar(string suffix, float fallback) =>
+            FindScalarParam(material, curvePrefix + suffix, 0) ?? fallback;
+        return new FaceUvLayer(
+            rel,
+            FindColourParam(material, materialPrefix + " Tint", 0) ?? defaultTint,
+            curvePrefix.ToLowerInvariant(),
+            Scalar("OffsetU", 0f),
+            Scalar("OffsetV", defaultOffsetV),
+            Scalar("Rotate", 0f),
+            Scalar("ScaleU", 1f),
+            Scalar("ScaleV", 1f));
+    }
+
+    /// <summary>
+    /// The eye highlight is another master-material layer: a large cream disc moved across the dark
+    /// eye stencil by the EyeSpecL/R scalars and expression curves. The overlap creates the small
+    /// LEGO highlight crescent, so use the shipped map even when a character instance stores a
+    /// dummy placeholder.
+    /// </summary>
+    private static FaceUvLayer? ResolveEyeSpecLayer(
+        DefaultFileProvider provider, string previewDir, UObject? material, char side)
+    {
+        var texture = FindFirstRealTexture(material,
+            $"Eye {side} Spec BC Prestine", $"Eye {side} Spec BC");
+        if (texture is null)
+        {
+            try { texture = provider.LoadPackageObject(DefaultEyeSpecTexPath) as UTexture2D; }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"      Eye {side} Spec default texture failed: {ex.Message.Split('\n')[0]}");
+            }
+        }
+        if (texture is null)
+        {
+            return null;
+        }
+
+        var rel = "textures/" + MakeSafeName(texture.Name) + $"_eye-spec-{char.ToLowerInvariant(side)}.png";
+        var dest = Path.Combine(previewDir, rel.Replace('/', Path.DirectorySeparatorChar));
+        if (!File.Exists(dest) && !TextureDecodeService.TryExportPng(texture, dest, keepAlpha: true))
+        {
+            return null;
+        }
+
+        var scalarPrefix = "EyeSpec" + side;
+        float Scalar(string suffix, float fallback) =>
+            FindScalarParam(material, scalarPrefix + suffix, 0) ?? fallback;
+        return new FaceUvLayer(
+            rel,
+            FindColourParam(material, $"Eye {side} Spec Tint", 0)
+            ?? Color.FromArgb(255, 0xE7, 0xD6, 0xC0),
+            "eyespec" + char.ToLowerInvariant(side),
+            Scalar("OffsetU", 0f),
+            Scalar("OffsetV", -0.184f),
+            Scalar("Rotate", 0f),
+            Scalar("ScaleU", 1f),
+            Scalar("ScaleV", 1f));
+    }
+
+    private static UTexture2D? FindFirstRealTexture(UObject? material, params string[] slots)
+    {
+        foreach (var slot in slots)
+        {
+            var candidate = FindTextureParam(material, slot, 0);
+            if (candidate is not null && !IsDummyTexture(candidate))
+            {
+                return candidate;
+            }
+        }
+        return null;
+    }
 
     /// <summary>
     /// Expression applied to the face rig, and the character whose set to take it from.
@@ -668,29 +2195,31 @@ public static class ModelPreviewService
                 continue;
             }
 
-            // Each feature band takes its texture from the face material's OWN parameter for that
-            // feature ("Mouth BC" for the mouth shells). When the character binds a dummy there -
-            // cowled Batman faces set nearly every feature to T_Dummy_Alpha_Off, a fully transparent
-            // texture - the game draws nothing, so the band must be hidden rather than shaded.
+            // Most face bands take their texture from the character material. Mouth is different:
+            // ordinary faces inherit the master mouth stencil, while their instance serialises a
+            // dummy override. MouthHide, not that dummy, is the game-side opt-out.
             string? mouthRel = null;
-            var mouthHidden = false;
+            var mouthHidden = (FindScalarParam(_faceMaterial, "MouthHide", 0) ?? 0f) > 0.5f;
             var faceMaterial = _faceMaterial;
-            var mouthTex = FindTextureParam(faceMaterial, "Mouth BC", 0)
-                           ?? FindTextureParam(faceMaterial, "Mouth BC Prestine", 0);
-            if (mouthTex is not null && IsDummyTexture(mouthTex))
+            var mouthTex = FindFirstRealTexture(faceMaterial, "Mouth BC Prestine", "Mouth BC");
+            if (!mouthHidden && mouthTex is null)
             {
-                // A dummy here means the character overrides nothing, not that the mouth is absent -
-                // the shared sheet is the base the rig deforms. Fall through to it.
-                mouthTex = null;
+                try { mouthTex = provider.LoadPackageObject(DefaultMouthTexPath) as UTexture2D; }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"  face master mouth texture failed: {ex.Message.Split('\n')[0]}");
+                }
             }
             try
             {
-                mouthTex ??= mouthHidden ? null : provider.LoadPackageObject(DefaultMouthTexPath) as UTexture2D;
                 if (mouthTex is not null)
                 {
                     mouthRel = "textures/" + MakeSafeName(mouthTex.Name) + "_mouth.png";
                     var dest = Path.Combine(previewDir, mouthRel.Replace('/', Path.DirectorySeparatorChar));
-                    if (!File.Exists(dest) && !TextureDecodeService.TryExportMouthSheet(mouthTex, dest))
+                    // M_LEGOface reads the raw alpha stencil. The old exporter baked it into a
+                    // single opaque black/white bitmap, which multiplied the white teeth by the
+                    // black Mouth Tint and made the whole mouth a dark slab.
+                    if (!File.Exists(dest) && !TextureDecodeService.TryExportPng(mouthTex, dest, keepAlpha: true))
                     {
                         mouthRel = null;
                     }
@@ -701,42 +2230,284 @@ public static class ModelPreviewService
                 Console.WriteLine($"  face mouth texture failed: {ex.Message.Split('\n')[0]}");
             }
 
+            // Mouth, upper teeth, lower teeth, and tongue all share band 13's skinned lip shell.
+            // The master material imports these defaults directly, even when an MI stores dummies;
+            // resolve real per-character overrides first and only then use those master textures.
+            FaceMouthLayers? mouthLayers = null;
+            if (!mouthHidden && mouthRel is not null)
+            {
+                var upper = ResolveMouthLayer(provider, previewDir, faceMaterial,
+                    "Teeth T", "TeethU", DefaultTeethUTexPath, Color.White, defaultOffsetV: -20f);
+                var lower = ResolveMouthLayer(provider, previewDir, faceMaterial,
+                    "Teeth B", "TeethD", DefaultTeethDTexPath, Color.White, defaultOffsetV: 17.90631f);
+                var tongue = ResolveMouthLayer(provider, previewDir, faceMaterial,
+                    "Tongue", "Tongue", DefaultTongueTexPath, FaceFeatureDefaultTint["Tongue"], defaultOffsetV: -7f);
+                mouthLayers = new FaceMouthLayers(upper, lower, tongue);
+                Console.WriteLine("  face mouth layers: " + string.Join(", ", new[]
+                {
+                    upper is null ? null : "teeth U",
+                    lower is null ? null : "teeth D",
+                    tongue is null ? null : "tongue",
+                }.Where(x => x is not null)));
+            }
+
             // Give every band the texture its own material parameter names. A band whose feature the
             // character does not use resolves to a dummy (fully transparent) and is left untextured,
             // so cowled faces stay clean while ordinary faces get their brows, eyes and upper layer.
-            var bands = new List<(int Band, int Tris, string? Tex, Color? Tint)>();
+            // The material tells us which zone (= ExtraUV0 band) is which feature and whether it
+            // is enabled; anything without an enabled zone is simply not drawn.
+            var zones = EnabledFaceZones(faceMaterial);
+            var tinted = TintedFaceFeatures(faceMaterial);
+            Console.WriteLine($"  face material: {faceMaterial?.GetPathName() ?? "(null)"}");
+            Console.WriteLine("  face zones tinted (CustomColour): " + (tinted.Count == 0
+                ? "(none)" : string.Join(", ", tinted)));
+            Console.WriteLine("  face zones enabled: " + (zones.Count == 0
+                ? "(none declared)"
+                : string.Join(", ", zones.OrderBy(z => z.Key).Select(z => $"{z.Key}={z.Value}"))));
+
+            // Only zones the material SWITCHES ON are drawn. A bound texture proves nothing: 71 of
+            // the 125 materials that bind a HeadLowerOver print never enable zone 7, and 54 bind a
+            // lash they never enable. Leftover bindings are why a female lash once showed up on
+            // Bruce's face.
+            var draw = new Dictionary<int, string>(zones);
+
+            // Zone 13 is the animated mouth shell. Its master switch defaults on but that default
+            // is stripped during cooking, so it is absent from ordinary material instances such as
+            // Bruce's. Restore it whenever the material has not explicitly hidden the mouth.
+            if (!mouthHidden && mouthRel is not null && !draw.ContainsKey(13))
+            {
+                draw[13] = "Mouth";
+                Console.WriteLine("  face: Zone 13 Mouth inherited from M_LEGOface");
+            }
+
+            // Do not infer EyeBack from EyeL/EyeR. The stripped master material's eye-back defaults
+            // are not present in cooked data; putting the generic eye oval on those shells creates
+            // the solid double-dark disks visible in the old preview. Explicitly enabled/bound
+            // eye-back layers still render below, but absent data now means absent artwork.
+            var bands = new List<FaceBand>();
             foreach (var (band, tris) in GlbInspector.FaceBandLayout)
             {
                 string? rel = null;
                 Color? tint = null;
-                var z = GlbInspector.FaceBandCentres.TryGetValue(band, out var c) ? c : 0f;
-                foreach (var (texParam, tintParam) in ParamsForBand(band, z))
+                var additive = false;
+                UTexture2D? printSource = null;
+                if (draw.TryGetValue(band, out var feature))
                 {
-                    // "<feature> BC" is the DISTRESSED variant - a wear mask that measures 98-99%
-                    // transparent, so drawing it renders nothing (this is what lost the eyes and the
-                    // upper-face print). The artwork is in the pristine sibling, which the game
-                    // spells "Prestine". Prefer it, fall back to the distressed one.
-                    var t = FindTextureParam(faceMaterial, texParam + " Prestine", 0)
-                            ?? FindTextureParam(faceMaterial, texParam, 0);
-                    if (t is null || IsDummyTexture(t))
+                    var collapsedMouthInside = feature.Equals("MouthInside", StringComparison.OrdinalIgnoreCase)
+                                               && tris <= 1;
+                    var unsupportedMouth = feature.Equals("Mouth", StringComparison.OrdinalIgnoreCase)
+                                           && (mouthHidden || mouthRel is null || mouthTex is null);
+                    // Every face feature is an alpha stencil. Some layers are conceptually "Over",
+                    // but their texture alpha is still the cutout; treating them as additive RGB
+                    // overlays ignores the measured alpha path and changes the game's layering.
+                    additive = false;
+                    if (!collapsedMouthInside && !unsupportedMouth)
                     {
-                        continue;
+                        if (feature.Equals("Mouth", StringComparison.OrdinalIgnoreCase))
+                        {
+                            rel = mouthRel;
+                            printSource = mouthTex;
+                            tint = FindColourParam(faceMaterial, "Mouth Tint", 0)
+                                   ?? FaceFeatureDefaultTint["Mouth"];
+                            Console.WriteLine($"      zone {band} (Mouth) -> inherited {mouthTex!.Name}");
+                        }
+                        foreach (var variant in FeatureNameVariants(feature))
+                        {
+                            if (rel is not null)
+                            {
+                                break;
+                            }
+                            // "<feature> BC" is the DISTRESSED variant and is 98-99% transparent; the
+                            // artwork is in the sibling the game spells "Prestine".
+                            var t = FindTextureParam(faceMaterial, variant + " BC Prestine", 0)
+                                    ?? FindTextureParam(faceMaterial, variant + " BC", 0);
+                            if (t is null || IsDummyTexture(t))
+                            {
+                                continue;
+                            }
+                            var name = "textures/" + MakeSafeName(t.Name) + "_stencil.png";
+                            var dest = Path.Combine(previewDir, name.Replace('/', Path.DirectorySeparatorChar));
+                            if (File.Exists(dest) || TextureDecodeService.TryExportPng(t, dest, keepAlpha: true))
+                            {
+                                rel = name;
+                                printSource = t;
+                                // Only zones the material flags with "CustomColour Off/On" take their
+                                // "<feature> Tint" - those are white stencils (brows, skin shells).
+                                if (!additive && (tinted.Contains(variant) || tinted.Contains(feature)))
+                                {
+                                    tint = FindColourParam(faceMaterial, variant + " Tint", 0);
+                                }
+                                break;
+                            }
+                        }
                     }
-                    // Keep the alpha: it carries the feature's SHAPE. A distinct suffix so this is
-                    // never confused with an alpha-forced-opaque export of the same texture.
-                    var name = "textures/" + MakeSafeName(t.Name) + "_stencil.png";
-                    var dest = Path.Combine(previewDir, name.Replace('/', Path.DirectorySeparatorChar));
-                    if (File.Exists(dest) || TextureDecodeService.TryExportPng(t, dest, keepAlpha: true))
+
+                    if (rel is null && !additive && !collapsedMouthInside && !unsupportedMouth)
                     {
-                        rel = name;
-                        tint = tintParam is null ? null : FindColourParam(faceMaterial, tintParam, 0);
-                        break;
+                        // No per-character artwork: fall back to the SHARED feature sheet, which is
+                        // what the (stripped) master material points at. Its shape lives in ALPHA.
+                        var shared = feature switch
+                        {
+                            var f when f.Equals("EyeL", StringComparison.OrdinalIgnoreCase)
+                                       || f.Equals("EyeR", StringComparison.OrdinalIgnoreCase)
+                                => "T_LEGOface_Eye_BC",
+                            var f when f.Contains("lid", StringComparison.OrdinalIgnoreCase)
+                                => "T_LEGOface_EyelidLower_BC",
+                            var f when f.StartsWith("Mouth", StringComparison.OrdinalIgnoreCase)
+                                => "T_LEGOface_Mouth_BC",
+                            _ => null,
+                        };
+                        try
+                        {
+                            if (shared is not null && provider.LoadPackageObject(
+                                    "/Game/Characters/Textures/Attachments/LEGOface/" + shared) is UTexture2D st)
+                            {
+                                var sname = "textures/" + MakeSafeName(st.Name) + "_stencil.png";
+                                var sdest = Path.Combine(previewDir, sname.Replace('/', Path.DirectorySeparatorChar));
+                                if (File.Exists(sdest)
+                                    || TextureDecodeService.TryExportPng(st, sdest, keepAlpha: true))
+                                {
+                                    rel = sname;
+                                    printSource = st;
+                                    Console.WriteLine($"      zone {band} ({feature}) -> shared {shared}");
+                                }
+                            }
+                        }
+                        catch
+                        {
+                            // Shared sheet missing - fall through to the flat fill below.
+                        }
+                    }
+
+                    if (tint is null && !additive && !collapsedMouthInside && !unsupportedMouth
+                        && !feature.StartsWith("EyeBack", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // The zone draws but is not flagged "CustomColour", so its colour is the
+                        // master material's default - which cooking strips. These sheets are white
+                        // masks (the eye is a filled ellipse, the mouth a ring), so leaving them
+                        // untinted renders a white blob; the LEGO default for a print is near-black.
+                        tint = FaceFeatureDefaultTint.TryGetValue(feature.Replace(" ", ""), out var def)
+                            ? def
+                            : Color.FromArgb(255, 24, 22, 20);
+                        Console.WriteLine($"      zone {band} ({feature}) not CustomColour -> master default "
+                                          + $"#{tint.Value.R:X2}{tint.Value.G:X2}{tint.Value.B:X2}");
                     }
                 }
-                bands.Add((band, tris, rel, tint));
+
+                // EyeSpec belongs to the master material, not necessarily the character instance.
+                // It must receive the same curve-driven transform as the game; using it at a static
+                // offset is what previously painted the full eye white instead of a small crescent.
+                FaceUvLayer? eyeSpecLayer = null;
+                if (rel is not null && draw.TryGetValue(band, out var eyeFeature)
+                    && (eyeFeature.Equals("EyeL", StringComparison.OrdinalIgnoreCase)
+                        || eyeFeature.Equals("EyeR", StringComparison.OrdinalIgnoreCase)))
+                {
+                    var side = eyeFeature[^1];
+                    eyeSpecLayer = ResolveEyeSpecLayer(provider, previewDir, faceMaterial, side);
+                    if (eyeSpecLayer is not null)
+                    {
+                        Console.WriteLine($"      zone {band} ({eyeFeature}) -> master eye spec "
+                                          + $"offset=({eyeSpecLayer.OffsetU:0.###},{eyeSpecLayer.OffsetV:0.###})");
+                    }
+                }
+
+                // Bind the REST of the material for this feature, not just its base colour: the
+                // normal map (the prints are raised ink), the MMR (metal/roughness, repacked to ORM
+                // for three.js), the roughness/metallic scalars and the emissive set.
+                string? nrmRel = null, ormRel = null, emisRel = null;
+                float? roughness = null, metallic = null, emisStrength = null;
+                Color? emisColour = null;
+                if (draw.TryGetValue(band, out var mf))
+                {
+                    foreach (var variant in FeatureNameVariants(mf))
+                    {
+                        var nml = FindTextureParam(faceMaterial, variant + " NML Prestine", 0)
+                                  ?? FindTextureParam(faceMaterial, variant + " NML", 0);
+                        if (nrmRel is null && nml is not null && !IsDummyTexture(nml))
+                        {
+                            var n = "textures/" + MakeSafeName(nml.Name) + "_nrm.png";
+                            var d = Path.Combine(previewDir, n.Replace('/', Path.DirectorySeparatorChar));
+                            if (File.Exists(d) || TextureDecodeService.TryExportPng(nml, d, reconstructNormalZ: true))
+                            {
+                                nrmRel = n;
+                            }
+                        }
+                        var mmr = FindTextureParam(faceMaterial, variant + " MMR Prestine", 0)
+                                  ?? FindTextureParam(faceMaterial, variant + " MMR", 0);
+                        if (ormRel is null && mmr is not null && !IsDummyTexture(mmr))
+                        {
+                            var n = "textures/" + MakeSafeName(mmr.Name) + "_orm.png";
+                            var d = Path.Combine(previewDir, n.Replace('/', Path.DirectorySeparatorChar));
+                            if (File.Exists(d) || TextureDecodeService.TryExportMmrAsOrm(mmr, d))
+                            {
+                                ormRel = n;
+                            }
+                        }
+                        var em = FindTextureParam(faceMaterial, variant + " Emissive", 0);
+                        if (emisRel is null && em is not null && !IsDummyTexture(em))
+                        {
+                            var n = "textures/" + MakeSafeName(em.Name) + "_emis.png";
+                            var d = Path.Combine(previewDir, n.Replace('/', Path.DirectorySeparatorChar));
+                            if (File.Exists(d) || TextureDecodeService.TryExportPng(em, d, keepAlpha: true))
+                            {
+                                emisRel = n;
+                            }
+                        }
+                        roughness ??= FindScalarParam(faceMaterial, variant + " Roughness", 0);
+                        metallic ??= FindScalarParam(faceMaterial, variant + " Metallic", 0);
+                        emisStrength ??= FindScalarParam(faceMaterial, variant + " Emissive Strength", 0);
+                        emisColour ??= FindColourParam(faceMaterial, variant + " Emissive Custom Colour", 0);
+                    }
+                    if (mf.Equals("Mouth", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (nrmRel is null)
+                        {
+                            try
+                            {
+                                if (provider.LoadPackageObject(DefaultMouthNormalTexPath) is UTexture2D mouthNormal)
+                                {
+                                    var n = "textures/" + MakeSafeName(mouthNormal.Name) + "_nrm.png";
+                                    var d = Path.Combine(previewDir, n.Replace('/', Path.DirectorySeparatorChar));
+                                    if (File.Exists(d) || TextureDecodeService.TryExportPng(
+                                            mouthNormal, d, reconstructNormalZ: true))
+                                    {
+                                        nrmRel = n;
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"      zone {band} (Mouth) normal failed: "
+                                                  + ex.Message.Split('\n')[0]);
+                            }
+                        }
+                        roughness ??= 0.15f;
+                    }
+                    if (nrmRel is not null || ormRel is not null || roughness is not null)
+                    {
+                        Console.WriteLine($"      zone {band} ({mf}) maps:"
+                                          + (nrmRel is not null ? " NML" : "")
+                                          + (ormRel is not null ? " MMR" : "")
+                                          + (roughness is not null ? $" rough={roughness}" : "")
+                                          + (metallic is not null ? $" metal={metallic}" : "")
+                                          + (emisRel is not null ? " EMISSIVE" : ""));
+                    }
+                }
+
+                // No pre-baking: the viewer binds the raw stencil (shape in alpha) and applies the
+                // tint as material.color, so the normal/MMR maps below can light it as a surface.
+                var mode = additive ? 1 : 0;
+
+                bands.Add(new FaceBand(band, tris, rel, tint, mode,
+                    draw.TryGetValue(band, out var fname) ? fname : $"Zone{band}",
+                    FaceFeaturePdo.TryGetValue(draw.TryGetValue(band, out var pf) ? pf : "", out var pdo) ? pdo : 0f,
+                    nrmRel, ormRel, roughness, metallic, emisRel, emisColour, emisStrength,
+                    eyeSpecLayer,
+                    string.Equals(draw.TryGetValue(band, out var mouthFeature) ? mouthFeature : null, "Mouth",
+                        StringComparison.OrdinalIgnoreCase) ? mouthLayers : null));
             }
             Console.WriteLine("  face bands (* = textured): " + string.Join(", ",
-                bands.Select(b => $"{b.Band}:{b.Tris}{(b.Tex is null ? "" : "*")}{(b.Tint is null ? "" : "t")}")));
+                bands.Select(b => $"{b.Band}:{b.Tris}{(b.Tex is null ? "" : "*")}{(b.Tint is null ? "" : "t")}{(b.Mode == 2 ? "x" : b.Mode == 1 ? "+" : "")}")));
             // Load every expression the game ships for this rig so the viewer can switch between
             // them. Batman's own folder only has Neutral; the rest of the set lives under other
             // characters, and they all pose the same shared SKEL_LEGOface rig.
@@ -748,17 +2519,35 @@ public static class ModelPreviewService
             {
                 Console.WriteLine($"  face character: {character}");
             }
+            _faceAnimHome = ResolveFaceAnimHome(provider, _bpCharacter)
+                            ?? ResolveFaceAnimHome(provider, character);
+            if (_faceAnimHome is not null)
+            {
+                Console.WriteLine($"  face anim home (from ABP_LEGOface_*): {_faceAnimHome}");
+            }
+            Console.WriteLine($"  face mesh: {_faceMeshPath ?? "(unknown)"}"
+                              + (_faceMeshPath?.Contains("Superhero", StringComparison.OrdinalIgnoreCase) == true
+                                 ? "  -> SUPERHERO rig" : "  -> standard rig"));
             var poses = new Dictionary<string, Dictionary<int, Dictionary<string, (Vector3, System.Numerics.Quaternion, Vector3)>>>();
+            var curves = new Dictionary<string, Dictionary<int, Dictionary<string, float>>>();
             foreach (var expr in FaceExpressions)
             {
-                var one = LoadFacePose(provider, expr, character);
+                var one = LoadFacePose(provider, expr, character, out var oneCurves);
                 if (one is not null)
                 {
                     poses[expr] = one;
+                    if (oneCurves is not null)
+                    {
+                        curves[expr] = oneCurves;
+                    }
                 }
             }
             Console.WriteLine($"  face expressions available: {string.Join(", ", poses.Keys)}");
-            placed[i] = placed[i] with { FaceGroups = groups, MouthTex = mouthRel, Bands = bands, Poses = poses, MouthHidden = mouthHidden };
+            placed[i] = placed[i] with
+            {
+                FaceGroups = groups, MouthTex = mouthRel, Bands = bands,
+                Poses = poses, Curves = curves, MouthHidden = mouthHidden,
+            };
         }
         return placed;
     }
@@ -766,10 +2555,9 @@ public static class ModelPreviewService
     /// <summary>
     /// Exports a material and returns the preview-relative path of the texture to use as base colour.
     ///
-    /// CUE4Parse does NOT embed textures in the .glb - it writes loose .png files plus a .json listing
-    /// the material's texture slots. So we export the material, read that json, and pick the slot that
-    /// carries the visible colour: "CT" (the printed colour/detail map) if present, else "BC" (the flat
-    /// LEGO colour swatch, e.g. T_LEGO_Black17).
+    /// CUE4Parse does NOT embed textures in the .glb, so the preview has to export the material's
+    /// actual base-colour input separately. CT is intentionally not part of that selection: it is a
+    /// channel/control texture in the EoM controller family, not an albedo map.
     /// </summary>
     /// <summary>
     /// The slots that actually carry visible colour, best first.
@@ -786,10 +2574,13 @@ public static class ModelPreviewService
     private static readonly string[] BaseColourSlots =
         { "BC_Pristine", "BC", "HeadLowerUnder BC", "Diffuse", "BaseColor" };
 
-    private static string? ExportMaterialTexture(
-        CUE4Parse.UE4.Assets.Exports.Material.UUnrealMaterial? material, string previewDir, string exportDir)
+    private static string? ExportMaterialTexture(UObject? material, string previewDir)
     {
-        var tex = FindBaseColourTexture(material, 0);
+        return ExportBaseColourTexture(FindBaseColourTexture(material, 0), previewDir);
+    }
+
+    private static string? ExportBaseColourTexture(UTexture2D? tex, string previewDir)
+    {
         if (tex is null)
         {
             return null;
@@ -797,10 +2588,6 @@ public static class ModelPreviewService
 
         // A tiny texture (e.g. the cowl's 8x8 T_LEGO_Black17) IS the flat plastic colour, not a print.
         // A large sheet is the decal layer and needs a plastic colour underneath it.
-        var decoded = TextureDecodeService.TryDecode(tex);
-        var isSwatch = decoded is not null && decoded.Width <= 16 && decoded.Height <= 16;
-        var plastic = isSwatch ? AverageColour(decoded!) : DefaultPlastic;
-
         // BC is a complete albedo once alpha is ignored: the "transparent" area still carries the
         // plastic colour in RGB. LEGO packs masks into alpha, so honouring it is what blacked the
         // model out. TryExportPng forces alpha opaque.
@@ -824,25 +2611,10 @@ public static class ModelPreviewService
     }
 
     /// <summary>
-    /// Plastic colour used when the material carries no flat swatch. The real value comes from the
-    /// ColourMask's channel slots (red = suit, green = logo, blue = belt) resolved against the
-    /// character's palette - not yet wired up, so this stands in as a neutral LEGO dark.
-    /// </summary>
-    private static readonly Color DefaultPlastic = Color.FromArgb(255, 32, 33, 36);
-
-    /// <summary>
     /// LEGO minifig skin tone, taken from the face material's "HeadLowerUnder Tint" (#D28856). Used
     /// for the head piece, whose own material slot is empty in the shipped asset.
     /// </summary>
     private static readonly Color SkinTone = Color.FromArgb(255, 0xD2, 0x88, 0x56);
-
-    private static Color AverageColour(TextureDecodeService.Decoded d)
-    {
-        long r = 0, g = 0, b = 0;
-        foreach (var p in d.Pixels) { r += p.r; g += p.g; b += p.b; }
-        var n = Math.Max(1, d.Pixels.Length);
-        return Color.FromArgb(255, (int)(r / n), (int)(g / n), (int)(b / n));
-    }
 
     /// <summary>
     /// How one material slot should be shaded. A LEGO material supplies its base colour in one of
@@ -854,7 +2626,8 @@ public static class ModelPreviewService
     /// </summary>
     private sealed record SlotShading(
         string? Texture, string? Normal, string? Mmr, Color? Colour, string? Alpha = null,
-        bool Hidden = false, bool Cutout = false, string? Nrm2 = null);
+        bool Hidden = false, bool Cutout = false, string? Nrm2 = null, string? Ao = null,
+        float? Roughness = null, float? Metalness = null);
 
     /// <summary>
     /// Material-slot indices whose LOD0 render sections the game itself never draws. Cape meshes
@@ -886,12 +2659,38 @@ public static class ModelPreviewService
     }
 
     /// <summary>Reads a vector (colour) parameter, walking up the parent chain.</summary>
+    /// Scalar parameter off the instance chain - "<feature> Roughness", "<feature> Metallic",
+    /// "<feature> Emissive Strength". The face material sets Roughness 0.3 almost everywhere.
+    private static float? FindScalarParam(UObject? material, string name, int depth)
+    {
+        if (material is null || depth > 5)
+        {
+            return null;
+        }
+        var ps = material.GetOrDefault<FStructFallback[]>("ScalarParameterValues");
+        foreach (var entry in ps ?? Array.Empty<FStructFallback>())
+        {
+            var pn = entry.GetOrDefault<FStructFallback>("ParameterInfo")?.GetOrDefault<FName>("Name").Text;
+            if (string.Equals(pn, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return entry.GetOrDefault<float>("ParameterValue");
+            }
+        }
+        return FindScalarParam(material.GetOrDefault<FPackageIndex>("Parent")?.ResolvedObject?.Load(), name, depth + 1);
+    }
+
     private static Color? FindColourParam(UObject? material, string name, int depth)
     {
         if (material is null || depth > 5)
         {
             return null;
         }
+        return FindColourParamOnMaterial(material, name)
+               ?? FindColourParam(material.GetOrDefault<FPackageIndex>("Parent")?.ResolvedObject?.Load(), name, depth + 1);
+    }
+
+    private static Color? FindColourParamOnMaterial(UObject material, string name)
+    {
         var ps = material.GetOrDefault<FStructFallback[]>("VectorParameterValues");
         if (ps is not null)
         {
@@ -912,7 +2711,7 @@ public static class ModelPreviewService
                     (int)Math.Clamp(v.B * 255f + 0.5f, 0, 255));
             }
         }
-        return FindColourParam(material.GetOrDefault<FPackageIndex>("Parent")?.ResolvedObject?.Load(), name, depth + 1);
+        return null;
     }
 
     /// <summary>Resolves one material slot to a texture or a flat colour, plus its normal/MMR maps.</summary>
@@ -929,6 +2728,14 @@ public static class ModelPreviewService
         if (IsCapeMaterial(material))
         {
             return ResolveCapeSlot(provider, material, previewDir);
+        }
+
+        // The game's own BaseColour_SolidColour switch distinguishes a vector-coloured piece from
+        // a real BC atlas. It applies to hair, hats, and other attachment parts, so use it instead
+        // of guessing from an asset name or the presence of CT (which is a control map, not albedo).
+        if (ResolveSolidColourSlot(provider, material, previewDir) is { } solidColourSlot)
+        {
+            return solidColourSlot;
         }
 
         // Faces: the Blender recreation binds the face print's REAL alpha as opacity - the opposite
@@ -964,7 +2771,7 @@ public static class ModelPreviewService
             }
         }
 
-        var tex = ExportMaterialTexture(material as CUE4Parse.UE4.Assets.Exports.Material.UUnrealMaterial, previewDir, previewDir);
+        var tex = ExportMaterialTexture(material, previewDir);
         var normal = ExportSlot(material, "DNRM_Pristine", previewDir, isNormal: true)
                      ?? ExportSlot(material, "DNRM", previewDir, isNormal: true)
                      ?? ExportSlot(material, "HeadLowerUnder NML", previewDir, isNormal: true);
@@ -983,16 +2790,60 @@ public static class ModelPreviewService
         }
         var mmr = ExportMmrSlot(material, previewDir);
 
-        // No texture anywhere: the material states its colour directly (capes do this).
-        Color? colour = tex is null
-            ? FindColourParam(material, "Base Colour", 0) ?? FindColourParam(material, "BaseColour", 0)
-            : FindColourParam(material, "HeadLowerUnder Tint", 0);
+        // No texture anywhere: the material states its colour directly (capes do this). Keep the
+        // tint when a texture exists as well; body TPAGEs usually leave it at white.
+        Color? colour = FindColourParam(material, "HeadLowerUnder Tint", 0)
+            ?? FindColourParam(material, "Base Color", 0)
+            ?? FindColourParam(material, "BaseColor", 0)
+            ?? FindColourParam(material, "Base Colour", 0)
+            ?? FindColourParam(material, "BaseColour", 0);
 
         if (tex is null && colour is not null)
         {
             Console.WriteLine($"      flat colour #{colour.Value.R:X2}{colour.Value.G:X2}{colour.Value.B:X2}");
         }
         return new SlotShading(tex, normal, mmr, colour, Nrm2: nrm2);
+    }
+
+    /// <summary>
+    /// Resolves a material that explicitly enables BaseColour_SolidColour. This is a material
+    /// contract, not a hair special case: its Base Color vector is the albedo, while NRM and RAO
+    /// retain the surface definition. A material without this switch continues through the normal
+    /// BC/BC_Pristine atlas resolver below.
+    /// </summary>
+    private static SlotShading? ResolveSolidColourSlot(DefaultFileProvider provider, UObject material, string previewDir)
+    {
+        if (FindStaticSwitch(material, "BaseColour_SolidColour") != true)
+        {
+            return null;
+        }
+
+        var colour = FindColourParam(material, "Base Color", 0)
+                     ?? FindColourParam(material, "BaseColor", 0)
+                     ?? FindColourParam(material, "Base Colour", 0)
+                     ?? FindColourParam(material, "BaseColour", 0);
+        if (colour is null)
+        {
+            return null;
+        }
+
+        var normal = ExportSlot(material, "DNRM_Pristine", previewDir, isNormal: true)
+                     ?? ExportSlot(material, "DNRM", previewDir, isNormal: true);
+        string? nrm2 = null;
+        if (normal is null)
+        {
+            normal = BakeNoisedNrm(provider, material, previewDir);
+        }
+        else
+        {
+            nrm2 = BakeNoisedNrm(provider, material, previewDir);
+        }
+        var mmr = ExportMmrSlot(material, previewDir);
+        var ao = ExportRaoAoSlot(material, previewDir);
+        Console.WriteLine($"    solid Base Color: #{colour.Value.R:X2}{colour.Value.G:X2}{colour.Value.B:X2}"
+                          + (ao is null ? " (no RAO)" : " + RAO.G AO")
+                          + " (CT ignored)");
+        return new SlotShading(null, normal, mmr, colour, Nrm2: nrm2, Ao: ao, Roughness: 0.36f);
     }
 
     /// <summary>
@@ -1117,12 +2968,11 @@ public static class ModelPreviewService
     /// </summary>
     private static void ReportSlots(UObject mesh, PreviewPart part)
     {
-        var slots = (mesh as USkeletalMesh)?.Materials;
-        Console.WriteLine($"  {Path.GetFileNameWithoutExtension(part.MeshPath.Split('.')[0])}: {slots?.Length ?? 0} slot(s), {part.Overrides?.Length ?? 0} override(s)");
-        if (slots is null) return;
-        for (var i = 0; i < slots.Length; i++)
+        var slots = MeshSlotMaterials(mesh);
+        Console.WriteLine($"  {Path.GetFileNameWithoutExtension(part.MeshPath.Split('.')[0])}: {slots.Count} slot(s), {part.Overrides?.Length ?? 0} override(s)");
+        for (var i = 0; i < slots.Count; i++)
         {
-            var m = slots[i]?.Load();
+            var m = slots[i];
             var ovr = part.Overrides is not null && i < part.Overrides.Length
                 ? part.Overrides[i]?.ResolvedObject?.GetPathName() : null;
             Console.WriteLine($"      [{i}] {m?.Name ?? "(none)"}" + (ovr is not null ? $"   <- override {ovr.Split('.')[^1]}" : ""));
@@ -1144,6 +2994,27 @@ public static class ModelPreviewService
         if (File.Exists(dest) || TextureDecodeService.TryExportMmrAsOrm(t, dest))
         {
             Console.WriteLine($"    MMR->ORM: {t.Name} ({t.Format})");
+            return rel;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// The EoM master uses RAO.G as ambient occlusion. Export it separately from MMR so material
+    /// families that use a solid Base Color still retain their authored plastic surface definition.
+    /// </summary>
+    private static string? ExportRaoAoSlot(UObject? material, string previewDir)
+    {
+        var rao = FindTextureParam(material, "RAO", 0);
+        if (rao is null)
+        {
+            return null;
+        }
+        var rel = "textures/" + MakeSafeName(rao.Name) + "_ao.png";
+        var dest = Path.Combine(previewDir, rel.Replace('/', Path.DirectorySeparatorChar));
+        if (File.Exists(dest) || TextureDecodeService.TryExportRaoGreenAsAo(rao, dest))
+        {
+            Console.WriteLine($"    RAO.G->AO: {rao.Name} ({rao.Format})");
             return rel;
         }
         return null;
@@ -1189,30 +3060,46 @@ public static class ModelPreviewService
             return null;
         }
 
-        var textureParams = material.GetOrDefault<FStructFallback[]>("TextureParameterValues");
-        if (textureParams is not null)
+        if (FindDirectBaseColourTexture(material) is { } texture)
         {
-            foreach (var slot in BaseColourSlots)
-            {
-                foreach (var entry in textureParams)
-                {
-                    var name = entry.GetOrDefault<FStructFallback>("ParameterInfo")
-                                    ?.GetOrDefault<FName>("Name").Text;
-                    if (!string.Equals(name, slot, StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-                    if (entry.GetOrDefault<FPackageIndex>("ParameterValue")?.ResolvedObject?.Load() is UTexture2D t)
-                    {
-                        return t;
-                    }
-                }
-            }
+            return texture;
         }
 
         // Not on this instance - inherit from the parent material.
         var parent = material.GetOrDefault<FPackageIndex>("Parent")?.ResolvedObject?.Load();
         return FindBaseColourTexture(parent, depth + 1);
+    }
+
+    private static UTexture2D? FindDirectBaseColourTexture(UObject material)
+    {
+        foreach (var slot in BaseColourSlots)
+        {
+            if (FindTextureParamOnMaterial(material, slot) is { } texture)
+            {
+                return texture;
+            }
+        }
+        return null;
+    }
+
+    private static UTexture2D? FindTextureParamOnMaterial(UObject material, string slot)
+    {
+        var textureParams = material.GetOrDefault<FStructFallback[]>("TextureParameterValues");
+        if (textureParams is null)
+        {
+            return null;
+        }
+
+        foreach (var entry in textureParams)
+        {
+            var name = entry.GetOrDefault<FStructFallback>("ParameterInfo")?.GetOrDefault<FName>("Name").Text;
+            if (string.Equals(name, slot, StringComparison.OrdinalIgnoreCase) &&
+                entry.GetOrDefault<FPackageIndex>("ParameterValue")?.ResolvedObject?.Load() is UTexture2D texture)
+            {
+                return texture;
+            }
+        }
+        return null;
     }
 
     /// <summary>
@@ -1228,8 +3115,13 @@ public static class ModelPreviewService
     private static List<PlacedModel> AlignToHead(string dir, IReadOnlyList<(string File, PreviewPart Part, List<SlotShading> Slots)> models)
     {
         var head = models.FirstOrDefault(m => m.Part.IsHeadPiece);
-        (Vector3 Min, Vector3 Max)? headB3 =
-            head.File is null ? null : GlbInspector.Bounds3(Path.Combine(dir, head.File));
+        (Vector3 Min, Vector3 Max)? headB3 = null;
+        if (head.File is not null && GlbInspector.Bounds3(Path.Combine(dir, head.File)) is { } rawHeadBounds)
+        {
+            var transformedHeadBounds = TransformBounds(rawHeadBounds, head.Part.Transform);
+            var headShift = head.Part.AttachmentOffset ?? Vector3.Zero;
+            headB3 = (transformedHeadBounds.Min + headShift, transformedHeadBounds.Max + headShift);
+        }
         var headBase = headB3?.Min.Y;
         if (headBase is not null)
         {
@@ -1242,9 +3134,11 @@ public static class ModelPreviewService
             var isBody = part.MeshPath.Contains("LEGOfig", StringComparison.OrdinalIgnoreCase);
             var isFace = part.MeshPath.Contains("LEGOface", StringComparison.OrdinalIgnoreCase);
             var isHead = part.IsHeadPiece;
+            var attachmentOffset = part.AttachmentOffset ?? Vector3.Zero;
             if (!part.AttachToHead || headBase is null)
             {
-                result.Add(new PlacedModel(file, Vector3.Zero, slots, isBody, isFace, isHead));
+                result.Add(new PlacedModel(file, attachmentOffset, slots, isBody, isFace, isHead)
+                    { Transform = part.Transform, ComponentName = part.ComponentName, Adjustment = part.Adjustment });
                 continue;
             }
             // Hair and other rigid head pieces are authored around their own origin and pinned to
@@ -1257,14 +3151,16 @@ public static class ModelPreviewService
                 // sheathe the head, so centre it on the head in all three axes: that also corrects
                 // the small front/back bias in how the piece is authored.
                 var hairB = GlbInspector.Bounds3(Path.Combine(dir, file));
-                if (hairB is { } pb)
+                if (hairB is { } rawBounds)
                 {
+                    var pb = TransformBounds(rawBounds, part.Transform);
                     var headCentre = (hb.Min + hb.Max) / 2f;
                     var partCentre = (pb.Min + pb.Max) / 2f;
                     var delta = headCentre - partCentre;
-                    Console.WriteLine($"  {file}: head attachment centred -> "
+                    Console.WriteLine($"  {file}: head attachment centred after component transform -> "
                                       + $"({delta.X:0.###}, {delta.Y:0.###}, {delta.Z:0.###})");
-                    result.Add(new PlacedModel(file, delta, slots, isBody, isFace, isHead));
+                    result.Add(new PlacedModel(file, delta, slots, isBody, isFace, isHead)
+                        { Transform = part.Transform, ComponentName = part.ComponentName, Adjustment = part.Adjustment });
                     continue;
                 }
             }
@@ -1272,7 +3168,8 @@ public static class ModelPreviewService
             var b3 = GlbInspector.Bounds3(Path.Combine(dir, file));
             if (b3 is null)
             {
-                result.Add(new PlacedModel(file, Vector3.Zero, slots, isBody, isFace, isHead));
+                result.Add(new PlacedModel(file, attachmentOffset, slots, isBody, isFace, isHead)
+                    { Transform = part.Transform, ComponentName = part.ComponentName, Adjustment = part.Adjustment });
                 continue;
             }
             var dy = headBase.Value - b3.Value.Min.Y;
@@ -1295,13 +3192,18 @@ public static class ModelPreviewService
             }
             Console.WriteLine($"  {file}: spans y {b3.Value.Min.Y:0.###}..{b3.Value.Max.Y:0.###} -> lift {dy:0.###}" +
                               (dx != 0 ? $", forward {dx:0.####}" : ""));
-            result.Add(new PlacedModel(file, new Vector3(dx, dy, 0), slots, isBody, isFace, isHead));
+            result.Add(new PlacedModel(file, new Vector3(dx, dy, 0), slots, isBody, isFace, isHead)
+                { Transform = part.Transform, ComponentName = part.ComponentName, Adjustment = part.Adjustment });
         }
         return result;
     }
 
     /// <summary>Extracts the vendored three.js + writes the viewer HTML + model list into the dir.</summary>
-    private static void WriteViewerAssets(string dir, IReadOnlyList<PlacedModel> models)
+    private static void WriteViewerAssets(
+        string dir,
+        IReadOnlyList<PlacedModel> models,
+        bool allowPartMover,
+        string? viewerLayoutKey = null)
     {
         foreach (var js in new[] { "three.min.js", "GLTFLoader.js", "OrbitControls.js" })
         {
@@ -1316,22 +3218,53 @@ public static class ModelPreviewService
                 "{" +
                 $"\"tex\":{Q(sl.Texture)},\"nrm\":{Q(sl.Normal)},\"mmr\":{Q(sl.Mmr)},\"alpha\":{Q(sl.Alpha)}," +
                 $"\"hide\":{(sl.Hidden ? "true" : "false")},\"cut\":{(sl.Cutout ? "true" : "false")},\"nrm2\":{Q(sl.Nrm2)}," +
+                $"\"ao\":{Q(sl.Ao)},\"rough\":{(sl.Roughness is null ? "null" : sl.Roughness.Value.ToString(System.Globalization.CultureInfo.InvariantCulture))}," +
+                $"\"metal\":{(sl.Metalness is null ? "null" : sl.Metalness.Value.ToString(System.Globalization.CultureInfo.InvariantCulture))}," +
                 $"\"col\":{(sl.Colour is null ? "null" : $"\"#{sl.Colour.Value.R:X2}{sl.Colour.Value.G:X2}{sl.Colour.Value.B:X2}\"")}" +
                 "}"));
             // Extract every UV channel so the viewer's switcher can bind sets three.js drops on import.
             var baseName = Path.GetFileNameWithoutExtension(m.File);
             Console.WriteLine($"    uv extract {m.File}");
             var uvs = GlbInspector.ExtractUvChannels(Path.Combine(dir, m.File), dir, baseName);
+            var defaultUv = m.IsBody && uvs.Contains(1)
+                ? 1
+                : uvs.Contains(0) ? 0 : uvs.FirstOrDefault();
+            var selectedUv = m.Adjustment?.UvChannel is int savedUv && uvs.Contains(savedUv)
+                ? savedUv
+                : defaultUv;
             var fg = m.FaceGroups is null ? "null" : $"[{string.Join(",", m.FaceGroups)}]";
+            var transform = m.Transform is null
+                ? "\"pos\":null,\"rot\":null,\"scale\":null"
+                : $"\"pos\":[{F(m.Transform.Translation.X)},{F(m.Transform.Translation.Y)},{F(m.Transform.Translation.Z)}]," +
+                  $"\"rot\":[{F(m.Transform.Rotation.X)},{F(m.Transform.Rotation.Y)},{F(m.Transform.Rotation.Z)},{F(m.Transform.Rotation.W)}]," +
+                  $"\"scale\":[{F(m.Transform.Scale.X)},{F(m.Transform.Scale.Y)},{F(m.Transform.Scale.Z)}]";
+            var adjustment = m.Adjustment is null
+                ? "[0,0,0]"
+                : $"[{F(m.Adjustment.OffsetX)},{F(m.Adjustment.OffsetY)},{F(m.Adjustment.OffsetZ)}]";
+            var movable = !m.IsBody && !m.IsHead && !m.IsFace &&
+                          !string.IsNullOrWhiteSpace(m.ComponentName) &&
+                          !m.ComponentName.StartsWith("__", StringComparison.Ordinal);
             return $"{{\"file\":\"{m.File}\",\"base\":\"{baseName}\",\"body\":{(m.IsBody ? "true" : "false")},\"isface\":{(m.IsFace ? "true" : "false")},\"ishead\":{(m.IsHead ? "true" : "false")}," +
+                    $"{transform}," +
+                    $"\"part\":{Q(m.ComponentName)},\"move\":{(movable ? "true" : "false")},\"adj\":{adjustment}," +
                    $"\"fgroups\":{fg},\"mouth\":{Q(m.MouthTex)},\"mhide\":{(m.MouthHidden ? "true" : "false")}," +
-                   $"\"fbands\":[{string.Join(",", (m.Bands ?? new()).Select(b => $"[{b.Band},{b.Tris},{Q(b.Tex)},{(b.Tint is null ? "null" : $"\"#{b.Tint.Value.R:X2}{b.Tint.Value.G:X2}{b.Tint.Value.B:X2}\"")}]"))}]," +
-                   $"\"poses\":{PoseJson(m.Poses)}," +
-                   $"\"uvs\":[{string.Join(",", uvs)}]," +
+                    $"\"fbands\":[{string.Join(",", (m.Bands ?? new()).Select(b => $"[{b.Band},{b.Tris},{Q(b.Tex)},{(b.Tint is null ? "null" : $"\"#{b.Tint.Value.R:X2}{b.Tint.Value.G:X2}{b.Tint.Value.B:X2}\"")},{b.Mode},{Q(b.Feature)},{F(b.Pdo)},{Q(b.Nrm)},{Q(b.Orm)},{(b.Roughness is null ? "null" : F(b.Roughness.Value))},{(b.Metallic is null ? "null" : F(b.Metallic.Value))},{Q(b.Emissive)},{(b.EmissiveColour is null ? "null" : $"\"#{b.EmissiveColour.Value.R:X2}{b.EmissiveColour.Value.G:X2}{b.EmissiveColour.Value.B:X2}\"")},{(b.EmissiveStrength is null ? "null" : F(b.EmissiveStrength.Value))},{UvLayerJson(b.EyeSpecLayer)},{MouthLayersJson(b.MouthLayers)}]"))}]," +
+                   $"\"poses\":{PoseJson(m.Poses)},\"curves\":{CurveJson(m.Curves)}," +
+                    $"\"uvs\":[{string.Join(",", uvs)}],\"uv\":{selectedUv},\"uvdefault\":{defaultUv}," +
                    $"\"offset\":[{m.Offset.X:0.#####},{m.Offset.Y:0.#####},{m.Offset.Z:0.#####}]," +
                    $"\"slots\":[{slots}]}}";
         })) + "]";
         static string Q(string? v) => v is null ? "null" : $"\"{v}\"";
+        static string F(float v) => v.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
+        string UvLayerJson(FaceUvLayer? layer) => layer is null
+            ? "null"
+            : $"[{Q(layer.Tex)},\"#{layer.Tint.R:X2}{layer.Tint.G:X2}{layer.Tint.B:X2}\",{Q(layer.CurvePrefix)}," +
+              $"{F(layer.OffsetU)},{F(layer.OffsetV)},{F(layer.Rotation)},{F(layer.ScaleU)},{F(layer.ScaleV)}]";
+        string MouthLayersJson(FaceMouthLayers? layers) => layers is null
+            ? "null"
+            : $"[{UvLayerJson(layers.TeethU)},{UvLayerJson(layers.TeethD)},{UvLayerJson(layers.Tongue)}]";
+        static string CurveJson(Dictionary<string, Dictionary<int, Dictionary<string, float>>>? curves) =>
+            curves is null || curves.Count == 0 ? "{}" : JsonSerializer.Serialize(curves);
 
         // Serialises every expression pose as {name:{bone:[px,py,pz,qx,qy,qz,qw,sx,sy,sz]}}.
         // {expression:{frame:{bone:[px,py,pz,qx,qy,qz,qw,sx,sy,sz]}}}
@@ -1371,7 +3304,9 @@ public static class ModelPreviewService
             return sb.Append('}').ToString();
         }
 
-        File.WriteAllText(Path.Combine(dir, "models.js"), $"window.PREVIEW_MODELS={jsonList};");
+        File.WriteAllText(Path.Combine(dir, "models.js"),
+            $"window.PREVIEW_MODELS={jsonList};window.PREVIEW_CAN_SAVE_PLACEMENTS={(allowPartMover ? "true" : "false")};" +
+            $"window.PREVIEW_LAYOUT_KEY={JsonSerializer.Serialize(viewerLayoutKey ?? string.Empty)};");
         File.WriteAllText(Path.Combine(dir, "index.html"), ViewerHtml);
         Console.WriteLine("  viewer assets written");
     }
@@ -1390,6 +3325,18 @@ public static class ModelPreviewService
   #exprwrap label{color:#f0c230;margin-right:4px}
   #expr{background:#22262c;color:#e6e9ee;border:1px solid #3a4048;border-radius:5px;padding:3px 6px;
     font-family:inherit;font-size:13px;outline:none}
+  #partmove{position:absolute;right:14px;top:12px;width:184px;color:#dfe4ea;font-size:12px;
+    background:rgba(26,29,34,.9);padding:9px 10px;border:1px solid #333a44;border-radius:6px}
+  #partmove label{display:block;color:#f0c230;margin-bottom:5px}
+  #partmove select{box-sizing:border-box;width:100%;margin-bottom:7px;background:#22262c;color:#e6e9ee;
+    border:1px solid #3a4048;border-radius:4px;padding:4px;font:inherit}
+  #partmove .axis{display:grid;grid-template-columns:14px 1fr;align-items:center;gap:5px;margin:3px 0;color:#9ea6b2}
+  #partmove input{box-sizing:border-box;width:100%;background:#171a1f;color:#e6e9ee;border:1px solid #3a4048;
+    border-radius:4px;padding:3px 5px;font:12px Consolas,monospace}
+  #partmove .actions{display:flex;gap:6px;margin-top:8px}
+  #partmove button{border:1px solid #3a4048;border-radius:4px;background:#232833;color:#dfe4ea;padding:4px 7px;cursor:pointer;font:inherit}
+  #partmove button.save{border-color:#aa8b1b;color:#f0c230}
+  #partmove button:disabled{opacity:.45;cursor:default}
   #err{position:absolute;left:12px;bottom:12px;color:#f0c230;font-size:12px;line-height:1.5;font-family:Consolas,monospace}
   canvas{display:block}
 </style></head><body>
@@ -1433,27 +3380,251 @@ const loader=new THREE.GLTFLoader();const models=window.PREVIEW_MODELS||[];
 const texLoader=new THREE.TextureLoader();
 const diag=[];
 function say(s){diag.push(s);document.getElementById('err').innerHTML=diag.join('<br>');}
+const partStates=new Map();
+function postToHost(message){
+  if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage(message);
+}
+function setPartAdjustment(component,adjustment){
+  const state=partStates.get(component);if(!state)return;
+  state.adjustment=adjustment.slice(0,3).map(value=>Number.isFinite(value)?value:0);
+  state.scene.position.copy(state.basePosition).add(new THREE.Vector3(
+    state.adjustment[0],state.adjustment[1],state.adjustment[2]));
+}
+function uvAttribute(mesh,channel){
+  const attrs=mesh.geometry.attributes;
+  if(channel===0)return attrs.aUv0||attrs.uv||null;
+  if(channel===1)return attrs.aUv1||attrs.uv2||null;
+  return attrs['previewUv'+channel]||null;
+}
+async function prepareUvChannels(g,info){
+  const channels=(info.uvs||[]).filter(channel=>channel>1);if(!channels.length)return;
+  const meshes=[];g.scene.traverse(o=>{if(o.isMesh)meshes.push(o);});
+  await Promise.all(channels.map(async channel=>{
+    try{
+      const response=await fetch(info.base+'_uv'+channel+'.f32');if(!response.ok)return;
+      const values=new Float32Array(await response.arrayBuffer());
+      meshes.forEach(o=>{const position=o.geometry.attributes.position;
+        if(position&&values.length===position.count*2){
+          o.geometry.setAttribute('previewUv'+channel,new THREE.BufferAttribute(values.slice(),2));
+        }});
+    }catch(_){/* Missing optional UV data just leaves this channel unavailable. */}
+  }));
+}
+function usableUvChannels(scene,channels){
+  return (channels||[]).filter(channel=>{let found=false;
+    scene.traverse(o=>{if(o.isMesh&&uvAttribute(o,channel))found=true;});return found;});
+}
+function setPartUv(component,channel){
+  const state=partStates.get(component);if(!state)return false;
+  let applied=0;state.scene.traverse(o=>{if(!o.isMesh)return;
+    const attribute=uvAttribute(o,channel);if(!attribute)return;
+    o.geometry.setAttribute('uv',attribute);attribute.needsUpdate=true;applied++;
+  });
+  if(applied)state.uvChannel=channel;
+  return applied>0;
+}
+function buildPartMover(){
+  const parts=[...partStates.values()];if(!parts.length)return;
+  const panel=document.createElement('div');panel.id='partmove';
+  const label=document.createElement('label');label.textContent='Part';panel.appendChild(label);
+  const select=document.createElement('select');
+  parts.forEach(state=>{const option=document.createElement('option');option.value=state.component;
+    option.textContent=state.component;select.appendChild(option);});
+  panel.appendChild(select);
+  const inputs=[];
+  ['X','Y','Z'].forEach((axis,index)=>{
+    const row=document.createElement('div');row.className='axis';
+    const axisLabel=document.createElement('span');axisLabel.textContent=axis;row.appendChild(axisLabel);
+    const input=document.createElement('input');input.type='number';input.step='0.005';input.value='0';
+    input.addEventListener('input',()=>{
+      const state=partStates.get(select.value);if(!state)return;
+      const next=state.adjustment.slice();next[index]=Number(input.value)||0;setPartAdjustment(select.value,next);
+    });
+    row.appendChild(input);panel.appendChild(row);inputs.push(input);
+  });
+  const uvLabel=document.createElement('label');uvLabel.textContent='UV';panel.appendChild(uvLabel);
+  const uvSelect=document.createElement('select');panel.appendChild(uvSelect);
+  uvSelect.onchange=()=>{const state=partStates.get(select.value);if(!state)return;
+    const channel=Number(uvSelect.value);if(setPartUv(state.component,channel))sync();};
+  const actions=document.createElement('div');actions.className='actions';
+  const reset=document.createElement('button');reset.type='button';reset.textContent='↺';reset.title='Reset alignment';
+  reset.onclick=()=>{setPartAdjustment(select.value,[0,0,0]);sync();};actions.appendChild(reset);
+  const save=document.createElement('button');save.type='button';save.className='save';save.textContent='Save';
+   save.disabled=!window.PREVIEW_CAN_SAVE_PLACEMENTS||!window.PREVIEW_LAYOUT_KEY;
+   save.onclick=()=>{const state=partStates.get(select.value);if(!state)return;
+     postToHost({type:'save-placement',layout:window.PREVIEW_LAYOUT_KEY,component:state.component,
+       offset:state.adjustment,uv:state.uvChannel===state.defaultUv?null:state.uvChannel});
+     const label=save.textContent;save.textContent='Saved';setTimeout(()=>save.textContent=label,850);};
+  actions.appendChild(save);panel.appendChild(actions);
+  function sync(){const state=partStates.get(select.value);if(!state)return;
+    inputs.forEach((input,index)=>{input.value=(state.adjustment[index]||0).toFixed(4);input.disabled=!state.movable;});
+    reset.disabled=!state.movable;
+    uvSelect.innerHTML='';state.uvs.forEach(channel=>{const option=document.createElement('option');
+      option.value=channel;option.textContent='UV '+channel;uvSelect.appendChild(option);});
+    uvSelect.value=String(state.uvChannel);uvSelect.disabled=state.uvs.length<2;}
+  select.onchange=sync;sync();document.body.appendChild(panel);
+}
 // CUE4Parse writes textures as loose .png beside the .glb rather than embedding them, so the base
 // colour map is applied here from the path the exporter reported.
 function tex(path,sRGB){if(!path)return null;const t=texLoader.load(path);t.flipY=false;
   if(sRGB)t.encoding=THREE.sRGBEncoding;return t;}
+// The face master stores TeethU/D and Tongue offsets in centi-UV authoring units. The shipped hide
+// values (-20, +17.906 and -7) therefore move a sheet a few tenths of a UV space, while expression
+// curves around -12 bring it into the mouth. Treating those as tenths moved the layers off-sheet.
+const FACE_UV_OFFSET_UNIT=0.01;
+const faceTransparentTex=new THREE.DataTexture(new Uint8Array([255,255,255,0]),1,1,THREE.RGBAFormat);
+faceTransparentTex.needsUpdate=true;
+function faceMouthLayer(spec){
+  if(!spec)return null;
+  const [path,tint,prefix,offsetU,offsetV,rotation,scaleU,scaleV]=spec;
+  return {map:tex(path,true)||faceTransparentTex,
+    tint:new THREE.Color(tint||'#ffffff').convertSRGBToLinear(),prefix:(prefix||'').toLowerCase(),
+    base:{offsetU:offsetU||0,offsetV:offsetV||0,rotation:rotation||0,
+      scaleU:scaleU===undefined?1:scaleU,scaleV:scaleV===undefined?1:scaleV}};
+}
+function installEyeSpec(mat,spec){
+  const layer=faceMouthLayer(spec);if(!layer)return;
+  const state={layer:layer,uniforms:null,curves:null};mat.userData.faceEyeSpec=state;
+  mat.onBeforeCompile=sh=>{
+    state.uniforms={
+      faceEyeSpecMap:{value:layer.map},faceEyeSpecTint:{value:layer.tint},
+      faceEyeSpecOffset:{value:new THREE.Vector2()},faceEyeSpecRotate:{value:0},
+      faceEyeSpecScale:{value:new THREE.Vector2(1,1)}
+    };
+    setEyeSpecUniforms(state,state.curves);
+    Object.assign(sh.uniforms,state.uniforms);
+    sh.fragmentShader=sh.fragmentShader
+      .replace('#include <common>',`#include <common>
+uniform sampler2D faceEyeSpecMap;
+uniform vec3 faceEyeSpecTint;
+uniform vec2 faceEyeSpecOffset;
+uniform float faceEyeSpecRotate;
+uniform vec2 faceEyeSpecScale;
+vec2 faceEyeSpecUv(vec2 uv,vec2 offset,float rotation,vec2 scale){
+  vec2 p=(uv-vec2(0.5))*scale;
+  float c=cos(rotation),s=sin(rotation);
+  p=mat2(c,-s,s,c)*p;
+  return p+vec2(0.5)+offset;
+}`)
+      .replace('#include <map_fragment>',`#include <map_fragment>
+vec4 faceEyeSpec=mapTexelToLinear(texture2D(faceEyeSpecMap,faceEyeSpecUv(vUv,faceEyeSpecOffset,faceEyeSpecRotate,faceEyeSpecScale)));
+float faceEyeSpecA=faceEyeSpec.a*diffuseColor.a;
+diffuseColor.rgb=mix(diffuseColor.rgb,faceEyeSpecTint,faceEyeSpecA);`);
+  };
+  mat.customProgramCacheKey=function(){return 'faceEyeSpec-v2';};
+}
+function installMouthLayers(mat,spec,hidden){
+  if(!spec)return;
+  const state={layers:spec.map(faceMouthLayer),hidden:hidden?1:0,uniforms:null,curves:null};
+  mat.userData.faceMouth=state;
+  mat.onBeforeCompile=sh=>{
+    state.uniforms={
+      faceMouthHide:{value:state.hidden},
+      faceTeethUMap:{value:(state.layers[0]||{}).map||faceTransparentTex},
+      faceTeethDMap:{value:(state.layers[1]||{}).map||faceTransparentTex},
+      faceTongueMap:{value:(state.layers[2]||{}).map||faceTransparentTex},
+      faceTeethUTint:{value:(state.layers[0]||{}).tint||new THREE.Color(0xffffff)},
+      faceTeethDTint:{value:(state.layers[1]||{}).tint||new THREE.Color(0xffffff)},
+      faceTongueTint:{value:(state.layers[2]||{}).tint||new THREE.Color(0xffffff)},
+      faceTeethUOffset:{value:new THREE.Vector2()},faceTeethDOffset:{value:new THREE.Vector2()},faceTongueOffset:{value:new THREE.Vector2()},
+      faceTeethURotate:{value:0},faceTeethDRotate:{value:0},faceTongueRotate:{value:0},
+      faceTeethUScale:{value:new THREE.Vector2(1,1)},faceTeethDScale:{value:new THREE.Vector2(1,1)},faceTongueScale:{value:new THREE.Vector2(1,1)}
+    };
+    setMouthLayerUniforms(state,state.curves);
+    Object.assign(sh.uniforms,state.uniforms);
+    sh.fragmentShader=sh.fragmentShader
+      .replace('#include <common>',`#include <common>
+uniform sampler2D faceTeethUMap;
+uniform sampler2D faceTeethDMap;
+uniform sampler2D faceTongueMap;
+uniform vec3 faceTeethUTint;
+uniform vec3 faceTeethDTint;
+uniform vec3 faceTongueTint;
+uniform vec2 faceTeethUOffset;
+uniform vec2 faceTeethDOffset;
+uniform vec2 faceTongueOffset;
+uniform vec2 faceTeethUScale;
+uniform vec2 faceTeethDScale;
+uniform vec2 faceTongueScale;
+uniform float faceTeethURotate;
+uniform float faceTeethDRotate;
+uniform float faceTongueRotate;
+uniform float faceMouthHide;
+vec2 faceLayerUv(vec2 uv,vec2 offset,float rotation,vec2 scale){
+  vec2 p=(uv-vec2(0.5))*scale;
+  float c=cos(rotation),s=sin(rotation);
+  p=mat2(c,-s,s,c)*p;
+  return p+vec2(0.5)+offset*${FACE_UV_OFFSET_UNIT.toFixed(1)};
+}`)
+      .replace('#include <map_fragment>',`vec4 faceBase=mapTexelToLinear(texture2D(map,vUv));
+vec4 faceTeethU=mapTexelToLinear(texture2D(faceTeethUMap,faceLayerUv(vUv,faceTeethUOffset,faceTeethURotate,faceTeethUScale)));
+vec4 faceTeethD=mapTexelToLinear(texture2D(faceTeethDMap,faceLayerUv(vUv,faceTeethDOffset,faceTeethDRotate,faceTeethDScale)));
+vec4 faceTongue=mapTexelToLinear(texture2D(faceTongueMap,faceLayerUv(vUv,faceTongueOffset,faceTongueRotate,faceTongueScale)));
+float faceVisible=1.0-clamp(faceMouthHide,0.0,1.0);
+float faceTeethUA=faceTeethU.a*faceVisible;
+float faceTeethDA=faceTeethD.a*faceVisible;
+float faceTongueA=faceTongue.a*faceVisible;
+vec3 faceRgb=diffuseColor.rgb*faceBase.rgb;
+faceRgb=mix(faceRgb,faceTeethU.rgb*faceTeethUTint,faceTeethUA);
+faceRgb=mix(faceRgb,faceTeethD.rgb*faceTeethDTint,faceTeethDA);
+faceRgb=mix(faceRgb,faceTongue.rgb*faceTongueTint,faceTongueA);
+// The black Mouth BC ring is the front-most lip rim; its alpha must cover the teeth at the
+// perimeter, otherwise a white teeth texel leaks through the rim as it animates.
+float faceMouthA=faceBase.a*faceVisible;
+faceRgb=mix(faceRgb,diffuseColor.rgb*faceBase.rgb,faceMouthA);
+diffuseColor.rgb=faceRgb;
+diffuseColor.a*=max(faceMouthA,max(faceTeethUA,max(faceTeethDA,faceTongueA)));`);
+  };
+  mat.customProgramCacheKey=function(){return 'faceMouthLayers-v1';};
+}
+function curveValue(curves,name,fallback){
+  if(!curves)return fallback;
+  if(typeof curves[name]==='number')return curves[name];
+  const key=Object.keys(curves).find(k=>k.toLowerCase()===name.toLowerCase());
+  return key!==undefined&&typeof curves[key]==='number'?curves[key]:fallback;
+}
+function setEyeSpecUniforms(state,curves){
+  if(!state)return;state.curves=curves;
+  if(!state.uniforms)return;
+  const layer=state.layer,key=layer.prefix;
+  state.uniforms.faceEyeSpecOffset.value.set(
+    curveValue(curves,key+'offsetu',layer.base.offsetU),
+    curveValue(curves,key+'offsetv',layer.base.offsetV));
+  state.uniforms.faceEyeSpecRotate.value=curveValue(curves,key+'rotate',layer.base.rotation);
+  state.uniforms.faceEyeSpecScale.value.set(
+    curveValue(curves,key+'scaleu',layer.base.scaleU),
+    curveValue(curves,key+'scalev',layer.base.scaleV));
+}
+function setMouthLayerUniforms(state,curves){
+  if(!state)return;state.curves=curves;
+  if(!state.uniforms)return;
+  state.uniforms.faceMouthHide.value=curveValue(curves,'mouthhide',state.hidden);
+  const slots=[['TeethU',0],['TeethD',1],['Tongue',2]];
+  slots.forEach(([name,index])=>{
+    const layer=state.layers[index];if(!layer)return;
+    const key=layer.prefix;
+    const offset=state.uniforms['face'+name+'Offset'].value;
+    offset.set(curveValue(curves,key+'offsetu',layer.base.offsetU),curveValue(curves,key+'offsetv',layer.base.offsetV));
+    state.uniforms['face'+name+'Rotate'].value=curveValue(curves,key+'rotate',layer.base.rotation);
+    state.uniforms['face'+name+'Scale'].value.set(curveValue(curves,key+'scaleu',layer.base.scaleU),curveValue(curves,key+'scalev',layer.base.scaleV));
+  });
+}
+function applyFaceMaterialCurves(curves){faceBandMats.forEach(b=>{setEyeSpecUniforms(b.eyeSpec,curves);setMouthLayerUniforms(b.mouth,curves);});}
 // Each mesh section has its OWN material slot. Shading is resolved per slot in C# and applied by
 // index here - spraying one texture across every section is what mixed up the cape/face/cowl.
-const uvMeshes=[]; // textured meshes we can retarget to a different UV channel live
 function dress(g,info){
   const slots=(info&&info.slots)||[];
   let matIndex=0,applied=0;
   g.scene.traverse(o=>{if(!o.isMesh)return;
-    // The shared LEGOfig body maps into the character's decal atlas through its SECOND UV set
-    // (TEXCOORD_1 = ExtraUV0 = three.js uv2), not UV0. UV0 is a per-part structural unwrap, so the
-    // atlas tiles onto every limb. Bind uv2 as the sampling UV. (Confirmed via the channel switcher.)
-    if(info.body&&o.geometry.attributes.uv2){
-      // Keep the structural UV0 reachable as aUv0 - the plastic base normal samples it while the
-      // atlas maps sample uv (rebound to uv2 below).
-      o.geometry.setAttribute('aUv0',o.geometry.attributes.uv);
-      o.geometry.setAttribute('uv',o.geometry.attributes.uv2);}
-    // Keep the switcher available on body meshes for tuning other suits.
-    if(info.body&&info.base&&info.uvs&&info.uvs.length){uvMeshes.push({o:o,base:info.base,uvs:info.uvs});}
+    // Preserve the glTF UV sets before AO and the body atlas reuse three.js's uv/uv2 names. The
+    // part panel can then rebind map sampling to any extracted channel without disturbing plastic
+    // normal or AO sampling.
+    if(o.geometry.attributes.uv&&!o.geometry.attributes.aUv0){
+      o.geometry.setAttribute('aUv0',o.geometry.attributes.uv);}
+    if(o.geometry.attributes.uv2&&!o.geometry.attributes.aUv1){
+      o.geometry.setAttribute('aUv1',o.geometry.attributes.uv2);}
+    // The shared LEGOfig body defaults to TEXCOORD_1 (ExtraUV0); other components default to UV0.
+    if(info.body&&o.geometry.attributes.aUv1){o.geometry.setAttribute('uv',o.geometry.attributes.aUv1);}
     const list=Array.isArray(o.material)?o.material:[o.material];
     list.forEach((m,li)=>{if(!m)return;
       const s=slots[matIndex]||slots[0]||{};
@@ -1465,14 +3636,18 @@ function dress(g,info){
           ()=>say('  '+s.tex.split('/').pop()+' loaded'),
           undefined,()=>say('  TEX FAIL '+s.tex));
         t.flipY=false;t.encoding=THREE.sRGBEncoding;m.map=t;
-        // Face prints are white stencils - their colour comes from the material's tint (the
-        // Blender recreation drives Base Colour flat and takes only the texture's alpha). The tint
-        // hex is an sRGB colour, so decode it to linear for the shader - passing it raw washes the
-        // mouth out to pale tan instead of the reference's darker nougat.
-        m.color=(s.cut&&s.col)?new THREE.Color(s.col).convertSRGBToLinear():new THREE.Color(0xffffff);applied++;}
+        // The face tint is authoring-space sRGB; solid Base Color values came from Unreal
+        // FLinearColor and are already in the space three.js expects.
+        m.color=s.col?(s.cut?new THREE.Color(s.col).convertSRGBToLinear():new THREE.Color(s.col)):new THREE.Color(0xffffff);applied++;}
       else if(s.col){m.map=null;m.color=new THREE.Color(s.col);applied++;}
       else if(!m.map){m.color=new THREE.Color(0x9aa0a8);}
       const n=tex(s.nrm,false); if(n)m.normalMap=n;
+      // RAO.G is the EoM ambient-occlusion channel. three.js aoMap samples UV2, so give static
+      // attachments their structural UV0 there; body meshes preserve the same UV as aUv0.
+      const ao=tex(s.ao,false);
+      if(ao){const auv=o.geometry.attributes.aUv0||o.geometry.attributes.uv;
+        if(auv)o.geometry.setAttribute('uv2',auv);
+        m.aoMap=ao;m.aoMapIntensity=0.65;}
       // Body: blend the uv0-space plastic base normal (LEGOfig seams + micro noise, baked in C#)
       // under the uv2-space DNRM sculpt. three.js samples every normal map with one UV set, so the
       // second map needs a small shader patch reading the preserved aUv0 attribute.
@@ -1502,7 +3677,8 @@ function dress(g,info){
       // to be forced to 0). Plastic areas have metalness 0 in the map and stay diffuse.
       const r=tex(s.mmr,false);
       if(r){m.roughnessMap=r;m.metalnessMap=r;m.roughness=1;m.metalness=1;}
-      else{m.roughness=0.55;m.metalness=0;}
+      else{m.roughness=(s.rough===null||s.rough===undefined)?0.55:s.rough;
+        m.metalness=(s.metal===null||s.metal===undefined)?0:s.metal;}
       m.envMapIntensity=0.5;
       // LEGO packs masks into alpha - it is not opacity.
       m.transparent=false;m.alphaTest=0;m.opacity=1;m.depthWrite=true;
@@ -1520,6 +3696,8 @@ function dress(g,info){
       // vertexColors=true. That multiplies the albedo - if those colours are dark the whole surface
       // goes black regardless of texture or UV. It is not the display colour, so switch it off.
       if(m.vertexColors){m.vertexColors=false;say('  '+(info.file||'')+': disabled vertexColors');}
+      // Same opt-in as above: any material we build or rebind on a skinned mesh must carry it.
+      if(o.isSkinnedMesh&&!m.skinning)m.skinning=true;
       m.needsUpdate=true;});
     // Face feature split: the cooked face mesh is ONE section; C# reordered its index buffer into
     // [base][mouth][hidden] runs so the mouth shell can wear its own print (black stern mouth) and
@@ -1531,29 +3709,85 @@ function dress(g,info){
       geo.clearGroups();
       const mats=[];let off=0;
       info.fbands.forEach(b=>{
-        const band=b[0],tris=b[1],texPath=b[2],tint=b[3];
-        const m2=new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.42,metalness:0});
+        const band=b[0],tris=b[1],texPath=b[2],tint=b[3],mode=b[4]||0,additive=mode===1;
+        const feature=b[5]||('Zone'+band),pdo=b[6]||0;
+        const nrmPath=b[7],ormPath=b[8],rough=b[9],metal=b[10],emisPath=b[11],emisCol=b[12],emisStr=b[13];
+        const eyeSpecLayer=b[14],mouthLayers=b[15];
+        // Use the material's OWN roughness/metallic (the face sets 0.3 nearly everywhere) rather
+        // than a viewer default.
+        const m2=new THREE.MeshStandardMaterial({color:0xffffff,
+          roughness:(rough===null||rough===undefined)?0.3:rough,
+          metalness:(metal===null||metal===undefined)?0:metal});
         m2.side=THREE.DoubleSide;
+        // r128 requires a material to OPT IN to skeletal deformation. GLTFLoader sets this on the
+        // materials it creates; ours are built from scratch, so without it the face renders in BIND
+        // pose forever - the bones move, the skeleton updates, and the GPU ignores all of it.
+        m2.skinning=o.isSkinnedMesh;
         // Feature textures are WHITE STENCILS: the alpha is the shape, the colour comes from the
         // material's "<feature> Tint" (brows 442E2B, skin D28856). Tint is linear, so convert.
-        if(texPath){const t=tex(texPath,true);if(t){m2.map=t;m2.alphaTest=0.5;}}
-        else m2.visible=false;
+        if(texPath){const t=tex(texPath,true);if(t){
+          m2.map=t;
+          // M_LEGOface is BLEND_Masked in the cooked game material. Keep a depth-writing cutout
+          // rather than alpha-blending the feature shell into the head; Unreal's default masked
+          // clip value is 0.333.
+          m2.transparent=false;m2.alphaTest=0.333;m2.depthWrite=true;
+          // The rest of the feature's material. Without these the prints render as flat decals:
+          // the normal map is what makes printed ink sit proud of the plastic, and the MMR is what
+          // stops every zone sharing one uniform gloss.
+          if(nrmPath){const n=tex(nrmPath,false);if(n){m2.normalMap=n;}}
+          if(ormPath){const om2=tex(ormPath,false);if(om2){m2.roughnessMap=om2;m2.metalnessMap=om2;}}
+          if(emisPath){const e=tex(emisPath,true);if(e){m2.emissiveMap=e;
+            m2.emissive=new THREE.Color(emisCol||0xffffff).convertSRGBToLinear();
+            m2.emissiveIntensity=(emisStr===null||emisStr===undefined)?1:emisStr;}}
+          // EyeSpec is a shipped master layer with its own UV transform and expression curves.
+          // Install it after the base eye is available, before the first material compilation.
+          if(eyeSpecLayer)installEyeSpec(m2,eyeSpecLayer);
+          if(additive){
+            // An "Over" layer is the printed detail: artwork in RGB on a BLACK field, opaque alpha.
+            // Added over the skin shell, black contributes nothing and only the print shows. It is
+            // unlit, because the skin underneath already carries the lighting.
+            const om=new THREE.MeshBasicMaterial({map:t,transparent:true,depthWrite:false,
+              blending:THREE.AdditiveBlending,side:THREE.DoubleSide,toneMapped:false,skinning:o.isSkinnedMesh});
+            om.polygonOffset=true;om.polygonOffsetFactor=-4;om.polygonOffsetUnits=-4;
+            om.needsUpdate=true;
+            mats.push(om);faceBandMats.push({band:band,mat:om,tris:tris,tex:texPath,feature:feature,tint:tint,pdo:pdo,mesh:o,slot:mats.length-1});
+            geo.addGroup(off,tris*3,mats.length-1);off+=tris*3;return;
+          }
+        }}
+        else if(!tint)m2.visible=false;   // no texture AND no tint = feature this face does not use
+        // Band 13's texture is only the black mouth rim. The master material composites its real
+        // TeethU, TeethD and Tongue maps on this same skinned shell, then the expression curves
+        // slide those sheets independently. Do that before the material first compiles.
+        if(mouthLayers&&m2.map)installMouthLayers(m2,mouthLayers,info.mhide);
+        // Face tints behave as sRGB, not linear: taken raw, brow 442E2B renders mid-brown and the
+        // D28856 nose/mouth print is so close to skin it vanishes. Converting matches the game -
+        // near-black brows and a print that actually reads against the head.
         if(tint)m2.color=new THREE.Color(tint).convertSRGBToLinear();
         // Layered shells sit on the same surface; bias the ones above the base skin forward.
-        if(band!==8){m2.polygonOffset=true;m2.polygonOffsetFactor=-2;m2.polygonOffsetUnits=-2;}
+        // The master orders these coincident shells with a Pixel Depth Offset; use the game's own
+        // values rather than a flat guess, so eyelids sit over the eye and the eye back sits behind.
+        if(band!==8){m2.polygonOffset=true;m2.polygonOffsetFactor=-1-pdo*4;m2.polygonOffsetUnits=-1-pdo*4;}
+        // Setting .skinning alone is not enough: the flag feeds SHADER COMPILATION, and a plain
+        // property assignment does not mark the program dirty. Without needsUpdate the material
+        // keeps its unskinned program and the face stays in bind pose.
+        m2.needsUpdate=true;
         mats.push(m2);
-        faceBandMats.push({band:band,mat:m2,tris:tris,tex:texPath});
+        faceBandMats.push({band:band,mat:m2,tris:tris,tex:texPath,feature:feature,tint:tint,pdo:pdo,mesh:o,slot:mats.length-1,eyeSpec:m2.userData.faceEyeSpec||null,mouth:m2.userData.faceMouth||null});
         geo.addGroup(off,tris*3,mats.length-1);
         off+=tris*3;
       });
       o.material=mats;
+      // Fires after this mesh's first real draw, which is the moment the material swap becomes
+      // meaningful. Works even where requestAnimationFrame never runs.
+      o.onAfterRender=function(){faceDrawn=true;};
       say(info.file+': face bands '+info.fbands.filter(b=>b[2]).length+'/'+info.fbands.length+' textured');
+      buildBandInspector();
     }
   });
 }
 // Apply the facial rig pose from the game's expression animation. Without this the face renders in
 // BIND pose, which the game never shows.
-const faceRig={bones:[],bind:new Map(),poses:null,frameKeys:[]};
+const faceRig={bones:[],bind:new Map(),poses:null,curves:null,frameKeys:[]};
 // Band identification aid: paint every ExtraUV0 band a distinct colour with a legend, so which
 // band is which facial feature can be read off one screenshot instead of inferred.
 const faceBandMats=[];let bandDebug=false;
@@ -1595,23 +3829,45 @@ addEventListener('keydown',e=>{
 function poseFace(g,info){
   if(!info.poses||!Object.keys(info.poses).length)return;
   faceRig.poses=info.poses;
+  faceRig.curves=info.curves||{};
+  let skinned=0,verts=0;
   g.scene.traverse(o=>{
     if(o.isBone||o.type==='Bone'){
       faceRig.bones.push(o);
       faceRig.bind.set(o,{p:o.position.clone(),q:o.quaternion.clone(),s:o.scale.clone()});
     }
+    if(o.isSkinnedMesh){skinned++;verts+=(o.geometry.attributes.position||{count:0}).count;}
   });
+  // Diagnose the rig rather than guessing: a pose does nothing if the face mesh came through
+  // unskinned, or if the animation's bone names do not match the exported node names.
+  const any=faceRig.poses[Object.keys(faceRig.poses)[0]];
+  const first=any?any[Object.keys(any)[0]]:null;
+  const poseNames=first?Object.keys(first):[];
+  const boneNames=faceRig.bones.map(b=>b.name);
+  const hit=poseNames.filter(n=>boneNames.indexOf(n)>=0).length;
+  say('face rig: '+faceRig.bones.length+' bones, '+skinned+' skinned meshes ('+verts+' verts), pose targets '
+      +poseNames.length+', matched '+hit);
+  if(poseNames.length&&!hit){
+    say('  pose bones: '+poseNames.slice(0,6).join(', '));
+    say('  glb bones:  '+boneNames.slice(0,6).join(', '));
+  }
   buildExpressionUi();
 }
 // Apply one of the game's expression poses to the facial rig (or restore the bind pose).
+let applyCount=0;
 function applyExpression(name,frameIdx){
+  // The swap needs the face to have been drawn once. onAfterRender covers the normal case; this
+  // second call onwards covers anything that renders without firing it.
+  if(++applyCount>1)faceDrawn=true;
+  forceSkinningRecompile();
   const frames=name&&faceRig.poses?faceRig.poses[name]:null;
-  let pose=null;
+  let pose=null,materialCurves=null;
   if(frames){
     const keys=Object.keys(frames).map(Number).sort((a,b)=>a-b);
     faceRig.frameKeys=keys;
     const fi=Math.min(frameIdx===undefined?Math.floor(keys.length/2):frameIdx,keys.length-1);
     pose=frames[keys[fi]];
+    materialCurves=faceRig.curves&&faceRig.curves[name]?faceRig.curves[name][keys[fi]]:null;
     const lab=document.getElementById('frameLabel');
     if(lab)lab.textContent='frame '+keys[fi];
     const sl=document.getElementById('frame');
@@ -1622,6 +3878,63 @@ function applyExpression(name,frameIdx){
     if(t){b.position.set(t[0],t[1],t[2]);b.quaternion.set(t[3],t[4],t[5],t[6]);b.scale.set(t[7],t[8],t[9]);}
     else{const bp=faceRig.bind.get(b);if(bp){b.position.copy(bp.p);b.quaternion.copy(bp.q);b.scale.copy(bp.s);}}
   });
+  applyFaceMaterialCurves(materialCurves);
+}
+// Live band inspector: every ExtraUV0 band with the feature it was identified as, its triangle
+// count, the colour it resolved to and a visibility toggle. This is the tool for answering "which
+// shell is that?" by eye instead of another round of guess-and-rebuild.
+// The program the renderer builds for a band material on its FIRST draw comes out UNSKINNED, so
+// the face renders in bind pose while the bones move. Marking the material needsUpdate does NOT
+// clear it - measured: still 0 pixels of change. REPLACING the material objects after that first
+// draw does: 8958 pixels between Neutral and Screaming. So swap in clones, once, post-draw.
+let skinningFixed=false,faceDrawn=false;
+function forceSkinningRecompile(){
+  // Only valid once the face has genuinely been drawn - swapping before that just recreates the
+  // same broken state, and latching a "done" flag then would lock it in permanently.
+  if(skinningFixed||faceDrawn===false||!faceBandMats.length)return;
+  const mesh=faceBandMats[0].mesh;
+  if(!mesh||!Array.isArray(mesh.material))return;
+  const fresh=mesh.material.map(mm=>{const n=mm.clone();n.needsUpdate=true;return n;});
+  mesh.material=fresh;
+  faceBandMats.forEach(f=>{if(f.slot<fresh.length)f.mat=fresh[f.slot];});
+  skinningFixed=true;
+  say('face: rebound '+fresh.length+' band materials so skinning takes effect');
+}
+function buildBandInspector(){
+  if(document.getElementById('bands'))return;
+  const p=document.createElement('div');p.id='bands';
+  p.style.cssText='position:fixed;left:8px;top:8px;max-height:88vh;overflow:auto;background:rgba(12,14,18,.88);'
+    +'color:#dfe4ea;font:11px/1.45 Consolas,monospace;padding:8px 10px;border:1px solid #2b3038;border-radius:6px;z-index:20';
+  const h=document.createElement('div');
+  h.style.cssText='font-weight:bold;color:#e8b64c;margin-bottom:6px;cursor:pointer';
+  h.textContent='Face bands ('+faceBandMats.length+') - click to collapse';
+  const body=document.createElement('div');
+  h.onclick=()=>{body.style.display=body.style.display==='none'?'block':'none';};
+  p.appendChild(h);p.appendChild(body);
+  faceBandMats.slice().sort((a,b)=>a.band-b.band).forEach(f=>{
+    const row=document.createElement('label');
+    row.style.cssText='display:flex;align-items:center;gap:6px;padding:1px 0;white-space:nowrap;cursor:pointer';
+    const cb=document.createElement('input');cb.type='checkbox';cb.checked=f.mat.visible!==false;
+    cb.onchange=()=>{f.mat.visible=cb.checked;};
+    const sw=document.createElement('span');
+    sw.style.cssText='width:11px;height:11px;border:1px solid #555;display:inline-block;flex:none;background:'
+      +(f.tint||'#ffffff');
+    const t=document.createElement('span');
+    t.textContent=String(f.band).padStart(2,'0')+'  '+f.feature+'  '+f.tris+'t'
+      +(f.tex?'':'  (no tex)')+(f.pdo?'  pdo '+f.pdo:'');
+    if(!f.tex)t.style.opacity='.6';
+    row.appendChild(cb);row.appendChild(sw);row.appendChild(t);body.appendChild(row);
+  });
+  const all=document.createElement('div');
+  all.style.cssText='margin-top:6px;display:flex;gap:6px';
+  [['all on',true],['all off',false]].forEach(([lbl,v])=>{
+    const b=document.createElement('button');b.textContent=lbl;
+    b.style.cssText='font:11px Consolas,monospace;background:#232833;color:#dfe4ea;border:1px solid #39404d;border-radius:3px;cursor:pointer;padding:2px 6px';
+    b.onclick=()=>{faceBandMats.forEach(f=>{f.mat.visible=v;});
+      body.querySelectorAll('input').forEach(i=>{i.checked=v;});};
+    all.appendChild(b);});
+  body.appendChild(all);
+  document.body.appendChild(p);
 }
 function buildExpressionUi(){
   if(!faceRig.poses||document.getElementById('expr'))return;
@@ -1632,8 +3945,8 @@ function buildExpressionUi(){
   wrap.innerHTML='<label for="expr">Expression</label> ';
   const sel=document.createElement('select');
   sel.id='expr';
-  sel.innerHTML='<option value="">None (rest)</option>'+names.map(n=>'<option>'+n+'</option>').join('');
-  sel.onchange=()=>{applyExpression(sel.value);applyShrinkwrap();};
+  sel.innerHTML='<option value="">Bind pose (debug)</option>'+names.map(n=>'<option>'+n+'</option>').join('');
+  sel.onchange=()=>applyExpression(sel.value);
   wrap.appendChild(sel);
   // Scrub the sampled frames: these clips ease in, hold, then relax, so the pose you
   // want is somewhere in the middle - this finds it by eye instead of by guessing.
@@ -1641,12 +3954,15 @@ function buildExpressionUi(){
   row.style.cssText='margin-top:6px;display:flex;align-items:center;gap:6px';
   const sl=document.createElement('input');
   sl.type='range';sl.id='frame';sl.min=0;sl.max=4;sl.value=2;sl.style.width='110px';
-  sl.oninput=()=>{applyExpression(sel.value,+sl.value);applyShrinkwrap();};
+  sl.oninput=()=>applyExpression(sel.value,+sl.value);
   const lab=document.createElement('span');lab.id='frameLabel';lab.textContent='frame';
   lab.style.cssText='font-size:12px;color:#9ea6b2;min-width:64px';
   row.appendChild(sl);row.appendChild(lab);
   wrap.appendChild(row);
   document.body.appendChild(wrap);
+  // The exported glTF's bind pose is not the game at rest: its post-process face AnimBP applies
+  // A_Neutral at runtime. Start there, while leaving the raw bind pose available for diagnostics.
+  if(names.indexOf('Neutral')>=0){sel.value='Neutral';applyExpression('Neutral',+sl.value);}
 }
 function frameAll(){
   const box=new THREE.Box3().setFromObject(root);
@@ -1654,71 +3970,57 @@ function frameAll(){
   const size=box.getSize(new THREE.Vector3());const center=box.getCenter(new THREE.Vector3());
   root.position.sub(center);
   const d=Math.max(size.x,size.y,size.z)||1;
-  camera.position.set(d*0.55,d*0.3,d*1.7);camera.near=d/100;camera.far=d*40;camera.updateProjectionMatrix();
+  // LEGOfig faces +X in the exported glTF basis. Framing from +Z opened every preview in profile,
+  // which makes face and head-attachment checks need an immediate manual orbit.
+  camera.position.set(d*1.7,d*0.25,0);camera.near=d/100;camera.far=d*40;camera.updateProjectionMatrix();
   controls.target.set(0,0,0);controls.update();
   // One line saying what actually reached the scene, so a bad render can be read off the screen.
   say('frame: '+root.children.length+' parts, size '
       +size.x.toFixed(2)+'x'+size.y.toFixed(2)+'x'+size.z.toFixed(2));
 }
-function load(m){return new Promise(res=>loader.load(m.file,g=>{dress(g,m);poseFace(g,m);res({m,scene:g.scene});},
+function load(m){return new Promise(res=>loader.load(m.file,g=>{dress(g,m);poseFace(g,m);
+  prepareUvChannels(g,m).finally(()=>res({m,scene:g.scene}));},
   undefined,e=>{document.getElementById('err').textContent='Load error ('+m.file+'): '+(e&&e.message||e);res(null);}));}
 Promise.all(models.map(load)).then(loaded=>{
   loaded=loaded.filter(Boolean);
   // Offsets are precomputed in C# from the exported glb skeletons, so the viewer just places them.
   loaded.forEach(x=>{
+    if(x.m.scale)x.scene.scale.set(x.m.scale[0],x.m.scale[1],x.m.scale[2]);
+    if(x.m.rot)x.scene.quaternion.set(x.m.rot[0],x.m.rot[1],x.m.rot[2],x.m.rot[3]);
+    if(x.m.pos)x.scene.position.add(new THREE.Vector3(x.m.pos[0],x.m.pos[1],x.m.pos[2]));
     const o=x.m.offset;
-    if(o&&(o[0]||o[1]||o[2]))x.scene.position.set(o[0],o[1],o[2]);
+    if(o&&(o[0]||o[1]||o[2]))x.scene.position.add(new THREE.Vector3(o[0],o[1],o[2]));
+    const basePosition=x.scene.position.clone();
+    const adjustment=Array.isArray(x.m.adj)?x.m.adj:[0,0,0];
+    if(adjustment[0]||adjustment[1]||adjustment[2]){
+      x.scene.position.add(new THREE.Vector3(adjustment[0]||0,adjustment[1]||0,adjustment[2]||0));
+    }
+    const availableUvs=usableUvChannels(x.scene,x.m.uvs);
+    if(x.m.part&&!x.m.part.startsWith('__')&&(x.m.move||availableUvs.length)){
+      const defaultUv=availableUvs.indexOf(x.m.uvdefault)>=0?x.m.uvdefault:availableUvs[0];
+      const selectedUv=availableUvs.indexOf(x.m.uv)>=0?x.m.uv:defaultUv;
+      partStates.set(x.m.part,{component:x.m.part,scene:x.scene,basePosition:basePosition,
+        movable:!!x.m.move,adjustment:[adjustment[0]||0,adjustment[1]||0,adjustment[2]||0],
+        uvs:availableUvs,defaultUv:defaultUv,uvChannel:selectedUv});
+      setPartUv(x.m.part,selectedUv);
+    }
     root.add(x.scene);
   });
   // Frame the scene BEFORE anything optional runs: frameAll is what positions the camera, so if
   // a later step throws the camera is left at the origin - inside the character, which reads as a
   // "stuck camera" with no error on screen.
   frameAll();
-  try{
-  // Head is the shrinkwrap target; the face shells project onto it.
-    const headEntry=loaded.find(x=>x.m.ishead), faceEntry=loaded.find(x=>x.m.isface);
-    if(headEntry&&faceEntry){
-      headEntry.scene.updateMatrixWorld(true);
-      let headMesh=null; headEntry.scene.traverse(o=>{if(o.isMesh&&!headMesh)headMesh=o;});
-      let faceMesh=null; faceEntry.scene.traverse(o=>{if(o.isMesh&&!faceMesh)faceMesh=o;});
-      if(headMesh&&faceMesh&&faceMesh.isSkinnedMesh){
-        buildWrapTarget(headMesh);
-        const g=faceMesh.geometry;
-        const vg=new Int32Array(g.attributes.position.count);
-        g.groups.forEach(grp=>{for(let i=grp.start;i<grp.start+grp.count;i++)vg[g.index.getX(i)]=grp.materialIndex;});
-        // Render a BAKED copy: GPU-skinned positions cannot be read back, so the
-        // shell is posed + projected on the CPU into this twin, while the skinned
-        // original stays (hidden) as the source the skeleton drives.
-        const bg=g.clone();
-        const baked=new THREE.Mesh(bg,faceMesh.material);
-        baked.position.copy(faceMesh.position);
-        baked.quaternion.copy(faceMesh.quaternion);
-        baked.scale.copy(faceMesh.scale);
-        faceMesh.parent.add(baked);
-        faceMesh.visible=false;
-        baked.updateMatrixWorld(true);
-        faceSkins.push({mesh:faceMesh,baked:baked,
-                        offsets:{0:0.0005,1:0.0017,2:0.0028},vertGroup:vg});
-        // Defer a frame: world matrices (and the skeleton) must be current, or the
-        // projection reads stale transforms and silently no-ops.
-        // Shrinkwrap is OFF: projecting the shells onto the head still explodes the geometry on
-        // some characters, and it runs after the camera has framed the scene, so the failure looks
-        // like a stuck camera. Set wrapPending=3 to re-enable once the projection is trustworthy.
-        wrapPending=0;
-      }
-    }
-  }catch(e){say('face setup skipped: '+e.message);}
-
-  const avail=[...new Set(uvMeshes.flatMap(u=>u.uvs))].sort();
-  say('UV switch: press '+avail.join('/')+' to change texture UV channel (now: glTF default)');
+  buildPartMover();
 });
 // Calibration aid: arrows move the face piece in 0.004 steps and report the total, so the right
 // permanent offset can be read straight off the HUD instead of guessed.
 addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+let skinFixFrame=0;
 (function loop(){requestAnimationFrame(loop);controls.update();renderer.render(scene,camera);
+  // Once the face has actually been drawn, swap its band materials (see forceSkinningRecompile).
+  if(faceBandMats.length&&!skinningFixed&&++skinFixFrame>2){faceDrawn=true;forceSkinningRecompile();}
   // Project the face onto the head a few frames in, when the skeleton and world
   // matrices are actually live - doing it during load silently no-ops.
-  if(wrapPending>0&&--wrapPending===0){applyShrinkwrap();say('face shrinkwrapped onto the head');}
 })();
 </script></body></html>
 """;
