@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Text.Json;
 using UAssetAPI;
 using UAssetAPI.UnrealTypes;
@@ -10,7 +11,6 @@ namespace Batcomputer;
 /// Home-screen "Mods" section and the mod build. A mod bundles several suit projects
 /// into one release: one pak, one <c>&lt;ModId&gt;PawnTags.ini</c>, one <c>ST_&lt;ModId&gt;</c>
 /// StringTable, one <c>mod.json</c>, and one plugin-local cooked AssetRegistry.bin.
-/// The reserved SuitSlots core release also owns the shared <c>Config/Game.ini</c>.
 /// This partial owns the UI + orchestration; the asset work lives in focused services.
 /// </summary>
 public sealed partial class MainForm
@@ -20,6 +20,10 @@ public sealed partial class MainForm
     /// <summary>Where a built mod's aggregate outputs land.</summary>
     private string ModBuildRoot(string modId) =>
         Path.Combine(AppSettings.GeneratedRootFor(_projectRootText.Text.Trim()), "NativeSuitModBuilds", modId);
+
+    /// <summary>The portable release archive created from one completed mod build.</summary>
+    private string ModReleaseZipPath(string modId) =>
+        Path.Combine(ModBuildRoot(modId), $"{modId}-release.zip");
 
     /// <summary>
     /// The command-bar entry point. A suit can be the only entry in a mod, but every
@@ -283,6 +287,14 @@ public sealed partial class MainForm
             });
             if (hasBuild)
             {
+                tiles.Add(new VirtualTilePanel.Tile
+                {
+                    Section = SectionRelease,
+                    Title = $"Zip {TrimMiddle(activeSummary.DisplayName, 20)}",
+                    Subtitle = "create a player-ready mod archive",
+                    Accent = Theme.Info,
+                    OnClick = () => CreateModReleaseZip(modPath),
+                });
                 tiles.Add(new VirtualTilePanel.Tile
                 {
                     Section = SectionRelease,
@@ -726,22 +738,6 @@ public sealed partial class MainForm
                 !string.IsNullOrWhiteSpace(result.AssetRegistryDestination))
             {
                 CopyDirectoryContents(plugin.PluginDirectory, result.AssetRegistryDestination, overwrite: true);
-                if (!plugin.IncludesCoreConfiguration)
-                {
-                    // Remove configuration produced by an older Batcomputer build.
-                    // Only the SuitSlots core plugin is allowed to retain Game.ini.
-                    var staleGameIni = Path.Combine(result.AssetRegistryDestination, "Config", "Game.ini");
-                    if (File.Exists(staleGameIni))
-                    {
-                        File.Delete(staleGameIni);
-                        var configDirectory = Path.GetDirectoryName(staleGameIni)!;
-                        if (Directory.Exists(configDirectory) && !Directory.EnumerateFileSystemEntries(configDirectory).Any())
-                        {
-                            Directory.Delete(configDirectory);
-                        }
-                        AppendLog($"  removed stale Config\\Game.ini from {plugin.PluginName}");
-                    }
-                }
                 installed += Directory.EnumerateFiles(plugin.PluginDirectory, "*", SearchOption.AllDirectories).Count();
                 assetRegistryInstalled = true;
                 AppendLog($"  {plugin.PluginName} -> {result.AssetRegistryDestination}");
@@ -803,6 +799,113 @@ public sealed partial class MainForm
         }
         try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(dir) { UseShellExecute = true }); }
         catch (Exception ex) { AppendLog($"Could not open output folder: {ex.Message}"); }
+    }
+
+    /// <summary>
+    /// Writes a player-ready archive using the same paths as <see cref="InstallModCore"/>.
+    /// The archive starts one directory above LEGOBatmanLotDK, so extracting it directly into
+    /// Steam's common directory preserves the game's intended layout.
+    /// </summary>
+    private void CreateModReleaseZip(string modProjectPath)
+    {
+        var mod = ModService.LoadMod(modProjectPath);
+        if (mod is null)
+        {
+            Dialog.Error(this, "Zip mod", "The selected mod could not be loaded.");
+            return;
+        }
+        ModProjectService.ApplyDerivedFields(mod);
+
+        var outRoot = ModBuildRoot(mod.ModId);
+        var trioBase = Path.Combine(outRoot, mod.PackageBaseName);
+        var plugin = RegistryPluginService.CreateLayout(outRoot, mod.ModId);
+        var files = new List<(string Source, string ArchivePath)>();
+        const string ArchiveRoot = "LEGO Batman - Legacy of the Dark Knight";
+
+        void AddRequired(string source, string archivePath)
+        {
+            if (!File.Exists(source))
+            {
+                throw new FileNotFoundException("A required built release file is missing.", source);
+            }
+            files.Add((source, archivePath.Replace('\\', '/')));
+        }
+
+        try
+        {
+            foreach (var extension in new[] { ".pak", ".ucas", ".utoc" })
+            {
+                var source = trioBase + extension;
+                AddRequired(source, $"{ArchiveRoot}/LEGOBatmanLotDK/Content/Paks/~mods/Slot/{Path.GetFileName(source)}");
+            }
+
+            AddRequired(
+                Path.Combine(outRoot, "LooseFiles", "LEGOBatmanLotDK", "Config", "Tags", $"{mod.ModId}PawnTags.ini"),
+                $"{ArchiveRoot}/LEGOBatmanLotDK/Config/Tags/{mod.ModId}PawnTags.ini");
+            AddRequired(
+                Path.Combine(outRoot, "mod.json"),
+                $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/Mods/NewSuitSlotNative/SuitMods/{mod.ModId}/mod.json");
+            AddRequired(
+                plugin.DescriptorPath,
+                $"{ArchiveRoot}/Engine/Plugins/Mods/{plugin.PluginName}/{Path.GetFileName(plugin.DescriptorPath)}");
+            AddRequired(
+                plugin.RegistryPath,
+                $"{ArchiveRoot}/Engine/Plugins/Mods/{plugin.PluginName}/{Path.GetFileName(plugin.RegistryPath)}");
+        }
+        catch (FileNotFoundException ex)
+        {
+            var missing = string.IsNullOrWhiteSpace(ex.FileName) ? ex.Message : ex.FileName;
+            Dialog.Warn(this, "Zip mod",
+                "This mod needs a complete successful build before it can be archived.\n\nMissing:\n" + missing);
+            return;
+        }
+
+        var zipPath = ModReleaseZipPath(mod.ModId);
+        var temporaryZipPath = zipPath + ".tmp";
+        try
+        {
+            Directory.CreateDirectory(outRoot);
+            if (File.Exists(temporaryZipPath)) File.Delete(temporaryZipPath);
+            using (var stream = File.Create(temporaryZipPath))
+            using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: false))
+            {
+                foreach (var (source, archivePath) in files)
+                {
+                    archive.CreateEntryFromFile(source, archivePath, CompressionLevel.Fastest);
+                }
+            }
+            File.Move(temporaryZipPath, zipPath, overwrite: true);
+
+            var sizeMb = new FileInfo(zipPath).Length / 1024d / 1024d;
+            AppendLog($"Created player-ready release archive: {zipPath} ({sizeMb:0.0} MB, {files.Count} files).");
+            Dialog.Show(this, new Dialog.Model
+            {
+                WindowTitle = "Batcomputer - Mod release archive",
+                Title = "Mod release archive created",
+                Subtitle = mod.DisplayName,
+                Message = "Extract this archive into your Steam common folder. Its game-relative paths are already arranged for installation.",
+                Severity = Dialog.Level.Good,
+                PrimaryText = "Done",
+                CalloutTitle = "Ready to share",
+                CalloutDetail = $"{files.Count} release file{(files.Count == 1 ? "" : "s")} packaged. The archive contains no authoring projects or generated previews.",
+                Fields = new List<(string Label, string Value)>
+                {
+                    ("Archive", zipPath),
+                    ("Extract into", "...\\Steam\\steamapps\\common"),
+                },
+            });
+            RefreshBuildModTiles();
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                if (File.Exists(temporaryZipPath)) File.Delete(temporaryZipPath);
+            }
+            catch { /* preserve the original failure */ }
+            AppendLog($"Could not create release archive: {ex.Message}");
+            Dialog.Error(this, "Zip mod", $"The release archive was not created.\n\n{ex.Message}");
+        }
     }
 
     /// <summary>
@@ -1302,10 +1405,6 @@ public sealed partial class MainForm
             }
             preflight.Result.AddInfo("Asset Registry", $"Verified {registry.Rows.Count} PawnMetaData row(s).");
             AppendLog($"  Asset Registry: {registry.Rows.Count} PawnMetaData row(s) -> {registry.Layout.RegistryPath}");
-            if (registry.Layout.IncludesCoreConfiguration)
-            {
-                AppendLog($"  SuitSlots core config: {registry.Layout.GameIniPath}");
-            }
             AppendLog("  registry verification: " + registry.VerificationLine);
 
             File.WriteAllText(modJsonPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));

@@ -11,11 +11,6 @@ namespace Batcomputer;
 /// </summary>
 public sealed class RegistryPluginService
 {
-    /// <summary>
-    /// The SuitSlots release is the shared registry core. It owns the one Asset
-    /// Manager scan rule for /Game/Mods; author mod plugins only contribute rows.
-    /// </summary>
-    public const string CoreRegistryModId = "SuitSlots";
     public const string PrimaryAssetType = "PawnMetaData";
     public const string PawnMetadataClass = "/Script/DinnerPawnMetaData.DinnerCharacterMetaData";
     public const string WriterResultMarker = "SUIT_SLOTS_REGISTRY_WRITER_RESULT";
@@ -30,9 +25,7 @@ public sealed class RegistryPluginService
         string PluginName,
         string PluginDirectory,
         string DescriptorPath,
-        string RegistryPath,
-        string GameIniPath,
-        bool IncludesCoreConfiguration);
+        string RegistryPath);
 
     public sealed class BuildResult
     {
@@ -51,9 +44,7 @@ public sealed class RegistryPluginService
             pluginName,
             directory,
             Path.Combine(directory, pluginName + ".uplugin"),
-            Path.Combine(directory, "AssetRegistry.bin"),
-            Path.Combine(directory, "Config", "Game.ini"),
-            string.Equals(modId, CoreRegistryModId, StringComparison.OrdinalIgnoreCase));
+            Path.Combine(directory, "AssetRegistry.bin"));
     }
 
     /// <summary>Rejects malformed package paths and duplicate primary asset IDs before UE runs.</summary>
@@ -112,18 +103,6 @@ public sealed class RegistryPluginService
         return JsonSerializer.Serialize(descriptor, new JsonSerializerOptions { WriteIndented = true });
     }
 
-    /// <summary>
-    /// Extends the game's existing PawnMetaData scan rule to /Game/Mods.  This is
-    /// deliberately the same remove/add pair proven by SuitSlotsRegistryProof:
-    /// AssetRegistry.bin makes the rows discoverable at startup, while this rule
-    /// tells the runtime AssetManager that mod-mounted DCMD packages are valid
-    /// PawnMetaData scan candidates.
-    /// </summary>
-    public static string BuildGameIni() =>
-        "[/Script/Engine.AssetManagerSettings]" + Environment.NewLine +
-        "-PrimaryAssetTypesToScan=(PrimaryAssetType=\"PawnMetaData\",AssetBaseClass=\"/Script/TtPawnMetaData.TtPawnMetaData\",bHasBlueprintClasses=False,bIsEditorOnly=False,Directories=((Path=\"/Game/Characters\"),(Path=\"/Game/PlaceHolder/Characters\"),(Path=\"/Game/Developers\"),(Path=\"/Game/Vehicles\"),(Path=\"/Game/AdditionalContent\")),SpecificAssets=,Rules=(Priority=-1,ChunkId=-1,bApplyRecursively=True,CookRule=AlwaysCook))" + Environment.NewLine +
-        "+PrimaryAssetTypesToScan=(PrimaryAssetType=\"PawnMetaData\",AssetBaseClass=\"/Script/TtPawnMetaData.TtPawnMetaData\",bHasBlueprintClasses=False,bIsEditorOnly=False,Directories=((Path=\"/Game/Characters\"),(Path=\"/Game/PlaceHolder/Characters\"),(Path=\"/Game/Developers\"),(Path=\"/Game/Vehicles\"),(Path=\"/Game/AdditionalContent\"),(Path=\"/Game/Mods\")),SpecificAssets=,Rules=(Priority=-1,ChunkId=-1,bApplyRecursively=True,CookRule=AlwaysCook))" + Environment.NewLine;
-
     public async Task<BuildResult> BuildAsync(
         string buildRoot,
         string modId,
@@ -159,24 +138,18 @@ public sealed class RegistryPluginService
         {
             Directory.CreateDirectory(layout.PluginDirectory);
             File.WriteAllText(layout.DescriptorPath, BuildDescriptorJson(layout.PluginName, modDisplayName));
-            if (layout.IncludesCoreConfiguration)
+            // Configuration is owned by the user's SuitSlots installation, never by
+            // a generated author-mod release. Clear an older generated copy so a
+            // rebuilt or zipped release cannot accidentally ship it.
+            var staleGameIni = Path.Combine(layout.PluginDirectory, "Config", "Game.ini");
+            if (File.Exists(staleGameIni))
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(layout.GameIniPath)!);
-                File.WriteAllText(layout.GameIniPath, BuildGameIni());
+                File.Delete(staleGameIni);
             }
-            else
+            var staleConfigDirectory = Path.GetDirectoryName(staleGameIni)!;
+            if (Directory.Exists(staleConfigDirectory) && !Directory.EnumerateFileSystemEntries(staleConfigDirectory).Any())
             {
-                // A mod may have been built before this became core-only. Remove the
-                // stale file so it cannot be copied into a subsequent release.
-                if (File.Exists(layout.GameIniPath))
-                {
-                    File.Delete(layout.GameIniPath);
-                }
-                var configDirectory = Path.GetDirectoryName(layout.GameIniPath)!;
-                if (Directory.Exists(configDirectory) && !Directory.EnumerateFileSystemEntries(configDirectory).Any())
-                {
-                    Directory.Delete(configDirectory);
-                }
+                Directory.Delete(staleConfigDirectory);
             }
             if (File.Exists(layout.RegistryPath))
             {
@@ -235,16 +208,13 @@ public sealed class RegistryPluginService
             var verification = writerRun.Output
                 .Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries)
                 .LastOrDefault(line => line.Contains(WriterResultMarker, StringComparison.Ordinal)) ?? "";
-            if (writerRun.ExitCode != 0 || !File.Exists(layout.RegistryPath) ||
-                (layout.IncludesCoreConfiguration && !File.Exists(layout.GameIniPath)))
+            if (writerRun.ExitCode != 0 || !File.Exists(layout.RegistryPath))
             {
                 return new BuildResult
                 {
                     Error = writerRun.ExitCode != 0
                         ? $"The Asset Registry writer failed verification (exit {writerRun.ExitCode})."
-                        : layout.IncludesCoreConfiguration
-                            ? "The SuitSlots core registry release is missing AssetRegistry.bin or Config\\Game.ini."
-                            : "The mod registry release is missing AssetRegistry.bin.",
+                        : "The mod registry release is missing AssetRegistry.bin.",
                     Layout = layout,
                     Rows = rows,
                     VerificationLine = verification,
