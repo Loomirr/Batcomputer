@@ -277,11 +277,6 @@ public sealed partial class MainForm
             menu.Show(_menuButton, new Point(_menuButton.Width - menu.Width, _menuButton.Height));
         };
 
-        _toyboxInstallButton.Text = "↓  Install mod";
-        _toyboxInstallButton.Width = 112; _toyboxInstallButton.Height = 34; _toyboxInstallButton.Margin = new Padding(6, 0, 0, 0);
-        Theme.StyleDarkButton(_toyboxInstallButton);
-        _toyboxInstallButton.Click += (_, _) => InstallModForCurrentSuit();
-
         _toyboxPackageButton.Text = "●  Build mod";
         _toyboxPackageButton.Width = 120; _toyboxPackageButton.Height = 34; _toyboxPackageButton.Margin = new Padding(6, 0, 0, 0);
         Theme.StyleGoldButton(_toyboxPackageButton);
@@ -327,7 +322,6 @@ public sealed partial class MainForm
         };
 
         right.Controls.Add(_menuButton);
-        right.Controls.Add(_toyboxInstallButton);
         right.Controls.Add(_toyboxPackageButton);
         right.Controls.Add(_toyboxSaveButton);
         right.Controls.Add(_toyboxStatusChip);
@@ -446,10 +440,6 @@ public sealed partial class MainForm
         SetHeaderCommandState(_toyboxPackageButton, hasOpenSuit && hasBase, isPrimary: true,
             readyHint: "Build and install the current suit's mod",
             unavailableHint: "Set a visual base and gameplay donor before building a mod.");
-        SetHeaderCommandState(_toyboxInstallButton, hasOpenSuit && hasBase, isPrimary: false,
-            readyHint: "Install the built mod for the current suit",
-            unavailableHint: "Set a visual base, gameplay donor, and build a mod before installing.");
-
         RefreshHeaderMeta();
     }
 

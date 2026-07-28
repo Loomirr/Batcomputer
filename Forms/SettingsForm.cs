@@ -390,21 +390,7 @@ public sealed partial class SettingsForm : Form
             _keepExtractsToggle);
 
         Section("PATHS");
-        var detect = new Button { Width = 150, Text = "Auto-detect" };
-        Theme.StyleDarkButton(detect);
-        detect.Click += (_, _) =>
-        {
-            var d = AppSettings.BuiltInDefaults();
-            foreach (var row in _rows)
-            {
-                row.Box.Text = row.Get(d) ?? "";
-            }
-            SelectTab(0);
-        };
-        ButtonRow(detect, "Best-effort guess at your paths. Always check them - they differ per install.");
-
-        // Re-run the guided setup. Styled as a destructive-ish action because it walks every path
-        // again and overwrites what's here.
+        // Re-run the guided setup when paths change or a fresh full asset extraction is needed.
         var rerun = new Button { Width = 200, Text = "Run first-time setup again" };
         Theme.StyleDarkButton(rerun);
         rerun.FlatAppearance.BorderColor = Theme.Crit;
@@ -421,7 +407,7 @@ public sealed partial class SettingsForm : Form
                 SelectTab(0);
             }
         };
-        ButtonRow(rerun, "Walks through every path one at a time, with explanations.");
+        ButtonRow(rerun, "Walks through every required path, then offers the full first-time game extraction.");
 
         return panel;
     }
@@ -463,7 +449,7 @@ public sealed partial class SettingsForm : Form
             // No built-in defaults: every install's paths are different, so blank means "not set"
             // rather than silently falling back to a path that only exists on one machine.
             row.Status.DotColor = Theme.Warn;
-            _tips.SetToolTip(row.Status, "Not set — pick a path with Browse (or use Auto-detect).");
+            _tips.SetToolTip(row.Status, "Not set — pick a path with Browse.");
             return;
         }
 

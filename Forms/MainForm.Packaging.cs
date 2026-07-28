@@ -25,23 +25,11 @@ public sealed partial class MainForm
         _suitNameText.TextChanged += (_, _) => DeriveOutputs();
         _modFolderText.TextChanged += (_, _) => DeriveOutputs();
 
-        var steps = new TabControl { Dock = DockStyle.Fill };
-        steps.TabPages.Add(CreateTabPage("1 · Base suit", CreateBaseSuitPanel()));
-        steps.TabPages.Add(CreateTabPage("2 · Materials", CreateMaterialGenPanel()));
-        steps.TabPages.Add(CreateTabPage("3 · Parts", CreatePartsStepPanel()));
-        steps.TabPages.Add(CreateTabPage("4 · Package & install", CreatePackagePanel()));
-
-        // Builder is the whole window; no tab strip (keeps everything dark). The Toybox workspace
-        // is hosted inside the designer-editable CharacterAssemblyControl shell.
+        // The current Home/toybox workflow owns the whole window. The retired tabbed fallback is
+        // deliberately not created so old controls cannot resurface through a hidden window.
         var assembly = new CharacterAssemblyControl { Dock = DockStyle.Fill };
         assembly.HostContent(CreateToyboxPanel());
         _mainWorkspaceHost.Controls.Add(assembly);
-
-        // Advanced is a hidden fallback - opened in its own window via the header toggle.
-        var advanced = new Panel { Dock = DockStyle.Fill, BackColor = Theme.WindowBg };
-        advanced.Controls.Add(steps);
-        Theme.ApplyReadableTheme(advanced);
-        _advancedContent = advanced;
 
         // Collapsible diagnostics drawer: a click-to-toggle header bar over the log.
         _mainLogGroupBox.Text = "";
@@ -64,7 +52,7 @@ public sealed partial class MainForm
     }
 
     /// <summary>
-    /// The ☰ overflow menu - everything that isn't Build mod/Install mod, grouped by intent:
+    /// The ☰ overflow menu - everything that isn't the primary Build mod command, grouped by intent:
     /// suit lifecycle, this-suit build tools, library-wide actions, then settings.
     /// </summary>
     private ContextMenuStrip BuildMainMenu()
@@ -86,7 +74,6 @@ public sealed partial class MainForm
         menu.Items.Add(new ToolStripSeparator());
 
         menu.Items.Add("Settings…", null, (_, _) => OpenSettings());
-        menu.Items.Add("Advanced window", null, (_, _) => ToggleAdvanced());
         return menu;
     }
 

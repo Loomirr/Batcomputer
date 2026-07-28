@@ -40,6 +40,12 @@ public sealed class FirstRunWizard : Form
     private readonly ThemedProgressBar _bar = new();
     private readonly ToolTip _tips = new();
 
+    /// <summary>
+    /// Set when setup has all prerequisites but no usable extracted dump, and the user chooses the
+    /// full character-asset extraction. Program starts the existing refresh pipeline after MainForm opens.
+    /// </summary>
+    public bool InitialExtractionRequested { get; private set; }
+
     public FirstRunWizard(AppSettings settings)
     {
         _settings = settings;
@@ -127,10 +133,7 @@ public sealed class FirstRunWizard : Form
                 Title = "Extracted game Content",
                 Blurb = "An unpacked Content dump. This is what the part index, materials browser and " +
                         "base-character picker read from.\r\n\r\n" +
-                        "No dump yet? Leave this blank and use \"Refresh game assets\" once you're in. " +
-                        "⚠ Budget the disk space first — \"Refresh all character assets\" writes about " +
-                        "18 GB, and \"Full refresh\" about 19 GB. (\"Refresh Batman donor assets\" is " +
-                        "only ~50 MB if you just want to get started.)",
+                        "Already have a dump? Select it here. Otherwise leave this blank: finishing setup offers the full character, animation, and localisation extraction automatically. Budget about 18 GB of free space.",
                 Hint = "The Content folder itself, or Content\\Characters\\Minifig.",
                 Optional = true,
                 IsFile = false,
@@ -379,7 +382,19 @@ public sealed class FirstRunWizard : Form
 
         if (missing.Count == 0)
         {
-            Dialog.Success(this, "Setup complete", "Everything is pointed at a real path. You're ready to build.", "Batcomputer — Setup");
+            InitialExtractionRequested = NeedsInitialExtraction() && Dialog.Confirm(this,
+                "First-time game extraction",
+                $"Batcomputer is ready to extract every character, shared animation, and localisation asset needed by the builder.\n\n" +
+                $"This uses about 18 GB and can take a while. The extract will be stored under:\n{_settings.EffectiveAssetExtractRoot()}\n\n" +
+                "The extraction is read-only against your game files. It validates the result and builds the indexes before you start editing.",
+                confirmText: "Extract assets", cancelText: "Finish without extracting", severity: Dialog.Level.Warn,
+                windowTitle: "Batcomputer - Setup");
+
+            Dialog.Success(this, "Setup complete",
+                InitialExtractionRequested
+                    ? "Setup is saved. The full first-time extraction will begin as Batcomputer opens."
+                    : "Everything is pointed at a real path. You're ready to build.",
+                "Batcomputer - Setup");
         }
         else
         {
@@ -390,5 +405,11 @@ public sealed class FirstRunWizard : Form
         }
         DialogResult = DialogResult.OK;
         Close();
+    }
+
+    private bool NeedsInitialExtraction()
+    {
+        var contentRoot = _settings.EffectiveExtractedContentRoot();
+        return !Directory.Exists(Path.Combine(contentRoot, "Characters"));
     }
 }

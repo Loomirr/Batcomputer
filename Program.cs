@@ -370,16 +370,18 @@ internal static class Program
         // not resolve. If the built-in defaults already work (the original author's
         // machine), this is skipped entirely and no config file is needed. New users
         // whose defaults don't exist get guided through setup on first launch.
+        var initialExtractionRequested = false;
         if (!AppSettings.Current.IsUsable())
         {
             using var setup = new FirstRunWizard(AppSettings.Current);
             setup.ShowDialog();
+            initialExtractionRequested = setup.InitialExtractionRequested;
             // Reload whatever was saved (or keep the in-memory defaults if cancelled).
             AppSettings.Current = AppSettings.Load();
-            if (!AppSettings.Current.IsUsable())
+            if (!AppSettings.Current.IsUsable() && !initialExtractionRequested)
             {
                 Dialog.Warn(null, "Setup incomplete", "Batcomputer can open, but setup is incomplete.\n\n" +
-                    "Before building indexes or packaging, open Setup and point the tool at retoc.exe, your .usmap mappings file, and your UAssetGUI extracted Content dump.");
+                    "Before building indexes or packaging, open Setup and point the tool at retoc.exe, your .usmap mappings file, and your game Content\\Paks folder.");
             }
         }
 
@@ -390,7 +392,12 @@ internal static class Program
             Dialog.Error(null, "Can't write to the tool folder", writeProblem);
         }
 
-        Application.Run(new MainForm());
+        var mainForm = new MainForm();
+        if (initialExtractionRequested)
+        {
+            mainForm.Shown += async (_, _) => await mainForm.RunFirstTimeAssetExtractionAsync();
+        }
+        Application.Run(mainForm);
         return 0;
     }
 

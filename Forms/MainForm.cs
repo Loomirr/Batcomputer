@@ -165,8 +165,6 @@ public sealed partial class MainForm : Form
 
     private readonly Button _toyboxPackageButton = new();
 
-    private readonly Button _toyboxInstallButton = new();
-
     private readonly Button _toyboxSaveButton = new();
 
     // The Inspector is a designer-editable control owning its tree/info/buttons.
@@ -216,10 +214,6 @@ public sealed partial class MainForm : Form
     private string _characterResearchRoot = "";
 
     private Point _toyboxDragStartPoint;
-
-    private Control? _advancedContent;
-
-    private Form? _advancedWindow;
 
     private TemplateIndexService? _indexService;
 
@@ -550,50 +544,6 @@ public sealed partial class MainForm : Form
             case "Textures": await ImportTextureFromPngAsync(); break;
             case "Review": CopyChangeSummary(); break;
             case "Build mod": BuildActiveModFromWorkspace(); break;
-        }
-    }
-
-    private void ToggleAdvanced()
-    {
-        if (_advancedContent is null)
-        {
-            return;
-        }
-        if (_advancedWindow is null || _advancedWindow.IsDisposed)
-        {
-            _advancedWindow = new Form
-            {
-                Text = "Advanced (fallback)",
-                Width = 1100,
-                Height = 780,
-                StartPosition = FormStartPosition.CenterParent,
-                BackColor = Theme.WindowBg,
-                ForeColor = Theme.OnDark
-            };
-            _advancedContent.Dock = DockStyle.Fill;
-            _advancedWindow.Controls.Add(_advancedContent);
-            Theme.ApplyReadableTheme(_advancedWindow);
-            // Hide instead of dispose so it can be reopened.
-            _advancedWindow.FormClosing += (s, e) => { e.Cancel = true; ((Form)s!).Hide(); };
-        }
-
-        if (_advancedWindow.Visible)
-        {
-            _advancedWindow.Hide();
-        }
-        else
-        {
-            Theme.ApplyReadableTheme(_advancedWindow);
-            _advancedWindow.Show(this);
-        }
-    }
-
-    private void ShowAdvancedFor(string what)
-    {
-        AppendLog($"{what} isn't a one-click toybox action yet — opening Advanced.");
-        if (_advancedWindow is null || !_advancedWindow.Visible)
-        {
-            ToggleAdvanced();
         }
     }
 
@@ -1930,6 +1880,10 @@ public sealed partial class MainForm : Form
             progressWindow.Close();
         }
     }
+
+    /// <summary>Runs the same complete asset refresh used by the normal menu after first-time setup.</summary>
+    public Task RunFirstTimeAssetExtractionAsync() =>
+        RefreshGameAssetsAsync(GameAssetRefreshService.RefreshProfile.AllCharacterAssets);
 
     private static string FindProjectRoot()
     {
