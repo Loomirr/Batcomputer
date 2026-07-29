@@ -617,12 +617,8 @@ public sealed partial class MainForm
         {
             AppendLog($"'{UnrealPathUtil.AssetName(playablePackage)}' is a villain/NPC — its body & movement live in its NPC class, so it can't be reparented into a working playable. Reskinning its look onto the runtime's proven playable base.");
 
-            // CRITICAL: the runtime bridge ALWAYS ping-pongs through the TheBatman2025 donor
-            // (DerivePawnTag is fixed to Pawns.Playable.Batman.TheBatman2025). The game applies
-            // that donor's family identity/DPRD to the spawned pawn, so the reskin MUST build on a
-            // Batman-family playable - building on Talia (or any other family) makes the spawned
-            // pawn's identity fight its body → invisible/glitched (the exact failure). So force the
-            // machinery donor to TheBatman2025's own playable (the ping-pong-matching base).
+            // The runtime bridge uses TheBatman2025 as the proven NPC machinery donor. That does
+            // not change this suit's own PawnTag, UI metadata, or generated package family.
             const string PingPongDonorPlayable = "/Game/Characters/Minifig/Batman/BP_Batman_TheBatman2025_Playable";
             var machineryDonor = PingPongDonorPlayable;
             var donorPlayableDisk = Path.Combine(extracted, machineryDonor["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar) + ".uasset");
@@ -1001,12 +997,23 @@ public sealed partial class MainForm
 
     private async Task ApplyVisualAttachmentsToGameplayDonorAsync(string visualSourcePackage)
     {
-        if (_currentProject is null || _partIndex is null)
+        if (_currentProject is null)
+        {
+            return;
+        }
+        if (!await EnsurePartIndexAsync())
+        {
+            AppendLog("Visual attachments were skipped because the part index could not be built.");
+            return;
+        }
+
+        var partIndex = _partIndex;
+        if (partIndex is null)
         {
             return;
         }
 
-        var sourceParts = _partIndex.Parts
+        var sourceParts = partIndex.Parts
             .Where(p => p.SourcePackagePath.Equals(visualSourcePackage, StringComparison.OrdinalIgnoreCase))
             .ToList();
         var attachments = sourceParts
@@ -2487,14 +2494,26 @@ public sealed partial class MainForm
             return false;
         }
 
-        DeriveOutputs();
-        ReadFieldsIntoProject(_currentProject);
+        var previousSlotId = _currentProject.SlotId;
+        var previousProjectPath = _projectService.ProjectPathForSlot(previousSlotId);
         _currentProject.PlayableTemplate = playable;
         _currentProject.CutsceneTemplate = cutscene;
         _currentProject.DcmdTemplate = TemplateFromUasset(_baseDcmdText.Text.Trim(), "dcmd", contentRoot);
         _currentProject.VisualSourceTemplate = cutscene;
         _currentProject.VisualCutsceneSourceTemplate = cutscene;
         _currentProject.BaseProfile = BaseEligibilityService.CreateProfile(cutscene.PackagePath, playable.PackagePath);
+        var metadataDonor = NativeMetadataDonorService.TryRead(
+            _currentProject.DcmdTemplate,
+            _currentProject.PlayableTemplate,
+            _currentProject.CutsceneTemplate);
+        if (!string.IsNullOrWhiteSpace(metadataDonor?.ProgressTag) &&
+            (string.IsNullOrWhiteSpace(_currentProject.ProgressTag) ||
+             _currentProject.ProgressTag.Equals("GameProgress.Definitions.Characters.Batman.TheBatman2025", StringComparison.OrdinalIgnoreCase)))
+        {
+            _currentProject.ProgressTag = metadataDonor.ProgressTag;
+        }
+        DeriveOutputs();
+        ReadFieldsIntoProject(_currentProject);
         if (!ValidateUseAsBaseTargetPackages(_currentProject))
         {
             return false;
@@ -2527,7 +2546,19 @@ public sealed partial class MainForm
             _projectService.CreateUnpatchedStage(_currentProject);
             AppendLog($"Staged base: {playable.Stem} + {cutscene.Stem}{(_currentProject.DcmdTemplate is null ? " (no DCMD)" : " + DCMD")}");
             PatchNameMapsWithUAssetApi();
-            _projectService.SaveProject(_currentProject);
+            var savedProjectPath = _projectService.SaveProject(_currentProject);
+            if (!previousSlotId.Equals(_currentProject.SlotId, StringComparison.OrdinalIgnoreCase))
+            {
+                var relinked = ModService.RelinkSuitReferences(
+                    previousSlotId,
+                    previousProjectPath,
+                    _currentProject,
+                    savedProjectPath);
+                if (relinked > 0)
+                {
+                    AppendLog($"Updated {relinked} mod suit reference(s) for '{_currentProject.SlotId}'.");
+                }
+            }
             _detectedLabel.ForeColor = Color.SeaGreen;
             _detectedLabel.Text = $"Base set → {_targetPlayableText.Text.Trim()} + _Cutscene. Now go to step 2 (Materials) or step 3 (Parts).";
             AppendLog("Base ready.");

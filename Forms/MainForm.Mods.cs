@@ -25,6 +25,58 @@ public sealed partial class MainForm
     private string ModReleaseZipPath(string modId) =>
         Path.Combine(ModBuildRoot(modId), $"{modId}-release.zip");
 
+    private async Task<RegistryPluginService.WriterPreparationResult> PrepareRegistryWriterAsync(
+        RegistryWriterProgressForm? progressWindow = null)
+    {
+        AppendLog("Preparing the UE 5.6 Asset Registry writer for future builds...");
+        var result = await new RegistryPluginService().PrepareAsync(line =>
+        {
+            AppendLog("  registry: " + line);
+            progressWindow?.UpdateFromWriterLog(line);
+        });
+        if (result.Succeeded)
+        {
+            AppendLog($"Asset Registry writer ready ({(result.Rebuilt ? "built" : "cache verified")}).");
+            progressWindow?.SetFinished();
+            return result;
+        }
+
+        AppendLog("Asset Registry writer setup failed: " + result.Error);
+        if (!string.IsNullOrWhiteSpace(result.VerificationLine))
+        {
+            AppendLog("  registry verification: " + result.VerificationLine);
+        }
+        progressWindow?.SetFailed(result.Error);
+        return result;
+    }
+
+    internal async Task RunInitialSetupTasksAsync(bool prepareRegistryWriter, bool extractAssets)
+    {
+        if (prepareRegistryWriter)
+        {
+            using var writerProgress = new RegistryWriterProgressForm();
+            writerProgress.Show(this);
+            var result = await PrepareRegistryWriterAsync(writerProgress);
+            if (result.Succeeded)
+            {
+                await Task.Delay(450);
+            }
+            writerProgress.Close();
+
+            if (!result.Succeeded)
+            {
+                Dialog.Warn(this, "Registry writer not ready",
+                    result.Error + "\n\nBatcomputer will continue with your requested game-asset extraction. You can fix the UE 5.6 or writer-project path in Settings before your first mod build.",
+                    "Batcomputer - Setup");
+            }
+        }
+
+        if (extractAssets)
+        {
+            await RunFirstTimeAssetExtractionAsync();
+        }
+    }
+
     /// <summary>
     /// The command-bar entry point. A suit can be the only entry in a mod, but every
     /// shippable export is still a mod-level trio with its registry and loose files.
@@ -729,10 +781,14 @@ public sealed partial class MainForm
 
             AppendLog($"Installed mod '{mod.DisplayName}' — {installed} file(s). Restart the game to load it.");
             var plugin = RegistryPluginService.CreateLayout(outRoot, mod.ModId);
-            var installRoot = Directory.GetParent(gameRoot)?.FullName;
-            result.AssetRegistryDestination = string.IsNullOrWhiteSpace(installRoot)
-                ? ""
-                : Path.Combine(installRoot, "Engine", "Plugins", "Mods", plugin.PluginName);
+            result.AssetRegistryDestination = Path.Combine(
+                gameRoot,
+                "Binaries",
+                "Win64",
+                "ue4ss",
+                "SuitSlots",
+                "RegistryPlugins",
+                plugin.PluginName);
             ModReleaseStep("Installing the Asset Registry plugin...");
             if (File.Exists(plugin.DescriptorPath) && File.Exists(plugin.RegistryPath) &&
                 !string.IsNullOrWhiteSpace(result.AssetRegistryDestination))
@@ -847,10 +903,10 @@ public sealed partial class MainForm
                 $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/Mods/NewSuitSlotNative/SuitMods/{mod.ModId}/mod.json");
             AddRequired(
                 plugin.DescriptorPath,
-                $"{ArchiveRoot}/Engine/Plugins/Mods/{plugin.PluginName}/{Path.GetFileName(plugin.DescriptorPath)}");
+                $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/SuitSlots/RegistryPlugins/{plugin.PluginName}/{Path.GetFileName(plugin.DescriptorPath)}");
             AddRequired(
                 plugin.RegistryPath,
-                $"{ArchiveRoot}/Engine/Plugins/Mods/{plugin.PluginName}/{Path.GetFileName(plugin.RegistryPath)}");
+                $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/SuitSlots/RegistryPlugins/{plugin.PluginName}/{Path.GetFileName(plugin.RegistryPath)}");
         }
         catch (FileNotFoundException ex)
         {

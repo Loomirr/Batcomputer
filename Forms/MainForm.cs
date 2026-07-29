@@ -588,7 +588,7 @@ public sealed partial class MainForm : Form
             return;
         }
 
-        // The dialog will not return OK with a blank or donor pawn tag, so no re-check here.
+        // The dialog requires a non-empty tag; release validation checks collisions.
         _currentProject.PawnTag = dlg.PawnTag;
         _currentProject.DisplayName = dlg.DisplayName;
         _currentProject.Description = dlg.Description;
@@ -1739,12 +1739,13 @@ public sealed partial class MainForm : Form
             stem = "Custom";
         }
 
+        var family = TargetFamilyNameForProject(_currentProject);
         _displayNameText.Text = suit;
-        _slotIdText.Text = $"batman_{slug}";
+        _slotIdText.Text = $"{family.ToLowerInvariant()}_{slug}";
         var basePath = $"/Game/Mods/{mod}/Characters";
-        _targetPlayableText.Text = $"{basePath}/BP_Batman_{stem}_Playable";
-        _targetCutsceneText.Text = $"{basePath}/BP_Batman_{stem}_Cutscene";
-        _targetDcmdText.Text = $"{basePath}/DA_DCMD_Batman_{stem}_Playable";
+        _targetPlayableText.Text = $"{basePath}/BP_{family}_{stem}_Playable";
+        _targetCutsceneText.Text = $"{basePath}/BP_{family}_{stem}_Cutscene";
+        _targetDcmdText.Text = $"{basePath}/DA_DCMD_{family}_{stem}_Playable";
 
         var derivedPackageBaseName = MakeSafePackageBaseName($"{mod}_{stem}_P");
         if (string.IsNullOrWhiteSpace(_packageBaseNameText.Text) ||
@@ -1799,7 +1800,7 @@ public sealed partial class MainForm : Form
         }
     }
 
-    private async Task RefreshGameAssetsAsync(GameAssetRefreshService.RefreshProfile profile)
+    private async Task RefreshGameAssetsAsync(GameAssetRefreshService.RefreshProfile profile, bool firstRun = false)
     {
         var projectRoot = _projectRootText.Text.Trim();
         if (string.IsNullOrWhiteSpace(projectRoot) || !Directory.Exists(projectRoot))
@@ -1825,7 +1826,7 @@ public sealed partial class MainForm : Form
         }
 
         using var cancellation = new CancellationTokenSource();
-        using var progressWindow = new AssetRefreshProgressForm();
+        using var progressWindow = new AssetRefreshProgressForm(firstRun);
         progressWindow.CancelRequested += (_, _) => cancellation.Cancel();
         progressWindow.Show(this);
         _refreshGameAssetsButton.Enabled = false;
@@ -1883,7 +1884,7 @@ public sealed partial class MainForm : Form
 
     /// <summary>Runs the same complete asset refresh used by the normal menu after first-time setup.</summary>
     public Task RunFirstTimeAssetExtractionAsync() =>
-        RefreshGameAssetsAsync(GameAssetRefreshService.RefreshProfile.AllCharacterAssets);
+        RefreshGameAssetsAsync(GameAssetRefreshService.RefreshProfile.AllCharacterAssets, firstRun: true);
 
     private static string FindProjectRoot()
     {
@@ -2508,9 +2509,6 @@ public sealed partial class MainForm : Form
     private static string FirstNonEmpty(params string?[] values) =>
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? "";
 
-    // Fallback tag for projects created before PawnTag was required.
-    private const string LegacyDonorPawnTag = "Pawns.Playable.Batman.TheBatman2025";
-
     /// <summary>
     /// A starting pawn tag for a suit that has none, built from its display name or slot id. Only a
     /// suggestion - the author still has to accept it, and uniqueness is enforced at package time.
@@ -2526,7 +2524,8 @@ public sealed partial class MainForm : Form
     {
         var seed = Seed(project.DisplayName) ?? Seed(project.SlotId);
         var leaf = ToGameplayTagLeaf(seed ?? "");
-        return string.IsNullOrWhiteSpace(leaf) ? "" : $"Pawns.Playable.Batman.{leaf}";
+        var family = TargetFamilyNameForProject(project);
+        return string.IsNullOrWhiteSpace(leaf) ? "" : $"Pawns.Playable.{family}.{leaf}";
 
         static string? Seed(string? value) =>
             !string.IsNullOrWhiteSpace(value) &&
@@ -2537,10 +2536,23 @@ public sealed partial class MainForm : Form
 
     private static string DerivePawnTag(NativeSuitProject project)
     {
-        // Older projects fall back to the donor tag.
-        return string.IsNullOrWhiteSpace(project.PawnTag)
-            ? LegacyDonorPawnTag
-            : project.PawnTag.Trim();
+        return project.PawnTag.Trim();
+    }
+
+    private static string TargetFamilyNameForProject(NativeSuitProject? project)
+    {
+        var family = project?.BaseProfile?.GameplayFamily;
+        if (string.IsNullOrWhiteSpace(family) && project?.PlayableTemplate is not null)
+        {
+            family = GameDataService.Instance.FamilyForBasePath(project.PlayableTemplate.PackagePath)?.Name;
+        }
+        if (string.IsNullOrWhiteSpace(family) && project?.PlayableTemplate is not null)
+        {
+            family = BaseEligibilityService.CharacterStem(project.PlayableTemplate.PackagePath);
+        }
+
+        var token = ToGameplayTagLeaf(family ?? "");
+        return string.IsNullOrWhiteSpace(token) ? "Custom" : token;
     }
 
     private static string ToGameplayTagLeaf(string value)

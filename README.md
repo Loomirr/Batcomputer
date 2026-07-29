@@ -1,98 +1,121 @@
 # Batcomputer
 
-A Windows tool for building custom character suits for *LEGO Batman: Legacy of the Dark Knight*
-(UE 5.6).
+Batcomputer is a Windows suit-building tool for *LEGO Batman: Legacy of the Dark Knight*.
+It assembles custom playable suits from shipped character assets, then builds and installs a native
+mod release for the game.
 
-Pick a character to build on, swap parts and materials onto it, give it a name and a menu icon, and
-package the result as an IoStore trio (`.pak` / `.ucas` / `.utoc`) that drops into the game's `~mods`
-folder. A companion UE4SS runtime mod (distributed separately) is what actually registers the
-finished suits in-game.
+This repository contains the authoring tool only. It does not contain game files, extracted assets,
+Oodle, or the SuitSlots runtime mod.
 
-> This repository is the builder tool only. It contains no game files, no extracted assets, and not
-> the runtime DLL. Its bundled catalog is reference metadata only, not game content.
+## What It Does
 
-## What it does
-
-- Clones a shipped character - playable, cutscene and metadata - as a clean base for your suit.
-- Grafts parts from any character in the game: hair, hats, capes, torso add-ons, accessories.
-- Swaps materials per mesh slot, or builds new ones from your own textures.
-- Adds gadgets, including ones native to other characters - their animation sets get grafted in too.
-- Overrides animations (locomotion, or whole categories) from a compatibility catalog.
-- Generates the DCMD/UIMD assets that give a suit its menu name, description and icon.
-- Bundles several suits into a single mod.
+- Starts a suit from a playable donor and any cutscene or playable visual character.
+- Grafts hair, hats, capes, torsos, accessories, equipment, and supported animation data.
+- Clones real in-game material instances and applies generated textures per mesh slot.
+- Creates native PawnTag, DCMD, UIMD, StringTable, and Asset Registry data for menu discovery.
+- Builds one or more suits into a single mod release.
+- Installs the pak trio, PawnTags configuration, runtime manifest, and registry plugin to the correct
+  game folders.
+- Creates a player-ready ZIP with the same game-relative folder layout.
+- Provides a 3D assembly preview with saved per-part viewer placement and UV adjustments.
 
 ## Requirements
 
-The portable author release already includes the tools it is allowed to ship:
+### Author machine
 
-- **retoc-oodle** for normal asset extraction and mod packing.
-- **The template indexer** and the source/config for the UE 5.6 Asset Registry writer.
-- **The reference game-data catalog** used by the browser.
+- A local installation of *LEGO Batman: Legacy of the Dark Knight*.
+- A matching `.usmap` file for the current game build.
+- Unreal Engine 5.6 to build the small Asset Registry writer used by native releases.
+- The separate SuitSlots / NewSuitSlotNative runtime installed in the game.
 
-You still point the tool at things which must stay local to your machine:
+### Optional compact packages
 
-- **A .usmap mappings file** for your game build - lets the tool read and write cooked assets.
-- **Your installed game** and, for compact Oodle builds, an Oodle runtime from your local UE 5.6 install.
-- **Unreal Engine 5.6** when building the static Asset Registry plugin. Players do not need it.
+Batcomputer includes an Oodle-capable `retoc` helper. Compact Oodle packages additionally require a
+user-selected `oo2core_9_win64.dll` from a local UE 5.6 installation. The runtime DLL is never
+copied into a mod, release ZIP, or this repository.
 
-To build from source you also need the **.NET 10 SDK**. (A published release is self-contained and
-needs no .NET install.)
+### Players
 
-Nothing is hardcoded to a particular machine; every path is set in Setup.
+Players only need the finished mod and the SuitSlots runtime. They do not need Batcomputer, .NET,
+Unreal Engine, mappings, or extracted game assets.
 
-## Build & run
+## Portable Layout
+
+Extract a portable release somewhere writable, such as `C:\Tools\Batcomputer`.
+
+```text
+Batcomputer/
+  Batcomputer.exe
+  Generated/       build output, suit projects, previews, and extracts
+  Data/            reusable indexes and the writer cache
+  Runtime/         local runtime state
+  Tools/           retoc and the Asset Registry writer source
+```
+
+The default workspace stays beside `Batcomputer.exe`. Settings can move the workspace or the large
+extracted game dump to another drive.
+
+## First Run
+
+Setup asks for the game Paks folder, mappings, and other local paths. When UE 5.6 is configured,
+setup builds and verifies the Asset Registry writer once. Later mod builds reuse that local writer
+until its source or the configured UE build changes.
+
+Setup can then run the full character extraction. It reads only the shipped, top-level Paks
+containers and ignores nested `~mods` folders. The standard all-character extraction includes
+character, animation, and localisation assets and needs about 18 GB of free space.
+
+## Building a Suit
+
+1. Create or open a mod.
+2. Add a suit and choose a visual base plus a playable donor.
+3. Use the part, material, texture, equipment, and animation tools to assemble the suit.
+4. Set the native identity and review the donor-based menu icons.
+5. Use the 3D viewer to inspect the assembled character. Placement and UV saves affect the viewer
+   only; they do not alter the in-game character transform.
+6. Validate the release, then select **Build Mod**.
+
+Every export is a mod, including a mod containing one suit. **Build Mod** creates the release and
+installs it into the configured game folders. Restart the game before testing a newly built mod.
+
+## Visual Base and Playable Donor
+
+The visual base controls the character's appearance. Any cutscene character can be used for this
+purpose. The playable donor supplies the gameplay-facing data that a cutscene character may not
+have, such as equipment and movement support.
+
+This separation makes it possible to build visually from a wide range of characters without
+guessing gameplay metadata.
+
+## 3D Viewer
+
+The viewer lists shipped playable and cutscene characters plus suit projects in the current
+workspace. It deliberately ignores installed game mods, so an existing `~mods\Slot` folder cannot
+change the base-game catalog or preview material resolution.
+
+Generated 3D preview files are cleaned automatically by default. The cleanup setting can be changed
+in Settings when a generated model or texture needs to be inspected.
+
+## Building From Source
+
+Install the .NET 10 SDK, then run:
 
 ```powershell
 dotnet build -c Release
 dotnet run --project Batcomputer.csproj
 ```
 
-**The `Assets/` folder is not in this repository.** It holds the UI icons and the minifig part
-silhouettes, which are compiled into the exe as embedded resources - so a build expects
-`Assets/*.png` and `Assets/Parts/*.png` to be there. Copy them in before building from a fresh clone.
-Without them the tool still runs, it just degrades: the sidebar falls back to text glyphs and the
-character panel falls back to the slot list.
-
-Keep the tool somewhere you can write to, such as `C:\Tools\Batcomputer`. A default portable install
-keeps its settings, `Data`, `Runtime`, and `Generated` workspace beside `Batcomputer.exe`. Choose a
-different workspace in Settings only when you want the large extracted game dump on another drive;
-no data silently goes to AppData or `%TEMP%`.
-
-## First run
-
-Setup walks through the paths above, then use **Refresh game assets** to unpack the game data the
-tool reads from. That step is the one to plan for:
-
-| Profile | Size |
-|---|---|
-| Refresh Batman donor assets | ~50 MB |
-| Refresh all character assets | ~18 GB |
-| Full refresh (adds equipment, UI, gameplay, GameFeatures) | ~19 GB |
-
-The Batman donors are enough to build a Batman-based suit if you just want to try it. Later refreshes
-replace the previous dump instead of stacking up, unless you turn that off in Settings.
-
-## Regenerating the asset catalog
-
-`gamedata/lotdk-*.json` catalogs character families, gadgets and animation sets. A prebuilt one is
-included, so this is only needed when the game updates:
-
-```powershell
-dotnet run --project Batcomputer.csproj -- --build-gamedata "<extracted>\LEGOBatmanLotDK\Content" gamedata\lotdk.json --full
-```
-
-Keep exactly one catalog in `gamedata/`. The tool loads whichever is newest by timestamp, and zip
-extraction can shuffle timestamps around.
+The `Assets/` directory is intentionally not tracked. Release builds embed the artwork. A source
+checkout without local artwork still runs with text and fallback glyphs.
 
 ## Legal
 
-This tool ships no game content - no textures, meshes, or cooked assets. The bundled `gamedata/`
-catalog is reference metadata only: asset package paths and class names. It reads assets you have
-extracted from your own copy of the game, and produces mod packages for personal use. Don't
-redistribute extracted or cooked game assets.
+Batcomputer ships no game content. The bundled `gamedata` catalog contains reference metadata such
+as package paths and class names, not textures, meshes, or cooked assets. Use assets from a locally
+owned game installation and do not redistribute extracted game content.
 
-Not affiliated with TT Games, Warner Bros. Games or the LEGO Group.
+Batcomputer is not affiliated with TT Games, Warner Bros. Games, or the LEGO Group.
 
 ## License
 
-MIT - see [LICENSE](LICENSE).
+[MIT](LICENSE). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for bundled dependency notices.

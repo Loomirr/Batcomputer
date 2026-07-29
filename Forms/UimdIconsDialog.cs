@@ -1,11 +1,6 @@
 namespace Batcomputer;
 
-/// <summary>
-/// Modal editor for the suit's UIMD icon texture paths. The four fields map to the
-/// UIMD's MenuIcon / SuitIcon / LeftFacing / RightFacing. Leave a field blank to
-/// keep the base Batman icon for that slot. Paths are /Game object paths pointing
-/// at textures the modder ships in their own pak (nothing is staged here).
-/// </summary>
+/// <summary>Edits the four icon paths stored by a suit's UIMD.</summary>
 public sealed partial class UimdIconsDialog : Form
 {
     private readonly TextBox _menu = new();
@@ -23,7 +18,13 @@ public sealed partial class UimdIconsDialog : Form
         InitializeComponent();
     }
 
-    public UimdIconsDialog(string mod, string menu, string suit, string left, string right)
+    public UimdIconsDialog(
+        string donorUimd,
+        NativeMetadataDonorService.Icons donorIcons,
+        string menu,
+        string suit,
+        string left,
+        string right)
     {
         InitializeComponent();
         if (WinFormsDesignerSupport.IsInDesigner())
@@ -32,73 +33,155 @@ public sealed partial class UimdIconsDialog : Form
         }
 
         Controls.Clear();
-
-        Text = "Suit icons (UIMD)";
-        Width = 760;
-        Height = 360;
+        Text = "Suit icons";
+        AutoScaleMode = AutoScaleMode.None;
+        ClientSize = new Size(760, 478);
+        MinimumSize = new Size(760, 478);
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
         MaximizeBox = false;
+        ShowInTaskbar = false;
         BackColor = Theme.WindowBg;
         ForeColor = Theme.OnDark;
+        Font = Theme.Body;
 
-        var safeMod = string.IsNullOrWhiteSpace(mod) ? "Suit" : mod;
-        _menu.Text = string.IsNullOrWhiteSpace(menu) ? $"/Game/Mods/{safeMod}/UI/T_UI_IconChar_{safeMod}_Menu_BCA" : menu;
-        _suit.Text = string.IsNullOrWhiteSpace(suit) ? $"/Game/Mods/{safeMod}/UI/T_UI_IconSuit_{safeMod}_BCA" : suit;
-        _left.Text = string.IsNullOrWhiteSpace(left) ? $"/Game/Mods/{safeMod}/UI/T_UI_IconChar_{safeMod}_Left_BCA" : left;
-        _right.Text = string.IsNullOrWhiteSpace(right) ? $"/Game/Mods/{safeMod}/UI/T_UI_IconChar_{safeMod}_Right_BCA" : right;
+        _menu.Text = FirstNonEmpty(menu, donorIcons.Menu);
+        _suit.Text = FirstNonEmpty(suit, donorIcons.Suit);
+        _left.Text = FirstNonEmpty(left, donorIcons.Left);
+        _right.Text = FirstNonEmpty(right, donorIcons.Right);
 
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6, Padding = new Padding(12) };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
-        for (var i = 0; i < 4; i++) root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        Controls.Add(root);
-
-        root.Controls.Add(new Label
+        var root = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ForeColor = Theme.OnDarkMuted,
-            Text = "Point each icon at a texture in YOUR pak (/Game/... object path). Blank = keep the Batman default. Textures aren't staged — ship them in your own texture pak."
-        }, 0, 0);
+            ColumnCount = 1,
+            RowCount = 3,
+            Padding = new Padding(20, 16, 20, 16),
+            BackColor = Theme.WindowBg,
+        };
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 96));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
+        Controls.Add(root);
 
-        root.Controls.Add(Row("Menu icon", _menu), 0, 1);
-        root.Controls.Add(Row("Suit icon", _suit), 0, 2);
-        root.Controls.Add(Row("Left facing", _left), 0, 3);
-        root.Controls.Add(Row("Right facing", _right), 0, 4);
-
-        var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
-        var cancel = new Button { Text = "Cancel", Width = 90, DialogResult = DialogResult.Cancel };
-        Theme.StyleSmallDarkButton(cancel);
-        var ok = new Button { Text = "Save icons", Width = 120 };
-        Theme.StyleGoldButton(ok);
-        ok.Click += (_, _) =>
+        var header = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
+        header.Controls.Add(new Label
         {
-            foreach (var t in new[] { IconMenu, IconSuit, IconLeft, IconRight })
+            Text = "UIMD",
+            Dock = DockStyle.Top,
+            Height = 18,
+            Font = Theme.Eyebrow,
+            ForeColor = Theme.Textures,
+        });
+        header.Controls.Add(new Label
+        {
+            Text = "Suit icons",
+            Dock = DockStyle.Top,
+            Height = 29,
+            Font = Theme.Heading,
+            ForeColor = Theme.OnDark,
+        });
+        header.Controls.Add(new Label
+        {
+            Text = string.IsNullOrWhiteSpace(donorUimd)
+                ? "No donor UIMD was found. Add only icon textures that your mod ships."
+                : $"Starting from {UnrealPathUtil.AssetName(donorUimd)}. Keep a base-game path unless you are replacing that icon.",
+            Dock = DockStyle.Fill,
+            Font = Theme.Caption,
+            ForeColor = Theme.OnDarkMuted,
+            AutoEllipsis = true,
+        });
+        root.Controls.Add(header, 0, 0);
+
+        var card = new RoundedPanel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Theme.CardBg,
+            BorderColor = Theme.LineSoft,
+            CornerRadius = Theme.RadiusSm,
+            Padding = new Padding(14, 12, 14, 12),
+            Margin = new Padding(0, 0, 0, 12),
+        };
+        var fields = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, BackColor = Color.Transparent };
+        for (var i = 0; i < 4; i++)
+        {
+            fields.RowStyles.Add(new RowStyle(SizeType.Percent, 25));
+        }
+        fields.Controls.Add(Row("Menu icon", "Character menu portrait", _menu), 0, 0);
+        fields.Controls.Add(Row("Suit icon", "Suit selector tile", _suit), 0, 1);
+        fields.Controls.Add(Row("Left-facing", "Character-card left view", _left), 0, 2);
+        fields.Controls.Add(Row("Right-facing", "Character-card right view", _right), 0, 3);
+        card.Controls.Add(fields);
+        root.Controls.Add(card, 0, 1);
+
+        var footer = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.RightToLeft,
+            WrapContents = false,
+            Padding = new Padding(0, 4, 0, 0),
+            BackColor = Color.Transparent,
+        };
+        var save = new Button { Text = "Save icons", Width = 112, Height = 32 };
+        Theme.StyleGoldButton(save);
+        save.Click += (_, _) =>
+        {
+            foreach (var path in new[] { IconMenu, IconSuit, IconLeft, IconRight })
             {
-                if (!string.IsNullOrWhiteSpace(t) && !t.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+                if (!string.IsNullOrWhiteSpace(path) && !path.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
                 {
-                    Dialog.Warn(this, "Suit icons", "Icon paths must start with /Game/ (or be blank).");
+                    Dialog.Warn(this, "Suit icons", "Each icon path must start with /Game/ or be blank.");
                     return;
                 }
             }
             DialogResult = DialogResult.OK;
             Close();
         };
-        buttons.Controls.Add(cancel);
-        buttons.Controls.Add(ok);
-        root.Controls.Add(buttons, 0, 5);
+        var cancel = new Button { Text = "Cancel", Width = 88, Height = 32, DialogResult = DialogResult.Cancel };
+        Theme.StyleDarkButton(cancel);
+        footer.Controls.Add(save);
+        footer.Controls.Add(cancel);
+        root.Controls.Add(footer, 0, 2);
+        AcceptButton = save;
         CancelButton = cancel;
     }
 
-    private Control Row(string label, TextBox text)
+    protected override void OnHandleCreated(EventArgs e)
     {
-        var row = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
+        base.OnHandleCreated(e);
+        Theme.UseDarkTitleBar(this);
+    }
+
+    private static string FirstNonEmpty(string current, string donor) =>
+        !string.IsNullOrWhiteSpace(current) ? current : donor;
+
+    private static Control Row(string title, string detail, TextBox input)
+    {
+        var row = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 148));
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        row.Controls.Add(new Label { Text = label, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Theme.OnDark }, 0, 0);
-        text.Dock = DockStyle.Fill;
-        Theme.StyleDarkInput(text);
-        row.Controls.Add(text, 1, 0);
+        var label = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
+        label.Controls.Add(new Label
+        {
+            Text = title,
+            Dock = DockStyle.Top,
+            Height = 20,
+            Font = Theme.BodyStrong,
+            ForeColor = Theme.OnDark,
+        });
+        label.Controls.Add(new Label
+        {
+            Text = detail,
+            Dock = DockStyle.Top,
+            Height = 18,
+            Font = Theme.Caption,
+            ForeColor = Theme.OnDarkMuted,
+        });
+        row.Controls.Add(label, 0, 0);
+
+        input.Dock = DockStyle.Fill;
+        input.Margin = new Padding(0, 8, 0, 8);
+        Theme.StyleDarkInput(input);
+        row.Controls.Add(input, 1, 0);
         return row;
     }
 }

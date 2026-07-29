@@ -1790,6 +1790,34 @@ public sealed partial class MainForm
         grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Source package", DataPropertyName = nameof(PartRow.SourcePackagePath), AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
     }
 
+    private async Task<bool> EnsurePartIndexAsync()
+    {
+        if (_partIndex is { Parts.Count: > 0 })
+        {
+            return true;
+        }
+
+        var service = new PartIndexService(_projectRootText.Text.Trim());
+        _partIndex = service.LoadPartIndex();
+        if (_partIndex is { Parts.Count: > 0 })
+        {
+            return true;
+        }
+
+        AppendLog("Building the part index so the visual base can bring over its attachments...");
+        try
+        {
+            _partIndex = await Task.Run(() => service.BuildPartIndex());
+            AppendLog($"Parts indexed: {_partIndex.Parts.Count}");
+            return _partIndex.Parts.Count > 0;
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Part index build failed: {ex.Message}");
+            return false;
+        }
+    }
+
     private async Task BuildPartIndexAsync()
     {
         var projectRoot = _projectRootText.Text.Trim();

@@ -240,14 +240,6 @@ public sealed class UAssetPatchService
                 targetCutscenePackage + "." + targetCutsceneStem + "_C");
         }
 
-        // Generated DCMDs currently use the shared unlocked Batman2025 bridge tag.
-        // The runtime decides which custom DCMD payload is active per hovered
-        // button; the cooked generated assets should not invent per-suit tags yet.
-        Add(replacements, "Pawns.Playable.Batman.Absolute", "Pawns.Playable.Batman.TheBatman2025");
-        Add(replacements, "GameProgress.Definitions.Characters.Batman.Absolute", "GameProgress.Definitions.Characters.Batman.TheBatman2025");
-        Add(replacements, "Pawns.Playable.ThomasWayne.Default", "Pawns.Playable.Batman.TheBatman2025");
-        Add(replacements, "GameProgress.Definitions.Characters.ThomasWayne.Casual", "GameProgress.Definitions.Characters.Batman.TheBatman2025");
-
         return replacements;
     }
 

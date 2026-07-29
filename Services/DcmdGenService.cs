@@ -6,15 +6,7 @@ using UAssetAPI.Unversioned;
 
 namespace Batcomputer;
 
-/// <summary>
-/// Clones a Batman DinnerCharacterMetaData (DCMD) - which carries the Batman menu
-/// icon (DA_UIMD_Batman) and equipment (DA_ETA_Batarang / DA_ETA_Batclaw) - and
-/// repoints its Pawn / MenuActor / CinematicsActor class paths to the suit's
-/// generated playable + cutscene classes. The soft-object class paths are stored
-/// as name-map FNames, so a targeted name-map string replacement repoints them
-/// without touching the icon/equipment references. The result is a self-contained
-/// DCMD written next to the generated BPs so it packages into the trio.
-/// </summary>
+/// <summary>Clones a donor DCMD and repoints it at the generated character assets.</summary>
 public sealed class DcmdGenService
 {
     // The base DCMD to clone (unlocked-by-default Batman with icon + gadgets).
@@ -22,12 +14,8 @@ public sealed class DcmdGenService
     private const string SrcPlayablePkg = "/Game/Characters/Minifig/Batman/BP_Batman_TheBatman2025_Playable";
     private const string SrcCutscenePkg = "/Game/Characters/Minifig/Batman/BP_Batman_TheBatman2025_Default_Cutscene";
     private const string SrcDcmdPkg = "/Game/Characters/Minifig/Batman/DA_DCMD_Batman_TheBatman2025_Playable";
-    private const string SrcPlayableAsset = "BP_Batman_TheBatman2025_Playable";
-    private const string SrcCutsceneAsset = "BP_Batman_TheBatman2025_Default_Cutscene";
-    private const string SrcDcmdAsset = "DA_DCMD_Batman_TheBatman2025_Playable";
     private const string SrcPawnTag = "Pawns.Playable.Batman.TheBatman2025";
     private const string SrcUimdPkg = "/Game/Characters/Minifig/Batman/DA_UIMD_Batman";
-    private const string SrcUimdAsset = "DA_UIMD_Batman";
 
     public string ProjectRoot { get; }
 
@@ -44,7 +32,7 @@ public sealed class DcmdGenService
         public List<string> Repointed { get; } = new();
     }
 
-    /// <summary>Resolves the base Batman DCMD .uasset under the extracted content root.</summary>
+    /// <summary>Resolves the legacy default DCMD used by the command-line probe.</summary>
     public static string ResolveBaseDcmdPath()
     {
         var root = AppSettings.Current.EffectiveExtractedContentRoot();
@@ -62,23 +50,35 @@ public sealed class DcmdGenService
         string? uimdPackagePath = null,
         string? targetPawnTag = null,
         string? displayNameTableObjectPath = null,
-        string? displayNameKey = null)
+        string? displayNameKey = null,
+        string? progressTag = null,
+        NativeMetadataDonorService.Donor? donor = null)
     {
         var result = new GenResult();
         try
         {
-            var baseUasset = ResolveBaseDcmdPath();
-            if (!File.Exists(baseUasset))
+            var sourceUasset = donor?.DcmdUassetPath;
+            if (donor is not null && (string.IsNullOrWhiteSpace(sourceUasset) || !File.Exists(sourceUasset)))
+            {
+                result.Status = "missing-donor";
+                result.Error = $"Selected donor DCMD is not extracted: {sourceUasset}";
+                return result;
+            }
+            if (donor is null)
+            {
+                sourceUasset = ResolveBaseDcmdPath();
+            }
+            if (!File.Exists(sourceUasset))
             {
                 result.Status = "missing-base";
-                result.Error = $"Base Batman DCMD not found: {baseUasset}";
+                result.Error = $"Donor DCMD not found: {sourceUasset}";
                 return result;
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(outputBasePath)!);
             var baseNoExt = Path.Combine(
-                Path.GetDirectoryName(baseUasset)!,
-                Path.GetFileNameWithoutExtension(baseUasset));
+                Path.GetDirectoryName(sourceUasset)!,
+                Path.GetFileNameWithoutExtension(sourceUasset));
             CopyIfExists(baseNoExt + ".uasset", outputBasePath + ".uasset");
             CopyIfExists(baseNoExt + ".uexp", outputBasePath + ".uexp");
 
@@ -93,29 +93,45 @@ public sealed class DcmdGenService
             var playableStem = UnrealPathUtil.AssetName(playablePackagePath);
             var cutsceneStem = UnrealPathUtil.AssetName(cutscenePackagePath);
             var dcmdStem = UnrealPathUtil.AssetName(dcmdPackagePath);
+            var sourcePlayablePackage = !string.IsNullOrWhiteSpace(donor?.PlayablePackagePath)
+                ? UnrealPathUtil.NormalizePackagePath(donor.PlayablePackagePath)
+                : SrcPlayablePkg;
+            var sourceCutscenePackage = !string.IsNullOrWhiteSpace(donor?.CutscenePackagePath)
+                ? UnrealPathUtil.NormalizePackagePath(donor.CutscenePackagePath)
+                : SrcCutscenePkg;
+            var sourceDcmdPackage = !string.IsNullOrWhiteSpace(donor?.DcmdPackagePath)
+                ? UnrealPathUtil.NormalizePackagePath(donor.DcmdPackagePath)
+                : SrcDcmdPkg;
+            var sourceUimdPackage = !string.IsNullOrWhiteSpace(donor?.UimdPackagePath)
+                ? UnrealPathUtil.NormalizePackagePath(donor.UimdPackagePath)
+                : SrcUimdPkg;
+            var sourcePlayableStem = UnrealPathUtil.AssetName(sourcePlayablePackage);
+            var sourceCutsceneStem = UnrealPathUtil.AssetName(sourceCutscenePackage);
+            var sourceDcmdStem = UnrealPathUtil.AssetName(sourceDcmdPackage);
+            var sourceUimdStem = UnrealPathUtil.AssetName(sourceUimdPackage);
 
-            // Longest keys first so package paths and *_C names win over bare names.
             var replacements = new List<KeyValuePair<string, string>>
             {
-                new(SrcPlayablePkg, playablePackagePath),
-                new(SrcCutscenePkg, cutscenePackagePath),
-                new(SrcDcmdPkg, dcmdPackagePath),
-                new(SrcPlayableAsset + "_C", playableStem + "_C"),
-                new(SrcCutsceneAsset + "_C", cutsceneStem + "_C"),
-                new(SrcDcmdAsset, dcmdStem),
-                new(SrcPlayableAsset, playableStem),
-                new(SrcCutsceneAsset, cutsceneStem),
+                new(sourcePlayablePackage, playablePackagePath),
+                new(sourceCutscenePackage, cutscenePackagePath),
+                new(sourceDcmdPackage, dcmdPackagePath),
+                new(sourcePlayableStem + "_C", playableStem + "_C"),
+                new(sourceCutsceneStem + "_C", cutsceneStem + "_C"),
+                new(sourceDcmdStem, dcmdStem),
+                new(sourcePlayableStem, playableStem),
+                new(sourceCutsceneStem, cutsceneStem),
             };
 
             if (!string.IsNullOrWhiteSpace(targetPawnTag))
             {
-                replacements.Add(new(SrcPawnTag, targetPawnTag!));
+                var sourcePawnTag = string.IsNullOrWhiteSpace(donor?.PawnTag) ? SrcPawnTag : donor.PawnTag;
+                replacements.Add(new(sourcePawnTag, targetPawnTag!));
             }
 
             if (!string.IsNullOrWhiteSpace(uimdPackagePath))
             {
-                replacements.Add(new(SrcUimdPkg, uimdPackagePath!));
-                replacements.Add(new(SrcUimdAsset, UnrealPathUtil.AssetName(uimdPackagePath!)));
+                replacements.Add(new(sourceUimdPackage, uimdPackagePath!));
+                replacements.Add(new(sourceUimdStem, UnrealPathUtil.AssetName(uimdPackagePath!)));
             }
             // Exact-match per name-map entry: these are all standalone package/asset
             // FNames, so whole-entry replacement avoids substring overlap (e.g. the
@@ -144,6 +160,17 @@ public sealed class DcmdGenService
                 asset,
                 new[] { dcmdPackagePath, playablePackagePath, cutscenePackagePath, uimdPackagePath ?? "" },
                 result.Repointed);
+
+            if (!string.IsNullOrWhiteSpace(targetPawnTag) &&
+                NativeAssetTextPatch.SetGameplayTag(asset, "PawnTag", targetPawnTag.Trim()))
+            {
+                result.Repointed.Add($"PawnTag -> {targetPawnTag.Trim()}");
+            }
+            if (!string.IsNullOrWhiteSpace(progressTag) &&
+                NativeAssetTextPatch.SetGameplayTag(asset, "ProgressTag", progressTag.Trim()))
+            {
+                result.Repointed.Add($"ProgressTag -> {progressTag.Trim()}");
+            }
 
             // Native-suit menu name: repoint DisplayName to the mod StringTable + key
             // (property-level; §7.2 gap - DcmdGenService previously left DisplayName

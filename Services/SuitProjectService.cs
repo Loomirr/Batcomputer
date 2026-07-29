@@ -80,11 +80,13 @@ public sealed class SuitProjectService
     public string SaveProject(NativeSuitProject project)
     {
         Directory.CreateDirectory(GuiOutputRoot);
-        var safeSlot = MakeSafeFileName(project.SlotId);
-        var path = Path.Combine(GuiOutputRoot, $"{safeSlot}.native-suit-project.json");
+        var path = ProjectPathForSlot(project.SlotId);
         File.WriteAllText(path, JsonSerializer.Serialize(project, JsonOptions));
         return path;
     }
+
+    public string ProjectPathForSlot(string slotId) =>
+        Path.Combine(GuiOutputRoot, $"{MakeSafeFileName(slotId)}.native-suit-project.json");
 
     public string SavePatchPlan(NativeSuitPatchPlan plan)
     {

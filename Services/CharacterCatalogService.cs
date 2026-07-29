@@ -11,8 +11,8 @@ namespace Batcomputer;
 /// Lists the characters the 3D viewer can load: the game's playable and cutscene blueprints, plus
 /// the user's own suit projects.
 ///
-/// Scanning the paks means walking ~355k mounted entries, so the result is cached to disk and only
-/// rebuilt when asked - the viewer should open instantly on the second run.
+/// Only the shipped top-level Paks containers are mounted; nested ~mods folders are deliberately
+/// excluded. The result is cached to disk so the viewer opens instantly on later runs.
 /// </summary>
 internal static class CharacterCatalogService
 {
@@ -32,10 +32,7 @@ internal static class CharacterCatalogService
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
     private static string CachePath =>
-        Path.Combine(AppSettings.CacheRoot, "characters.json");
-
-    private static string LegacyCachePath =>
-        Path.Combine(AppSettings.ToolRoot, "Batcomputer.characters.json");
+        Path.Combine(AppSettings.CacheRoot, "characters.base-game.json");
 
     /// <summary>Loads the cached catalogue, or scans the paks when there is no cache yet.</summary>
     public static List<Entry> Load(string paksDir, string usmapPath, bool forceRescan = false)
@@ -61,9 +58,8 @@ internal static class CharacterCatalogService
     {
         try
         {
-            var path = File.Exists(CachePath) ? CachePath : LegacyCachePath;
-            return File.Exists(path)
-                ? JsonSerializer.Deserialize<List<Entry>>(File.ReadAllText(path))
+            return File.Exists(CachePath)
+                ? JsonSerializer.Deserialize<List<Entry>>(File.ReadAllText(CachePath))
                 : null;
         }
         catch
@@ -82,7 +78,7 @@ internal static class CharacterCatalogService
         }
 
         var provider = new DefaultFileProvider(
-            paksDir, SearchOption.AllDirectories,
+            paksDir, BaseGamePakSource.SearchOption,
             versions: new VersionContainer(EGame.GAME_UE5_6),
             pathComparer: StringComparer.OrdinalIgnoreCase);
         provider.MappingsContainer = new FileUsmapTypeMappingsProvider(usmapPath);

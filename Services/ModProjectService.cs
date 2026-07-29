@@ -167,4 +167,56 @@ public sealed class ModProjectService
             return absoluteSuitProjectPath;
         }
     }
+
+    /// <summary>Updates mod entries after a suit receives a new derived slot ID.</summary>
+    public int RelinkSuitReferences(
+        string previousSuitId,
+        string previousProjectPath,
+        NativeSuitProject currentSuit,
+        string currentProjectPath)
+    {
+        var updated = 0;
+        var suitService = new SuitProjectService(ProjectRoot);
+        foreach (var summary in ListMods())
+        {
+            var mod = LoadMod(summary.Path);
+            if (mod is null)
+            {
+                continue;
+            }
+
+            var direct = mod.Suits.Where(entry =>
+                entry.SuitId.Equals(previousSuitId, StringComparison.OrdinalIgnoreCase) ||
+                ResolveSuitProjectPath(entry).Equals(previousProjectPath, StringComparison.OrdinalIgnoreCase)).ToList();
+            var entries = direct;
+            if (entries.Count == 0)
+            {
+                var staleSameName = mod.Suits.Where(entry =>
+                {
+                    var saved = suitService.LoadProject(ResolveSuitProjectPath(entry));
+                    return saved is not null &&
+                           saved.DisplayName.Equals(currentSuit.DisplayName, StringComparison.OrdinalIgnoreCase) &&
+                           (string.IsNullOrWhiteSpace(saved.PawnTag) || !BaseEligibilityService.Evaluate(saved).IsReady);
+                }).ToList();
+                if (staleSameName.Count == 1)
+                {
+                    entries = staleSameName;
+                }
+            }
+
+            if (entries.Count == 0)
+            {
+                continue;
+            }
+
+            foreach (var entry in entries)
+            {
+                entry.SuitId = currentSuit.SlotId;
+                entry.SuitProjectPath = MakeRelativeSuitProjectPath(currentProjectPath);
+                updated++;
+            }
+            SaveMod(mod);
+        }
+        return updated;
+    }
 }

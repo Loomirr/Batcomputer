@@ -34,7 +34,7 @@ public static class ModelPreviewService
     {
         // Asset paths use mixed casing, so preview lookups stay case-insensitive.
         var provider = new DefaultFileProvider(
-            paksDir, SearchOption.AllDirectories,
+            paksDir, BaseGamePakSource.SearchOption,
             versions: new VersionContainer(EGame.GAME_UE5_6),
             pathComparer: StringComparer.OrdinalIgnoreCase);
         provider.MappingsContainer = new FileUsmapTypeMappingsProvider(usmapPath);

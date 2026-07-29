@@ -34,6 +34,7 @@
   <ItemGroup>
     <!-- Unreal build rules are not part of Batcomputer. -->
     <Compile Remove="Tools\SuitSlotsRegistryWriter\**\*.cs" />
+    <Compile Remove="artifacts\**\*.cs" />
     <!-- Embed app art in the single-file release. -->
     <EmbeddedResource Include="Assets\**\*.png" />
     <EmbeddedResource Include="Assets\**\*.gif" />
@@ -59,6 +60,9 @@
     <None Update="Tools\README.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="Tools\Build-NativeSuitTemplateIndex.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="Tools\SuitSlotsRegistryWriter\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="Tools\SuitSlotsRegistryWriter\Source\**\*.cs"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <Target Name="RemoveWebView2WpfReference" BeforeTargets="ResolveAssemblyReferences">
     <ItemGroup>

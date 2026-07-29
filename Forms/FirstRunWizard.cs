@@ -46,6 +46,9 @@ public sealed class FirstRunWizard : Form
     /// </summary>
     public bool InitialExtractionRequested { get; private set; }
 
+    /// <summary>Set when setup can prepare the local UE registry writer before the first build.</summary>
+    public bool RegistryWriterPreparationRequested { get; private set; }
+
     public FirstRunWizard(AppSettings settings)
     {
         _settings = settings;
@@ -378,6 +381,7 @@ public sealed class FirstRunWizard : Form
     private void Finish()
     {
         _settings.Save();
+        RegistryWriterPreparationRequested = RegistryPluginService.NeedsWriterPreparation();
         var missing = _steps.Where(s => !s.Optional)
             .Where(s => { var v = s.Get(_settings); return string.IsNullOrWhiteSpace(v) || !(s.IsFile ? File.Exists(v) : Directory.Exists(v)); })
             .Select(s => s.Title)
@@ -393,10 +397,15 @@ public sealed class FirstRunWizard : Form
                 confirmText: "Extract assets", cancelText: "Finish without extracting", severity: Dialog.Level.Warn,
                 windowTitle: "Batcomputer - Setup");
 
+            var setupMessage = InitialExtractionRequested
+                ? "Setup is saved. The full first-time extraction will begin as Batcomputer opens."
+                : "Everything is pointed at a real path. You're ready to build.";
+            if (RegistryWriterPreparationRequested)
+            {
+                setupMessage += "\n\nBatcomputer will now prepare and verify the UE 5.6 registry writer for future mod builds.";
+            }
             Dialog.Success(this, "Setup complete",
-                InitialExtractionRequested
-                    ? "Setup is saved. The full first-time extraction will begin as Batcomputer opens."
-                    : "Everything is pointed at a real path. You're ready to build.",
+                setupMessage,
                 "Batcomputer - Setup");
         }
         else

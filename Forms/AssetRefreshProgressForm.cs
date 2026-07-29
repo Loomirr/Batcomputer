@@ -10,9 +10,9 @@ public sealed class AssetRefreshProgressForm : Form
 
     public event EventHandler? CancelRequested;
 
-    public AssetRefreshProgressForm()
+    public AssetRefreshProgressForm(bool firstRun = false)
     {
-        Text = "Refreshing game assets";
+        Text = firstRun ? "Batcomputer - First-time extraction" : "Refreshing game assets";
         BackColor = Theme.WindowBg;
         ForeColor = Theme.OnDark;
         Font = Theme.Body;
@@ -21,10 +21,33 @@ public sealed class AssetRefreshProgressForm : Form
         MinimizeBox = false;
         MaximizeBox = false;
         ShowInTaskbar = false;
-        ClientSize = new Size(620, 150);
+        ClientSize = new Size(620, firstRun ? 210 : 150);
+
+        var offset = 0;
+        if (firstRun)
+        {
+            var eyebrow = new Label
+            {
+                Left = 18, Top = 16, Width = 584, Height = 16,
+                Text = "SETUP - STEP 2 OF 2", Font = Theme.Eyebrow, ForeColor = Theme.Gold,
+            };
+            var title = new Label
+            {
+                Left = 18, Top = 36, Width = 584, Height = 24,
+                Text = "First-time game asset extraction", Font = new Font("Segoe UI", 13f, FontStyle.Bold), ForeColor = Theme.OnDark,
+            };
+            var intro = new Label
+            {
+                Left = 18, Top = 62, Width = 584, Height = 32,
+                Text = "Batcomputer is extracting character, animation, and localisation assets. This can use about 18 GB and may take a while.",
+                Font = Theme.Body, ForeColor = Theme.OnDarkMuted,
+            };
+            Controls.AddRange(new Control[] { eyebrow, title, intro });
+            offset = 60;
+        }
 
         _phase.Left = 18;
-        _phase.Top = 16;
+        _phase.Top = 16 + offset;
         _phase.Width = 584;
         _phase.Height = 20;
         _phase.Font = new Font("Segoe UI", 10f, FontStyle.Bold);
@@ -32,7 +55,7 @@ public sealed class AssetRefreshProgressForm : Form
         _phase.Text = "Preparing";
 
         _status.Left = 18;
-        _status.Top = 38;
+        _status.Top = 38 + offset;
         _status.Width = 584;
         _status.Height = 20;
         _status.AutoEllipsis = true;
@@ -41,7 +64,7 @@ public sealed class AssetRefreshProgressForm : Form
         _status.Text = "Starting…";
 
         _progress.Left = 18;
-        _progress.Top = 68;
+        _progress.Top = 68 + offset;
         _progress.Width = 584;
         _progress.Height = 14;
         _progress.Maximum = 100;
@@ -49,7 +72,7 @@ public sealed class AssetRefreshProgressForm : Form
         Theme.StyleDarkButton(_cancel);
         _cancel.Text = "Cancel";
         _cancel.Left = 502;
-        _cancel.Top = 106;
+        _cancel.Top = 106 + offset;
         _cancel.Width = 100;
         _cancel.Height = 28;
         _cancel.Click += (_, _) =>

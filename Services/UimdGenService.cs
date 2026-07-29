@@ -4,15 +4,7 @@ using UAssetAPI.Unversioned;
 
 namespace Batcomputer;
 
-/// <summary>
-/// Clones a Batman TtPawnUIMetaData (DA_UIMD) - the asset that supplies a suit's
-/// menu/suit/left/right icons and its description - and renames it to the suit's
-/// own /Game/Mods path. Icon textures can optionally be retargeted to a modder's
-/// own icon texture object paths (like the material generator, it does NOT stage
-/// textures - modders ship their own icon paks). The four icon references and the
-/// asset's own name are stored as name-map FNames, so a targeted name-map string
-/// replacement repoints them without disturbing the description string table.
-/// </summary>
+/// <summary>Clones a donor UIMD into the mod's package path.</summary>
 public sealed class UimdGenService
 {
     private const string BaseUimdPackage = "Characters/Minifig/Batman/DA_UIMD_Batman";
@@ -46,10 +38,7 @@ public sealed class UimdGenService
         return Path.Combine(root, BaseUimdPackage.Replace('/', Path.DirectorySeparatorChar) + ".uasset");
     }
 
-    /// <param name="iconOverrides">
-    /// Optional map of base icon object path (SrcMenuIcon/SrcLeftIcon/SrcRightIcon/SrcSuitIcon)
-    /// to the modder's own icon object path. Omitted icons keep the Batman default.
-    /// </param>
+    /// <param name="iconOverrides">Maps donor icon paths to replacement texture paths.</param>
     /// <param name="pawnTag">
     /// Native pawn tag to write into the UIMD's PawnTag (e.g.
     /// "Pawns.Playable.Batman.Electric"). Null/empty leaves the inherited tag - the
@@ -68,23 +57,34 @@ public sealed class UimdGenService
         string? pawnTag = null,
         string? descriptionTableObjectPath = null,
         string? descriptionKey = null,
-        string? lockedDescriptionKey = null)
+        string? lockedDescriptionKey = null,
+        NativeMetadataDonorService.Donor? donor = null)
     {
         var result = new GenResult();
         try
         {
-            var baseUasset = ResolveBaseUimdPath();
-            if (!File.Exists(baseUasset))
+            var sourceUasset = donor?.UimdUassetPath;
+            if (donor is not null && (string.IsNullOrWhiteSpace(sourceUasset) || !File.Exists(sourceUasset)))
+            {
+                result.Status = "missing-donor";
+                result.Error = $"Selected donor UIMD is not extracted: {sourceUasset}";
+                return result;
+            }
+            if (donor is null)
+            {
+                sourceUasset = ResolveBaseUimdPath();
+            }
+            if (!File.Exists(sourceUasset))
             {
                 result.Status = "missing-base";
-                result.Error = $"Base Batman UIMD not found: {baseUasset}";
+                result.Error = $"Donor UIMD not found: {sourceUasset}";
                 return result;
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(outputBasePath)!);
             var baseNoExt = Path.Combine(
-                Path.GetDirectoryName(baseUasset)!,
-                Path.GetFileNameWithoutExtension(baseUasset));
+                Path.GetDirectoryName(sourceUasset)!,
+                Path.GetFileNameWithoutExtension(sourceUasset));
             CopyIfExists(baseNoExt + ".uasset", outputBasePath + ".uasset");
             CopyIfExists(baseNoExt + ".uexp", outputBasePath + ".uexp");
 
@@ -93,16 +93,23 @@ public sealed class UimdGenService
             asset.FolderName = new FString(cleanUimdPackagePath);
 
             var uimdStem = UnrealPathUtil.AssetName(cleanUimdPackagePath);
+            var sourceUimdPackage = !string.IsNullOrWhiteSpace(donor?.UimdPackagePath)
+                ? UnrealPathUtil.NormalizePackagePath(donor.UimdPackagePath)
+                : SrcUimdPkg;
+            var sourceUimdAsset = UnrealPathUtil.AssetName(sourceUimdPackage);
             var replacements = new List<KeyValuePair<string, string>>
             {
-                new(SrcUimdPkg, cleanUimdPackagePath),
-                new(SrcUimdAsset, uimdStem),
+                new(sourceUimdPackage, cleanUimdPackagePath),
+                new(sourceUimdAsset, uimdStem),
             };
             var cleanPackageTargets = new List<string> { cleanUimdPackagePath };
 
             if (iconOverrides is not null)
             {
-                foreach (var src in new[] { SrcMenuIcon, SrcLeftIcon, SrcRightIcon, SrcSuitIcon })
+                var sourceIcons = donor is null
+                    ? new[] { SrcMenuIcon, SrcLeftIcon, SrcRightIcon, SrcSuitIcon }
+                    : new[] { donor.IconPaths.Menu, donor.IconPaths.Suit, donor.IconPaths.Left, donor.IconPaths.Right };
+                foreach (var src in sourceIcons.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase))
                 {
                     if (iconOverrides.TryGetValue(src, out var target) && !string.IsNullOrWhiteSpace(target))
                     {

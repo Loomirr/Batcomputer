@@ -29,7 +29,7 @@ internal static class ModelPreviewProbe
         if (!File.Exists(usmapPath)) { Console.Error.WriteLine("usmap not found"); return 2; }
 
         var provider = new DefaultFileProvider(
-            paksDir, SearchOption.AllDirectories,
+            paksDir, BaseGamePakSource.SearchOption,
             versions: new VersionContainer(EGame.GAME_UE5_6),
             pathComparer: StringComparer.OrdinalIgnoreCase);
         provider.MappingsContainer = new FileUsmapTypeMappingsProvider(usmapPath);

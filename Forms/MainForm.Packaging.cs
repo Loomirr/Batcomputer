@@ -1043,19 +1043,29 @@ public sealed partial class MainForm
 
         var uimdPkg = DeriveUimdPackagePath(dcmdPkg!);
         var uimdOutputBase = PackagePathToContentPath(contentRootToPackage, uimdPkg);
+        var metadataDonor = NativeMetadataDonorService.TryRead(
+            project.DcmdTemplate,
+            project.PlayableTemplate,
+            project.CutsceneTemplate);
+        if (metadataDonor is null)
+        {
+            AppendLog("Skipping native metadata generation - the selected donor DCMD/UIMD could not be read.");
+            return;
+        }
+
+        var pawnTag = DerivePawnTag(project);
         var icons = new Dictionary<string, string>(StringComparer.Ordinal);
-        // IconSuit IS written into the UIMD: the custom suit needs its own suit icon wherever
-        // the game reads UIMetaData (menu, HUD). The side effect -- the NATIVE donor button
-        // rendering our icon while its DCMD is patched -- is corrected at runtime instead, by
-        // re-asserting the donor's own icon onto the native button (see the DLL's native
-        // source-button icon re-assert). Fixing it here was tried and reverted: it left the
-        // suit without its own icon in every UIMetaData-driven surface.
-        if (!string.IsNullOrWhiteSpace(project.IconMenu)) icons[UimdGenService.SrcMenuIcon] = project.IconMenu;
-        if (!string.IsNullOrWhiteSpace(project.IconSuit)) icons[UimdGenService.SrcSuitIcon] = project.IconSuit;
-        if (!string.IsNullOrWhiteSpace(project.IconLeft)) icons[UimdGenService.SrcLeftIcon] = project.IconLeft;
-        if (!string.IsNullOrWhiteSpace(project.IconRight)) icons[UimdGenService.SrcRightIcon] = project.IconRight;
-        var uimdResult = new UimdGenService(_projectRootText.Text.Trim()).Generate(uimdOutputBase, uimdPkg, icons.Count > 0 ? icons : null);
-        AppendLog($"UIMD generate: {uimdResult.Status}{(icons.Count > 0 ? $" ({icons.Count} custom icon(s))" : " (default Batman icons)")}");
+        AddIconOverride(metadataDonor.IconPaths.Menu, project.IconMenu);
+        AddIconOverride(metadataDonor.IconPaths.Suit, project.IconSuit);
+        AddIconOverride(metadataDonor.IconPaths.Left, project.IconLeft);
+        AddIconOverride(metadataDonor.IconPaths.Right, project.IconRight);
+        var uimdResult = new UimdGenService(_projectRootText.Text.Trim()).Generate(
+            uimdOutputBase,
+            uimdPkg,
+            icons.Count > 0 ? icons : null,
+            pawnTag: pawnTag,
+            donor: metadataDonor);
+        AppendLog($"UIMD generate: {uimdResult.Status}{(icons.Count > 0 ? $" ({icons.Count} changed icon(s))" : $" (from {UnrealPathUtil.AssetName(metadataDonor.UimdPackagePath)})")}");
         if (!string.IsNullOrWhiteSpace(uimdResult.Error))
         {
             AppendLog("  " + uimdResult.Error);
@@ -1072,19 +1082,16 @@ public sealed partial class MainForm
         // base-game scanned Character folder anymore.
         var outputBase = PackagePathToContentPath(contentRootToPackage, dcmdPkg!);
 
-        // Purge any stale scanned-location DCMD left by older registry experiments.
-        // The builder now owns only the /Game/Mods/<Mod>/Characters copy.
-        var staleScannedDcmdPkg = "/Game/Characters/Minifig/Batman/" + UnrealPathUtil.AssetName(dcmdPkg!);
-        var staleBase = PackagePathToContentPath(contentRootToPackage, staleScannedDcmdPkg);
-        foreach (var ext in new[] { ".uasset", ".uexp", ".ubulk" })
-        {
-            try { if (File.Exists(staleBase + ext)) { File.Delete(staleBase + ext); AppendLog($"  removed stale scanned DCMD {Path.GetFileName(staleBase + ext)} from old registry-test location"); } }
-            catch { /* best effort */ }
-        }
-
-        var pawnTag = DerivePawnTag(project);
         var result = new DcmdGenService(_projectRootText.Text.Trim())
-            .Generate(outputBase, dcmdPkg!, playablePkg!, cutscenePkg!, uimdPkg, pawnTag);
+            .Generate(
+                outputBase,
+                dcmdPkg!,
+                playablePkg!,
+                cutscenePkg!,
+                uimdPackagePath: uimdPkg,
+                targetPawnTag: pawnTag,
+                progressTag: project.ProgressTag,
+                donor: metadataDonor);
 
         AppendLog($"DCMD generate: {result.Status} (PawnTag -> {pawnTag}, shipped beside BP assets at {dcmdPkg})");
         if (!string.IsNullOrWhiteSpace(result.Error))
@@ -1095,6 +1102,16 @@ public sealed partial class MainForm
         {
             AppendLog($"  wrote {Path.GetFileName(result.OutputUasset)} ({result.Repointed.Count} name(s) repointed, UIMetaData -> {uimdPkg})");
             InjectStagedEquipment(project, result.OutputUasset);
+        }
+
+        void AddIconOverride(string source, string target)
+        {
+            if (!string.IsNullOrWhiteSpace(source) &&
+                !string.IsNullOrWhiteSpace(target) &&
+                !source.Equals(target, StringComparison.OrdinalIgnoreCase))
+            {
+                icons[source] = target;
+            }
         }
     }
 

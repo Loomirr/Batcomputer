@@ -2,17 +2,9 @@ using System.Drawing.Drawing2D;
 
 namespace Batcomputer;
 
-/// <summary>
-/// The suit's native identity: its globally-unique pawn tag plus the menu text that lands in the
-/// mod StringTable. The pawn tag is the field that actually matters - two suits sharing one cannot
-/// be switched between in-game - so it gets live validation and blocks Save, rather than being a
-/// plain box labelled "(required)" that accepted anything.
-/// </summary>
+/// <summary>Edits a suit's pawn tag and menu text.</summary>
 public sealed class NativeIdentityDialog : Form
 {
-    /// <summary>The tag the game's own TheBatman2025 character answers to.</summary>
-    private const string DonorPawnTag = "Pawns.Playable.Batman.TheBatman2025";
-
     private const int PadX = 22;
     private const int FieldW = 496;
 
@@ -35,10 +27,7 @@ public sealed class NativeIdentityDialog : Form
     public NativeIdentityDialog(NativeSuitProject project, string suggestedTag)
     {
         _suggestedTag = suggestedTag ?? "";
-
         Text = "Native identity";
-        // Positions here are exact pixels; let font auto-scaling nudge them and the right-edge
-        // controls drift off the client area (the Suggest button was clipped at >100% DPI).
         AutoScaleMode = AutoScaleMode.None;
         AutoScroll = false;
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -51,8 +40,6 @@ public sealed class NativeIdentityDialog : Form
         Font = Theme.Body;
 
         var y = 18;
-
-        // --- header ---------------------------------------------------------
         Controls.Add(new Label
         {
             Text = "Native identity",
@@ -72,10 +59,9 @@ public sealed class NativeIdentityDialog : Form
         });
         y += 30;
 
-        // --- pawn tag -------------------------------------------------------
         y = Section("IDENTITY", y);
         y = Field(_tag, "Pawn tag", project.PawnTag, y,
-            "Globally unique across every installed mod. This is what the game switches on.");
+            "Use the tag family your character needs. It can be any valid pawn tag, but must be unique.");
 
         _tagDot.Bounds = new Rectangle(PadX, y, 8, 8);
         Controls.Add(_tagDot);
@@ -87,7 +73,6 @@ public sealed class NativeIdentityDialog : Form
         const int suggestW = 78;
         var suggest = new Button
         {
-            // Right edge aligned with the input fields (right edge = PadX + FieldW).
             Text = "Suggest",
             Bounds = new Rectangle(PadX + FieldW - suggestW, y - 9, suggestW, 24),
             Visible = !string.IsNullOrWhiteSpace(_suggestedTag),
@@ -97,21 +82,16 @@ public sealed class NativeIdentityDialog : Form
         Controls.Add(suggest);
         y += 22;
 
-        // --- menu text ------------------------------------------------------
         y = Section("MENU TEXT", y);
-        y = Field(_name, "Name", project.DisplayName, y, "Shown as the suit's name in the character menu.");
-        y = Field(_desc, "Description", project.Description, y, "The description for your suit.");
+        y = Field(_name, "Name", project.DisplayName, y, "Shown as the suit name in the character menu.");
+        y = Field(_desc, "Description", project.Description, y, "Shown beneath the suit name.");
         y = Field(_locked, "Locked description", project.LockedDescription, y,
-            "Shown while the suit is gated. Leave empty if it never is.");
+            "Shown while this suit is gated. Leave blank when it is never gated.");
 
-        // --- advanced -------------------------------------------------------
         y = Section("ADVANCED", y);
         y = Field(_progress, "Progress / unlock tag", project.ProgressTag, y,
-            "Which unlock gates this suit. The default keeps it unlocked for everyone - change it only " +
-            "if you want the suit gated behind progression.");
+            "Copied from the playable base. Change it only when this suit uses a different unlock gate.");
 
-        // --- buttons --------------------------------------------------------
-        // Size to the content, then place the buttons - not the other way round.
         ClientSize = new Size(FieldW + PadX * 2, y + 60);
         var buttonY = ClientSize.Height - 46;
 
@@ -129,48 +109,41 @@ public sealed class NativeIdentityDialog : Form
         };
         Theme.StyleDarkButton(cancel);
         Controls.Add(cancel);
-
         AcceptButton = _save;
         CancelButton = cancel;
 
         _tag.TextChanged += (_, _) => Revalidate();
-        Revalidate();
-
-        // Prefill a suggestion rather than opening empty: a blank tag is how suits used to end up
-        // silently sharing the donor tag at package time.
         if (string.IsNullOrWhiteSpace(_tag.Text) && !string.IsNullOrWhiteSpace(_suggestedTag))
         {
             _tag.Text = _suggestedTag;
         }
+        Revalidate();
     }
 
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
-        // Directly, not via the app-wide Idle sweep: a modal dialog is visible before the first
-        // idle tick, so the sweep alone lets a light caption flash.
         Theme.UseDarkTitleBar(this);
     }
 
     private int Section(string title, int y)
     {
-        var lbl = new Label
+        var label = new Label
         {
             Bounds = new Rectangle(PadX, y, FieldW, 22),
             BackColor = Theme.WindowBg,
         };
-        lbl.Paint += (_, e) =>
+        label.Paint += (_, e) =>
         {
-            var tw = TextRenderer.MeasureText(title, Theme.Eyebrow).Width;
+            var width = TextRenderer.MeasureText(title, Theme.Eyebrow).Width;
             TextRenderer.DrawText(e.Graphics, title, Theme.Eyebrow, new Point(0, 6), Theme.Gold);
             using var pen = new Pen(Theme.LineSoft);
-            e.Graphics.DrawLine(pen, tw + 10, lbl.Height / 2 + 1, lbl.Width, lbl.Height / 2 + 1);
+            e.Graphics.DrawLine(pen, width + 10, label.Height / 2 + 1, label.Width, label.Height / 2 + 1);
         };
-        Controls.Add(lbl);
+        Controls.Add(label);
         return y + 30;
     }
 
-    /// <summary>Label, rounded input, and a caption underneath. Returns the next free Y.</summary>
     private int Field(TextBox box, string label, string? value, int y, string hint)
     {
         Controls.Add(new Label
@@ -202,61 +175,27 @@ public sealed class NativeIdentityDialog : Form
         Controls.Add(frame);
         y += 38;
 
-        // Measure the wrapped hint rather than guessing from its length - a guess that runs short
-        // is how the Settings panel ended up with two controls on the same row.
-        var hintH = TextRenderer.MeasureText(hint, Theme.Caption, new Size(FieldW, 0),
+        var hintHeight = TextRenderer.MeasureText(hint, Theme.Caption, new Size(FieldW, 0),
             TextFormatFlags.WordBreak).Height;
         Controls.Add(new Label
         {
             Text = hint,
             Font = Theme.Caption,
             ForeColor = Theme.OnDarkMuted,
-            Bounds = new Rectangle(PadX, y, FieldW, hintH),
+            Bounds = new Rectangle(PadX, y, FieldW, hintHeight),
             BackColor = Color.Transparent,
-            AutoSize = false,
         });
-        return y + hintH + 14;
+        return y + hintHeight + 14;
     }
 
-    /// <summary>
-    /// Live tag verdict. Blocks Save on the two states that produce a broken suit; the namespace
-    /// check only warns, because an unusual tag may still be deliberate.
-    /// </summary>
     private void Revalidate()
     {
-        var tag = _tag.Text.Trim();
-        Color dot;
-        string message;
-        bool ok;
-
-        if (string.IsNullOrWhiteSpace(tag))
-        {
-            dot = Theme.Crit;
-            message = "Required — without it the suit falls back to the shared donor tag.";
-            ok = false;
-        }
-        else if (tag.Equals(DonorPawnTag, StringComparison.OrdinalIgnoreCase))
-        {
-            dot = Theme.Crit;
-            message = "That tag belongs to the game's own TheBatman2025 character.";
-            ok = false;
-        }
-        else if (!tag.StartsWith("Pawns.Playable.", StringComparison.OrdinalIgnoreCase))
-        {
-            dot = Theme.Warn;
-            message = "Outside Pawns.Playable.* — it will build, but may not resolve in-game.";
-            ok = true;
-        }
-        else
-        {
-            dot = Theme.Good;
-            message = "Unique namespace — good.";
-            ok = true;
-        }
-
-        _tagDot.DotColor = dot;
-        _tagStatus.Text = message;
-        _tagStatus.ForeColor = dot;
-        _save.Enabled = ok;
+        var hasTag = !string.IsNullOrWhiteSpace(_tag.Text);
+        _tagDot.DotColor = hasTag ? Theme.Good : Theme.Crit;
+        _tagStatus.ForeColor = hasTag ? Theme.Good : Theme.Crit;
+        _tagStatus.Text = hasTag
+            ? "Saved as entered. Release validation checks for duplicates."
+            : "Required - every suit needs its own pawn tag.";
+        _save.Enabled = hasTag;
     }
 }

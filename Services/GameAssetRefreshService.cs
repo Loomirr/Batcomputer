@@ -133,9 +133,15 @@ public sealed class GameAssetRefreshService
         Directory.CreateDirectory(outputRoot);
 
         var filters = FiltersFor(profile);
+        var baseGameUtocs = BaseGamePakSource.FindUtocs(paksRoot);
+        if (baseGameUtocs.Count == 0)
+        {
+            throw new InvalidDataException($"No top-level .utoc containers were found in '{paksRoot}'.");
+        }
         var result = new Result { Profile = profile, OutputRoot = outputRoot };
-        progress?.Report(new Progress(2, "Preparing", $"Source: {paksRoot}"));
+        progress?.Report(new Progress(2, "Preparing", $"Base-game source: {paksRoot}"));
         result.Logs.Add($"Refresh profile: {profile}");
+        result.Logs.Add($"Base-game pak source: {baseGameUtocs.Count} top-level .utoc container(s); nested ~mods folders are excluded.");
 
         for (var i = 0; i < filters.Count; i++)
         {
@@ -145,7 +151,7 @@ public sealed class GameAssetRefreshService
             var end = 5 + ((i + 1) * 70 / filters.Count);
             progress?.Report(new Progress(start, "Extracting", filter));
 
-            var command = await RunRetocAsync(retoc, paksRoot, outputRoot, filter, cancellationToken);
+            var command = await RunRetocAsync(retoc, baseGameUtocs, outputRoot, filter, cancellationToken);
             result.Logs.AddRange(command.OutputLines.TakeLast(12));
             if (command.ExitCode != 0)
             {
@@ -212,7 +218,29 @@ public sealed class GameAssetRefreshService
 
     private static async Task<ProcessResult> RunRetocAsync(
         string retoc,
-        string paksRoot,
+        IReadOnlyList<string> baseGameUtocs,
+        string outputRoot,
+        string filter,
+        CancellationToken cancellationToken)
+    {
+        var outputLines = new List<string>();
+        var errorLines = new List<string>();
+        foreach (var utoc in baseGameUtocs)
+        {
+            var result = await RunRetocContainerAsync(retoc, utoc, outputRoot, filter, cancellationToken);
+            outputLines.AddRange(result.OutputLines);
+            errorLines.AddRange(result.ErrorLines);
+            if (result.ExitCode != 0)
+            {
+                return new ProcessResult(result.ExitCode, outputLines, errorLines);
+            }
+        }
+        return new ProcessResult(0, outputLines, errorLines);
+    }
+
+    private static async Task<ProcessResult> RunRetocContainerAsync(
+        string retoc,
+        string utoc,
         string outputRoot,
         string filter,
         CancellationToken cancellationToken)
@@ -232,7 +260,7 @@ public sealed class GameAssetRefreshService
         startInfo.ArgumentList.Add(filter);
         startInfo.ArgumentList.Add("--version");
         startInfo.ArgumentList.Add(RetocEngineVersion);
-        startInfo.ArgumentList.Add(paksRoot);
+        startInfo.ArgumentList.Add(utoc);
         startInfo.ArgumentList.Add(outputRoot);
 
         using var process = Process.Start(startInfo)

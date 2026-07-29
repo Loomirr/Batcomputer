@@ -374,11 +374,13 @@ internal static class Program
         // machine), this is skipped entirely and no config file is needed. New users
         // whose defaults don't exist get guided through setup on first launch.
         var initialExtractionRequested = false;
+        var registryWriterPreparationRequested = false;
         if (!AppSettings.Current.IsUsable())
         {
             using var setup = new FirstRunWizard(AppSettings.Current);
             setup.ShowDialog();
             initialExtractionRequested = setup.InitialExtractionRequested;
+            registryWriterPreparationRequested = setup.RegistryWriterPreparationRequested;
             // Reload whatever was saved (or keep the in-memory defaults if cancelled).
             AppSettings.Current = AppSettings.Load();
             if (!AppSettings.Current.IsUsable() && !initialExtractionRequested)
@@ -396,9 +398,11 @@ internal static class Program
         }
 
         var mainForm = new MainForm();
-        if (initialExtractionRequested)
+        if (initialExtractionRequested || registryWriterPreparationRequested)
         {
-            mainForm.Shown += async (_, _) => await mainForm.RunFirstTimeAssetExtractionAsync();
+            mainForm.Shown += async (_, _) => await mainForm.RunInitialSetupTasksAsync(
+                registryWriterPreparationRequested,
+                initialExtractionRequested);
         }
         Application.Run(mainForm);
         return 0;

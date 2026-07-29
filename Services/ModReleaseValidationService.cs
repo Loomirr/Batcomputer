@@ -413,11 +413,11 @@ public sealed class ModReleaseValidationService
     {
         var mod = ModFolderFromPackagePath(dcmdPackagePath);
         var stem = UnrealPathUtil.AssetName(dcmdPackagePath);
-        const string prefix = "DA_DCMD_Batman_";
+        const string prefix = "DA_DCMD_";
         const string suffix = "_Playable";
         if (stem.StartsWith(prefix, StringComparison.Ordinal)) stem = stem[prefix.Length..];
         if (stem.EndsWith(suffix, StringComparison.Ordinal)) stem = stem[..^suffix.Length];
-        return string.IsNullOrWhiteSpace(mod) ? "" : $"/Game/Mods/{mod}/UI/DA_UIMD_Batman_{stem}";
+        return string.IsNullOrWhiteSpace(mod) ? "" : $"/Game/Mods/{mod}/UI/DA_UIMD_{stem}";
     }
 
     private static string ModFolderFromPackagePath(string? packagePath)

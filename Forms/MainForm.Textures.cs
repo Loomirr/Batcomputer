@@ -72,8 +72,18 @@ public sealed partial class MainForm
             return;
         }
 
-        var mod = ExtractModFolder(_targetPlayableText.Text.Trim()) ?? _modFolderText.Text.Trim();
-        using var dlg = new UimdIconsDialog(mod, _currentProject.IconMenu, _currentProject.IconSuit, _currentProject.IconLeft, _currentProject.IconRight);
+        var donor = NativeMetadataDonorService.TryRead(
+            _currentProject.DcmdTemplate,
+            _currentProject.PlayableTemplate,
+            _currentProject.CutsceneTemplate);
+        var donorIcons = donor?.IconPaths ?? NativeMetadataDonorService.Icons.Empty;
+        using var dlg = new UimdIconsDialog(
+            donor?.UimdPackagePath ?? "",
+            donorIcons,
+            IconValueForDialog(_currentProject, _currentProject.IconMenu),
+            IconValueForDialog(_currentProject, _currentProject.IconSuit),
+            IconValueForDialog(_currentProject, _currentProject.IconLeft),
+            IconValueForDialog(_currentProject, _currentProject.IconRight));
         if (dlg.ShowDialog(this) != DialogResult.OK)
         {
             return;
@@ -81,12 +91,30 @@ public sealed partial class MainForm
 
         // Store icon paths raw (trimmed) so an explicit object suffix like
         // "...ElectricSuitFront.0" is preserved - UimdGenService honors it.
-        _currentProject.IconMenu = dlg.IconMenu.Trim();
-        _currentProject.IconSuit = dlg.IconSuit.Trim();
-        _currentProject.IconLeft = dlg.IconLeft.Trim();
-        _currentProject.IconRight = dlg.IconRight.Trim();
+        _currentProject.IconMenu = PersistedIconValue(dlg.IconMenu, donorIcons.Menu);
+        _currentProject.IconSuit = PersistedIconValue(dlg.IconSuit, donorIcons.Suit);
+        _currentProject.IconLeft = PersistedIconValue(dlg.IconLeft, donorIcons.Left);
+        _currentProject.IconRight = PersistedIconValue(dlg.IconRight, donorIcons.Right);
         (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject);
         AppendLog("Saved suit icon paths. Repackage to bake them into the UIMD.");
+    }
+
+    private static string PersistedIconValue(string current, string donor) =>
+        current.Equals(donor, StringComparison.OrdinalIgnoreCase) ? "" : current.Trim();
+
+    private static string IconValueForDialog(NativeSuitProject project, string value)
+    {
+        var icon = value.Trim();
+        if (string.IsNullOrWhiteSpace(icon) ||
+            !icon.Contains("/UI/T_UI_Icon", StringComparison.OrdinalIgnoreCase))
+        {
+            return icon;
+        }
+
+        var matchesGeneratedTexture = project.GeneratedTextures.Any(texture =>
+            texture.PackagePath.Equals(icon, StringComparison.OrdinalIgnoreCase) ||
+            texture.ObjectPath.Equals(icon, StringComparison.OrdinalIgnoreCase));
+        return matchesGeneratedTexture ? icon : "";
     }
 
     /// <summary>
@@ -2115,18 +2143,18 @@ public sealed partial class MainForm
         }
     }
 
-    // /Game/Mods/<mod>/Characters/DA_DCMD_Batman_<Stem>_Playable -> /Game/Mods/<mod>/UI/DA_UIMD_Batman_<Stem>
+    // /Game/Mods/<mod>/Characters/DA_DCMD_<Family>_<Stem>_Playable -> /Game/Mods/<mod>/UI/DA_UIMD_<Family>_<Stem>
     private static string DeriveUimdPackagePath(string dcmdPackagePath)
     {
         dcmdPackagePath = UnrealPathUtil.NormalizePackagePath(dcmdPackagePath);
         var mod = ExtractModFolder(dcmdPackagePath) ?? "Suit";
         var dcmdStem = UnrealPathUtil.AssetName(dcmdPackagePath);
         var suitStem = dcmdStem;
-        const string prefix = "DA_DCMD_Batman_";
+        const string prefix = "DA_DCMD_";
         const string suffix = "_Playable";
         if (suitStem.StartsWith(prefix, StringComparison.Ordinal)) suitStem = suitStem[prefix.Length..];
         if (suitStem.EndsWith(suffix, StringComparison.Ordinal)) suitStem = suitStem[..^suffix.Length];
-        return $"/Game/Mods/{mod}/UI/DA_UIMD_Batman_{suitStem}";
+        return $"/Game/Mods/{mod}/UI/DA_UIMD_{suitStem}";
     }
 
     internal static string DeriveUimdPackagePathForTest(string dcmdPackagePath) =>

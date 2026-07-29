@@ -107,13 +107,13 @@ public sealed class TemplateRecord
 public sealed class TargetPackages
 {
     [JsonPropertyName("playable")]
-    public string Playable { get; set; } = "/Game/Mods/Batman_Thomas/Characters/BP_Batman_Thomas_Playable";
+    public string Playable { get; set; } = "";
 
     [JsonPropertyName("cutscene")]
-    public string Cutscene { get; set; } = "/Game/Mods/Batman_Thomas/Characters/BP_Batman_Thomas_Cutscene";
+    public string Cutscene { get; set; } = "";
 
     [JsonPropertyName("dcmd")]
-    public string Dcmd { get; set; } = "/Game/Mods/Batman_Thomas/Characters/DA_DCMD_Batman_Thomas_Playable";
+    public string Dcmd { get; set; } = "";
 }
 
 public sealed class RecommendedDonorPlan
@@ -156,9 +156,9 @@ public sealed class NativeSuitProject
 {
     public int SchemaVersion { get; set; } = 1;
     public string ToolVersion { get; set; } = "0.1-plan-gui";
-    public string SlotId { get; set; } = "batman_thomas";
-    public string DisplayName { get; set; } = "Thomas Wayne";
-    public string Description { get; set; } = "Generated native-suit prototype.";
+    public string SlotId { get; set; } = "custom_suit";
+    public string DisplayName { get; set; } = "New Suit";
+    public string Description { get; set; } = "Custom native suit.";
 
     // Native registry identity for this suit.
     public string PawnTag { get; set; } = "";
@@ -170,10 +170,10 @@ public sealed class NativeSuitProject
     public string LockedDescription { get; set; } = "";
 
     // Progress gate for the native suit menu.
-    public string ProgressTag { get; set; } = "GameProgress.Definitions.Characters.Batman.TheBatman2025";
+    public string ProgressTag { get; set; } = "";
     // Local artwork copied into the suit project for its Home tile.
     public string CoverImagePath { get; set; } = "";
-    public string PackageBaseName { get; set; } = "THOMAS_NEWSLOT_GENERATED_P";
+    public string PackageBaseName { get; set; } = "CUSTOM_SUIT_P";
     public TargetPackages TargetPackages { get; set; } = new();
     public TemplateRecord? PlayableTemplate { get; set; }
     public TemplateRecord? CutsceneTemplate { get; set; }
