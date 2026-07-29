@@ -88,6 +88,22 @@ public sealed class SuitProjectService
     public string ProjectPathForSlot(string slotId) =>
         Path.Combine(GuiOutputRoot, $"{MakeSafeFileName(slotId)}.native-suit-project.json");
 
+    public void DeleteSavedProjectFile(string projectPath)
+    {
+        var root = Path.GetFullPath(GuiOutputRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var fullPath = Path.GetFullPath(projectPath);
+        if (!fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase) ||
+            !fullPath.EndsWith(".native-suit-project.json", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Refused to delete a project outside the tool's saved-project folder.");
+        }
+
+        if (File.Exists(fullPath))
+        {
+            File.Delete(fullPath);
+        }
+    }
+
     public string SavePatchPlan(NativeSuitPatchPlan plan)
     {
         Directory.CreateDirectory(GuiOutputRoot);

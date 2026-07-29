@@ -40,7 +40,7 @@ public sealed class GameAssetRefreshService
         // the ST_<ModId> template. Narrow substring filters -> just these two tables.
         "Content/Localization/StringTables/ST_TagNames",
         "Content/Localization/StringTables/ST_UI",
-    };
+    }.Concat(TextureCookTemplateService.RetocFilters).ToArray();
 
     // The normal refresh profile used by the builder - this has to be SELF-SUFFICIENT, because it
     // is the one a new user runs. Content/Characters gives the part index every Minifig family,
@@ -55,7 +55,7 @@ public sealed class GameAssetRefreshService
         "Content/Characters/",
         "Content/Localization/StringTables/",
         "Content/Animation/",
-    };
+    }.Concat(TextureCookTemplateService.RetocFilters).ToArray();
 
     // Developer-only research profile. This is broader than the normal builder
     // refresh and may take substantially longer and consume more disk space. It
@@ -97,10 +97,94 @@ public sealed class GameAssetRefreshService
         public List<string> Logs { get; } = new();
     }
 
+    public sealed class TextureTemplatePreparationResult
+    {
+        public List<string> Logs { get; } = new();
+        public List<string> Warnings { get; } = new();
+    }
+
     public async Task<Result> RefreshBatmanAsync(
         CancellationToken cancellationToken,
         IProgress<Progress>? progress = null)
         => await RefreshAsync(RefreshProfile.BatmanDonors, cancellationToken, progress);
+
+    public async Task<TextureTemplatePreparationResult> PrepareTextureCookTemplatesAsync(
+        CancellationToken cancellationToken,
+        IProgress<Progress>? progress = null)
+    {
+        var result = new TextureTemplatePreparationResult();
+        if (TextureCookTemplateService.HasCoreTemplates(_projectRoot))
+        {
+            result.Logs.Add("Texture cook templates already exist.");
+            return result;
+        }
+
+        var retoc = AppSettings.Current.EffectiveRetocExePath();
+        var paksRoot = AppSettings.Current.EffectiveGamePaksRoot();
+        if (!File.Exists(retoc))
+        {
+            throw new FileNotFoundException("retoc.exe was not found. Open Setup and select it.", retoc);
+        }
+        if (!Directory.Exists(paksRoot))
+        {
+            throw new DirectoryNotFoundException($"Game Paks folder was not found: {paksRoot}");
+        }
+
+        var generatedRoot = AppSettings.GeneratedRootFor(_projectRoot);
+        var stageRoot = Path.Combine(generatedRoot, "TextureTemplateStage");
+        if (Directory.Exists(stageRoot))
+        {
+            Directory.Delete(stageRoot, recursive: true);
+        }
+        Directory.CreateDirectory(stageRoot);
+
+        try
+        {
+            var filters = TextureCookTemplateService.RetocFilters;
+            for (var i = 0; i < filters.Count; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var filter = filters[i];
+                progress?.Report(new Progress(5 + (i * 75 / filters.Count), "Preparing textures", filter));
+                var command = await RunRetocAsync(retoc, paksRoot, stageRoot, filter, cancellationToken);
+                result.Logs.AddRange(command.OutputLines.TakeLast(4));
+                if (command.ExitCode != 0)
+                {
+                    var detail = command.ErrorLines.Count == 0
+                        ? string.Join(Environment.NewLine, command.OutputLines.TakeLast(8))
+                        : string.Join(Environment.NewLine, command.ErrorLines.TakeLast(8));
+                    throw new InvalidOperationException($"retoc failed while preparing texture templates for '{filter}' (exit {command.ExitCode}).\n{detail}");
+                }
+            }
+
+            var contentRoot = FindContentRoot(stageRoot, requireCharacters: false)
+                ?? throw new InvalidDataException("retoc completed, but did not produce a Content folder for the texture templates.");
+            var prepared = TextureCookTemplateService.PrepareFromContentRoot(_projectRoot, contentRoot);
+            result.Logs.AddRange(prepared.Logs);
+            result.Warnings.AddRange(prepared.Warnings);
+            if (!TextureCookTemplateService.HasCoreTemplates(_projectRoot))
+            {
+                throw new InvalidDataException("The required BGRA8 and BC5 texture templates were not prepared.");
+            }
+
+            progress?.Report(new Progress(90, "Preparing textures", "Texture cook templates are ready."));
+            return result;
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(stageRoot))
+                {
+                    Directory.Delete(stageRoot, recursive: true);
+                }
+            }
+            catch
+            {
+                // A later attempt can replace the staging folder.
+            }
+        }
+    }
 
     public async Task<Result> RefreshAsync(
         RefreshProfile profile,
@@ -133,15 +217,10 @@ public sealed class GameAssetRefreshService
         Directory.CreateDirectory(outputRoot);
 
         var filters = FiltersFor(profile);
-        var baseGameUtocs = BaseGamePakSource.FindUtocs(paksRoot);
-        if (baseGameUtocs.Count == 0)
-        {
-            throw new InvalidDataException($"No top-level .utoc containers were found in '{paksRoot}'.");
-        }
         var result = new Result { Profile = profile, OutputRoot = outputRoot };
-        progress?.Report(new Progress(2, "Preparing", $"Base-game source: {paksRoot}"));
+        progress?.Report(new Progress(2, "Preparing", $"Source: {paksRoot}"));
         result.Logs.Add($"Refresh profile: {profile}");
-        result.Logs.Add($"Base-game pak source: {baseGameUtocs.Count} top-level .utoc container(s); nested ~mods folders are excluded.");
+        result.Logs.Add("retoc reads the top-level Paks containers; nested mod folders are not mounted.");
 
         for (var i = 0; i < filters.Count; i++)
         {
@@ -151,7 +230,7 @@ public sealed class GameAssetRefreshService
             var end = 5 + ((i + 1) * 70 / filters.Count);
             progress?.Report(new Progress(start, "Extracting", filter));
 
-            var command = await RunRetocAsync(retoc, baseGameUtocs, outputRoot, filter, cancellationToken);
+            var command = await RunRetocAsync(retoc, paksRoot, outputRoot, filter, cancellationToken);
             result.Logs.AddRange(command.OutputLines.TakeLast(12));
             if (command.ExitCode != 0)
             {
@@ -218,29 +297,7 @@ public sealed class GameAssetRefreshService
 
     private static async Task<ProcessResult> RunRetocAsync(
         string retoc,
-        IReadOnlyList<string> baseGameUtocs,
-        string outputRoot,
-        string filter,
-        CancellationToken cancellationToken)
-    {
-        var outputLines = new List<string>();
-        var errorLines = new List<string>();
-        foreach (var utoc in baseGameUtocs)
-        {
-            var result = await RunRetocContainerAsync(retoc, utoc, outputRoot, filter, cancellationToken);
-            outputLines.AddRange(result.OutputLines);
-            errorLines.AddRange(result.ErrorLines);
-            if (result.ExitCode != 0)
-            {
-                return new ProcessResult(result.ExitCode, outputLines, errorLines);
-            }
-        }
-        return new ProcessResult(0, outputLines, errorLines);
-    }
-
-    private static async Task<ProcessResult> RunRetocContainerAsync(
-        string retoc,
-        string utoc,
+        string paksRoot,
         string outputRoot,
         string filter,
         CancellationToken cancellationToken)
@@ -248,7 +305,7 @@ public sealed class GameAssetRefreshService
         var startInfo = new ProcessStartInfo
         {
             FileName = retoc,
-            WorkingDirectory = Path.GetDirectoryName(retoc) ?? Environment.CurrentDirectory,
+            WorkingDirectory = Path.GetDirectoryName(retoc) ?? AppSettings.ToolRoot,
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -260,7 +317,7 @@ public sealed class GameAssetRefreshService
         startInfo.ArgumentList.Add(filter);
         startInfo.ArgumentList.Add("--version");
         startInfo.ArgumentList.Add(RetocEngineVersion);
-        startInfo.ArgumentList.Add(utoc);
+        startInfo.ArgumentList.Add(paksRoot);
         startInfo.ArgumentList.Add(outputRoot);
 
         using var process = Process.Start(startInfo)
@@ -357,10 +414,10 @@ public sealed class GameAssetRefreshService
     private static List<string> SplitLines(string text) =>
         text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).ToList();
 
-    private static string? FindContentRoot(string outputRoot)
+    private static string? FindContentRoot(string outputRoot, bool requireCharacters = true)
     {
         return Directory
             .EnumerateDirectories(outputRoot, "Content", SearchOption.AllDirectories)
-            .FirstOrDefault(path => Directory.Exists(Path.Combine(path, "Characters")));
+            .FirstOrDefault(path => !requireCharacters || Directory.Exists(Path.Combine(path, "Characters")));
     }
 }

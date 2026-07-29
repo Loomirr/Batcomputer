@@ -626,20 +626,7 @@ public sealed class ComponentRemoveService
 
     private string? FindDefaultMappingsPath()
     {
-        var configured = AppSettings.Current.UsmapPath;
-        if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured))
-        {
-            return configured;
-        }
-
-        var candidates = new[]
-        {
-            AppSettings.BundledUsmapPath() ?? "",
-            Path.Combine(AppSettings.GeneratedRootFor(ProjectRoot), "PartGraphProbe", "input", "Dinner.usmap"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "UAssetGUI", "Mappings", "Dinner-5.6.1-1283556+++Dinner+mainline-7f7cc36f.usmap"),
-        };
-
-        return candidates.FirstOrDefault(File.Exists);
+        return AppSettings.Current.EffectiveUsmapPath();
     }
 
     private static string PackagePathToBasePath(string contentRoot, string packagePath)

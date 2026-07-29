@@ -124,7 +124,32 @@ public sealed class AppSettings
 
     public void Save()
     {
+        AdoptUsmapIntoToolData();
         File.WriteAllText(SettingsFilePath, JsonSerializer.Serialize(this, JsonOptions));
+    }
+
+    private void AdoptUsmapIntoToolData()
+    {
+        if (string.IsNullOrWhiteSpace(UsmapPath) || !File.Exists(UsmapPath))
+        {
+            return;
+        }
+
+        var mappingsRoot = Path.Combine(DataRoot, "Mappings");
+        var source = Path.GetFullPath(UsmapPath);
+        if (source.StartsWith(Path.GetFullPath(mappingsRoot) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(mappingsRoot);
+        var destination = Path.Combine(mappingsRoot, Path.GetFileName(source));
+        if (!source.Equals(Path.GetFullPath(destination), StringComparison.OrdinalIgnoreCase))
+        {
+            File.Copy(source, destination, overwrite: true);
+        }
+
+        UsmapPath = destination;
     }
 
     // ---- Effective values: user value if usable, else built-in default -------
@@ -191,6 +216,22 @@ public sealed class AppSettings
             // shape so setup still offers the full extraction.
             && Directory.Exists(Path.Combine(extractedContent, "Characters"))
             && Directory.Exists(EffectiveGamePaksRoot());
+    }
+
+    /// <summary>Files that every published author install must carry beside the executable.</summary>
+    public static IReadOnlyList<string> PortableLayoutIssues()
+    {
+        var issues = new List<string>();
+        var retoc = Path.Combine(ToolRoot, "Tools", "retoc-oodle", "retoc.exe");
+        var indexer = Path.Combine(ToolRoot, "Tools", "Build-NativeSuitTemplateIndex.ps1");
+        var registryProject = Path.Combine(ToolRoot, "Tools", "SuitSlotsRegistryWriter", "SuitSlotsRegistryWriter.uproject");
+        var gameData = Path.Combine(ToolRoot, "gamedata");
+
+        if (!File.Exists(retoc)) issues.Add("Tools\\retoc-oodle\\retoc.exe");
+        if (!File.Exists(indexer)) issues.Add("Tools\\Build-NativeSuitTemplateIndex.ps1");
+        if (!File.Exists(registryProject)) issues.Add("Tools\\SuitSlotsRegistryWriter\\SuitSlotsRegistryWriter.uproject");
+        if (!Directory.Exists(gameData) || !Directory.EnumerateFiles(gameData, "*.json").Any()) issues.Add("gamedata\\*.json");
+        return issues;
     }
 
     /// <summary>Returns a copy pre-filled with every built-in default (for "Detect defaults").</summary>
@@ -334,14 +375,7 @@ public sealed class AppSettings
 
     public static string? DefaultUsmapPath()
     {
-        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var candidates = new[]
-        {
-            BundledUsmapPath() ?? "",
-            Path.Combine(GeneratedRootFor(DefaultProjectRoot()), "PartGraphProbe", "input", "Dinner.usmap"),
-            Path.Combine(local, "UAssetGUI", "Mappings", "Dinner.usmap")
-        };
-        return candidates.FirstOrDefault(File.Exists) ?? candidates[0];
+        return BundledUsmapPath();
     }
 
     /// <summary>Returns a mapping bundled with the portable tool, regardless of its versioned name.</summary>
@@ -362,17 +396,12 @@ public sealed class AppSettings
 
     public static string DefaultExtractedContentRoot()
     {
-        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var candidates = new[]
-        {
-            Path.Combine(DataRoot, "Extracted", "LEGOBatmanLotDK", "Content"),
-            Path.Combine(local, "UAssetGUI", "Extracted", "LEGOBatmanLotDK", "Content")
-        };
-        return candidates.FirstOrDefault(Directory.Exists) ?? candidates[0];
+        return Path.Combine(DataRoot, "Extracted", "LEGOBatmanLotDK", "Content");
     }
 
-    // Optional cooked-export root - user points at it in Setup if used.
-    public static string DefaultExportContentRoot() => "";
+    // Generated material and texture assets stage here unless an author overrides it.
+    public static string DefaultExportContentRoot() =>
+        Path.Combine(GeneratedRootFor(DefaultProjectRoot()), "ExportContent");
 
     public static string DefaultGamePaksModFolder() =>
         @"C:\Program Files (x86)\Steam\steamapps\common\LEGO Batman - Legacy of the Dark Knight\LEGOBatmanLotDK\Content\Paks\~mods\Slot";
@@ -387,37 +416,12 @@ public sealed class AppSettings
         return Directory.Exists(epic56) ? epic56 : "";
     }
 
-    /// <summary>
-    /// Finds a bundled registry-writer project in a portable install or its sibling
-    /// project in this development tree. The setting remains available for authors
-    /// who place the writer elsewhere.
-    /// </summary>
+    /// <summary>Returns the registry-writer project shipped in a portable install.</summary>
     public static string DefaultRegistryWriterProjectPath()
     {
         var relative = Path.Combine("Tools", "SuitSlotsRegistryWriter", "SuitSlotsRegistryWriter.uproject");
         var bundled = Path.Combine(ToolRoot, relative);
-        if (File.Exists(bundled))
-        {
-            return bundled;
-        }
-
-        try
-        {
-            for (var cursor = new DirectoryInfo(ToolRoot); cursor is not null; cursor = cursor.Parent)
-            {
-                var candidate = Path.Combine(cursor.FullName, relative);
-                if (File.Exists(candidate))
-                {
-                    return candidate;
-                }
-            }
-        }
-        catch
-        {
-            // A missing writer is reported when Build Mod needs it.
-        }
-
-        return "";
+        return File.Exists(bundled) ? bundled : "";
     }
 
     // ---- helpers ------------------------------------------------------------

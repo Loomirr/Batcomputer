@@ -117,7 +117,7 @@ public sealed class FirstRunWizard : Form
             {
                 Title = "Mappings (.usmap)",
                 Blurb = "Tells the tool how the game's assets are laid out. Needed to read and write " +
-                        "anything from the game.",
+                        "anything from the game. Batcomputer copies the selected mapping into its own Data\\Mappings folder.",
                 Hint = "A .usmap file dumped from the game — e.g. Dinner.usmap.",
                 IsFile = true,
                 Filter = "Mappings|*.usmap|All files|*.*",

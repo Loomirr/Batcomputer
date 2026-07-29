@@ -369,6 +369,14 @@ internal static class Program
         Theme.ApplyDarkTitleBarsAppWide();
         Animator.Enabled = AppSettings.Current.AnimationsEnabled;
 
+        var portableIssues = AppSettings.PortableLayoutIssues();
+        if (portableIssues.Count > 0)
+        {
+            Dialog.Error(null, "Portable install is incomplete",
+                "These files are missing beside Batcomputer.exe:\n\n  " + string.Join("\n  ", portableIssues) +
+                "\n\nExtract a complete Batcomputer release zip, then launch it again.");
+        }
+
         // First-time setup: show the setup dialog only when the effective paths do
         // not resolve. If the built-in defaults already work (the original author's
         // machine), this is skipped entirely and no config file is needed. New users
@@ -535,7 +543,7 @@ internal static class Program
     private static int AnimLibraryCli(string[] args)
     {
         var sub = args[1].ToLowerInvariant();
-        var projectRoot = args.Length >= 3 ? args[2] : Directory.GetCurrentDirectory();
+        var projectRoot = args.Length >= 3 ? args[2] : AppSettings.Current.EffectiveProjectRoot();
         var svc = new AnimLibraryService(projectRoot, AppSettings.Current.EffectiveUsmapPath());
         var lib = svc.Load();
 

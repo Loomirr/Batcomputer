@@ -434,10 +434,8 @@ public sealed partial class MainForm
 
         ReadFieldsIntoProject(_currentProject);
         var projectRoot = _projectRootText.Text.Trim();
-        var script = Path.Combine(projectRoot, "tools", "Build-TextureDuplicateFromTemplate.ps1");
-        if (!File.Exists(script))
+        if (!await EnsureTextureCookTemplatesAsync(projectRoot))
         {
-            AppendLog($"Texture duplicate script not found: {script}");
             return;
         }
 
@@ -477,14 +475,6 @@ public sealed partial class MainForm
         }
 
         var rawRoot = DefaultTextureSourceRawRoot(projectRoot);
-        if (!TextureTemplateIsStandaloneUasset(templateJson) &&
-            (string.IsNullOrWhiteSpace(rawRoot) || !Directory.Exists(rawRoot)))
-        {
-            AppendLog("Texture import needs a raw IoStore source root from the proven template container.");
-            AppendLog($"Expected: {rawRoot}");
-            AppendLog("Create it with retoc unpack-raw on the known-working SuitSlots_P.utoc before importing textures.");
-            return;
-        }
 
         AppendLog($"Texture profile selected: {cookPreset.Label} ({cookPreset.Detail})");
         AppendLog($"  template: {Path.GetFileName(templateJson)}");
@@ -524,69 +514,37 @@ public sealed partial class MainForm
         _toyboxPrimaryActionButton.Enabled = false;
         try
         {
-            var psi = new ProcessStartInfo
-            {
-                FileName = "powershell",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
-            psi.ArgumentList.Add("-ExecutionPolicy");
-            psi.ArgumentList.Add("Bypass");
-            psi.ArgumentList.Add("-File");
-            psi.ArgumentList.Add(script);
-            psi.ArgumentList.Add("-SourcePng");
-            psi.ArgumentList.Add(dlg.FileName);
-            psi.ArgumentList.Add("-TemplateJson");
-            psi.ArgumentList.Add(templateJson);
-            psi.ArgumentList.Add("-SourceRawRoot");
-            psi.ArgumentList.Add(rawRoot);
-            psi.ArgumentList.Add("-OutputPackagePath");
-            psi.ArgumentList.Add(outputPackagePath);
-            psi.ArgumentList.Add("-ProjectRoot");
-            psi.ArgumentList.Add(projectRoot);
-            psi.ArgumentList.Add("-OutputRoot");
-            psi.ArgumentList.Add(outputRoot);
-            psi.ArgumentList.Add("-PackageBaseName");
-            psi.ArgumentList.Add(packageBaseName);
-            psi.ArgumentList.Add("-CookOnly");
-            if (!UseNearestNeighborMipsForTextureKind(textureKind))
-            {
-                psi.ArgumentList.Add("-LinearMips");
-                AppendLog("  mip mode: high-quality UI mips (alpha-safe)");
-            }
-            // Derived from the assembly so renaming the app doesn't silently break this.
-            // A single-file publish has no side-by-side dll; the File.Exists below handles that.
-            var toolDll = Path.Combine(AppContext.BaseDirectory,
-                typeof(MainForm).Assembly.GetName().Name + ".dll");
-            if (File.Exists(toolDll))
-            {
-                psi.ArgumentList.Add("-ToolDll");
-                psi.ArgumentList.Add(toolDll);
-            }
+            var nearestMips = UseNearestNeighborMipsForTextureKind(textureKind);
+            AppendLog(nearestMips
+                ? "  mip mode: nearest-neighbor"
+                : "  mip mode: high-quality UI mips (alpha-safe)");
 
-            using var process = Process.Start(psi);
-            if (process is null)
+            var cookedContentRoot = Path.Combine(outputRoot, "Cooked", "LEGOBatmanLotDK", "Content");
+            var cookResult = await Task.Run(() => new TextureCookService(projectRoot).Cook(new TextureCookService.Request
             {
-                AppendLog("Failed to start powershell for texture import.");
+                SourceImagePath = dlg.FileName,
+                TemplateJsonPath = templateJson,
+                OutputContentRoot = cookedContentRoot,
+                OutputPackagePath = outputPackagePath,
+                NearestNeighborMips = nearestMips,
+                WriteInlineMips = IsColorMaskTextureKind(textureKind),
+            }));
+
+            foreach (var log in cookResult.Log)
+            {
+                AppendLog($"  texture cook: {log}");
+            }
+            foreach (var warning in cookResult.Warnings)
+            {
+                AppendLog($"  texture cook warning: {warning}");
+            }
+            if (!cookResult.Status.Equals("created", StringComparison.OrdinalIgnoreCase))
+            {
+                AppendLog($"Texture import failed: {cookResult.Error?.Split('\n').FirstOrDefault() ?? cookResult.Status}");
                 return;
             }
 
-            var stdoutTask = process.StandardOutput.ReadToEndAsync();
-            var stderrTask = process.StandardError.ReadToEndAsync();
-            await process.WaitForExitAsync();
-
-            var stdout = await stdoutTask;
-            var stderr = await stderrTask;
-            if (!string.IsNullOrWhiteSpace(stdout)) AppendLog(stdout.Trim());
-            if (!string.IsNullOrWhiteSpace(stderr)) AppendLog(stderr.Trim());
-
-            AppendLog($"Texture import exit code: {process.ExitCode}");
-            if (process.ExitCode != 0)
-            {
-                return;
-            }
+            AppendLog($"Texture import complete: {cookResult.OutputPackagePath}");
 
             var entry = BuildTextureEntryFromSummary(
                 outputRoot,
@@ -617,6 +575,43 @@ public sealed partial class MainForm
         finally
         {
             _toyboxPrimaryActionButton.Enabled = true;
+        }
+    }
+
+    private async Task<bool> EnsureTextureCookTemplatesAsync(string projectRoot)
+    {
+        if (TextureCookTemplateService.HasCoreTemplates(projectRoot))
+        {
+            return true;
+        }
+
+        AppendLog("Preparing the base-game texture cook templates...");
+        UseWaitCursor = true;
+        try
+        {
+            var result = await new GameAssetRefreshService(projectRoot)
+                .PrepareTextureCookTemplatesAsync(CancellationToken.None);
+            foreach (var line in result.Logs)
+            {
+                AppendLog("  " + line);
+            }
+            foreach (var warning in result.Warnings)
+            {
+                AppendLog("  texture template warning: " + warning);
+            }
+
+            return TextureCookTemplateService.HasCoreTemplates(projectRoot);
+        }
+        catch (Exception ex)
+        {
+            AppendLog("Texture cook template setup failed: " + ex.Message);
+            Dialog.Error(this, "Texture profiles unavailable",
+                "Batcomputer could not prepare its base-game texture donors.\n\n" + ex.Message);
+            return false;
+        }
+        finally
+        {
+            UseWaitCursor = false;
         }
     }
 
@@ -684,10 +679,10 @@ public sealed partial class MainForm
 
     private static List<TextureCookPreset> AvailableTextureCookPresets(string projectRoot, string textureKind)
     {
-        var bgraPath = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_DroneControlBGRA8", "T_GA_DroneControl_BatGirl_AO.json");
+        var bgraPath = TextureCookTemplateService.TemplateJsonPath(projectRoot, "TextureStandaloneTemplate_DroneControlBGRA8");
         var bgra1kPath = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_CloudMaskBGRA8_1K", "T_CloudMask.json");
-        var bc5Path = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_BatarangBC5", "T_Batarang_N.json");
-        var dxt5Path = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_BatclawLogo_DXT5", "T_DECAL_BatclawLogo.json");
+        var bc5Path = TextureCookTemplateService.TemplateJsonPath(projectRoot, "TextureStandaloneTemplate_BatarangBC5");
+        var dxt5Path = TextureCookTemplateService.TemplateJsonPath(projectRoot, "TextureStandaloneTemplate_BatclawLogo_DXT5");
         var dxt1Path = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_EoMColorMask_DXT1", "T_TPAGE_Batman_TheBatman2025_ColourMask.json");
         var candidates = new List<TextureCookPreset>();
         void Add(
@@ -700,7 +695,7 @@ public sealed partial class MainForm
             TextureProfileSafety safety,
             string validationNote)
         {
-            if (File.Exists(template))
+            if (TextureCookTemplateService.IsTemplateReady(template))
             {
                 candidates.Add(new TextureCookPreset(id, label, template, width, height, pixelFormat, safety, validationNote));
             }

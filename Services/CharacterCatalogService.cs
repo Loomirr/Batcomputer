@@ -78,7 +78,7 @@ internal static class CharacterCatalogService
         }
 
         var provider = new DefaultFileProvider(
-            paksDir, BaseGamePakSource.SearchOption,
+            paksDir, BaseGamePakSource.ShippedContainerSearchOption,
             versions: new VersionContainer(EGame.GAME_UE5_6),
             pathComparer: StringComparer.OrdinalIgnoreCase);
         provider.MappingsContainer = new FileUsmapTypeMappingsProvider(usmapPath);

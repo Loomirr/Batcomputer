@@ -81,7 +81,7 @@ public sealed partial class MainForm
         UpdateToyboxChips();
     }
 
-    private void OpenMaterialWizard(bool applyToSelectedSlot)
+    private void OpenMaterialWizard()
     {
         var mod = ExtractModFolder(_targetPlayableText.Text.Trim()) ?? _modFolderText.Text.Trim();
         var suggested = $"MI_Batman_{(string.IsNullOrWhiteSpace(mod) ? "Suit" : mod)}_{_toyboxSlotLabel.Replace(" ", "").Replace("/", "")}";
@@ -91,10 +91,6 @@ public sealed partial class MainForm
             return;
         }
         AppendLog($"Created material {wiz.ResultMiPackagePath}");
-        if (applyToSelectedSlot)
-        {
-            ApplyToyboxMaterial(wiz.ResultMiPackagePath!);
-        }
         SelectComboValue(_toyboxCategoryCombo, "Materials");
         RefreshToyboxTiles();
     }
@@ -128,6 +124,10 @@ public sealed partial class MainForm
         {
             return;
         }
+        if (editInPlace)
+        {
+            RenameGeneratedMaterial(miGamePath, wiz.ResultMiPackagePath);
+        }
         AppendLog($"{(editInPlace ? "Edited" : "Created from base")} material {wiz.ResultMiPackagePath}");
         SelectComboValue(_toyboxCategoryCombo, "Materials");
         RefreshToyboxTiles();
@@ -140,6 +140,7 @@ public sealed partial class MainForm
         if (isUserMade)
         {
             menu.Items.Add("Edit this material…", null, (_, _) => OpenMaterialFromBase(miGamePath, editInPlace: true));
+            menu.Items.Add("Delete this material…", null, async (_, _) => await DeleteGeneratedMaterialAsync(miGamePath));
         }
         else
         {
@@ -286,7 +287,7 @@ public sealed partial class MainForm
             var header = $"Materials you generated for slot [{_toyboxSlotLabel}]. Drag a tile onto a slot to apply it; right-click to edit. Use '＋ Create' for a new one, or switch the dropdown to a game folder to pull base-game MIs.";
             var tiles = new List<VirtualTilePanel.Tile>
             {
-                new() { Title = "＋ Create", Subtitle = "new material", Accent = Theme.Materials, Dashed = true, OnClick = () => OpenMaterialWizard(applyToSelectedSlot: true) }
+                new() { Title = "＋ Create", Subtitle = "new material", Accent = Theme.Materials, Dashed = true, OnClick = OpenMaterialWizard }
             };
             var mod = ExtractModFolder(_targetPlayableText.Text.Trim());
             if (string.IsNullOrWhiteSpace(mod))
@@ -444,6 +445,121 @@ public sealed partial class MainForm
                 ? Path.Combine(projectRoot, stage, "Stage", "LEGOBatmanLotDK", "Content")
                 : Path.Combine(projectRoot, stage, "LEGOBatmanLotDK", "Content");
         }
+    }
+
+    private void RenameGeneratedMaterial(string oldPackagePath, string newPackagePath)
+    {
+        var oldPackage = UnrealPathUtil.NormalizePackagePath(oldPackagePath);
+        var newPackage = UnrealPathUtil.NormalizePackagePath(newPackagePath);
+        if (oldPackage.Equals(newPackage, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var reassigned = 0;
+        if (_currentProject is not null)
+        {
+            foreach (var assignment in _currentProject.MaterialAssignments)
+            {
+                if (!UnrealPathUtil.NormalizePackagePath(assignment.MiPackagePath)
+                        .Equals(oldPackage, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                assignment.MiPackagePath = newPackage;
+                reassigned++;
+            }
+
+            if (reassigned > 0)
+            {
+                (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject);
+                ApplySavedMaterials(_currentProject, logIfNone: false);
+            }
+        }
+
+        var removed = DeleteGeneratedMaterialFiles(oldPackage);
+        AppendLog($"Renamed material {UnrealPathUtil.AssetName(oldPackage)} to {UnrealPathUtil.AssetName(newPackage)}; updated {reassigned} assignment(s), removed {removed} old file(s).");
+        RefreshInspector();
+    }
+
+    private async Task DeleteGeneratedMaterialAsync(string miPackagePath)
+    {
+        var package = UnrealPathUtil.NormalizePackagePath(miPackagePath);
+        if (!package.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase))
+        {
+            AppendLog($"Material delete refused outside /Game/Mods: {package}");
+            return;
+        }
+
+        var assignments = _currentProject?.MaterialAssignments
+            .Where(assignment => UnrealPathUtil.NormalizePackagePath(assignment.MiPackagePath)
+                .Equals(package, StringComparison.OrdinalIgnoreCase))
+            .ToList() ?? new List<SavedMaterialAssignment>();
+        var detail = assignments.Count == 0
+            ? "It is not assigned to this suit."
+            : $"It is assigned to {assignments.Count} slot(s). Those assignments will be removed and the stage rebuilt from the base.";
+        if (!Dialog.Confirm(this, "Delete material",
+                $"Delete '{UnrealPathUtil.AssetName(package)}'?\n\n{detail}\n\n{package}",
+                confirmText: "Delete material", severity: Dialog.Level.Crit))
+        {
+            return;
+        }
+
+        var removedAssignments = 0;
+        if (_currentProject is not null && assignments.Count > 0)
+        {
+            removedAssignments = _currentProject.MaterialAssignments.RemoveAll(assignment =>
+                UnrealPathUtil.NormalizePackagePath(assignment.MiPackagePath)
+                    .Equals(package, StringComparison.OrdinalIgnoreCase));
+            (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject);
+        }
+
+        var removedFiles = DeleteGeneratedMaterialFiles(package);
+        if (removedAssignments > 0 && _currentProject is not null)
+        {
+            await RebuildGraftStageFromDeclarativeAsync();
+        }
+
+        RecordChange("Materials", UnrealPathUtil.AssetName(package), "deleted", status: "deleted");
+        AppendLog($"Deleted material {package}; removed {removedAssignments} assignment(s) and {removedFiles} file(s).");
+        RefreshInspector();
+        RefreshToyboxTiles();
+    }
+
+    private int DeleteGeneratedMaterialFiles(string miPackagePath)
+    {
+        var package = UnrealPathUtil.NormalizePackagePath(miPackagePath);
+        if (!package.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase))
+        {
+            return 0;
+        }
+
+        var relative = package["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar);
+        var removed = 0;
+        foreach (var contentRoot in GeneratedMaterialContentRoots(_currentProject)
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var basePath = Path.Combine(contentRoot, relative);
+            foreach (var extension in new[] { ".uasset", ".uexp", ".ubulk" })
+            {
+                var candidate = basePath + extension;
+                try
+                {
+                    if (File.Exists(candidate))
+                    {
+                        File.Delete(candidate);
+                        removed++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AppendLog($"Material delete warning for {candidate}: {ex.Message}");
+                }
+            }
+        }
+
+        return removed;
     }
 
     private void ApplyToyboxMaterial(string miPath)
@@ -762,31 +878,29 @@ public sealed partial class MainForm
             return;
         }
 
-        var exportRoot = AppSettings.Current.EffectiveExportContentRoot();
-        var src = Path.Combine(exportRoot, "Mods", mod);
-        if (!Directory.Exists(src))
-        {
-            AppendLog($"No generated Mods\\{mod} assets to stage (looked in {src}).");
-            return;
-        }
-
         var dst = Path.Combine(contentRootToPackage, "Mods", mod);
         var copied = 0;
-        foreach (var file in Directory.EnumerateFiles(src, "*", SearchOption.AllDirectories))
+        var src = Path.Combine(AppSettings.Current.EffectiveExportContentRoot(), "Mods", mod);
+        if (Directory.Exists(src))
         {
-            var relative = file.Substring(src.Length).TrimStart('\\', '/');
-            // Never overwrite the patched/grafted BP assets.
-            if (relative.StartsWith("Characters", StringComparison.OrdinalIgnoreCase))
+            foreach (var file in Directory.EnumerateFiles(src, "*", SearchOption.AllDirectories))
             {
-                continue;
-            }
+                var relative = file.Substring(src.Length).TrimStart('\\', '/');
+                // Never overwrite the patched/grafted BP assets.
+                if (relative.StartsWith("Characters", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
 
-            var destination = Path.Combine(dst, relative);
-            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            File.Copy(file, destination, overwrite: true);
-            copied++;
+                var destination = Path.Combine(dst, relative);
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                File.Copy(file, destination, overwrite: true);
+                copied++;
+            }
         }
 
-        AppendLog($"Staged {copied} generated Mods\\{mod} asset file(s) into the pack content root.");
+        AppendLog(copied > 0
+            ? $"Staged {copied} generated Mods\\{mod} asset file(s) into the pack content root."
+            : $"No generated Mods\\{mod} assets to stage.");
     }
 }

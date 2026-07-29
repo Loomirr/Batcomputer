@@ -583,38 +583,11 @@ public sealed class PartIndexService
 
     private static string FindDefaultExtractedContentRoot()
     {
-        // User-configured path (settings.json) wins if it exists.
-        var configured = AppSettings.Current.EffectiveExtractedContentRoot();
-        if (!string.IsNullOrWhiteSpace(configured) && Directory.Exists(configured))
-        {
-            return configured;
-        }
-
-        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var candidates = new[]
-        {
-            Path.Combine(local, "UAssetGUI", "Extracted", "LEGOBatmanLotDK", "Content")
-        };
-
-        return candidates.FirstOrDefault(Directory.Exists) ?? candidates[0];
+        return AppSettings.Current.EffectiveExtractedContentRoot();
     }
 
     private string? FindDefaultMappingsPath()
     {
-        // User-configured mappings (settings.json) win if present.
-        var configured = AppSettings.Current.UsmapPath;
-        if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured))
-        {
-            return configured;
-        }
-
-        var candidates = new[]
-        {
-            AppSettings.BundledUsmapPath() ?? "",
-            Path.Combine(AppSettings.GeneratedRootFor(ProjectRoot), "PartGraphProbe", "input", "Dinner.usmap"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "UAssetGUI", "Mappings", "Dinner-5.6.1-1283556+++Dinner+mainline-7f7cc36f.usmap"),
-        };
-
-        return candidates.FirstOrDefault(File.Exists);
+        return AppSettings.Current.EffectiveUsmapPath();
     }
 }

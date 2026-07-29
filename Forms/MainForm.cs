@@ -540,33 +540,11 @@ public sealed partial class MainForm : Form
         switch (_toyboxCategoryCombo.SelectedItem?.ToString())
         {
             case "Base": OpenBaseWizard(); break;
-            case "Materials": OpenMaterialWizard(applyToSelectedSlot: false); break;
+            case "Materials": OpenMaterialWizard(); break;
             case "Textures": await ImportTextureFromPngAsync(); break;
             case "Review": CopyChangeSummary(); break;
             case "Build mod": BuildActiveModFromWorkspace(); break;
         }
-    }
-
-    /// <summary>Edits the suit's menu description (shown under the suit in-game). Was only
-    /// round-tripped in a hidden field before - this is the only way to change it.</summary>
-    private void EditSuitDescription()
-    {
-        if (_currentProject is null)
-        {
-            AppendLog("Set or load a base suit first, then edit its description.");
-            return;
-        }
-
-        var value = PromptForText("Suit description", "Shown under the suit in the character menu:", _descriptionText.Text.Trim());
-        if (value is null)
-        {
-            return;
-        }
-        _descriptionText.Text = value.Trim();
-        _currentProject.Description = value.Trim();
-        try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject); } catch { /* best effort */ }
-        AppendLog($"Suit description set: \"{value.Trim()}\". Repackage to bake it into the DCMD/runtime JSON.");
-        RefreshToyboxTiles();
     }
 
     /// <summary>
@@ -1852,6 +1830,17 @@ public sealed partial class MainForm : Form
             AppSettings.Current.Save();
             AppendLog($"New extracted Content root selected: {result.ContentRoot}");
 
+            progressWindow.SetIndeterminate("Preparing texture cook templates...");
+            var templates = TextureCookTemplateService.PrepareFromContentRoot(projectRoot, result.ContentRoot);
+            foreach (var line in templates.Logs)
+            {
+                AppendLog("  " + line);
+            }
+            foreach (var warning in templates.Warnings)
+            {
+                AppendLog("  texture template warning: " + warning);
+            }
+
             // Each dump is ~18 GB, so replace rather than accumulate (Settings → keep old extracts).
             PruneOldExtracts(result.OutputRoot);
 
@@ -1885,28 +1874,6 @@ public sealed partial class MainForm : Form
     /// <summary>Runs the same complete asset refresh used by the normal menu after first-time setup.</summary>
     public Task RunFirstTimeAssetExtractionAsync() =>
         RefreshGameAssetsAsync(GameAssetRefreshService.RefreshProfile.AllCharacterAssets, firstRun: true);
-
-    private static string FindProjectRoot()
-    {
-        var dir = AppContext.BaseDirectory;
-        while (!string.IsNullOrWhiteSpace(dir))
-        {
-            if (File.Exists(Path.Combine(dir, "CMakeLists.txt")) &&
-                Directory.Exists(Path.Combine(dir, "NewSuitSlotNative")))
-            {
-                return dir.TrimEnd(Path.DirectorySeparatorChar);
-            }
-
-            var parent = Directory.GetParent(dir);
-            if (parent is null)
-            {
-                break;
-            }
-            dir = parent.FullName;
-        }
-
-        return AppSettings.DefaultProjectRoot();
-    }
 
     private async Task RunIndexerAsync()
     {

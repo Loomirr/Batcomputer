@@ -7,8 +7,7 @@ namespace Batcomputer;
 /// embedded resources, so a published single-file exe carries its icons and part silhouettes with
 /// no loose files to lose.
 ///
-/// Falls back to reading from disk when a matching file exists next to the exe (or in the source
-/// tree), which keeps a plain <c>dotnet run</c> working if art is added but not yet rebuilt.
+/// Falls back only to an Assets folder beside the executable.
 /// </summary>
 internal static class EmbeddedAssets
 {
@@ -59,22 +58,9 @@ internal static class EmbeddedAssets
     private static IEnumerable<string> DiskRoots()
     {
         yield return Path.Combine(AppContext.BaseDirectory, "Assets");
-        yield return Path.Combine(Application.StartupPath, "Assets");
-        yield return Path.Combine(Directory.GetCurrentDirectory(), "Assets");
-
-        // Running from bin\Debug\... in the source tree: walk up to the project folder and use its
-        // Assets. Found by looking for the folder, not by name, so renaming the project directory
-        // doesn't break it.
-        var dir = AppContext.BaseDirectory;
-        for (var i = 0; i < 6 && !string.IsNullOrEmpty(dir); i++)
+        if (!string.Equals(Application.StartupPath, AppContext.BaseDirectory, StringComparison.OrdinalIgnoreCase))
         {
-            var candidate = Path.Combine(dir, "Assets");
-            if (Directory.Exists(candidate))
-            {
-                yield return candidate;
-                yield break;
-            }
-            dir = Directory.GetParent(dir)?.FullName ?? "";
+            yield return Path.Combine(Application.StartupPath, "Assets");
         }
     }
 

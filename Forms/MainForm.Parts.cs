@@ -709,7 +709,7 @@ public sealed partial class MainForm
         return new ToolStripItem[]
         {
             new ToolStripMenuItem("Change material here", null, (_, _) => { SelectToyboxSlot(label, component, slot); SelectComboValue(_toyboxCategoryCombo, "Materials"); }),
-            new ToolStripMenuItem("Create new material…", null, (_, _) => { SelectToyboxSlot(label, component, slot); OpenMaterialWizard(applyToSelectedSlot: true); }),
+            new ToolStripMenuItem("Create new material…", null, (_, _) => { SelectToyboxSlot(label, component, slot); OpenMaterialWizard(); }),
             new ToolStripMenuItem("Browse game material…", null, (_, _) => { SelectToyboxSlot(label, component, slot); BrowseAndApplyGameMaterial(); }),
             new ToolStripSeparator(),
             new ToolStripMenuItem("Remove / hide part", null, async (_, _) =>

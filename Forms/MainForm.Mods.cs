@@ -1726,7 +1726,7 @@ public sealed partial class MainForm
         var psi = new ProcessStartInfo
         {
             FileName = retoc,
-            WorkingDirectory = Path.GetDirectoryName(retoc) ?? Environment.CurrentDirectory,
+            WorkingDirectory = Path.GetDirectoryName(retoc) ?? AppSettings.ToolRoot,
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -1775,7 +1775,7 @@ public sealed partial class MainForm
         var psi = new ProcessStartInfo
         {
             FileName = retoc,
-            WorkingDirectory = Path.GetDirectoryName(retoc) ?? Environment.CurrentDirectory,
+            WorkingDirectory = Path.GetDirectoryName(retoc) ?? AppSettings.ToolRoot,
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,

@@ -502,16 +502,6 @@ public sealed partial class MainForm
         }
     }
 
-    private string DescriptionTileSubtitle()
-    {
-        var d = _descriptionText.Text.Trim();
-        if (string.IsNullOrWhiteSpace(d))
-        {
-            return "add menu text";
-        }
-        return d.Length <= 22 ? d : d[..21] + "…";
-    }
-
     private string NativeIdentityTileSubtitle()
     {
         var tag = _currentProject?.PawnTag?.Trim() ?? "";
@@ -797,7 +787,7 @@ public sealed partial class MainForm
         var fam = GameDataService.Instance.FamilyForBasePath(playablePackage)?.Name ?? "unknown family";
         RecordChange("Base", _suitNameText.Text.Trim(), $"{UnrealPathUtil.AssetName(playablePackage)} ({fam})");
         UpdateToyboxChips();
-        SelectComboValue(_toyboxCategoryCombo, "Materials");
+        SelectComboValue(_toyboxCategoryCombo, "Base");
         _session.RaiseChanged();
     }
 
@@ -850,7 +840,7 @@ public sealed partial class MainForm
             $"visual {visual.Stem} ({(string.IsNullOrWhiteSpace(visualFamily) ? "unknown" : visualFamily)}) + gameplay {gameplay.Stem} ({(string.IsNullOrWhiteSpace(donorFamily) ? "unknown" : donorFamily)})");
         AppendLog($"Visual base = {visual.Stem}; gameplay donor = {gameplay.Stem}. The donor supplies movement, equipment, and runtime behavior.");
         UpdateToyboxChips();
-        SelectComboValue(_toyboxCategoryCombo, "Materials");
+        SelectComboValue(_toyboxCategoryCombo, "Base");
         _session.RaiseChanged();
     }
 
@@ -1086,7 +1076,7 @@ public sealed partial class MainForm
         await RebuildGraftStageFromDeclarativeAsync();
     }
 
-    private void OpenBaseWizardManual()
+    private async void OpenBaseWizardManual()
     {
         using var wiz = new BaseWizard(
             _suitNameText.Text.Trim(),
@@ -1103,11 +1093,13 @@ public sealed partial class MainForm
         _basePlayableText.Text = wiz.PlayablePath;
         _baseCutsceneText.Text = wiz.CutscenePath;
         _baseDcmdText.Text = wiz.DcmdPath;
-        _ = UseAsBase();
+        if (!await UseAsBase())
+        {
+            return;
+        }
         var fam = GameDataService.Instance.FamilyForBasePath(wiz.PlayablePath)?.Name ?? "unknown family";
         RecordChange("Base", wiz.SuitName, $"{System.IO.Path.GetFileName(wiz.PlayablePath)} ({fam})");
         UpdateToyboxChips();
-        SelectComboValue(_toyboxCategoryCombo, "Materials");
         _session.RaiseChanged();
     }
 
@@ -1685,7 +1677,6 @@ public sealed partial class MainForm
         if (hasBase)
         {
             tiles.Add(new() { Section = SectionIdentity, Title = "Native identity", Subtitle = NativeIdentityTileSubtitle(), Accent = Theme.Gold, OnClick = EditNativeIdentity });
-            tiles.Add(new() { Section = SectionIdentity, Title = "Description", Subtitle = DescriptionTileSubtitle(), Accent = Theme.Base, OnClick = EditSuitDescription });
             tiles.Add(new() { Section = SectionIdentity, Title = "Set icons", Subtitle = "menu / UIMD", Accent = Theme.Base, OnClick = OpenIconsDialog });
         }
 
@@ -2558,6 +2549,8 @@ public sealed partial class MainForm
                 {
                     AppendLog($"Updated {relinked} mod suit reference(s) for '{_currentProject.SlotId}'.");
                 }
+                _projectService.DeleteSavedProjectFile(previousProjectPath);
+                AppendLog($"Replaced the temporary project ID '{previousSlotId}' with '{_currentProject.SlotId}'.");
             }
             _detectedLabel.ForeColor = Color.SeaGreen;
             _detectedLabel.Text = $"Base set → {_targetPlayableText.Text.Trim()} + _Cutscene. Now go to step 2 (Materials) or step 3 (Parts).";
@@ -2567,7 +2560,9 @@ public sealed partial class MainForm
             {
                 await RebuildGraftStageCoreAsync();
             }
+            SelectComboValue(_toyboxCategoryCombo, "Base");
             PopulateToyboxSlots();
+            RefreshInspector();
             RefreshToyboxTiles();
             }
             finally
