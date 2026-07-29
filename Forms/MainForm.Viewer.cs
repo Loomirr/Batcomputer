@@ -340,6 +340,10 @@ public sealed partial class MainForm
             {
                 _viewerLoadButton!.Enabled = true;
             }
+            else
+            {
+                viewer.TrimInactiveMemory();
+            }
         }
     }
 

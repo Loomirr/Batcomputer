@@ -1,5 +1,7 @@
 using Microsoft.Web.WebView2.WinForms;
 using System.Diagnostics;
+using System.Runtime;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 
 namespace Batcomputer;
@@ -25,6 +27,7 @@ public sealed class ModelPreviewControl : UserControl
     private bool _ready;
     private bool _active = true;
     private uint? _browserProcessId;
+    private int _rendererVersion;
 
     /// <summary>Raised when the in-viewer part mover asks the host to persist an alignment.</summary>
     public event EventHandler<PreviewPlacementSaveRequestedEventArgs>? PlacementSaveRequested;
@@ -70,6 +73,7 @@ public sealed class ModelPreviewControl : UserControl
     /// <summary>Releases the WebView renderer while the 3D tab is hidden.</summary>
     public void ReleaseRenderer()
     {
+        var rendererVersion = Interlocked.Increment(ref _rendererVersion);
         _active = false;
         _ready = false;
         var browserProcessId = _browserProcessId;
@@ -87,16 +91,28 @@ public sealed class ModelPreviewControl : UserControl
         {
             ShowMessage("3D preview paused.");
         }
+
+        QueueMemoryTrim(rendererVersion);
     }
 
     /// <summary>Recreates the renderer and reloads the last preview when the tab returns.</summary>
     public async Task ResumeRendererAsync()
     {
+        Interlocked.Increment(ref _rendererVersion);
         _active = true;
         if (!string.IsNullOrWhiteSpace(_pendingFolder) && Directory.Exists(_pendingFolder))
         {
             ShowMessage("Reloading 3D preview...");
             await ShowFolderAsync(_pendingFolder);
+        }
+    }
+
+    /// <summary>Runs a second cleanup after a build that finished off-tab.</summary>
+    public void TrimInactiveMemory()
+    {
+        if (!_active)
+        {
+            QueueMemoryTrim(Volatile.Read(ref _rendererVersion));
         }
     }
 
@@ -205,6 +221,37 @@ public sealed class ModelPreviewControl : UserControl
             // The browser exited while the control was being released.
         }
     }
+
+    private void QueueMemoryTrim(int rendererVersion)
+    {
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(750).ConfigureAwait(false);
+            if (_active || rendererVersion != Volatile.Read(ref _rendererVersion))
+            {
+                return;
+            }
+
+            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+
+            try
+            {
+                using var process = Process.GetCurrentProcess();
+                EmptyWorkingSet(process.Handle);
+            }
+            catch (InvalidOperationException)
+            {
+                // The application is shutting down.
+            }
+        });
+    }
+
+    [DllImport("psapi.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EmptyWorkingSet(IntPtr processHandle);
 
     protected override void Dispose(bool disposing)
     {
