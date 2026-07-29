@@ -16,6 +16,7 @@ public sealed partial class MainForm
     private List<CharacterCatalogService.Entry> _viewerEntries = new();
     private TableLayoutPanel? _viewerHostLayout;
     private Control? _viewerPanel;
+    private int _viewerLoadGeneration;
 
     private const string ViewerCategory = "3D viewer";
 
@@ -37,11 +38,18 @@ public sealed partial class MainForm
         _viewerPanel.Visible = true;
         _viewerPanel.BringToFront();
         SetViewerWorkspaceExpanded(true);
+        _ = _viewer?.ResumeRendererAsync();
         RefreshViewerCustomSuits();
     }
 
     private void HideViewerPanel()
     {
+        _viewerLoadGeneration++;
+        if (_viewerLoadButton is not null)
+        {
+            _viewerLoadButton.Enabled = true;
+        }
+        _viewer?.ReleaseRenderer();
         if (_viewerPanel is not null)
         {
             _viewerPanel.Visible = false;
@@ -278,6 +286,12 @@ public sealed partial class MainForm
     /// <summary>Builds and shows a character; used by the tab and by "View in 3D" on My character.</summary>
     private async void ShowCharacterInViewer(string objectPath, string label, NativeSuitProject? project = null)
     {
+        var loadGeneration = ++_viewerLoadGeneration;
+        var viewer = _viewer;
+        if (viewer is null)
+        {
+            return;
+        }
         if (project is not null && EnsureCrossKindHeadGraftHidesBaseHead(project))
         {
             try
@@ -290,7 +304,7 @@ public sealed partial class MainForm
                 AppendLog($"Viewer: could not save cross-kind head removal: {ex.Message}");
             }
         }
-        _viewer?.ShowMessage($"Building {label}...");
+        viewer.ShowMessage($"Building {label}...");
         _viewerStatus!.Text = $"Building {label} - decoding meshes, materials and parts...";
         _viewerLoadButton!.Enabled = false;
         try
@@ -302,7 +316,11 @@ public sealed partial class MainForm
                 project is null
                     ? ModelPreviewService.BuildPreviewCharacter(paks, usmap, objectPath)
                     : ModelPreviewService.BuildPreviewSuit(paks, usmap, project, settings.EffectiveProjectRoot()));
-            await _viewer!.ShowFolderAsync(folder);
+            if (loadGeneration != _viewerLoadGeneration || _viewerPanel?.Visible != true)
+            {
+                return;
+            }
+            await viewer.ShowFolderAsync(folder);
             _viewerStatus.Text = project is null
                 ? $"{label} - drag to orbit, scroll to zoom."
                 : $"{label} - drag to orbit, scroll to zoom. Part adjustments stay in the 3D viewer.";
@@ -310,12 +328,18 @@ public sealed partial class MainForm
         catch (Exception ex)
         {
             var why = ex.Message.Split('\n')[0];
-            _viewer?.ShowMessage("Could not build this character.\n\n" + why);
-            _viewerStatus.Text = "Failed: " + why;
+            if (loadGeneration == _viewerLoadGeneration)
+            {
+                viewer.ShowMessage("Could not build this character.\n\n" + why);
+                _viewerStatus.Text = "Failed: " + why;
+            }
         }
         finally
         {
-            _viewerLoadButton!.Enabled = true;
+            if (loadGeneration == _viewerLoadGeneration)
+            {
+                _viewerLoadButton!.Enabled = true;
+            }
         }
     }
 
