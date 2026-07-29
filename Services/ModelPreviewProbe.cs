@@ -13,16 +13,12 @@ using CUE4Parse.UE4.Objects.UObject;
 
 namespace Batcomputer;
 
-/// <summary>
-/// Phase 0 spike for the 3D preview: prove CUE4Parse can open the game paks with our usmap and decode
-/// a mesh into real geometry. Prints counts only - no rendering, no UI. Run via
-/// <c>Batcomputer.exe --preview-probe "&lt;paksDir&gt;" "&lt;usmap&gt;" "&lt;objectPath&gt;"</c>.
-/// </summary>
+/// <summary>CLI diagnostics for preview data and CUE4Parse asset loading.</summary>
 internal static class ModelPreviewProbe
 {
     public static int Run(string paksDir, string usmapPath, string objectPath)
     {
-        Console.WriteLine("Model preview probe (Phase 0)");
+        Console.WriteLine("Model preview probe");
         Console.WriteLine(new string('-', 60));
         Console.WriteLine($"paks:   {paksDir}");
         Console.WriteLine($"usmap:  {usmapPath}");
@@ -33,7 +29,9 @@ internal static class ModelPreviewProbe
         if (!File.Exists(usmapPath)) { Console.Error.WriteLine("usmap not found"); return 2; }
 
         var provider = new DefaultFileProvider(
-            paksDir, SearchOption.AllDirectories, isCaseInsensitive: true, new VersionContainer(EGame.GAME_UE5_6));
+            paksDir, SearchOption.AllDirectories,
+            versions: new VersionContainer(EGame.GAME_UE5_6),
+            pathComparer: StringComparer.OrdinalIgnoreCase);
         provider.MappingsContainer = new FileUsmapTypeMappingsProvider(usmapPath);
         provider.Initialize();
         // Unencrypted paks: the zero key mounts them. Harmless if no key is needed.
@@ -364,7 +362,7 @@ internal static class ModelPreviewProbe
                 {
                     for (var li = 0; li < conv2.LODs.Count; li++)
                     {
-                        var secs = conv2.LODs[li].Sections.Value;
+                        var secs = conv2.LODs[li].Sections?.Value ?? [];
                         Console.WriteLine($"LOD{li}: {conv2.LODs[li].NumVerts} verts, {secs.Length} section(s)");
                         foreach (var s in secs)
                         {
@@ -1188,13 +1186,15 @@ internal static class ModelPreviewProbe
             if (exp is USkeletalMesh skel && skel.TryConvert(out var cs))
             {
                 var lod = cs.LODs[0];
+                var sections = lod.Sections?.Value?.Length ?? 0;
                 Console.WriteLine($"      -> skeletal: {cs.LODs.Count} LODs, {cs.RefSkeleton.Count} bones, " +
-                                  $"LOD0 {lod.NumVerts} verts / {lod.Sections.Value.Length} sections");
+                                  $"LOD0 {lod.NumVerts} verts / {sections} sections");
             }
             else if (exp is UStaticMesh stat && stat.TryConvert(out var cm))
             {
                 var lod = cm.LODs[0];
-                Console.WriteLine($"      -> static: LOD0 {lod.NumVerts} verts / {lod.Sections.Value.Length} sections");
+                var sections = lod.Sections?.Value?.Length ?? 0;
+                Console.WriteLine($"      -> static: LOD0 {lod.NumVerts} verts / {sections} sections");
             }
         }
 

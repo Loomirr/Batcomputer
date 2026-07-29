@@ -4,17 +4,7 @@ using System.Text.Json;
 
 namespace Batcomputer;
 
-/// <summary>
-/// Phase 2 (unified workspace & collector): after a suit packages successfully, this writes a
-/// <c>build-manifest.json</c> beside the IoStore trio. The manifest is the durable record of
-/// exactly WHAT shipped in a build:
-///   * an immutable <c>build_id</c> (fresh per successful package) + UTC timestamp + tool/game build
-///   * every package file bundled into the pak, with role + ownership + SHA-256 (the dependency
-///     inventory / ownership map - Phase 2 items 2 & 3)
-///   * the trio (.pak/.ucas/.utoc) hashes so a build can be verified byte-identical later
-///   * the preflight validation report (errors/warnings) that gated the build
-/// It reads only the already-staged files and never mutates anything - safe to call post-package.
-/// </summary>
+/// <summary>Records packaged files, hashes, and preflight results for a completed build.</summary>
 public sealed class BuildManifestService
 {
     public sealed record Entry(string Package, string Role, string Ownership, string File, string Sha256, long Size);

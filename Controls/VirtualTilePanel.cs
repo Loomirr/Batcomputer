@@ -119,7 +119,7 @@ public sealed class VirtualTilePanel : Panel
     {
         DisposeTileImages(_tiles);
         _tiles = tiles ?? Array.Empty<Tile>();
-        // The old hovered index means nothing against a new tile list - cancel any in-flight fade.
+        // Reset hover state before replacing tiles.
         Animator.Cancel(this, "tilehover");
         _hovered = -1;
         _hoverPaintIndex = -1;

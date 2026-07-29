@@ -82,7 +82,9 @@ internal static class CharacterCatalogService
         }
 
         var provider = new DefaultFileProvider(
-            paksDir, SearchOption.AllDirectories, isCaseInsensitive: true, new VersionContainer(EGame.GAME_UE5_6));
+            paksDir, SearchOption.AllDirectories,
+            versions: new VersionContainer(EGame.GAME_UE5_6),
+            pathComparer: StringComparer.OrdinalIgnoreCase);
         provider.MappingsContainer = new FileUsmapTypeMappingsProvider(usmapPath);
         provider.Initialize();
         provider.SubmitKey(new FGuid(), new FAesKey(new string('0', 64)));
@@ -150,9 +152,7 @@ internal static class CharacterCatalogService
     {
         try
         {
-            // SuitProjectService is the authoritative location for projects made by this tool.
-            // The old "Suits" directory scan was a legacy path, which left My suits empty even
-            // though the Home screen could see the same saved projects.
+            // Saved projects belong to SuitProjectService's workspace.
             return new SuitProjectService(projectRoot)
                 .ListProjects()
                 .Select(project => new Entry(

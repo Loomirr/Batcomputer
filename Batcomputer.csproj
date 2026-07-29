@@ -8,8 +8,7 @@
     <AssemblyName>Batcomputer</AssemblyName>
     <RootNamespace>Batcomputer</RootNamespace>
     <ApplicationIcon>Assets\Icon.ico</ApplicationIcon>
-    <!-- WFO1000 wants DesignerSerializationVisibility on custom control properties. Our controls are
-         built in code, never dropped on a designer surface, so the serialization hint is irrelevant. -->
+    <!-- Code-built controls do not need designer serialization metadata. -->
     <NoWarn>$(NoWarn);WFO1000</NoWarn>
   </PropertyGroup>
   <ItemGroup>
@@ -22,44 +21,31 @@
   <PropertyGroup>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
-  <!-- Release layout: one self-contained exe, no .NET runtime prerequisite.
-       gamedata stays loose so it can be refreshed without a rebuild.
-       Scoped to Release ON PURPOSE: setting RuntimeIdentifier globally moves the Debug build into
-       bin\Debug\net8.0-windows\win-x64\, which orphans the settings file that lives next to the exe
-       and makes the app think every F5 is a first run. -->
+  <!-- Keep the runtime layout beside Debug output; publish settings apply only to Release. -->
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <!-- Release ships just the exe; no loose .pdb next to it. -->
+    <!-- Release ships without a loose PDB. -->
     <DebugType>none</DebugType>
   </PropertyGroup>
   <ItemGroup>
-    <!-- UE build rules are C# source for UnrealBuildTool, not for Batcomputer's .NET project. -->
+    <!-- Unreal build rules are not part of Batcomputer. -->
     <Compile Remove="Tools\SuitSlotsRegistryWriter\**\*.cs" />
-    <!-- Compiled INTO the assembly (see EmbeddedAssets) so the exe carries its own art. -->
+    <!-- Embed app art in the single-file release. -->
     <EmbeddedResource Include="Assets\**\*.png" />
     <EmbeddedResource Include="Assets\**\*.gif" />
-    <!-- Also embedded, so the window/taskbar icon works in the single-file build. -->
+    <!-- Embed the window and taskbar icon. -->
     <EmbeddedResource Include="Assets\Icon.ico" />
-    <!-- Vendored three.js (MIT, r128) for the offline in-app 3D preview. Embedded so the exe carries
-         its own renderer - the user downloads nothing. License in licenses/three.js-LICENSE.txt.
-         Kept in Web\ (committed), not Assets\ (the user's art, excluded from the repo). -->
+    <!-- Offline three.js preview runtime; see licenses/three.js-LICENSE.txt. -->
     <EmbeddedResource Include="Web\preview\*.js" />
-    <!-- GameDataService loads the NEWEST gamedata json by file timestamp. Keep exactly one file
-         here: zip extraction can rewrite timestamps, so shipping two makes which one loads a
-         coin flip. publish-release.ps1 fails the build if more than one is present. -->
+    <!-- Keep one GameData file so timestamp-based loading is deterministic. -->
     <None Update="gamedata\*.json" CopyToOutputDirectory="PreserveNewest" />
-    <!-- CUE4Parse's native helper (win-x64). Needed ONLY to decompress ACL-compressed animation,
-        which is how the game stores facial expression poses - there is no managed ACL decoder.
-        Apache-2.0 (CUE4Parse) + MIT (ACL); notice in licenses/CUE4Parse-Natives-NOTICE.txt.
-        Must stay ABI-matched to the CUE4Parse package version above. -->
+    <!-- CUE4Parse's ACL helper; keep it matched to the package version. -->
     <None Include="native\CUE4Parse-Natives.dll" CopyToOutputDirectory="PreserveNewest" Link="CUE4Parse-Natives.dll" />
-    <!-- The Oodle-enabled retoc helper is built from Loomirr/retoc-oodle outside this
-         repository. When present locally, copy it into Debug and Publish output with its
-         MIT notice. Never place oo2core or other Unreal files in this folder. -->
+    <!-- Copy the locally supplied Oodle-enabled retoc helper and its notice. -->
     <None Remove="Tools\retoc-oodle\retoc.exe" />
     <Content Include="Tools\retoc-oodle\retoc.exe"
              CopyToOutputDirectory="PreserveNewest"
@@ -69,14 +55,17 @@
     <None Update="README.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="THIRD_PARTY_NOTICES.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="licenses\*.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <!-- Portable author tools: source/config only. UE creates its own Binaries, Intermediate,
-         DerivedDataCache and Saved folders locally after the author uses the registry writer. -->
+    <!-- Bundle author-tool source and config, not Unreal build outputs. -->
     <None Update="Tools\README.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="Tools\Build-NativeSuitTemplateIndex.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="Tools\SuitSlotsRegistryWriter\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
-  <!-- Empty directories are not source-controlled, but a portable release should visibly
-       include the default workspace before its first run. -->
+  <Target Name="RemoveWebView2WpfReference" BeforeTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <Reference Remove="@(Reference)" Condition="'%(Reference.Filename)' == 'Microsoft.Web.WebView2.Wpf'" />
+    </ItemGroup>
+  </Target>
+  <!-- Include the default workspace in portable releases. -->
   <Target Name="CreatePortableGeneratedFolder" AfterTargets="Publish">
     <MakeDir Directories="$(PublishDir)Generated" />
   </Target>

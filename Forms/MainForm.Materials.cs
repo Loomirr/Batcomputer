@@ -76,7 +76,7 @@ public sealed partial class MainForm
         }
 
         SelectComboValue(_toyboxCategoryCombo, "Materials");
-        _session.RaiseChanged(); // UI Phase 2: single project-state refresh (Your Character + Inspector)
+        _session.RaiseChanged();
         RefreshToyboxTiles();
         UpdateToyboxChips();
     }

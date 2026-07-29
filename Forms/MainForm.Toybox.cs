@@ -29,8 +29,6 @@ public sealed partial class MainForm
         var body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Padding = new Padding(6), BackColor = Theme.PanelBg };
         _toyboxBodyLayout = body;
         body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 82));
-        // Wider than the old 226 list column: the minifig figure is width-bound (its height follows
-        // its width), and it needs side gutters for the callout labels.
         body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 340));
         body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         outer.Controls.Add(body, 0, 1);
@@ -165,8 +163,6 @@ public sealed partial class MainForm
             if (distance < rightSplit.Panel1MinSize) distance = rightSplit.Panel1MinSize;
             try { rightSplit.SplitterDistance = distance; rightSplitSet = true; } catch { /* not sized yet */ }
         };
-        // Toybox workspace hosted in its designer-editable shell (UI Phase 1/2, host-unchanged;
-        // the tile browser is decomposed + virtualized in UI Phase 4).
         var toybox = new ToyboxControl { Dock = DockStyle.Fill };
         toybox.HostContent(toyBox);
         rightSplit.Panel1.Controls.Add(toybox);
@@ -185,15 +181,13 @@ public sealed partial class MainForm
 
     private Control CreateToyboxHeader()
     {
-        // Flat ground, not a gradient. Child controls that clear themselves resolve the ground from
-        // BackColor, so a painted gradient shows up as lighter/darker boxes behind them.
+        // Keep the header solid so child controls blend into it.
         var header = new Panel { Dock = DockStyle.Fill, BackColor = HeaderGround };
         header.Paint += (_, e) =>
         {
             var g = e.Graphics;
             var w = Math.Max(1, header.Width);
             var h = Math.Max(1, header.Height);
-            // Gold underline fading to the right, rather than a hard rule across the whole bar.
             using var line = new LinearGradientBrush(new Rectangle(0, h - 2, w, 2),
                 Theme.Gold, Color.FromArgb(0, Theme.GoldDim), LinearGradientMode.Horizontal);
             g.FillRectangle(line, 0, h - 2, w, 2);
@@ -808,7 +802,7 @@ public sealed partial class MainForm
         RecordChange("Base", _suitNameText.Text.Trim(), $"{UnrealPathUtil.AssetName(playablePackage)} ({fam})");
         UpdateToyboxChips();
         SelectComboValue(_toyboxCategoryCombo, "Materials");
-        _session.RaiseChanged(); // UI Phase 2: single project-state refresh (Your Character + Inspector)
+        _session.RaiseChanged();
     }
 
     private async Task ApplyVisualCutsceneBaseFromCatalog(string visualCutscenePackage)
@@ -1107,7 +1101,7 @@ public sealed partial class MainForm
         RecordChange("Base", wiz.SuitName, $"{System.IO.Path.GetFileName(wiz.PlayablePath)} ({fam})");
         UpdateToyboxChips();
         SelectComboValue(_toyboxCategoryCombo, "Materials");
-        _session.RaiseChanged(); // UI Phase 2: single project-state refresh (Your Character + Inspector)
+        _session.RaiseChanged();
     }
 
     private void SelectInspectorTabForCategory()
@@ -1189,7 +1183,7 @@ public sealed partial class MainForm
             }
             AppendLog($"Dropped part {CleanPartMeshDisplayName(payload.Part)} onto Your Character.");
             await GraftSelectedPartsAsync();
-            _session.RaiseChanged(); // UI Phase 2: single project-state refresh (Your Character + Inspector)
+            _session.RaiseChanged();
             return;
         }
 
@@ -1967,7 +1961,7 @@ public sealed partial class MainForm
 
         try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject); } catch { /* best effort */ }
         AppendLog($"Removed change: {change.Category} · {change.Target}");
-        _session.RaiseChanged(); // UI Phase 2: single project-state refresh (Your Character + Inspector)
+        _session.RaiseChanged();
         RefreshToyboxTiles();
     }
 
@@ -2175,8 +2169,6 @@ public sealed partial class MainForm
 
     private Button MakeTile(string title, string subtitle, Action onClick, Color accent, bool dashed = false)
     {
-        // Owner-drawn rounded card (matches the VirtualTilePanel tiles) instead of the
-        // old flat accent-outline Button.
         var b = new Button
         {
             Width = 118,
@@ -2511,19 +2503,11 @@ public sealed partial class MainForm
 
         try
         {
-            // Hold the rebuild gate across the WHOLE staging pass: PatchNameMapsWithUAssetApi writes
-            // the PatchedNameMapStage packages EXCLUSIVELY, and a concurrent rebuild copies that same
-            // stage - overlapping them threw "used by another process". Call the gate-free core for
-            // the replay so we don't deadlock re-acquiring our own gate.
+            // Serialize the staging pass so package reads and writes cannot race.
             await RebuildGate.WaitAsync();
             try
             {
-            // Purge any stale GraftedPartStage from a PRIOR base/graft session. Re-picking the
-            // base regenerates the PatchedNameMapStage, but the graft stage is only copied from
-            // patched when it doesn't already exist - so a leftover stage keeps its old (possibly
-            // broken/orphaned) component grafts. Worse, an orphaned static "Head" component there
-            // makes the next hair graft CLONE that orphan (same-asset path) instead of building a
-            // fresh donor shell, propagating the break. Deleting it forces a clean start.
+            // Rebuild part grafts from a clean stage after changing the base.
             var staleGraftStage = Path.Combine(
                 AppSettings.GeneratedRootFor(_projectRootText.Text.Trim()), "NativeSuitGuiProjects",
                 _currentProject.SlotId, "GraftedPartStage");
@@ -2547,9 +2531,7 @@ public sealed partial class MainForm
             _detectedLabel.ForeColor = Color.SeaGreen;
             _detectedLabel.Text = $"Base set → {_targetPlayableText.Text.Trim()} + _Cutscene. Now go to step 2 (Materials) or step 3 (Parts).";
             AppendLog("Base ready.");
-            // Re-picking the base purged the graft stage - replay the suit's declared parts
-            // onto the fresh base so grafted hair/hats/etc. survive a re-base (mirrors how
-            // materials/removals are replayed).
+            // Replay declared parts after changing the base.
             if (_currentProject.PartGrafts.Count > 0)
             {
                 await RebuildGraftStageCoreAsync();

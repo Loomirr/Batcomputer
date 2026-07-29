@@ -241,17 +241,26 @@ internal static class Program
         {
             // --apply-packaged <projectRoot> <projectJson> <contentRoot>
             var proj = new SuitProjectService(args[1]).LoadProject(args[2]);
+            if (proj is null)
+            {
+                Console.Error.WriteLine($"Could not read suit project: {args[2]}");
+                return 2;
+            }
             if (args.Length >= 5 && args[4] == "loco")
             {
-                // Test: give the suit Catwoman's idle via a locomotion override.
                 var usmap = AppSettings.Current.EffectiveUsmapPath();
                 Usmap? m = !string.IsNullOrWhiteSpace(usmap) && File.Exists(usmap) ? MappingsCache.Load(usmap) : null;
                 var d = AnimArchetypeGraftService.DetectDonorForProject(proj, args[3], m);
+                if (d is null)
+                {
+                    Console.Error.WriteLine("Could not detect an animation donor for the suit project.");
+                    return 2;
+                }
                 proj.AnimationOverrides.Clear();
                 proj.LocomotionOverrides.Clear();
                 proj.LocomotionOverrides.Add(new AnimSequenceOverride
                 {
-                    DonorSequence = $"A_Idle_{d!.Family}",
+                    DonorSequence = $"A_Idle_{d.Family}",
                     DonorSequencePackage = $"/Game/Animation/LEGOfig/{d.Family}/Movement/A_Idle_{d.Family}",
                     ReplacementSequence = "A_Idle_Catwoman",
                     ReplacementPackage = "/Game/Animation/LEGOfig/Catwoman/Movement/A_Idle_Catwoman",
@@ -270,12 +279,6 @@ internal static class Program
             foreach (var l in r.Log) Console.WriteLine("  " + l);
             if (r.Error is not null) Console.WriteLine("ERR: " + r.Error.Split('\n')[0]);
             return 0;
-        }
-
-        if (args.Length >= 3 && args[0].Equals("--reparent-poc", StringComparison.OrdinalIgnoreCase))
-        {
-            // --reparent-poc <projectRoot> <projectJson>
-            return ReparentPoc(args[1], args[2]);
         }
 
         if (args.Length >= 4 && args[0].Equals("--graft-anim", StringComparison.OrdinalIgnoreCase))
@@ -602,82 +605,6 @@ internal static class Program
                 Console.WriteLine("anim-lib subcommands: list | register | import | remove");
                 return 1;
         }
-    }
-
-    private static int ReparentPoc(string projectRoot, string projectJson)
-    {
-        var project = new SuitProjectService(projectRoot).LoadProject(projectJson);
-        project.UseCustomArchetype = true;
-        // Stage a foreign gadget (Whip, Catwoman) to exercise the anim graft.
-        project.EquipmentSlots.Clear();
-        project.EquipmentSlots.Add(new EquipmentSlotChange { Slot = 1, Gadget = "Whip" });
-        // Also exercise a locomotion swap: give the suit Catwoman's walk/idle.
-        var loco = GameDataService.Instance.BuildAnimOverride("Locomotion (idle/walk/run)", "Catwoman");
-        if (loco is not null) { project.AnimationOverrides.Clear(); project.AnimationOverrides.Add(loco); }
-        Console.WriteLine($"slot={project.SlotId} playable={project.TargetPackages.Playable} +foreign gadget=Whip");
-
-        var customArch = UAssetPatchService.CustomArchetypePackage(project);
-        Console.WriteLine($"custom archetype target = {customArch}");
-
-        var batch = new UAssetPatchService(projectRoot).CreateNameMapPatchedStage(project);
-        Console.WriteLine($"stage status={batch.Status}");
-        foreach (var r in batch.PackageResults)
-        {
-            Console.WriteLine($"  {r.Role}: success={r.Success} written={r.Written} replacements={r.NameMapReplacements.Count}{(r.Error is null ? "" : " ERROR=" + r.Error.Split('\n')[0])}");
-        }
-
-        // Simulate the packaging path on a FRESH root that only has the playable/
-        // cutscene (like a grafted-parts stage) to prove ApplyToPackagedRoot builds
-        // the archetype + anim assets there from scratch.
-        var simRoot = Path.Combine(Path.GetTempPath(), "packaged-sim", project.SlotId, "Content");
-        if (Directory.Exists(simRoot)) Directory.Delete(simRoot, true);
-        foreach (var role in new[] { project.TargetPackages.Playable, project.TargetPackages.Cutscene })
-        {
-            var src = Path.Combine(batch.PatchedContentRoot, role["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar));
-            var dst = Path.Combine(simRoot, role["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar));
-            Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
-            foreach (var ext in new[] { ".uasset", ".uexp" }) if (File.Exists(src + ext)) File.Copy(src + ext, dst + ext, true);
-        }
-        var packaged = new AnimArchetypeGraftService().ApplyToPackagedRoot(project, simRoot);
-        Console.WriteLine($"--- ApplyToPackagedRoot(sim grafted root) status={packaged.Status} ---");
-        foreach (var l in packaged.Log) Console.WriteLine("  " + l);
-        if (packaged.Error is not null) Console.WriteLine("  ERR: " + packaged.Error.Split('\n')[0]);
-        var mod2 = project.TargetPackages.Playable.Replace("/Game/Mods/", "").Split('/')[0];
-        Console.WriteLine("  sim archetype exists=" + File.Exists(Path.Combine(simRoot, "Mods", mod2, "Characters", $"BP_CAT_Archetype_{mod2}.uasset")) +
-            " DPRD=" + File.Exists(Path.Combine(simRoot, "Mods", mod2, "Characters", $"DA_DPRD_{mod2}.uasset")) +
-            " AS=" + File.Exists(Path.Combine(simRoot, "Mods", mod2, "Characters", $"AS_{mod2}.uasset")));
-
-        var animGraft = new AnimArchetypeGraftService().Graft(project, batch.PatchedContentRoot);
-        Console.WriteLine($"anim graft status={animGraft.Status}");
-        foreach (var l in animGraft.Log) Console.WriteLine("  " + l);
-        if (animGraft.Error is not null) Console.WriteLine("  ERR: " + animGraft.Error.Split('\n')[0]);
-
-        // Verify: does the reparented playable now point at the custom archetype, and does it re-parse?
-        var usmap = AppSettings.Current.EffectiveUsmapPath();
-        Usmap? mappings = !string.IsNullOrWhiteSpace(usmap) && File.Exists(usmap) ? MappingsCache.Load(usmap) : null;
-        var playable = batch.PackageResults.FirstOrDefault(r => r.Role == "playable")?.OutputUasset;
-        var archetype = batch.PackageResults.FirstOrDefault(r => r.Role == "archetype")?.OutputUasset;
-        var root = batch.PatchedContentRoot;
-        var mod = project.TargetPackages.Playable.Replace("/Game/Mods/", "").Split('/')[0];
-        string StagePath(string pkgLeaf) => Path.Combine(root, "Mods", mod, "Characters", pkgLeaf + ".uasset");
-        foreach (var (label, path) in new[] { ("archetype", archetype), ("playable", playable), ("MAS_Char", StagePath($"MAS_Char_{mod}")), ("LAS_Char", StagePath($"LAS_Char_{mod}")) })
-        {
-            if (path is null || !File.Exists(path)) { Console.WriteLine($"  {label}: <missing>"); continue; }
-            try
-            {
-                var asset = new UAsset(path, EngineVersion.VER_UE5_6, mappings, CustomSerializationFlags.SkipPreloadDependencyLoading);
-                var refs = asset.Imports.Where(i => i.ObjectName.ToString().Contains("CAT_Archetype", StringComparison.OrdinalIgnoreCase) ||
-                        i.ObjectName.ToString().Contains("Char_", StringComparison.OrdinalIgnoreCase) ||
-                        i.ObjectName.ToString().Contains("Whip", StringComparison.OrdinalIgnoreCase))
-                    .Select(i => i.ObjectName.ToString()).Distinct().Take(6);
-                Console.WriteLine($"  {label} RE-PARSED OK, folderName={asset.FolderName}, refs=[{string.Join(", ", refs)}]");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"  {label} RE-PARSE FAILED: {ex.GetType().Name}: {ex.Message}");
-            }
-        }
-        return 0;
     }
 
     private static int ProbeProps(string assetPath)

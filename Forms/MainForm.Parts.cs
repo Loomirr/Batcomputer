@@ -206,7 +206,7 @@ public sealed partial class MainForm
         ApplyMaterialAssignment();
 
         await Task.CompletedTask;
-        _session.RaiseChanged(); // UI Phase 2: single project-state refresh (Your Character + Inspector)
+        _session.RaiseChanged();
     }
 
     private static bool IsWingsuitGliderActive(NativeSuitProject project) =>
@@ -401,6 +401,10 @@ public sealed partial class MainForm
         }
         SelectToyboxPart(wingsuitPart); // sets the playable + cutscene donors
         await GraftSelectedPartsAsync(); // retargets Cape→glideComponent, repoints, refreshes
+        if (_currentProject is null)
+        {
+            return;
+        }
         _currentProject.GliderGrafted = true;
         RecordChange("Gliders", "Wingsuit visual", $"{chr} wingsuit → {glideComponent}", status: "staged");
         try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject); } catch { /* best effort */ }
@@ -409,7 +413,8 @@ public sealed partial class MainForm
     private async Task ApplyNativeGliderPresetAsync(NativeSuitPartRecord part, string? materialOverride = null)
     {
         EnsureProject();
-        if (_currentProject is null)
+        var project = _currentProject;
+        if (project is null)
         {
             return;
         }
@@ -419,15 +424,12 @@ public sealed partial class MainForm
             return;
         }
 
-        ReadFieldsIntoProject(_currentProject);
+        ReadFieldsIntoProject(project);
 
-        var glideComponent = new AnimArchetypeGraftService().BaseGlideVisualComponent(_currentProject);
+        var glideComponent = new AnimArchetypeGraftService().BaseGlideVisualComponent(project);
         if (string.IsNullOrWhiteSpace(glideComponent))
         {
-            // Civilian base (ThomasWayne/BruceWayne): no native glide visual, but the glide
-            // ABILITY is already granted (AS_Gliding in the family DPRD) - the character
-            // glides, only the visual is missing. Proceed: the graft ADDS a glide component
-            // (skeletal clone) + injects the glide anim. EXPERIMENTAL - verify in-game.
+            // Civilian donors need a visual component added for gliding.
             AppendLog("Glider: civilian base has no native glide visual — will ADD one (skeletal clone). The base already has the glide ability; this supplies the missing visual + pose.");
         }
 
@@ -436,10 +438,9 @@ public sealed partial class MainForm
             LoadPartIndexAndRefreshGrid(logIfMissing: false);
         }
 
-        // The glider owns the glide component's materials. Drop any stale material
-        // override the user set on that component (e.g. an old cape recolor) so it can't
-        // paint over the glider - otherwise ApplySavedMaterials re-applies it post-graft.
-        if (ClearMaterialAssignmentsForComponent(_currentProject, glideComponent))
+        // A glider material takes precedence over old component overrides.
+        if (!string.IsNullOrWhiteSpace(glideComponent) &&
+            ClearMaterialAssignmentsForComponent(project, glideComponent))
         {
             AppendLog($"Glider: cleared saved material override on glide component '{glideComponent}' (the glider provides its own material; recolor via the glider decal).");
         }
@@ -467,26 +468,26 @@ public sealed partial class MainForm
             {
                 cutscene = GliderService.WithWingsuitDecalOverride(cutscene, materialOverride);
             }
-            _currentProject.GliderMaterial = materialOverride;
+            project.GliderMaterial = materialOverride;
         }
         else
         {
-            _currentProject.GliderMaterial = (playable ?? cutscene)?.Materials.FirstOrDefault()?.PackagePath ?? "";
+            project.GliderMaterial = (playable ?? cutscene)?.Materials.FirstOrDefault()?.PackagePath ?? "";
         }
 
         var presetName = GliderService.GliderPresetLabel(playable ?? cutscene!);
-        _currentProject.GliderType = $"native:{presetName}";
-        _currentProject.GliderGrafted = false;
+        project.GliderType = $"native:{presetName}";
+        project.GliderGrafted = false;
         _selectedPlayablePart = playable;
         _selectedCutscenePart = cutscene;
         UpdateSelectedPartLabels();
 
         AppendLog($"Glider: applying native preset '{presetName}' to base glide component '{glideComponent}' ({GliderService.GliderPresetSubtitle(playable ?? cutscene!)})...");
         await GraftSelectedPartsAsync();
-        _currentProject.GliderGrafted = true;
+        project.GliderGrafted = true;
         RecordChange("Gliders", "Native glider preset", presetName, status: "staged");
-        try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject); } catch { /* best effort */ }
-        _session.RaiseChanged(); // UI Phase 2: single project-state refresh (Your Character + Inspector)
+        try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(project); } catch { /* keep the staged result usable */ }
+        _session.RaiseChanged();
     }
 
     private List<(string Label, string Component, int Slot)> DiscoverToyboxSlots()
@@ -1043,7 +1044,7 @@ public sealed partial class MainForm
         (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject);
         RecordChange("Parts", $"{component} slot {slot}", $"removed SCS part {label}");
         AppendLog($"Removed {label} from staged SCS arrays. Package the current stage to test it in-game.");
-        _session.RaiseChanged(); // UI Phase 2: single project-state refresh (Your Character + Inspector)
+        _session.RaiseChanged();
         RefreshToyboxTiles();
     }
 
@@ -1284,13 +1285,7 @@ public sealed partial class MainForm
             emptyMessage: "No face materials matched. Try <all faces> or clear the search.");
     }
 
-    /// <summary>
-    /// Glider picker. Characters glide with one of three visuals: a cape, a wingsuit
-    /// (SK_GA_Wingsuit_&lt;Char&gt; skeletal mesh + shared ABP_Wingsuit), or the plain
-    /// glider. This surfaces the choice + the per-character wingsuit decal variants.
-    /// The apply/graft (archetype GliderCharacterComponent rewire) is experimental -
-    /// the picker records intent into the project for packaging.
-    /// </summary>
+    /// <summary>Shows glider visuals and saves the selected package-time graft.</summary>
     private void RefreshGliderTiles(string? type)
     {
         if (!string.Equals(type, "Wingsuit decals", StringComparison.OrdinalIgnoreCase))
@@ -2150,10 +2145,7 @@ public sealed partial class MainForm
         _graftSelectedPartButton.Enabled = false;
         try
         {
-            // Declarative parts: record/replace this drop in project.PartGrafts (keyed by the
-            // resolved visual slot → one part per kind), then rebuild the ENTIRE graft stage from
-            // the clean base and replay every stored part. Replaces the old imperative
-            // one-graft-per-drop that stacked duplicate exports across repeated drops.
+            // Rebuild the clean stage from the saved graft list.
             UpsertPartGraft(targetSlot, isGliderPart, _selectedPlayablePart, _selectedCutscenePart);
             var donor = System.IO.Path.GetFileNameWithoutExtension(samplePart.SourceUasset);
             RecordChange("Parts", $"{targetSlot} @ {attachSocket}", $"graft {donor} (clone {cloneSlot})");
@@ -2410,7 +2402,7 @@ public sealed partial class MainForm
         ApplySavedComponentRemovals(_currentProject, logNoRemovals: false);
         ApplySavedMaterials(_currentProject, logIfNone: false);
         try { (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(_currentProject); } catch { /* best effort */ }
-        _session.RaiseChanged(); // UI Phase 2: single project-state refresh (Your Character + Inspector)
+        _session.RaiseChanged();
     }
 
     private void UpdateSelectedPartLabels()

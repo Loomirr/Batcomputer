@@ -361,6 +361,37 @@ internal static class Theme
         };
     }
 
+    public static void StyleListBox(ListBox list)
+    {
+        list.BackColor = SlateDark;
+        list.ForeColor = OnDark;
+        list.BorderStyle = BorderStyle.None;
+        list.DrawMode = DrawMode.OwnerDrawFixed;
+        list.ItemHeight = Math.Max(26, TextRenderer.MeasureText("Ag", Body).Height + 10);
+        list.DrawItem += (_, e) =>
+        {
+            if (e.Index < 0 || e.Index >= list.Items.Count)
+            {
+                return;
+            }
+
+            var selected = (e.State & DrawItemState.Selected) != 0;
+            using var fill = new SolidBrush(selected ? CardHi : SlateDark);
+            e.Graphics.FillRectangle(fill, e.Bounds);
+            if (selected)
+            {
+                using var accent = new Pen(Gold);
+                e.Graphics.DrawLine(accent, e.Bounds.Left, e.Bounds.Top, e.Bounds.Left, e.Bounds.Bottom - 1);
+            }
+
+            var textBounds = e.Bounds;
+            textBounds.X += 10;
+            textBounds.Width -= 14;
+            TextRenderer.DrawText(e.Graphics, list.GetItemText(list.Items[e.Index]), Body, textBounds, OnDark,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        };
+    }
+
     public static void StyleGrid(DataGridView grid)
     {
         grid.BackgroundColor = SlateDark;

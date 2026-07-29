@@ -325,6 +325,7 @@ public sealed partial class MainForm
         };
         var search = new TextBox { Dock = DockStyle.Top, Height = 26, PlaceholderText = $"Filter {assets.Count} {className}...", BackColor = Theme.SlateDark, ForeColor = Theme.OnDark, BorderStyle = BorderStyle.FixedSingle };
         var list = new ListBox { Dock = DockStyle.Fill, BackColor = Theme.CardBg, ForeColor = Theme.OnDark, BorderStyle = BorderStyle.None };
+        Theme.StyleListBox(list);
         var ok = new Button { Text = "Use selected", Dock = DockStyle.Bottom, Height = 34 };
         Theme.StyleGoldButton(ok);
         ok.DialogResult = DialogResult.OK;

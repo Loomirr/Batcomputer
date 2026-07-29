@@ -132,8 +132,7 @@ public sealed class SuitProjectService
         CopyPackagePair(project.CutsceneTemplate, project.TargetPackages.Cutscene, stageRoot);
         CopyPackagePair(project.DcmdTemplate, project.TargetPackages.Dcmd, stageRoot);
 
-        // Reparent PoC: stage the donor archetype at its mod-local clone path so the
-        // name-map patch pass can clone+rename it like any other package.
+        // Stage the donor archetype for the name-map clone pass.
         var customArchetypePkg = UAssetPatchService.CustomArchetypePackage(project);
         if (customArchetypePkg is not null)
         {

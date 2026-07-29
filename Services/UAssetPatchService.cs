@@ -67,7 +67,7 @@ public sealed class UAssetPatchService
         return batch;
     }
 
-    // Reparent PoC: the donor family archetype we clone from + the per-mod clone target.
+    // Donor family archetype for mod-local clones.
     public const string DonorArchetypePackage = "/Game/Characters/Minifig/Batman/BP_CAT_Archetype_Batman";
     public const string DonorArchetypeStem = "BP_CAT_Archetype_Batman";
 
@@ -96,8 +96,7 @@ public sealed class UAssetPatchService
         return slash > 0 ? rest[..slash] : rest;
     }
 
-    // Reparent replacements that repoint a playable/cutscene's parent-archetype refs
-    // from the donor archetype to the mod-local clone.
+    // Point playable and cutscene parent refs at the mod-local archetype.
     private static void AddArchetypeReparentReplacements(Dictionary<string, string> extra, string customArchetypePkg)
     {
         var customStem = UnrealPathUtil.AssetName(customArchetypePkg);
@@ -183,9 +182,7 @@ public sealed class UAssetPatchService
             });
         }
 
-        // Reparent PoC: clone the donor archetype into the mod, renaming its class.
-        // Left otherwise unchanged (same anim sets / mesh) so this isolates the
-        // reparent itself. The playable/cutscene above already repoint to it.
+        // Clone the donor archetype for the reparented blueprints.
         if (customArchetypePkg is not null)
         {
             var customStem = UnrealPathUtil.AssetName(customArchetypePkg);

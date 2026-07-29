@@ -27,17 +27,16 @@ namespace Batcomputer;
 /// </summary>
 public static class ModelPreviewService
 {
-    /// <summary>The zero key mounts LotDK's unencrypted paks (confirmed in the Phase 0 probe).</summary>
+    /// <summary>Mount key for LotDK's unencrypted paks.</summary>
     private const string ZeroAes = "0x0000000000000000000000000000000000000000000000000000000000000000";
 
     private static DefaultFileProvider MakeProvider(string paksDir, string usmapPath)
     {
-        // Case-insensitive lookup: asset import paths carry mixed casing (a component points at
-        // ".../Hat/..." while the file lives under ".../HAT/..."), so a case-sensitive match drops
-        // parts like the cowl.
+        // Asset paths use mixed casing, so preview lookups stay case-insensitive.
         var provider = new DefaultFileProvider(
-            paksDir, SearchOption.AllDirectories, isCaseInsensitive: true,
-            new VersionContainer(EGame.GAME_UE5_6));
+            paksDir, SearchOption.AllDirectories,
+            versions: new VersionContainer(EGame.GAME_UE5_6),
+            pathComparer: StringComparer.OrdinalIgnoreCase);
         provider.MappingsContainer = new FileUsmapTypeMappingsProvider(usmapPath);
         provider.Initialize();
         provider.SubmitKey(new FGuid(), new FAesKey(ZeroAes));
@@ -82,9 +81,7 @@ public static class ModelPreviewService
     /// </summary>
     private const string DefaultHeadMesh = "/Game/Characters/LEGOfig/SK_LEGOfig_Minifig_Head.SK_LEGOfig_Minifig_Head";
 
-    // Faces are deliberately suspended while the face-material research is rebuilt. Keeping this
-    // gate at assembly time means neither the experimental face mesh nor its diagnostic panels can
-    // leak into an otherwise useful body/parts preview.
+    // Keep unfinished face rendering out of the regular preview.
     private static readonly bool IncludeFacePreview = false;
 
     /// <summary>Project-specific data layered over a base character preview.</summary>
@@ -2220,9 +2217,7 @@ public static class ModelPreviewService
                 {
                     mouthRel = "textures/" + MakeSafeName(mouthTex.Name) + "_mouth.png";
                     var dest = Path.Combine(previewDir, mouthRel.Replace('/', Path.DirectorySeparatorChar));
-                    // M_LEGOface reads the raw alpha stencil. The old exporter baked it into a
-                    // single opaque black/white bitmap, which multiplied the white teeth by the
-                    // black Mouth Tint and made the whole mouth a dark slab.
+                    // M_LEGOface needs the texture's original alpha stencil.
                     if (!File.Exists(dest) && !TextureDecodeService.TryExportPng(mouthTex, dest, keepAlpha: true))
                     {
                         mouthRel = null;

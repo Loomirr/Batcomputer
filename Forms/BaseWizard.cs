@@ -1,10 +1,6 @@
 namespace Batcomputer;
 
-/// <summary>
-/// Modal "set base suit" wizard: name the suit, choose a mod folder, and pick the
-/// base playable + cutscene (+ optional DCMD template) .uasset files. Pure input
-/// collector - the caller applies the values through the existing base pipeline.
-/// </summary>
+/// <summary>Manual fallback for choosing a base set from extracted files.</summary>
 public sealed partial class BaseWizard : Form
 {
     private readonly TextBox _suitName = new();
@@ -40,14 +36,27 @@ public sealed partial class BaseWizard : Form
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
         MaximizeBox = false;
+        BackColor = Theme.WindowBg;
+        ForeColor = Theme.OnDark;
 
         _suitName.Text = suitName;
         _modFolder.Text = modFolder;
         _playable.Text = playable;
         _cutscene.Text = cutscene;
         _dcmd.Text = dcmd;
+        foreach (var input in new[] { _suitName, _modFolder, _playable, _cutscene, _dcmd })
+        {
+            Theme.StyleDarkInput(input);
+        }
 
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 7, Padding = new Padding(12) };
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 7,
+            Padding = new Padding(18),
+            BackColor = Theme.WindowBg,
+        };
         for (var i = 0; i < 6; i++) root.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         Controls.Add(root);
@@ -55,7 +64,9 @@ public sealed partial class BaseWizard : Form
         root.Controls.Add(new Label
         {
             Dock = DockStyle.Fill,
-            Text = "Pick an existing playable + cutscene from the extracted game content. The tool clones them under your mod's paths; you then customize materials + parts."
+            Text = "Choose the extracted playable and cutscene files to use as this suit's starting point.",
+            ForeColor = Theme.OnDarkMuted,
+            Font = Theme.Caption,
         }, 0, 0);
 
         root.Controls.Add(TwoField("Suit name", _suitName, "Mod folder", _modFolder), 0, 1);
@@ -66,6 +77,7 @@ public sealed partial class BaseWizard : Form
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
         var cancel = new Button { Text = "Cancel", Width = 90, DialogResult = DialogResult.Cancel };
         var ok = new Button { Text = "Use as base", Width = 130 };
+        Theme.StyleDarkButton(cancel);
         Theme.StyleGoldButton(ok);
         ok.Click += (_, _) =>
         {
@@ -105,7 +117,8 @@ public sealed partial class BaseWizard : Form
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));
         row.Controls.Add(new Label { Text = label, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
         text.Dock = DockStyle.Fill; row.Controls.Add(text, 1, 0);
-        var browse = new Button { Text = "Browse…", Dock = DockStyle.Fill };
+        var browse = new Button { Text = "Browse...", Dock = DockStyle.Fill };
+        Theme.StyleDarkButton(browse);
         browse.Click += (_, _) =>
         {
             using var dlg = new OpenFileDialog { Filter = "Cooked asset (*.uasset)|*.uasset" };

@@ -133,12 +133,10 @@ public sealed partial class MainForm
         _viewerList = new ListBox
         {
             Dock = DockStyle.Fill,
-            BackColor = Theme.PanelBg,
-            ForeColor = Theme.OnDark,
-            BorderStyle = BorderStyle.None,
             Font = Theme.Body,
             IntegralHeight = false,
         };
+        Theme.StyleListBox(_viewerList);
         _viewerList.DoubleClick += (_, _) => LoadSelectedViewerCharacter();
         left.Controls.Add(_viewerList, 0, 2);
 

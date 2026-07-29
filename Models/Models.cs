@@ -160,11 +160,7 @@ public sealed class NativeSuitProject
     public string DisplayName { get; set; } = "Thomas Wayne";
     public string Description { get; set; } = "Generated native-suit prototype.";
 
-    // Native identity (required for the native-suit path). The globally-unique pawn
-    // tag this suit registers as, e.g. "Pawns.Playable.Batman.Electric". Empty on
-    // legacy/donor-bridge suits - build-time validation flags an empty PawnTag when
-    // packaging a native mod. This is the SUIT's source of truth; a mod does not
-    // override it. See docs/native-suit-mod-bundles-...-2026-07-16.md.
+    // Native registry identity for this suit.
     public string PawnTag { get; set; } = "";
 
     // Localized UI text for the native suit menu. DisplayName above is the suit name;
@@ -173,13 +169,9 @@ public sealed class NativeSuitProject
     // §7.1 of the plan doc: never silently retain the Zoo-activity text).
     public string LockedDescription { get; set; } = "";
 
-    // Progress/unlock gate. Defaults to the known unlocked Batman progress so custom
-    // suits are usable by default; advanced override exposed later. A custom PawnTag
-    // and a custom progress tag are separate registration problems.
+    // Progress gate for the native suit menu.
     public string ProgressTag { get; set; } = "GameProgress.Definitions.Characters.Batman.TheBatman2025";
-    // Optional local artwork shown on the Home screen suit tile. The builder
-    // copies selected artwork into the suit's project folder so the tile does
-    // not depend on the user's original PNG remaining in its old location.
+    // Local artwork copied into the suit project for its Home tile.
     public string CoverImagePath { get; set; } = "";
     public string PackageBaseName { get; set; } = "THOMAS_NEWSLOT_GENERATED_P";
     public TargetPackages TargetPackages { get; set; } = new();
@@ -190,80 +182,48 @@ public sealed class NativeSuitProject
     public TemplateRecord? VisualCutsceneSourceTemplate { get; set; }
     public TemplateRecord? StaticMeshComponentShapeTemplate { get; set; }
 
-    // A suit can use any character cutscene as its visual starting point while a
-    // separate, proven _Playable donor supplies the runtime machinery. Keep that
-    // relationship explicit instead of overloading PlayableTemplate to mean both.
-    // Older projects have no profile; BaseEligibilityService derives one from their
-    // existing templates when they are opened or validated.
+    // Separates the visual cutscene source from the playable machinery donor.
     public SuitBaseProfile? BaseProfile { get; set; }
     public List<NativeSuitRequirement> Requirements { get; set; } = new();
 
-    // UI icon texture object paths (/Game/...) for the generated UIMD. Empty =
-    // keep the base Batman icon for that slot.
+    // UIMD icon texture paths. Empty keeps the donor icon.
     public string IconMenu { get; set; } = "";
     public string IconSuit { get; set; } = "";
     public string IconLeft { get; set; } = "";
     public string IconRight { get; set; } = "";
 
-    // Gadget slot replacements applied to this suit's DCMD EquipmentList at
-    // generation time (slot is 0-based; gadget is a catalog name like "Whip").
+    // DCMD equipment replacements, indexed from zero.
     public List<EquipmentSlotChange> EquipmentSlots { get; set; } = new();
 
-    // EXPERIMENTAL: glide visual choice - "" (keep base), "cape", "wingsuit", or
-    // "glider". Recorded by the Gliders toybox; the archetype glider rewire runs at
-    // package time.
+    // Glider visual: empty, cape, wingsuit, or glider.
     public string GliderType { get; set; } = "";
 
-    // EXPERIMENTAL: the material (MI_DECAL_Wingsuit_* or any MI) dropped onto the
-    // glider row. Recorded for the package-time glider rewire.
+    // Material applied by the package-time glider rewire.
     public string GliderMaterial { get; set; } = "";
 
-    // Set once the wingsuit glide component has been grafted into the stage, so we
-    // don't add duplicate glider components on later material changes (the decal is
-    // then just a material assignment on the Cape slot).
+    // Prevents duplicate glider components after later material edits.
     public bool GliderGrafted { get; set; }
 
-    // Cross-type glider: the donor character's glide ANIMATION sets, injected as parent
-    // sets into the suit's cloned LAS_Char/MAS_Char at package time. Needed because the
-    // glider mesh is a membrane driven by CopyPoseFromMesh - without the matching glide
-    // body pose (e.g. Catwoman's arms-spread) the wingsuit collapses and is invisible.
-    // Empty = no injection (the base already glides in this style, e.g. Batman cape).
+    // Donor glide animation sets for cross-type glider parts.
     public string GliderAnimLas { get; set; } = "";   // /Game/Animation/LayerAnimSets/Traversal/LAS_Traversal_<Char>
     public string GliderAnimMas { get; set; } = "";   // /Game/Animation/MontageAnimSets/Traversal/MAS_Glide_<Char>
 
-    // EXPERIMENTAL (reparent PoC): when true, generation clones the donor family
-    // archetype (BP_CAT_Archetype_Batman) into the mod and reparents the generated
-    // playable + cutscene to the clone. Proves cooked-BP reparenting works before
-    // we start customizing the clone's anim sets / mesh. Off = unchanged behavior.
+    // Clone a mod-local archetype before applying animation changes.
     public bool UseCustomArchetype { get; set; }
 
-    // Machinery donor: for base characters that lack their own playable machinery
-    // (villains/NPCs with no BP_CAT_Archetype), the /Game path of a hero playable to
-    // INHERIT abilities/equipment/animation/archetype from. The base supplies the visual
-    // (body mesh + parts); this donor supplies the runtime family. Empty = the base has
-    // its own machinery (normal heroes). Also used as the cutscene template when the base
-    // has no cutscene sibling.
+    // Hero playable used when a visual base lacks runtime machinery.
     public string MachineryDonorPlayable { get; set; } = "";
 
-    // Material assignments applied in the editor, persisted so reloading a suit
-    // restores them and re-applies them after the name-map stage is rebuilt
-    // (the rebuild wipes the staged .uassets, so these must be replayed).
+    // Material assignments replayed after rebuilding staged assets.
     public List<SavedMaterialAssignment> MaterialAssignments { get; set; } = new();
 
-    // Declarative part grafts, keyed by visual slot (Head, Torso, …). Each dropped part
-    // REPLACES any prior entry for its slot → one part per visual kind. On every stage
-    // (re)build the whole list is re-grafted from the CLEAN base - exactly like
-    // MaterialAssignments + remove-component Requirements - so parts never accumulate or
-    // collide across repeated drops (the old imperative graft stacked duplicate exports).
+    // Declarative part grafts replayed from the clean base on each rebuild.
     public List<SavedPartGraft> PartGrafts { get; set; } = new();
 
-    // Viewer-space nudges authored with the 3D part mover. These are intentionally separate from
-    // a donor's native transform: the preview keeps the game's authored placement as its base and
-    // applies only the small per-suit correction the user saved.
+    // Per-suit preview offsets layered over the donor transform.
     public List<SavedPreviewPartPlacement> PreviewPartPlacements { get; set; } = new();
 
-    // Persisted change log shown in the Review screen - reopening a suit restores
-    // the full history of what you changed and what you changed it to.
+    // Change log shown in Review.
     public List<SavedChange> Changes { get; set; } = new();
 
     // Animation building-block swaps: replace a donor set in the suit's MAS/LAS
@@ -276,19 +236,11 @@ public sealed class NativeSuitProject
     // crash-free alternative to swapping another family's whole AnimBlueprint.
     public List<AnimSequenceOverride> LocomotionOverrides { get; set; } = new();
 
-    // Texture2D imports cooked from user PNGs. GUI imports now cook split texture
-    // files only; the final suit package stages them into the suit's IoStore trio.
-    // Generated material instances can reference PackagePath/ObjectPath directly.
+    // Cooked Texture2D imports staged into the suit's IoStore trio.
     public List<GeneratedTextureEntry> GeneratedTextures { get; set; } = new();
 }
 
-/// <summary>
-/// The two independent sides of a suit base. The visual source is allowed to be
-/// any character Blueprint/cutscene. The gameplay donor must be a real
-/// <c>_Playable</c> Blueprint because it owns movement, equipment and the runtime
-/// archetype. Both are persisted so reopening a suit cannot silently lose that
-/// choice.
-/// </summary>
+/// <summary>Visual source and runtime donor chosen for a suit base.</summary>
 public sealed class SuitBaseProfile
 {
     public string VisualBasePackage { get; set; } = "";
@@ -382,12 +334,7 @@ public sealed class AnimSetOverride
     public string ReplacementPackage { get; set; } = ""; // /Game path of the replacement set
 }
 
-/// <summary>
-/// Per-animation locomotion override: replaces one AnimSequence the suit's own
-/// ABP_Core plays (idle/walk/run pose) with a custom or borrowed sequence. Safe
-/// because the animgraph stays the suit's own (shared LEGOFig base) - only the
-/// pose asset changes. Applied by cloning ABP_Core + LAS_Default and repointing.
-/// </summary>
+/// <summary>Sequence swap within the suit's own animation blueprint.</summary>
 public sealed class AnimSequenceOverride
 {
     public string DonorSequence { get; set; } = "";        // e.g. A_Idle_ThomasWayne (the ABP_Core slot)
@@ -396,34 +343,24 @@ public sealed class AnimSequenceOverride
     public string ReplacementPackage { get; set; } = "";   // /Game path of the replacement AnimSequence
 }
 
-/// <summary>
-/// Phase 3 (cooked animation library). One catalogued animation the user can pick when
-/// building an override, instead of hand-typing a /Game package path. The tool NEVER cooks
-/// animations - modders author + cook them in Unreal themselves; the library just REGISTERS
-/// and INSPECTS an already-cooked asset and remembers where it lives. Entries feed the
-/// existing AnimationOverrides / LocomotionOverrides (their ReplacementPackage) at build time.
-/// </summary>
+/// <summary>Catalog entry for a cooked animation used by an override.</summary>
 public sealed class AnimLibraryEntry
 {
-    // Stable identity - never changes once created; overrides reference this, not the name/path.
+    // Stable identity used by overrides.
     public string Id { get; set; } = "";
-    // Bumped each time the same entry is re-imported/updated (item 1: IDs + versions).
+    // Incremented when an entry is imported again.
     public int Version { get; set; } = 1;
     public string Name { get; set; } = "";
-    // Optional hint for filtering: Locomotion | Movement | Glide | Traversal | Montage | ""
+    // Optional filter category.
     public string Category { get; set; } = "";
 
-    // How the referenced asset is delivered at runtime (item 6):
-    //   base-game     - a stock cooked asset already in the game (referenced by /Game path)
-    //   external      - lives in the MODDER'S OWN pak; we only reference it by /Game path
-    //   preserve-path - imported into the library but keeps its original /Game path when packaged
-    //   proven-clone  - cloned from a known-good donor asset at build time
+    // Delivery mode: base-game, external, preserve-path, or proven-clone.
     public string SourceMode { get; set; } = "external";
 
-    // The /Game package path of the animation (for base-game / external / preserve-path).
+    // Package path for base-game, external, or preserve-path assets.
     public string PackagePath { get; set; } = "";
 
-    // --- Inspection results (item 4), best-effort when the asset bytes are resolvable ---
+    // Best-effort inspection results.
     public string AssetClass { get; set; } = "";     // AnimSequence | AnimMontage | TTLayerSet | TTAnimSet | …
     public string Skeleton { get; set; } = "";       // referenced USkeleton import path
     public bool RootMotion { get; set; }
@@ -431,7 +368,7 @@ public sealed class AnimLibraryEntry
     public List<string> Dependencies { get; set; } = new(); // /Game import paths the asset pulls in
     public bool Inspected { get; set; }              // true once inspection actually ran against bytes
 
-    // Relative paths (under the library cache) of imported cooked files (item 3): uasset (+ sidecars).
+    // Imported cooked files relative to the library cache.
     public List<string> CachedFiles { get; set; } = new();
 
     public string Notes { get; set; } = "";

@@ -448,13 +448,8 @@ public sealed class PartGraftService
             part.SourcePackagePath.Contains("BP_Batman_Absolute", StringComparison.OrdinalIgnoreCase));
     }
 
-    // Cross-asset donor static-shell graft: proven to produce assets that re-parse but
-    // still crash the game on load (2026-07-04). Gated OFF until an in-game-verified fix
-    // for the cross-asset class/name rebase exists. See character-system investigation doc.
-    // Re-enabled 2026-07-09 with the cross-asset object-ref fix (repoint node ComponentClass +
-    // strip stale donor object refs). Prior crash was unrebased FPackageIndex refs in the
-    // cloned static template. Still EXPERIMENTAL - validate in-game before trusting.
-    private const bool EnableDonorStaticShellGraftExperimental = true;
+    // Clone a donor static template when the base has no matching component.
+    private const bool EnableDonorStaticShellGrafts = true;
 
     private static PartGraftPackageResult ApplyPartGraftToPackage(
         string role,
@@ -523,16 +518,11 @@ public sealed class PartGraftService
                 newNode = (NormalExport)cloneNode.Clone();
                 newNode.Data = DeepCloneProperties(cloneNode.Data);
             }
-            else if (EnableDonorStaticShellGraftExperimental &&
+            else if (EnableDonorStaticShellGrafts &&
                      donorPart.MeshKind.Equals("StaticMesh", StringComparison.OrdinalIgnoreCase) &&
                      TryBuildStaticShellFromDonorLive(asset, donorPart, mappings, out newComponent, out newNode))
             {
-                // EXPERIMENTAL, DISABLED (EnableDonorStaticShellGraftExperimental=false):
-                // clones a genuine StaticMeshComponent template out of the donor asset when
-                // the base has no static component in its own SCS to clone. This produced an
-                // asset that PARSED cleanly but crashed the cooked loader on 2026-07-04, so it
-                // is gated off until the cross-asset rebase is proven safe with an in-game load.
-                // Re-parse validation is necessary but NOT sufficient here.
+                // The donor template supplies the StaticMeshComponent shape the base lacks.
             }
             else
             {
@@ -999,10 +989,7 @@ public sealed class PartGraftService
 
     private static IEnumerable<string> GetScsSlotNamesLive(UAsset asset)
     {
-        // Only count nodes actually LINKED into the construction script (present in the
-        // SCS "AllNodes" array). Failed/partial writes can leave orphan SCS_Node exports
-        // behind; counting those inflated unique-slot naming into Cape_2/Cape_3/Head_2.
-        // If the SCS/AllNodes can't be read, fall back to counting every node (old behavior).
+        // Ignore orphan SCS nodes so name allocation uses live components.
         var linked = GetLinkedScsNodeIndexesLive(asset);
 
         for (var i = 0; i < asset.Exports.Count; i++)

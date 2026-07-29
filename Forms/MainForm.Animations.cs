@@ -227,6 +227,7 @@ public sealed partial class MainForm
         };
         var search = new TextBox { Dock = DockStyle.Top, Height = 26, PlaceholderText = "Filter, or paste a custom /Game/... path", BackColor = Theme.SlateDark, ForeColor = Theme.OnDark, BorderStyle = BorderStyle.FixedSingle };
         var list = new ListBox { Dock = DockStyle.Fill, BackColor = Theme.CardBg, ForeColor = Theme.OnDark, BorderStyle = BorderStyle.None };
+        Theme.StyleListBox(list);
         var ok = new Button { Text = "Use selected", Dock = DockStyle.Bottom, Height = 34 };
         Theme.StyleGoldButton(ok);
         ok.DialogResult = DialogResult.OK;
@@ -377,6 +378,7 @@ public sealed partial class MainForm
 
         using var dlg = new Form { Text = $"{category} — source family", Width = 360, Height = 420, StartPosition = FormStartPosition.CenterParent, BackColor = Theme.WindowBg, ForeColor = Theme.OnDark };
         var list = new ListBox { Dock = DockStyle.Fill, BackColor = Theme.CardBg, ForeColor = Theme.OnDark, BorderStyle = BorderStyle.None };
+        Theme.StyleListBox(list);
         list.Items.Add("(donor default — remove override)");
         foreach (var f in families) list.Items.Add(f);
         var ok = new Button { Text = "Use", Dock = DockStyle.Bottom, Height = 32 };
@@ -436,11 +438,7 @@ public sealed partial class MainForm
         Dialog.Info(null, $"Animation · {set.Name}", string.Join(Environment.NewLine, lines));
     }
 
-    /// <summary>
-    /// Phase 3 item 7: stages library-owned cooked animation files that the suit's overrides
-    /// reference into the packaged content root, so they ship in the pak. Best-effort - a library
-    /// staging failure never fails the package (the override still points at the /Game path).
-    /// </summary>
+    /// <summary>Stages library-owned animation assets referenced by this suit.</summary>
     private void StageLibraryAnimsIntoContentRoot(NativeSuitProject project, string contentRootToPackage)
     {
         try

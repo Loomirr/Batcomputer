@@ -32,7 +32,6 @@ public sealed class FilterBar : Control
     private string _scopeTitle = "View";
     private List<string> _scopeItems = new();
     private string? _scopeSelected;
-    private bool _hover;
     private bool _open;
     private double _hoverT;
     private DateTime _closedAt = DateTime.MinValue;
@@ -117,9 +116,9 @@ public sealed class FilterBar : Control
     }
 
     protected override void OnMouseEnter(EventArgs e)
-    { _hover = true; Animator.Start(this, "hover", _hoverT, 1, 120, v => { _hoverT = v; Invalidate(); }); base.OnMouseEnter(e); }
+    { Animator.Start(this, "hover", _hoverT, 1, 120, v => { _hoverT = v; Invalidate(); }); base.OnMouseEnter(e); }
     protected override void OnMouseLeave(EventArgs e)
-    { _hover = false; Animator.Start(this, "hover", _hoverT, 0, 140, v => { _hoverT = v; Invalidate(); }); base.OnMouseLeave(e); }
+    { Animator.Start(this, "hover", _hoverT, 0, 140, v => { _hoverT = v; Invalidate(); }); base.OnMouseLeave(e); }
 
     protected override void OnHandleDestroyed(EventArgs e) { Animator.Cancel(this, "hover"); base.OnHandleDestroyed(e); }
 

@@ -1584,10 +1584,9 @@ public sealed partial class MainForm
         var list = new ListBox
         {
             Dock = DockStyle.Fill,
-            BackColor = Theme.SlateDark,
-            ForeColor = Theme.OnDark,
             IntegralHeight = false
         };
+        Theme.StyleListBox(list);
         foreach (var texture in textures)
         {
             list.Items.Add(new GeneratedTextureListItem(texture));

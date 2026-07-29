@@ -10,7 +10,7 @@ namespace Batcomputer;
 public sealed partial class BaseCharacterPicker : Form
 {
     private readonly ListBox _list = new();
-    private readonly TextBox _search = new();
+    private readonly SearchBox _search = new();
     private List<GameDataAsset> _all = new();
     private List<GameDataAsset> _view = new();
 
@@ -74,16 +74,14 @@ public sealed partial class BaseCharacterPicker : Form
         _search.Left = 14;
         _search.Top = 58;
         _search.Width = 556;
-        _search.BackColor = Theme.SlateDark;
-        _search.ForeColor = Theme.OnDark;
+        _search.PlaceholderText = "Search characters...";
         _search.TextChanged += (_, _) => ApplyFilter();
 
         _list.Left = 14;
         _list.Top = 88;
         _list.Width = 556;
         _list.Height = 376;
-        _list.BackColor = Theme.SlateDark;
-        _list.ForeColor = Theme.OnDark;
+        Theme.StyleListBox(_list);
         _list.DoubleClick += (_, _) => Accept();
 
         var browse = new Button { Text = "Browse files...", Left = 14, Top = 482, Width = 120, Height = 30 };

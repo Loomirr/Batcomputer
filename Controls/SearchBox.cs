@@ -1,4 +1,5 @@
 using System.Drawing.Drawing2D;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Batcomputer;
 
@@ -11,7 +12,7 @@ public sealed class SearchBox : Control
 {
     private readonly TextBox _input = new();
     private bool _hoverClear;
-    private double _focusT;   // eased focus amount for the border/magnifier warm-up
+    private double _focusT;
 
     public SearchBox()
     {
@@ -26,8 +27,7 @@ public sealed class SearchBox : Control
         _input.BackColor = FieldFill;
         _input.ForeColor = Theme.OnDark;
         _input.Font = Theme.Body;
-        // The clear button appears and disappears with the text, which changes how much room the
-        // inner box gets - so a relayout, not just a repaint.
+        // The clear button changes the usable text width.
         _input.TextChanged += (_, _) => { PerformLayout(); Invalidate(); OnTextChanged(EventArgs.Empty); };
         _input.GotFocus += (_, _) => Animator.Start(this, "focus", _focusT, 1, 130, v => { _focusT = v; Invalidate(); });
         _input.LostFocus += (_, _) => Animator.Start(this, "focus", _focusT, 0, 150, v => { _focusT = v; Invalidate(); });
@@ -44,10 +44,11 @@ public sealed class SearchBox : Control
 
     private static Color FieldFill => Theme.WindowBg;
 
+    [AllowNull]
     public override string Text
     {
         get => _input.Text;
-        set => _input.Text = value;
+        set => _input.Text = value ?? string.Empty;
     }
 
     public string PlaceholderText

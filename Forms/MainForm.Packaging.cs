@@ -410,7 +410,7 @@ public sealed partial class MainForm
         _packageProgress?.Report("Generating DCMD / UIMD metadata…");
         StageGeneratedDcmdIntoContentRoot(_currentProject, contentRootToPackage);
 
-        // Phase 3 item 7: ship any library-OWNED cooked animations (preserve-path/proven-clone/
+        // Stage library-owned cooked animations (preserve-path/proven-clone/
         // imported) that this suit's overrides reference. external/base-game anims are NOT shipped
         // (they live in the modder's own pak or the base game).
         StageLibraryAnimsIntoContentRoot(_currentProject, contentRootToPackage);
@@ -1204,7 +1204,7 @@ public sealed partial class MainForm
     }
 
     /// <summary>
-    /// Writes the Phase 2 build manifest beside the freshly-packaged IoStore trio. Best-effort:
+    /// Writes the build manifest beside the freshly-packaged IoStore trio. Best-effort:
     /// a manifest failure never fails an otherwise-successful package.
     /// </summary>
     private void WriteBuildManifest(NativeSuitProject project, string buildId, string contentRootPacked,

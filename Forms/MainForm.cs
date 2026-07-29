@@ -693,7 +693,7 @@ public sealed partial class MainForm : Form
         afterCreated?.Invoke(_currentProject);
         AppendLog($"Started new suit '{name}' (mod {mod}). Next: Base → Pick base character to choose the character to build from.");
         SelectComboValue(_toyboxCategoryCombo, "Base");
-        _session.RaiseChanged(); // UI Phase 2: single project-state refresh (Your Character + Inspector)
+        _session.RaiseChanged();
         RefreshToyboxTiles();
         UpdateToyboxChips();
     }
@@ -2158,17 +2158,8 @@ public sealed partial class MainForm : Form
         }
     }
 
-    /// <summary>
-    /// Rebuilds the graft stage from the CLEAN patched base and replays every declared part in
-    /// <c>project.PartGrafts</c>, then re-applies saved removals + materials. This is the single
-    /// authoritative path for grafting: because it always starts clean and applies exactly the
-    /// declared set, parts never accumulate or produce duplicate exports across repeated drops.
-    /// </summary>
-    // Serializes ALL stage-file operations (rebuilds AND UseAsBase's name-map staging). Several
-    // fire-and-forget callers (load-suit, use-as-base, part drop, villain transplant) can overlap
-    // and race on the staged .uasset files - one path writes a package exclusively while another
-    // reads/copies it ("used by another process" + half-read assets, count -1806). Everything that
-    // touches a stage must hold this while doing so.
+    /// <summary>Rebuilds the clean graft stage, then replays parts, removals, and materials.</summary>
+    // Serialize stage-file reads and writes.
     private static readonly System.Threading.SemaphoreSlim RebuildGate = new(1, 1);
 
     /// <summary>Reports a packaging step to whichever progress window is active (single or bulk).</summary>
@@ -2517,27 +2508,18 @@ public sealed partial class MainForm : Form
     private static string FirstNonEmpty(params string?[] values) =>
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? "";
 
-    // The donor tag used by the legacy bridge architecture, where every generated
-    // suit shared one unlocked/default source tag and the runtime swapped the donor
-    // DCMD payload per hovered button. Retained as the fallback for suits authored
-    // before PawnTag became a required native-suit field.
+    // Fallback tag for projects created before PawnTag was required.
     private const string LegacyDonorPawnTag = "Pawns.Playable.Batman.TheBatman2025";
 
     /// <summary>
     /// A starting pawn tag for a suit that has none, built from its display name or slot id. Only a
     /// suggestion - the author still has to accept it, and uniqueness is enforced at package time.
     /// </summary>
-    // Seams for SelfTest. These two are pure functions; exposing them beats making the real
-    // members public or reflecting into them.
+    // Test hooks for pure tag helpers.
     internal static string SuggestPawnTagForTest(NativeSuitProject project) => SuggestPawnTag(project);
     internal static string ToGameplayTagLeafForTest(string value) => ToGameplayTagLeaf(value);
 
-    /// <summary>
-    /// NativeSuitProject ships with the donor's own name as its default DisplayName/SlotId
-    /// ("Thomas Wayne" / "batman_thomas"). Seeding a suggestion from those would hand every
-    /// un-renamed suit the SAME tag - the collision this field exists to prevent - so they are
-    /// treated as "no name yet" and the box opens empty instead.
-    /// </summary>
+    /// <summary>Donor defaults are not valid seeds for a unique pawn tag.</summary>
     private static readonly string[] DonorDefaultNames = { "Thomas Wayne", "batman_thomas", "ThomasWayne" };
 
     private static string SuggestPawnTag(NativeSuitProject project)
@@ -2555,9 +2537,7 @@ public sealed partial class MainForm : Form
 
     private static string DerivePawnTag(NativeSuitProject project)
     {
-        // Native-suit path: the suit owns its globally-unique pawn tag. Fall back to
-        // the legacy donor tag only when a suit has no PawnTag set (older projects /
-        // the donor-bridge codepath). See docs/native-suit-mod-bundles-...-2026-07-16.md.
+        // Older projects fall back to the donor tag.
         return string.IsNullOrWhiteSpace(project.PawnTag)
             ? LegacyDonorPawnTag
             : project.PawnTag.Trim();
