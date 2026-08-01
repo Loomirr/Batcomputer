@@ -28,6 +28,283 @@ internal static class Program
             return ModelPreviewProbe.Run(args[1], args[2], args[3]);
         }
 
+        if (args.Length >= 5 && args[0].Equals("--static-mesh-donor-report", StringComparison.OrdinalIgnoreCase))
+        {
+            // --static-mesh-donor-report <extractedContent> <paksDir> <usmap> <outputDir>
+            var report = new StaticMeshDonorService().CreateReport(args[1], args[2], args[3], args[4]);
+            var reportPath = Path.Combine(args[4], "static-mesh-donor-report.json");
+            Console.WriteLine($"report={reportPath}");
+            foreach (var donor in report.Donors)
+            {
+                Console.WriteLine($"{donor.Id}: {donor.Status} lod0={donor.Lod0Vertices} verts / {donor.Lod0Sections} sections, " +
+                                  $"uasset-roundtrip={donor.UassetRoundTripByteEqual?.ToString() ?? "unavailable"}");
+                if (!string.IsNullOrWhiteSpace(donor.Error)) Console.WriteLine("  " + donor.Error);
+            }
+            return report.Donors.All(donor => donor.Status.Equals("ok", StringComparison.OrdinalIgnoreCase)) ? 0 : 1;
+        }
+
+        if (args.Length >= 5 && args[0].Equals("--static-mesh-cube-morph-probe", StringComparison.OrdinalIgnoreCase))
+        {
+            // --static-mesh-cube-morph-probe <extractedContent> <usmap> <outputContent> <outputPackage>
+            var result = new StaticMeshMorphService().CreateCubeMorphProbe(new StaticMeshMorphService.Request
+            {
+                ExtractedContentRoot = args[1],
+                UsmapPath = args[2],
+                OutputContentRoot = args[3],
+                OutputPackagePath = args[4]
+            });
+            Console.WriteLine($"status={result.Status}");
+            Console.WriteLine($"uasset={result.OutputUasset}");
+            Console.WriteLine($"uexp={result.OutputUexp}");
+            Console.WriteLine($"ubulk={result.OutputUbulk}");
+            Console.WriteLine($"report={result.ReportPath}");
+            foreach (var line in result.Log) Console.WriteLine(line);
+            if (!string.IsNullOrWhiteSpace(result.Error)) Console.Error.WriteLine(result.Error);
+            return result.Status.Equals("created", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+        }
+
+        if (args.Length >= 4 && args[0].Equals("--static-mesh-bounds-probe", StringComparison.OrdinalIgnoreCase))
+        {
+            // --static-mesh-bounds-probe <extractedContent> <usmap> <meshPackage>
+            var bounds = new StaticMeshMorphService().ReadExtendedBounds(args[1], args[2], args[3]);
+            Console.WriteLine($"package={bounds.PackagePath}");
+            Console.WriteLine($"origin={bounds.OriginX:F4},{bounds.OriginY:F4},{bounds.OriginZ:F4}");
+            Console.WriteLine($"extent={bounds.ExtentX:F4},{bounds.ExtentY:F4},{bounds.ExtentZ:F4}");
+            return 0;
+        }
+
+        if (args.Length >= 4 && args[0].Equals("--static-mesh-cube-attachment-probe", StringComparison.OrdinalIgnoreCase))
+        {
+            // --static-mesh-cube-attachment-probe <projectRoot> <sourceSuitProject> <newModId>
+            var result = new StaticMeshAttachmentProbeService().CreateCubeAttachmentProbe(new StaticMeshAttachmentProbeService.Request
+            {
+                ProjectRoot = args[1],
+                SourceProjectPath = args[2],
+                ModId = args[3]
+            });
+            Console.WriteLine($"status={result.Status}");
+            Console.WriteLine($"suitProject={result.SuitProjectPath}");
+            Console.WriteLine($"modProject={result.ModProjectPath}");
+            Console.WriteLine($"contentRoot={result.ContentRoot}");
+            Console.WriteLine($"mesh={result.MeshPackagePath}");
+            Console.WriteLine($"report={result.ReportPath}");
+            foreach (var line in result.Log) Console.WriteLine(line);
+            if (!string.IsNullOrWhiteSpace(result.Error)) Console.Error.WriteLine(result.Error);
+            return result.Status.Equals("created", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+        }
+
+        if (args.Length >= 4 && args[0].Equals("--static-mesh-large-cube-no-cowl-probe", StringComparison.OrdinalIgnoreCase))
+        {
+            // --static-mesh-large-cube-no-cowl-probe <projectRoot> <sourceSuitProject> <newModId>
+            var result = new StaticMeshAttachmentProbeService().CreateCubeAttachmentProbe(new StaticMeshAttachmentProbeService.Request
+            {
+                ProjectRoot = args[1],
+                SourceProjectPath = args[2],
+                ModId = args[3],
+                CubeScale = 4f,
+                RemoveCowl = true
+            });
+            Console.WriteLine($"status={result.Status}");
+            Console.WriteLine($"suitProject={result.SuitProjectPath}");
+            Console.WriteLine($"modProject={result.ModProjectPath}");
+            Console.WriteLine($"contentRoot={result.ContentRoot}");
+            Console.WriteLine($"mesh={result.MeshPackagePath}");
+            Console.WriteLine($"report={result.ReportPath}");
+            foreach (var line in result.Log) Console.WriteLine(line);
+            if (!string.IsNullOrWhiteSpace(result.Error)) Console.Error.WriteLine(result.Error);
+            return result.Status.Equals("created", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+        }
+
+        if (args.Length >= 4 && args[0].Equals("--static-mesh-clean-material-cube-probe", StringComparison.OrdinalIgnoreCase))
+        {
+            // --static-mesh-clean-material-cube-probe <projectRoot> <sourceSuitProject> <newModId>
+            var result = new StaticMeshAttachmentProbeService().CreateCubeAttachmentProbe(new StaticMeshAttachmentProbeService.Request
+            {
+                ProjectRoot = args[1],
+                SourceProjectPath = args[2],
+                ModId = args[3],
+                CubeScale = 4f,
+                RemoveCowl = true,
+                UseNativeHairMaterial = true
+            });
+            Console.WriteLine($"status={result.Status}");
+            Console.WriteLine($"suitProject={result.SuitProjectPath}");
+            Console.WriteLine($"modProject={result.ModProjectPath}");
+            Console.WriteLine($"contentRoot={result.ContentRoot}");
+            Console.WriteLine($"mesh={result.MeshPackagePath}");
+            Console.WriteLine($"report={result.ReportPath}");
+            foreach (var line in result.Log) Console.WriteLine(line);
+            if (!string.IsNullOrWhiteSpace(result.Error)) Console.Error.WriteLine(result.Error);
+            return result.Status.Equals("created", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+        }
+
+        if (args.Length >= 4 && args[0].Equals("--static-mesh-cowl-material-cube-probe", StringComparison.OrdinalIgnoreCase))
+        {
+            // --static-mesh-cowl-material-cube-probe <projectRoot> <sourceSuitProject> <newModId>
+            var result = new StaticMeshAttachmentProbeService().CreateCubeAttachmentProbe(new StaticMeshAttachmentProbeService.Request
+            {
+                ProjectRoot = args[1],
+                SourceProjectPath = args[2],
+                ModId = args[3],
+                CubeScale = 4f,
+                RemoveCowl = true,
+                UseOpaqueCowlMaterial = true
+            });
+            Console.WriteLine($"status={result.Status}");
+            Console.WriteLine($"suitProject={result.SuitProjectPath}");
+            Console.WriteLine($"modProject={result.ModProjectPath}");
+            Console.WriteLine($"contentRoot={result.ContentRoot}");
+            Console.WriteLine($"mesh={result.MeshPackagePath}");
+            Console.WriteLine($"report={result.ReportPath}");
+            foreach (var line in result.Log) Console.WriteLine(line);
+            if (!string.IsNullOrWhiteSpace(result.Error)) Console.Error.WriteLine(result.Error);
+            return result.Status.Equals("created", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+        }
+
+        if (args.Length >= 4 && args[0].Equals("--static-mesh-origin-cube-probe", StringComparison.OrdinalIgnoreCase))
+        {
+            // --static-mesh-origin-cube-probe <projectRoot> <sourceSuitProject> <newModId>
+            var result = new StaticMeshAttachmentProbeService().CreateCubeAttachmentProbe(new StaticMeshAttachmentProbeService.Request
+            {
+                ProjectRoot = args[1],
+                SourceProjectPath = args[2],
+                ModId = args[3],
+                CubeScale = 4f,
+                RemoveCowl = true,
+                UseOpaqueCowlMaterial = true,
+                CenterCubeAtAttachmentOrigin = true
+            });
+            Console.WriteLine($"status={result.Status}");
+            Console.WriteLine($"suitProject={result.SuitProjectPath}");
+            Console.WriteLine($"modProject={result.ModProjectPath}");
+            Console.WriteLine($"contentRoot={result.ContentRoot}");
+            Console.WriteLine($"mesh={result.MeshPackagePath}");
+            Console.WriteLine($"report={result.ReportPath}");
+            foreach (var line in result.Log) Console.WriteLine(line);
+            if (!string.IsNullOrWhiteSpace(result.Error)) Console.Error.WriteLine(result.Error);
+            return result.Status.Equals("created", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+        }
+
+        if (args.Length >= 4 && args[0].Equals("--static-mesh-render-data-cube-probe", StringComparison.OrdinalIgnoreCase))
+        {
+            // --static-mesh-render-data-cube-probe <projectRoot> <sourceSuitProject> <newModId>
+            var result = new StaticMeshAttachmentProbeService().CreateCubeAttachmentProbe(new StaticMeshAttachmentProbeService.Request
+            {
+                ProjectRoot = args[1],
+                SourceProjectPath = args[2],
+                ModId = args[3],
+                CubeScale = 4f,
+                RemoveCowl = true,
+                UseOpaqueCowlMaterial = true,
+                CenterCubeAtAttachmentOrigin = true,
+                RewriteCubeRenderData = true
+            });
+            Console.WriteLine($"status={result.Status}");
+            Console.WriteLine($"suitProject={result.SuitProjectPath}");
+            Console.WriteLine($"modProject={result.ModProjectPath}");
+            Console.WriteLine($"contentRoot={result.ContentRoot}");
+            Console.WriteLine($"mesh={result.MeshPackagePath}");
+            Console.WriteLine($"report={result.ReportPath}");
+            foreach (var line in result.Log) Console.WriteLine(line);
+            if (!string.IsNullOrWhiteSpace(result.Error)) Console.Error.WriteLine(result.Error);
+            return result.Status.Equals("created", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+        }
+
+        if (args.Length >= 4 && args[0].Equals("--static-mesh-side-shell-probe", StringComparison.OrdinalIgnoreCase))
+        {
+            // --static-mesh-side-shell-probe <projectRoot> <sourceSuitProject> <newModId>
+            var result = new StaticMeshAttachmentProbeService().CreateCubeAttachmentProbe(new StaticMeshAttachmentProbeService.Request
+            {
+                ProjectRoot = args[1],
+                SourceProjectPath = args[2],
+                ModId = args[3],
+                CubeScale = 4f,
+                RemoveCowl = true,
+                UseOpaqueCowlMaterial = true,
+                CenterCubeAtAttachmentOrigin = true,
+                RewriteCubeRenderData = true,
+                UseFourSidedHardEdgeShell = true
+            });
+            Console.WriteLine($"status={result.Status}");
+            Console.WriteLine($"suitProject={result.SuitProjectPath}");
+            Console.WriteLine($"modProject={result.ModProjectPath}");
+            Console.WriteLine($"contentRoot={result.ContentRoot}");
+            Console.WriteLine($"mesh={result.MeshPackagePath}");
+            Console.WriteLine($"report={result.ReportPath}");
+            foreach (var line in result.Log) Console.WriteLine(line);
+            if (!string.IsNullOrWhiteSpace(result.Error)) Console.Error.WriteLine(result.Error);
+            return result.Status.Equals("created", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+        }
+
+        if (args.Length >= 4 && args[0].Equals("--static-mesh-closed-cube-probe", StringComparison.OrdinalIgnoreCase))
+        {
+            // --static-mesh-closed-cube-probe <projectRoot> <sourceSuitProject> <newModId>
+            var result = new StaticMeshAttachmentProbeService().CreateCubeAttachmentProbe(new StaticMeshAttachmentProbeService.Request
+            {
+                ProjectRoot = args[1],
+                SourceProjectPath = args[2],
+                ModId = args[3],
+                CubeScale = 2.5f,
+                RemoveCowl = true,
+                UseOpaqueCowlMaterial = true,
+                CenterCubeAtAttachmentOrigin = true,
+                UseLargeClosedCube = true
+            });
+            Console.WriteLine($"status={result.Status}");
+            Console.WriteLine($"suitProject={result.SuitProjectPath}");
+            Console.WriteLine($"modProject={result.ModProjectPath}");
+            Console.WriteLine($"contentRoot={result.ContentRoot}");
+            Console.WriteLine($"mesh={result.MeshPackagePath}");
+            Console.WriteLine($"report={result.ReportPath}");
+            foreach (var line in result.Log) Console.WriteLine(line);
+            if (!string.IsNullOrWhiteSpace(result.Error)) Console.Error.WriteLine(result.Error);
+            return result.Status.Equals("created", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+        }
+
+        if (args.Length >= 5 && args[0].Equals("--static-mesh-obj-head-probe", StringComparison.OrdinalIgnoreCase))
+        {
+            // --static-mesh-obj-head-probe <projectRoot> <sourceSuitProject> <newModId> <objPath>
+            var result = new StaticMeshAttachmentProbeService().CreateCubeAttachmentProbe(new StaticMeshAttachmentProbeService.Request
+            {
+                ProjectRoot = args[1],
+                SourceProjectPath = args[2],
+                ModId = args[3],
+                RemoveCowl = true,
+                UseOpaqueCowlMaterial = true,
+                CenterCubeAtAttachmentOrigin = true,
+                ObjPath = args[4],
+                ObjScale = 150f
+            });
+            Console.WriteLine($"status={result.Status}");
+            Console.WriteLine($"suitProject={result.SuitProjectPath}");
+            Console.WriteLine($"modProject={result.ModProjectPath}");
+            Console.WriteLine($"contentRoot={result.ContentRoot}");
+            Console.WriteLine($"mesh={result.MeshPackagePath}");
+            Console.WriteLine($"report={result.ReportPath}");
+            foreach (var line in result.Log) Console.WriteLine(line);
+            if (!string.IsNullOrWhiteSpace(result.Error)) Console.Error.WriteLine(result.Error);
+            return result.Status.Equals("created", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+        }
+
+        if (args.Length >= 3 && args[0].Equals("--verify-static-mesh-cube-attachment-probe", StringComparison.OrdinalIgnoreCase))
+        {
+            // --verify-static-mesh-cube-attachment-probe <projectRoot> <modId>
+            var result = new StaticMeshAttachmentProbeService().VerifyCubeAttachmentProbe(args[1], args[2]);
+            Console.WriteLine("status=" + result.Status);
+            Console.WriteLine("suitProject=" + result.SuitProjectPath);
+            Console.WriteLine("contentRoot=" + result.ContentRoot);
+            Console.WriteLine("mesh=" + result.MeshPackagePath);
+            foreach (var line in result.Log)
+            {
+                Console.WriteLine("log=" + line);
+            }
+            if (!string.IsNullOrWhiteSpace(result.Error))
+            {
+                Console.Error.WriteLine("error=" + result.Error);
+            }
+            return result.Status.Equals("verified", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+        }
+
         if (args.Length >= 1 && args[0].Equals("--preview-window", StringComparison.OrdinalIgnoreCase))
         {
             ApplicationConfiguration.Initialize();
@@ -712,7 +989,7 @@ internal static class Program
                 var oi = -imp.OuterIndex.Index - 1;
                 if (oi >= 0 && oi < asset.Imports.Count) outer = asset.Imports[oi].ObjectName.ToString();
             }
-            Console.WriteLine($"[{i}] {imp.ClassName}  {(string.IsNullOrEmpty(outer) ? "" : outer + ".")}{imp.ObjectName}");
+            Console.WriteLine($"[{i}] {imp.ClassPackage}.{imp.ClassName}  {(string.IsNullOrEmpty(outer) ? "" : outer + ".")}{imp.ObjectName}");
         }
         return 0;
     }
@@ -1057,7 +1334,8 @@ internal static class Program
                 }
             }
 
-            Console.WriteLine($"export[{i + 1}] name={objectName} type={exportType} classIndex={classIndex} class={className} outer={outerName} data=[{string.Join(", ", dataNames)}]");
+            var rawExport = asset.Exports[i];
+            Console.WriteLine($"export[{i + 1}] name={objectName} type={exportType} classIndex={classIndex} class={className} outer={outerName} serial={rawExport.SerialOffset}+{rawExport.SerialSize} data=[{string.Join(", ", dataNames)}]");
         }
 
         return 0;
