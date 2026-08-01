@@ -1,4 +1,4 @@
-# Batcomputer
+# Batcomputer: A Tool For Modding Lego Batman: LOTDK
 
 Batcomputer is a Windows suit-building tool for *LEGO Batman: Legacy of the Dark Knight*.
 It assembles custom playable suits from shipped character assets, then builds and installs a native
