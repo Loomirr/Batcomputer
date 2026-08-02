@@ -220,6 +220,10 @@ public sealed class NativeSuitProject
     // Declarative part grafts replayed from the clean base on each rebuild.
     public List<SavedPartGraft> PartGrafts { get; set; } = new();
 
+    // OBJ static meshes created by Batcomputer. These are separate from native grafts because
+    // their cooked mesh is rebuilt from a project-owned source file on every fresh stage.
+    public List<CustomStaticMeshImport> CustomStaticMeshes { get; set; } = new();
+
     // Per-suit preview offsets layered over the donor transform.
     public List<SavedPreviewPartPlacement> PreviewPartPlacements { get; set; } = new();
 
@@ -417,6 +421,30 @@ public sealed class SavedPartGraft
     // cross-kind hair add, or "Torso" for a same-kind repoint). Written on each rebuild. Lets the
     // remove-component button map a removed component precisely back to its graft entry, without
     // confusing "Head_2" (the hair) with "Head" (the base cowl).
+    public string ResolvedComponent { get; set; } = "";
+}
+
+/// <summary>A project-owned static OBJ attachment and its authored import transform.</summary>
+public sealed class CustomStaticMeshImport
+{
+    public string Id { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public string SourceObjRelativePath { get; set; } = "";
+    // The CAE attachment slot selected by the author, for example Head or Hip.
+    public string Target { get; set; } = "Head";
+    // The matching socket declared by CAE_Default_AttachmentDef.
+    public string AttachSocket { get; set; } = "HeadStud_Attach_Socket";
+    public float Scale { get; set; } = 150f;
+    public float OffsetX { get; set; }
+    public float OffsetY { get; set; }
+    public float OffsetZ { get; set; }
+    // Unreal rotator degrees baked into the generated StaticMesh: pitch, yaw, then roll.
+    public float RotationPitch { get; set; }
+    public float RotationYaw { get; set; }
+    public float RotationRoll { get; set; }
+    public bool HideBaseHead { get; set; } = true;
+    public string MaterialPath { get; set; } = "";
+    public string MeshPackagePath { get; set; } = "";
     public string ResolvedComponent { get; set; } = "";
 }
 

@@ -35,6 +35,7 @@
     <!-- Unreal build rules are not part of Batcomputer. -->
     <Compile Remove="Tools\SuitSlotsRegistryWriter\**\*.cs" />
     <Compile Remove="artifacts\**\*.cs" />
+    <Compile Remove="Generated\**\*.cs" />
     <!-- Embed app art in the single-file release. -->
     <EmbeddedResource Include="Assets\**\*.png" />
     <EmbeddedResource Include="Assets\**\*.gif" />
@@ -42,8 +43,8 @@
     <EmbeddedResource Include="Assets\Icon.ico" />
     <!-- Offline three.js preview runtime; see licenses/three.js-LICENSE.txt. -->
     <EmbeddedResource Include="Web\preview\*.js" />
-    <!-- Keep one GameData file so timestamp-based loading is deterministic. -->
-    <None Update="gamedata\*.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Shipped game-data catalogs and runtime socket calibration profiles. -->
+    <None Update="gamedata\**\*.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <!-- CUE4Parse's ACL helper; keep it matched to the package version. -->
     <None Include="native\CUE4Parse-Natives.dll" CopyToOutputDirectory="PreserveNewest" Link="CUE4Parse-Natives.dll" />
     <!-- Copy the locally supplied Oodle-enabled retoc helper and its notice. -->
@@ -72,5 +73,6 @@
   <!-- Include the default workspace in portable releases. -->
   <Target Name="CreatePortableGeneratedFolder" AfterTargets="Publish">
     <MakeDir Directories="$(PublishDir)Generated" />
+    <WriteLinesToFile File="$(PublishDir)Generated\.gitkeep" Lines="" Overwrite="true" />
   </Target>
 </Project>

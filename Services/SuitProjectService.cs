@@ -11,10 +11,33 @@ public sealed class SuitProjectService
         PropertyNameCaseInsensitive = true
     };
 
-    public sealed record ProjectSummary(string SlotId, string DisplayName, string Path, DateTime Modified, string CoverImagePath);
+    public sealed record ProjectSummary(
+        string SlotId,
+        string DisplayName,
+        string Path,
+        DateTime Modified,
+        string CoverImagePath,
+        string TargetPlayablePath);
 
     /// <summary>Lists saved suit projects (newest first).</summary>
     public IReadOnlyList<ProjectSummary> ListProjects()
+    {
+        return ListProjectFiles()
+            .OrderByDescending(project => project.Modified)
+            .GroupBy(project => string.IsNullOrWhiteSpace(project.TargetPlayablePath)
+                    ? "slot:" + project.SlotId
+                    : "target:" + project.TargetPlayablePath,
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+    }
+
+    /// <summary>
+    /// Lists every readable project file without collapsing stale aliases. The normal
+    /// project picker uses <see cref="ListProjects"/>; deletion uses this list so an
+    /// older file cannot reappear after its newer replacement is removed.
+    /// </summary>
+    public IReadOnlyList<ProjectSummary> ListProjectFiles()
     {
         var results = new List<ProjectSummary>();
         if (!Directory.Exists(GuiOutputRoot))
@@ -26,40 +49,45 @@ public sealed class SuitProjectService
         {
             var slot = System.IO.Path.GetFileName(path).Replace(".native-suit-project.json", "");
             var display = slot;
+            var cover = "";
+            var targetPlayable = "";
             try
             {
                 var project = JsonSerializer.Deserialize<NativeSuitProject>(File.ReadAllText(path), JsonOptions);
+                if (project is not null && string.IsNullOrWhiteSpace(project.DisplayName))
+                {
+                    continue;
+                }
                 if (project is not null)
                 {
-                    // Skip nameless placeholder projects - an accidental save before a
-                    // name was chosen shows up as a nameless timestamp entry.
-                    if (string.IsNullOrWhiteSpace(project.DisplayName))
-                    {
-                        continue;
-                    }
                     display = project.DisplayName;
                     slot = project.SlotId;
+                    cover = project.CoverImagePath ?? "";
+                    targetPlayable = UnrealPathUtil.NormalizePackagePath(project.TargetPackages?.Playable);
                 }
             }
             catch
             {
-                // Skip unreadable files but still list them by filename.
+                // Keep a corrupt file visible by filename so it can still be removed from Home.
             }
-            var cover = "";
-            try
-            {
-                var project = JsonSerializer.Deserialize<NativeSuitProject>(File.ReadAllText(path), JsonOptions);
-                cover = project?.CoverImagePath ?? "";
-            }
-            catch
-            {
-                // The project was already accepted above; a missing cover should
-                // never make an otherwise valid suit disappear from Home.
-            }
-            results.Add(new ProjectSummary(slot, display, path, File.GetLastWriteTime(path), cover));
+            results.Add(new ProjectSummary(slot, display, path, File.GetLastWriteTime(path), cover, targetPlayable));
         }
 
-        return results.OrderByDescending(p => p.Modified).ToList();
+        return results;
+    }
+
+    /// <summary>Finds every saved alias that generates the same playable package.</summary>
+    public IReadOnlyList<ProjectSummary> FindProjectAliases(NativeSuitProject project)
+    {
+        var target = UnrealPathUtil.NormalizePackagePath(project.TargetPackages?.Playable);
+        if (string.IsNullOrWhiteSpace(target))
+        {
+            return Array.Empty<ProjectSummary>();
+        }
+
+        return ListProjectFiles()
+            .Where(summary => target.Equals(summary.TargetPlayablePath, StringComparison.OrdinalIgnoreCase))
+            .ToList();
     }
 
     public NativeSuitProject? LoadProject(string path)

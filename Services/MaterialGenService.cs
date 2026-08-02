@@ -30,6 +30,7 @@ public sealed class MaterialGenService
     {
         public string Name { get; set; } = "";
         public string CurrentTexturePath { get; set; } = "";
+        public string ObjectPath { get; set; } = "";
     }
 
     /// <summary>An authored Material Instance vector parameter, stored by UE as FLinearColor.</summary>
@@ -48,6 +49,7 @@ public sealed class MaterialGenService
         public string? Error { get; set; }
         public string SourcePackagePath { get; set; } = "";
         public string SourceStem { get; set; } = "";
+        public string ParentMaterialPath { get; set; } = "";
         public List<TextureParam> TextureParams { get; set; } = new();
         public List<ColorParam> ColorParams { get; set; } = new();
     }
@@ -78,6 +80,15 @@ public sealed class MaterialGenService
                 return info;
             }
 
+            var materialExport = textureExport ?? colorExport;
+            var parent = materialExport is null
+                ? null
+                : FindProperty<ObjectPropertyData>(materialExport.Data, "Parent");
+            if (parent is not null)
+            {
+                info.ParentMaterialPath = DescribeObjectImportPath(asset, parent.Value);
+            }
+
             foreach (var entry in textureArray?.Value?.OfType<StructPropertyData>() ?? Enumerable.Empty<StructPropertyData>())
             {
                 var name = ReadParamName(entry);
@@ -93,7 +104,12 @@ public sealed class MaterialGenService
                     current = DescribeObjectImport(asset, valueProp.Value);
                 }
 
-                info.TextureParams.Add(new TextureParam { Name = name, CurrentTexturePath = current });
+                info.TextureParams.Add(new TextureParam
+                {
+                    Name = name,
+                    CurrentTexturePath = current,
+                    ObjectPath = valueProp is null ? "" : DescribeObjectImportPath(asset, valueProp.Value),
+                });
             }
 
             foreach (var entry in colorArray?.Value?.OfType<StructPropertyData>() ?? Enumerable.Empty<StructPropertyData>())
@@ -367,6 +383,37 @@ public sealed class MaterialGenService
         }
 
         return asset.Imports[importIndex].ObjectName.ToString();
+    }
+
+    private static string DescribeObjectImportPath(UAsset asset, FPackageIndex index)
+    {
+        if (index is null || index.IsNull() || !index.IsImport())
+        {
+            return "";
+        }
+
+        var importIndex = -index.Index - 1;
+        if (importIndex < 0 || importIndex >= asset.Imports.Count)
+        {
+            return "";
+        }
+
+        var import = asset.Imports[importIndex];
+        var objectName = import.ObjectName.ToString();
+        if (import.OuterIndex.IsImport())
+        {
+            var outerIndex = -import.OuterIndex.Index - 1;
+            if (outerIndex >= 0 && outerIndex < asset.Imports.Count)
+            {
+                var packageName = asset.Imports[outerIndex].ObjectName.ToString();
+                if (packageName.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+                {
+                    return packageName + "." + objectName;
+                }
+            }
+        }
+
+        return objectName.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase) ? objectName : "";
     }
 
     private static void UpdateTextureStreamingData(

@@ -181,6 +181,8 @@ public sealed partial class MainForm : Form
 
     private Button? _researchRailButton;
 
+    private readonly Dictionary<string, Button> _categoryRailButtons = new(StringComparer.OrdinalIgnoreCase);
+
     private readonly Button _toyboxPrimaryActionButton = new();
 
     private readonly Label _toyboxStatusChip = new();
@@ -270,9 +272,7 @@ public sealed partial class MainForm : Form
         WireEvents();
         SetDefaults();
 
-        // One change-notification → one refresh from the current snapshot. Mutation
-        // sites are migrated onto _session.RaiseChanged() incrementally; existing ad-hoc refresh
-        // calls remain until each is converted, so behavior is unchanged during the migration.
+        // Project mutations notify the views through one shared refresh path.
         _session.Changed += (_, _) => RefreshAllViews();
     }
 
@@ -287,7 +287,9 @@ public sealed partial class MainForm : Form
     /// </summary>
     private void RefreshAllViews()
     {
-        PopulateToyboxSlots(); RefreshInspector();
+        SyncProjectFieldsForViews();
+        PopulateToyboxSlots();
+        RefreshInspector();
     }
 
     private static bool IsDesignerHost()
@@ -424,12 +426,19 @@ public sealed partial class MainForm : Form
         b.Click += (_, _) =>
         {
             SelectComboValue(_toyboxCategoryCombo, category);
-            foreach (Control c in ((FlowLayoutPanel)b.Parent!).Controls)
-            {
-                c.BackColor = ReferenceEquals(c, b) ? Theme.Tint(color) : Theme.PanelBg;
-            }
         };
         return b;
+    }
+
+    private void UpdateCategoryRailSelection()
+    {
+        var selected = _toyboxCategoryCombo.SelectedItem?.ToString() ?? "";
+        foreach (var (category, button) in _categoryRailButtons)
+        {
+            button.BackColor = category.Equals(selected, StringComparison.OrdinalIgnoreCase)
+                ? Theme.Tint(Theme.CategoryColor(category))
+                : Theme.PanelBg;
+        }
     }
 
     /// <summary>
@@ -654,6 +663,7 @@ public sealed partial class MainForm : Form
             LocomotionOverrides = new(),
             Requirements = new(),
         };
+        _projectService = new SuitProjectService(_projectRootText.Text.Trim());
         _customSlotKeys.Clear();
         _selectedPlayablePart = null;
         _selectedCutscenePart = null;
@@ -668,6 +678,8 @@ public sealed partial class MainForm : Form
         _lastAutoPackageBaseName = "";
 
         ReadFieldsIntoProject(_currentProject);
+        ApplyProjectToFields(_currentProject);
+        UpdateSelectedLabels();
         afterCreated?.Invoke(_currentProject);
         AppendLog($"Started new suit '{name}' (mod {mod}). Next: Base → Pick base character to choose the character to build from.");
         SelectComboValue(_toyboxCategoryCombo, "Base");
@@ -1035,10 +1047,40 @@ public sealed partial class MainForm : Form
             }
             if (deleteFromTool)
             {
-                svc.DeleteProjectFromTool(summary.Path, project);
+                var aliases = svc.FindProjectAliases(project).ToList();
+                if (aliases.Count == 0)
+                {
+                    aliases.Add(summary);
+                }
+
+                var removedModEntries = ModService.RemoveSuitReferences(
+                    project,
+                    aliases.Select(alias => alias.Path).Append(summary.Path));
+
+                foreach (var alias in aliases)
+                {
+                    var aliasProject = svc.LoadProject(alias.Path);
+                    if (aliasProject is not null)
+                    {
+                        svc.DeleteProjectFromTool(alias.Path, aliasProject);
+                    }
+                }
+
+                if (aliases.Count > 1)
+                {
+                    AppendLog($"Removed {aliases.Count} saved project aliases for '{project.DisplayName}'.");
+                }
+                if (removedModEntries > 0)
+                {
+                    AppendLog($"Removed {removedModEntries} mod reference(s) for '{project.DisplayName}'.");
+                }
             }
 
-            if (_currentProject is not null && _currentProject.SlotId.Equals(project.SlotId, StringComparison.OrdinalIgnoreCase))
+            var currentTarget = UnrealPathUtil.NormalizePackagePath(_currentProject?.TargetPackages?.Playable);
+            var deletedTarget = UnrealPathUtil.NormalizePackagePath(project.TargetPackages?.Playable);
+            if (_currentProject is not null &&
+                (_currentProject.SlotId.Equals(project.SlotId, StringComparison.OrdinalIgnoreCase) ||
+                 (!string.IsNullOrWhiteSpace(deletedTarget) && deletedTarget.Equals(currentTarget, StringComparison.OrdinalIgnoreCase))))
             {
                 ClearCurrentSuitAfterDeletion();
             }
@@ -2070,12 +2112,12 @@ public sealed partial class MainForm : Form
         AppendLog($"Saved patch plan: {planPath}");
     }
 
-    private void PatchNameMapsWithUAssetApi()
+    private bool PatchNameMapsWithUAssetApi()
     {
         EnsureProject();
         if (_currentProject is null)
         {
-            return;
+            return false;
         }
 
         ReadFieldsIntoProject(_currentProject);
@@ -2094,6 +2136,11 @@ public sealed partial class MainForm : Form
                 {
                     AppendLog(package.Error);
                 }
+            }
+
+            if (result.PackageResults.Any(package => !package.Success))
+            {
+                return false;
             }
 
             // The name-map stage was just rebuilt from clean donors, wiping any
@@ -2118,11 +2165,13 @@ public sealed partial class MainForm : Form
                     AppendLog("  " + animGraft.Error);
                 }
             }
+            return true;
         }
         catch (Exception ex)
         {
             AppendLog("UAssetAPI patch failed:");
             AppendLog(ex.ToString());
+            return false;
         }
     }
 
@@ -2563,9 +2612,14 @@ public sealed partial class MainForm : Form
 
     private void EnsureProject()
     {
-        if (_projectService is null)
+        var projectRoot = _projectRootText.Text.Trim();
+        if (_projectService is null ||
+            !string.Equals(
+                Path.GetFullPath(_projectService.ProjectRoot).TrimEnd(Path.DirectorySeparatorChar),
+                Path.GetFullPath(projectRoot).TrimEnd(Path.DirectorySeparatorChar),
+                StringComparison.OrdinalIgnoreCase))
         {
-            _projectService = new SuitProjectService(_projectRootText.Text.Trim());
+            _projectService = new SuitProjectService(projectRoot);
         }
 
         if (_currentProject is not null)
@@ -2587,6 +2641,12 @@ public sealed partial class MainForm : Form
 
     private void ApplyProjectToFields(NativeSuitProject project)
     {
+        _suitNameText.Text = project.DisplayName;
+        var modFolder = ExtractModFolder(project.TargetPackages.Playable);
+        if (!string.IsNullOrWhiteSpace(modFolder))
+        {
+            _modFolderText.Text = modFolder;
+        }
         _slotIdText.Text = project.SlotId;
         _displayNameText.Text = project.DisplayName;
         _descriptionText.Text = project.Description;
@@ -2597,6 +2657,17 @@ public sealed partial class MainForm : Form
             ? MakeSafePackageBaseName($"{project.SlotId}_P")
             : project.PackageBaseName;
         _lastAutoPackageBaseName = _packageBaseNameText.Text.Trim();
+    }
+
+    private void SyncProjectFieldsForViews()
+    {
+        if (_currentProject is null)
+        {
+            return;
+        }
+
+        ApplyProjectToFields(_currentProject);
+        UpdateSelectedLabels();
     }
 
     private void ReadFieldsIntoProject(NativeSuitProject project)

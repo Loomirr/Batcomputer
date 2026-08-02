@@ -65,19 +65,24 @@ public sealed class NativeIdentityDialog : Form
 
         _tagDot.Bounds = new Rectangle(PadX, y, 8, 8);
         Controls.Add(_tagDot);
-        _tagStatus.Bounds = new Rectangle(PadX + 14, y - 5, FieldW - 90, 18);
+        const int suggestW = 94;
+        const int suggestGap = 10;
+        var statusX = PadX + 14;
+        var statusW = FieldW - suggestW - suggestGap - 14;
+        _tagStatus.Bounds = new Rectangle(statusX, y - 5, statusW, 18);
         _tagStatus.Font = Theme.Caption;
         _tagStatus.BackColor = Color.Transparent;
         Controls.Add(_tagStatus);
 
-        const int suggestW = 78;
         var suggest = new Button
         {
             Text = "Suggest",
-            Bounds = new Rectangle(PadX + FieldW - suggestW, y - 9, suggestW, 24),
+            Bounds = new Rectangle(PadX + FieldW - suggestW, y - 9, suggestW, 30),
             Visible = !string.IsNullOrWhiteSpace(_suggestedTag),
+            Padding = Padding.Empty,
+            TextAlign = ContentAlignment.MiddleCenter,
         };
-        Theme.StyleSmallDarkButton(suggest);
+        Theme.StyleDarkButton(suggest);
         suggest.Click += (_, _) => { _tag.Text = _suggestedTag; _tag.Focus(); _tag.SelectAll(); };
         Controls.Add(suggest);
         y += 22;
@@ -194,7 +199,7 @@ public sealed class NativeIdentityDialog : Form
         _tagDot.DotColor = hasTag ? Theme.Good : Theme.Crit;
         _tagStatus.ForeColor = hasTag ? Theme.Good : Theme.Crit;
         _tagStatus.Text = hasTag
-            ? "Saved as entered. Release validation checks for duplicates."
+            ? "Saved as entered. Release validation checks duplicates."
             : "Required - every suit needs its own pawn tag.";
         _save.Enabled = hasTag;
     }

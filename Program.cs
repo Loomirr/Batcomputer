@@ -28,6 +28,15 @@ internal static class Program
             return ModelPreviewProbe.Run(args[1], args[2], args[3]);
         }
 
+        if (args.Length >= 5 && args[0].Equals("--preview-suit", StringComparison.OrdinalIgnoreCase))
+        {
+            // --preview-suit <paksDir> <usmap> <suitProjectJson> <projectRoot>
+            var project = JsonSerializer.Deserialize<NativeSuitProject>(File.ReadAllText(args[3]), JsonOptions)
+                ?? throw new InvalidOperationException("Could not read the suit project.");
+            Console.WriteLine(ModelPreviewService.BuildPreviewSuit(args[1], args[2], project, args[4]));
+            return 0;
+        }
+
         if (args.Length >= 5 && args[0].Equals("--static-mesh-donor-report", StringComparison.OrdinalIgnoreCase))
         {
             // --static-mesh-donor-report <extractedContent> <paksDir> <usmap> <outputDir>

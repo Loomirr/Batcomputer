@@ -415,15 +415,73 @@ public sealed class AnimArchetypeGraftService
             // face/hair/cape attachment materials.
             var body = mis.FirstOrDefault(n =>
                            n.Contains($"/Minifig/{characterFolder}/", StringComparison.OrdinalIgnoreCase) &&
-                           n.Contains("/Materials/", StringComparison.OrdinalIgnoreCase) &&
+                           IsCharacterMaterialFolder(n) &&
                            !UnrealPathUtil.AssetName(n).StartsWith("MI_FACE_", StringComparison.OrdinalIgnoreCase) &&
                            !UnrealPathUtil.AssetName(n).StartsWith("MI_HAIR_", StringComparison.OrdinalIgnoreCase))
                        ?? "";
+            body = string.IsNullOrWhiteSpace(body)
+                ? FindCharacterBodyMaterialOnDisk(playableUasset, characterFolder)
+                : body;
             return (body, face);
         }
         catch
         {
             return ("", "");
+        }
+    }
+
+    private static bool IsCharacterMaterialFolder(string packagePath) =>
+        packagePath.Contains("/Material/", StringComparison.OrdinalIgnoreCase) ||
+        packagePath.Contains("/Materials/", StringComparison.OrdinalIgnoreCase);
+
+    private static string FindCharacterBodyMaterialOnDisk(string characterBlueprint, string characterFolder)
+    {
+        try
+        {
+            var characterRoot = Path.GetDirectoryName(characterBlueprint);
+            if (string.IsNullOrWhiteSpace(characterRoot) || !Directory.Exists(characterRoot))
+            {
+                return "";
+            }
+
+            var contentRoot = new DirectoryInfo(characterRoot);
+            while (contentRoot is not null &&
+                   !contentRoot.Name.Equals("Content", StringComparison.OrdinalIgnoreCase))
+            {
+                contentRoot = contentRoot.Parent;
+            }
+            if (contentRoot is null)
+            {
+                return "";
+            }
+
+            var prefix = $"MI_{characterFolder}_";
+            var candidates = Directory.EnumerateFiles(characterRoot, "MI_*.uasset", SearchOption.AllDirectories)
+                .Select(path => new
+                {
+                    Path = path,
+                    Name = Path.GetFileNameWithoutExtension(path),
+                })
+                .Where(candidate =>
+                    !candidate.Name.StartsWith("MI_FACE_", StringComparison.OrdinalIgnoreCase) &&
+                    !candidate.Name.StartsWith("MI_HAIR_", StringComparison.OrdinalIgnoreCase) &&
+                    !candidate.Name.StartsWith("MI_CAPE_", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(candidate => candidate.Name.Equals($"MI_{characterFolder}_EOM", StringComparison.OrdinalIgnoreCase))
+                .ThenByDescending(candidate => candidate.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                .ThenBy(candidate => candidate.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var selected = candidates.FirstOrDefault();
+            if (selected is null)
+            {
+                return "";
+            }
+
+            var relative = Path.GetRelativePath(contentRoot.FullName, selected.Path);
+            return "/Game/" + Path.ChangeExtension(relative, null)!.Replace('\\', '/');
+        }
+        catch
+        {
+            return "";
         }
     }
 
@@ -571,18 +629,26 @@ public sealed class AnimArchetypeGraftService
 
         var mod = ModOf(project.TargetPackages.Playable);
         var gd = GameDataService.Instance;
+        var donorFamily = project.BaseProfile?.GameplayFamily;
+        if (string.IsNullOrWhiteSpace(donorFamily))
+        {
+            donorFamily = gd.FamilyForBasePath(project.PlayableTemplate?.PackagePath ?? "")?.Name ?? "";
+        }
 
-        // Foreign gadgets (not native to the Batman donor). Each needs its
+        // Foreign gadgets (not native to the selected gameplay donor). Each needs its
         // equipment definition in the DPRD loadout (to actually equip) and its
         // anim blocks in MAS/LAS (to animate).
         var foreignMas = new List<string>();
         var foreignLas = new List<string>();
         var foreignEd = new List<(int Slot, string EdPackage)>();
-        var foreignVisual = new List<string>();
+        var foreignAbilities = new List<string>();
+        var foreignAbilitySets = new List<string>();
         foreach (var change in project.EquipmentSlots)
         {
             var eq = gd.FindEquipment(change.Gadget);
-            if (eq is null || eq.NativeFamilies.Contains("Batman", StringComparer.OrdinalIgnoreCase))
+            if (eq is null ||
+                (!string.IsNullOrWhiteSpace(donorFamily) &&
+                 eq.NativeFamilies.Contains(donorFamily, StringComparer.OrdinalIgnoreCase)))
             {
                 continue; // native to donor — already in the loadout/animated
             }
@@ -598,13 +664,37 @@ public sealed class AnimArchetypeGraftService
             {
                 foreignEd.Add((change.Slot, eq.EdPackage));
             }
-            foreach (var va in eq.VisualAbilities)
+            var controllerSets = EquipmentDependencyService.RequiredAbilitySets(eq, donorFamily);
+            if (controllerSets.Count == 0)
             {
-                if (!foreignVisual.Contains(va))
+                foreach (var ability in eq.VisualAbilities)
                 {
-                    foreignVisual.Add(va);
+                    if (!foreignAbilities.Contains(ability))
+                    {
+                        foreignAbilities.Add(ability);
+                    }
                 }
             }
+            foreach (var abilitySet in controllerSets)
+            {
+                if (!foreignAbilitySets.Contains(abilitySet))
+                {
+                    foreignAbilitySets.Add(abilitySet);
+                }
+            }
+            if (controllerSets.Count > 0)
+            {
+                result.Log.Add(
+                    $"equipment dependency [{eq.Name}]: adding native controller set " +
+                    string.Join(", ", controllerSets.Select(UnrealPathUtil.AssetName)));
+            }
+        }
+
+        if (project.PartGrafts.Any(graft => graft.IsGlider) &&
+            !foreignAbilitySets.Contains(GliderService.GlidingAbilitySetPackage))
+        {
+            foreignAbilitySets.Add(GliderService.GlidingAbilitySetPackage);
+            result.Log.Add("glider dependency: adding native AS_Gliding ability set");
         }
 
         // Cross-type glider: inject the donor character's glide anim sets
@@ -639,6 +729,7 @@ public sealed class AnimArchetypeGraftService
         }
 
         if (foreignMas.Count == 0 && foreignLas.Count == 0 && foreignEd.Count == 0 &&
+            foreignAbilitySets.Count == 0 &&
             project.AnimationOverrides.Count == 0 && project.LocomotionOverrides.Count == 0)
         {
             result.Log.Add("no foreign gadgets or animation overrides — archetype left on donor sets");
@@ -778,7 +869,7 @@ public sealed class AnimArchetypeGraftService
             }
 
             // --- Loadout: clone DPRD, swap the gadget's ED into Equipment, repoint archetype. ---
-            if (foreignEd.Count > 0)
+            if (foreignEd.Count > 0 || foreignAbilitySets.Count > 0)
             {
                 var customDprdPkg = $"/Game/Mods/{mod}/Characters/DA_DPRD_{mod}";
                 var dprdStem = UnrealPathUtil.AssetName(customDprdPkg);
@@ -800,15 +891,23 @@ public sealed class AnimArchetypeGraftService
                 }, mappings);
                 result.Log.Add($"archetype repoint → custom DPRD: {applied} name(s)");
 
-                // --- Visual: clone AS_Batman, grant the gadget's GA_Item_* abilities,
-                //     repoint the DPRD's ability-set ref → the clone. Makes the held/
-                //     carried mesh appear (Batman's ability set doesn't grant them). ---
-                if (foreignVisual.Count > 0 && !string.IsNullOrEmpty(donor.AbilitySetPackage))
+                foreach (var abilitySet in foreignAbilitySets)
+                {
+                    var r = graft.AddAbilitySet(
+                        StageUasset(patchedContentRoot, customDprdPkg),
+                        abilitySet);
+                    result.Log.Add(
+                        $"DPRD controller set: {r.Status} added=[{string.Join(",", r.Added)}] " +
+                        $"skipped=[{string.Join(",", r.Skipped)}]{ErrSuffix(r.Error)}");
+                }
+
+                // Clone the donor ability set and add standard foreign gadget abilities.
+                if (foreignAbilities.Count > 0 && !string.IsNullOrEmpty(donor.AbilitySetPackage))
                 {
                     var customAsPkg = $"/Game/Mods/{mod}/Characters/AS_{mod}";
                     var asStem = UnrealPathUtil.AssetName(customAsPkg);
                     CloneDonorAsset(extractedRoot, donor.AbilitySetPackage, donor.AbilitySetStem, patchedContentRoot, customAsPkg, asStem, mappings, result);
-                    var r = graft.AddGrantedAbilities(StageUasset(patchedContentRoot, customAsPkg), foreignVisual);
+                    var r = graft.AddGrantedAbilities(StageUasset(patchedContentRoot, customAsPkg), foreignAbilities);
                     result.Log.Add($"ability-set grant: {r.Status} added=[{string.Join(",", r.Added)}] skipped=[{string.Join(",", r.Skipped)}]{ErrSuffix(r.Error)}");
 
                     var asApplied = ApplyNameMapReplacements(StageUasset(patchedContentRoot, customDprdPkg), new Dictionary<string, string>
@@ -817,6 +916,10 @@ public sealed class AnimArchetypeGraftService
                         [donor.AbilitySetStem] = asStem,
                     }, mappings);
                     result.Log.Add($"DPRD repoint → custom ability set: {asApplied} name(s)");
+                }
+                else if (foreignAbilities.Count > 0)
+                {
+                    result.Log.Add("ability-set grant skipped: donor DPRD has no character ability set to clone");
                 }
             }
 

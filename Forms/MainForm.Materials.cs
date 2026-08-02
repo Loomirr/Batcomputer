@@ -83,8 +83,15 @@ public sealed partial class MainForm
 
     private void OpenMaterialWizard()
     {
-        var mod = ExtractModFolder(_targetPlayableText.Text.Trim()) ?? _modFolderText.Text.Trim();
-        var suggested = $"MI_Batman_{(string.IsNullOrWhiteSpace(mod) ? "Suit" : mod)}_{_toyboxSlotLabel.Replace(" ", "").Replace("/", "")}";
+        var mod = ExtractModFolder(_targetPlayableText.Text.Trim());
+        if (string.IsNullOrWhiteSpace(mod))
+        {
+            AppendLog("Create material: choose a base suit first (Base → Set base).");
+            SelectComboValue(_toyboxCategoryCombo, "Base");
+            return;
+        }
+
+        var suggested = $"MI_Batman_{mod}_{_toyboxSlotLabel.Replace(" ", "").Replace("/", "")}";
         using var wiz = new MaterialWizard(_projectRootText.Text.Trim(), mod, suggested, _currentProject?.GeneratedTextures);
         if (wiz.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(wiz.ResultMiPackagePath))
         {
@@ -112,11 +119,20 @@ public sealed partial class MainForm
             return;
         }
 
-        var mod = ExtractModFolder(_targetPlayableText.Text.Trim()) ?? _modFolderText.Text.Trim();
+        var mod = editInPlace
+            ? ExtractModFolder(miGamePath)
+            : ExtractModFolder(_targetPlayableText.Text.Trim());
+        if (string.IsNullOrWhiteSpace(mod))
+        {
+            AppendLog("Create material: choose a base suit first (Base → Set base).");
+            SelectComboValue(_toyboxCategoryCombo, "Base");
+            return;
+        }
+
         var baseStem = Path.GetFileNameWithoutExtension(diskPath);
         var suggested = editInPlace
             ? baseStem
-            : $"MI_{(string.IsNullOrWhiteSpace(mod) ? "Suit" : mod)}_{baseStem.Replace("MI_", "")}_Custom";
+            : $"MI_{mod}_{baseStem.Replace("MI_", "")}_Custom";
 
         using var wiz = new MaterialWizard(_projectRootText.Text.Trim(), mod, suggested, _currentProject?.GeneratedTextures);
         wiz.PrefillBase(diskPath, suggested, editInPlace);
@@ -146,8 +162,11 @@ public sealed partial class MainForm
         {
             menu.Items.Add("Use as base for a new material…", null, (_, _) => OpenMaterialFromBase(miGamePath, editInPlace: false));
         }
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add($"Apply to slot [{_toyboxSlotLabel}]", null, (_, _) => ApplyToyboxMaterial(miGamePath));
+        if (!string.IsNullOrWhiteSpace(ExtractModFolder(_targetPlayableText.Text.Trim())))
+        {
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add($"Apply to slot [{_toyboxSlotLabel}]", null, (_, _) => ApplyToyboxMaterial(miGamePath));
+        }
         menu.Items.Add("Copy /Game path", null, (_, _) => { try { Clipboard.SetText(miGamePath); } catch { /* clipboard busy */ } });
         return menu;
     }
@@ -284,17 +303,17 @@ public sealed partial class MainForm
 
         if (type == "Your materials")
         {
-            var header = $"Materials you generated for slot [{_toyboxSlotLabel}]. Drag a tile onto a slot to apply it; right-click to edit. Use '＋ Create' for a new one, or switch the dropdown to a game folder to pull base-game MIs.";
+            var mod = ExtractModFolder(_targetPlayableText.Text.Trim());
+            var hasBase = !string.IsNullOrWhiteSpace(mod);
+            var header = hasBase
+                ? $"Materials you generated for slot [{_toyboxSlotLabel}]. Drag a tile onto a slot to apply it; right-click to edit. Use '＋ Create' for a new one, or switch the dropdown to a game folder to pull base-game MIs."
+                : "All generated materials. Set a base suit before creating or assigning a material.";
             var tiles = new List<VirtualTilePanel.Tile>
             {
-                new() { Title = "＋ Create", Subtitle = "new material", Accent = Theme.Materials, Dashed = true, OnClick = OpenMaterialWizard }
+                hasBase
+                    ? new() { Title = "＋ Create", Subtitle = "new material", Accent = Theme.Materials, Dashed = true, OnClick = OpenMaterialWizard }
+                    : new() { Title = "Set base", Subtitle = "choose character", Accent = Theme.Base, Dashed = true, OnClick = () => SelectComboValue(_toyboxCategoryCombo, "Base") }
             };
-            var mod = ExtractModFolder(_targetPlayableText.Text.Trim());
-            if (string.IsNullOrWhiteSpace(mod))
-            {
-                ShowVirtualTiles(tiles, header + "\n\nSet a base suit first (Base → Set base) to store generated materials.");
-                return;
-            }
 
             foreach (var miPath in DiscoverUserMaterialPaths(mod))
             {
@@ -355,10 +374,10 @@ public sealed partial class MainForm
     /// authoritative source for older projects such as Electric, whose assignments are
     /// valid even though their original export folder is no longer configured.
     /// </summary>
-    private IReadOnlyList<string> DiscoverUserMaterialPaths(string mod)
+    private IReadOnlyList<string> DiscoverUserMaterialPaths(string? mod)
     {
         var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var expectedPrefix = $"/Game/Mods/{mod}/";
+        var expectedPrefix = string.IsNullOrWhiteSpace(mod) ? "/Game/Mods/" : $"/Game/Mods/{mod}/";
 
         if (_currentProject is not null)
         {
@@ -374,7 +393,9 @@ public sealed partial class MainForm
 
         foreach (var contentRoot in GeneratedMaterialContentRoots(_currentProject))
         {
-            var modRoot = Path.Combine(contentRoot, "Mods", mod);
+            var modRoot = string.IsNullOrWhiteSpace(mod)
+                ? Path.Combine(contentRoot, "Mods")
+                : Path.Combine(contentRoot, "Mods", mod);
             if (!Directory.Exists(modRoot))
             {
                 continue;
@@ -809,8 +830,17 @@ public sealed partial class MainForm
             ApplyToCutscene = context is "both" or "cutscene"
         };
 
-        var result = new MaterialReplaceService(_projectRootText.Text.Trim())
-            .Apply(slotId, playablePkg, cutscenePkg, assignment);
+        var materialService = new MaterialReplaceService(_projectRootText.Text.Trim());
+        var result = materialService.Apply(slotId, playablePkg, cutscenePkg, assignment);
+        if (result.Status.Equals("no-stage", StringComparison.OrdinalIgnoreCase) &&
+            _currentProject is not null && HasCurrentSuitBase())
+        {
+            AppendLog("No editable stage was found. Recreating it from the selected base...");
+            if (PatchNameMapsWithUAssetApi())
+            {
+                result = materialService.Apply(slotId, playablePkg, cutscenePkg, assignment);
+            }
+        }
 
         AppendLog($"Apply material [{component} slot {slot}] = {mi}: {result.Status}");
         if (result.Files.Any(f => f.Success))

@@ -57,6 +57,8 @@ public sealed class StageValidationService
 
         CheckPawnTag(project, findings);
         CheckGliderAnimInjection(project, findings);
+        CheckRequiredAbilitySets(project, findings);
+        CheckExperimentalDependencies(project, findings);
         return findings;
     }
 
@@ -245,6 +247,121 @@ public sealed class StageValidationService
         catch (Exception ex)
         {
             findings.Add(new("WARN", $"could not verify glider anim injection in {label}: {ex.Message}"));
+        }
+    }
+
+    private void CheckRequiredAbilitySets(NativeSuitProject project, List<Finding> findings)
+    {
+        if (project.EquipmentSlots.Count == 0 &&
+            !project.PartGrafts.Any(graft => graft.IsGlider))
+        {
+            return;
+        }
+
+        var gameData = GameDataService.Instance;
+        var donorFamily = project.BaseProfile?.GameplayFamily;
+        if (string.IsNullOrWhiteSpace(donorFamily))
+        {
+            donorFamily = gameData.FamilyForBasePath(project.PlayableTemplate?.PackagePath ?? "")?.Name;
+        }
+
+        var requiredSets = project.EquipmentSlots
+            .Select(change => gameData.FindEquipment(change.Gadget))
+            .Where(equipment => equipment is not null)
+            .SelectMany(equipment => EquipmentDependencyService.RequiredAbilitySets(equipment!, donorFamily))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (project.PartGrafts.Any(graft => graft.IsGlider) &&
+            !requiredSets.Contains(GliderService.GlidingAbilitySetPackage, StringComparer.OrdinalIgnoreCase))
+        {
+            requiredSets.Add(GliderService.GlidingAbilitySetPackage);
+        }
+        if (requiredSets.Count == 0)
+        {
+            return;
+        }
+
+        var mod = ExtractMod(project.TargetPackages.Playable);
+        if (string.IsNullOrWhiteSpace(mod))
+        {
+            findings.Add(new("ERROR",
+                "Equipment or glider dependencies need a generated mod DPRD, but the playable package has no /Game/Mods/<mod>/ path."));
+            return;
+        }
+        var package = $"/Game/Mods/{mod}/Characters/DA_DPRD_{mod}";
+        var uasset = PackagePathToBasePath(package) + ".uasset";
+        if (!File.Exists(uasset))
+        {
+            findings.Add(new("ERROR",
+                "Equipment or glider dependencies need a generated DPRD, but none was produced. " +
+                "Re-apply the gadget or glider, then rebuild."));
+            return;
+        }
+
+        try
+        {
+            var asset = new UAsset(
+                uasset,
+                EngineVersion.VER_UE5_6,
+                _mappings,
+                CustomSerializationFlags.SkipPreloadDependencyLoading);
+            foreach (var abilitySet in requiredSets)
+            {
+                var name = AssetName(abilitySet);
+                if (!asset.Imports.Any(import =>
+                        import.ObjectName.ToString().Equals(name, StringComparison.OrdinalIgnoreCase)))
+                {
+                    findings.Add(new("ERROR",
+                        $"Required ability set '{name}' is missing from the generated DPRD. " +
+                        "The related equipment or glider would be incomplete in-game."));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            findings.Add(new("ERROR",
+                $"Could not verify equipment or glider dependencies in the generated DPRD: {ex.Message}"));
+        }
+    }
+
+    private static void CheckExperimentalDependencies(NativeSuitProject project, List<Finding> findings)
+    {
+        if (project.EquipmentSlots.Count == 0)
+        {
+            return;
+        }
+
+        var donorFamily = project.BaseProfile?.GameplayFamily;
+        foreach (var change in project.EquipmentSlots)
+        {
+            var equipment = GameDataService.Instance.FindEquipment(change.Gadget);
+            if (equipment is null)
+            {
+                continue;
+            }
+
+            var profile = EquipmentDependencyService.Analyze(equipment, donorFamily);
+            if (profile.Support == EquipmentSupportKind.Controller)
+            {
+                var actors = profile.RuntimeActors.Count == 0
+                    ? ""
+                    : " Runtime actors: " + string.Join(", ", profile.RuntimeActors) + ".";
+                findings.Add(new("WARN",
+                    $"Equipment '{equipment.Name}' is a controller setup. The tool stages its ability set, but controller spawn and recall behavior still needs an in-game check.{actors}"));
+            }
+            else if (profile.Support is EquipmentSupportKind.Experimental or EquipmentSupportKind.FamilyOnly)
+            {
+                findings.Add(new("WARN",
+                    $"Equipment '{equipment.Name}' is {profile.SupportLabel.ToLowerInvariant()}: {profile.Summary}"));
+            }
+        }
+
+        if (project.PartGrafts.Any(graft => graft.IsGlider) &&
+            (!string.IsNullOrWhiteSpace(project.GliderAnimLas) || !string.IsNullOrWhiteSpace(project.GliderAnimMas)) &&
+            !project.UseCustomArchetype)
+        {
+            findings.Add(new("ERROR",
+                "This glider needs a donor glide pose, but the custom archetype is off so its animation sets cannot be injected. Re-apply the glider preset."));
         }
     }
 

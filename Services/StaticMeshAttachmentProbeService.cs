@@ -42,6 +42,9 @@ public sealed class StaticMeshAttachmentProbeService
         public bool UseLargeClosedCube { get; set; }
         public string ObjPath { get; set; } = "";
         public float ObjScale { get; set; } = 150f;
+        public float ObjOffsetX { get; set; }
+        public float ObjOffsetY { get; set; }
+        public float ObjOffsetZ { get; set; }
     }
 
     public sealed class Result
@@ -226,7 +229,10 @@ public sealed class StaticMeshAttachmentProbeService
                     OutputContentRoot = graft.GraftedContentRoot,
                     OutputPackagePath = result.MeshPackagePath,
                     ObjPath = request.ObjPath,
-                    Scale = request.ObjScale
+                    Scale = request.ObjScale,
+                    OffsetX = request.ObjOffsetX,
+                    OffsetY = request.ObjOffsetY,
+                    OffsetZ = request.ObjOffsetZ,
                 });
                 if (!mesh.Status.Equals("created", StringComparison.OrdinalIgnoreCase))
                 {

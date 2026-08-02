@@ -102,6 +102,11 @@ public sealed class ModelPreviewForm : Form
             return;
         }
 
+        if (placement.CustomMeshTransform is not null)
+        {
+            return;
+        }
+
         ViewerLayoutService.Save(
             AppSettings.Current.EffectiveProjectRoot(),
             placement.LayoutKey,

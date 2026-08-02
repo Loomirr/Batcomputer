@@ -17,6 +17,7 @@ public sealed partial class MainForm
     private TableLayoutPanel? _viewerHostLayout;
     private Control? _viewerPanel;
     private int _viewerLoadGeneration;
+    private NativeSuitProject? _viewerProject;
 
     private const string ViewerCategory = "3D viewer";
 
@@ -292,11 +293,12 @@ public sealed partial class MainForm
         {
             return;
         }
+        _viewerProject = project;
         if (project is not null && EnsureCrossKindHeadGraftHidesBaseHead(project))
         {
             try
             {
-                new SuitProjectService(AppSettings.Current.EffectiveProjectRoot()).SaveProject(project);
+                (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(project);
                 AppendLog($"Viewer: saved Head:0 removal for cross-kind head graft on '{project.DisplayName}'.");
             }
             catch (Exception ex)
@@ -323,7 +325,7 @@ public sealed partial class MainForm
             await viewer.ShowFolderAsync(folder);
             _viewerStatus.Text = project is null
                 ? $"{label} - drag to orbit, scroll to zoom."
-                : $"{label} - drag to orbit, scroll to zoom. Part adjustments stay in the 3D viewer.";
+                : $"{label} - drag to orbit, scroll to zoom. Custom mesh preview changes save to the suit automatically; choose Bake to game before testing them in-game.";
         }
         catch (Exception ex)
         {
@@ -355,6 +357,18 @@ public sealed partial class MainForm
             return;
         }
 
+        var project = _viewerProject ?? _currentProject;
+        var customMesh = project?.CustomStaticMeshes.FirstOrDefault(mesh =>
+            (!string.IsNullOrWhiteSpace(args.CustomMeshId) &&
+             mesh.Id.Equals(args.CustomMeshId, StringComparison.OrdinalIgnoreCase)) ||
+            (!string.IsNullOrWhiteSpace(mesh.ResolvedComponent) &&
+             mesh.ResolvedComponent.Equals(component, StringComparison.OrdinalIgnoreCase)));
+        if (customMesh is not null)
+        {
+            _ = SaveCustomStaticMeshPlacementAsync(project!, customMesh, args);
+            return;
+        }
+
         var isZero = Math.Abs(args.OffsetX) < 0.00001f &&
                      Math.Abs(args.OffsetY) < 0.00001f &&
                      Math.Abs(args.OffsetZ) < 0.00001f;
@@ -374,6 +388,49 @@ public sealed partial class MainForm
         _viewerStatus!.Text = isZero && args.UvChannel is null
             ? $"{component}: viewer overrides reset."
             : $"{component}: viewer alignment and UV saved.";
+    }
+
+    private async Task SaveCustomStaticMeshPlacementAsync(
+        NativeSuitProject project,
+        CustomStaticMeshImport mesh,
+        PreviewPlacementSaveRequestedEventArgs args)
+    {
+        if (args.CustomMeshTransform is not { } transform)
+        {
+            return;
+        }
+
+        mesh.Scale = transform.Scale;
+        mesh.OffsetX = transform.OffsetX;
+        mesh.OffsetY = transform.OffsetY;
+        mesh.OffsetZ = transform.OffsetZ;
+        mesh.RotationPitch = transform.RotationPitch;
+        mesh.RotationYaw = transform.RotationYaw;
+        mesh.RotationRoll = transform.RotationRoll;
+
+        try
+        {
+            var projectService = _projectService ??= new SuitProjectService(_projectRootText.Text.Trim());
+            projectService.SaveProject(project);
+            if (!args.CustomMeshBakeRequested)
+            {
+                _viewerStatus!.Text = $"{mesh.DisplayName}: preview transform saved. Use Bake to game before testing it in-game.";
+                return;
+            }
+
+            _viewerStatus!.Text = $"{mesh.DisplayName}: baking its transform, then rebuilding the custom mesh...";
+            await RebuildGraftStageFromDeclarativeAsync(project, projectService.ProjectRoot);
+            projectService.SaveProject(project);
+            RecordChange("Parts", mesh.DisplayName,
+                $"custom mesh scale {mesh.Scale:0.###}; position {mesh.OffsetX:0.###}, {mesh.OffsetY:0.###}, {mesh.OffsetZ:0.###}; rotation {mesh.RotationPitch:0.###}, {mesh.RotationYaw:0.###}, {mesh.RotationRoll:0.###}",
+                status: "staged");
+            _viewerStatus.Text = $"{mesh.DisplayName}: transform baked to the suit. Reloading preview...";
+            ShowCharacterInViewer(string.Empty, project.DisplayName, project);
+        }
+        catch (Exception ex)
+        {
+            _viewerStatus!.Text = $"Could not save {mesh.DisplayName}: {ex.Message.Split('\n')[0]}";
+        }
     }
 
     /// <summary>Jumps to the viewer tab and loads the current suit with its saved edits.</summary>

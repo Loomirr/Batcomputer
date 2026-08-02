@@ -263,6 +263,15 @@ public sealed class ModelPreviewControl : UserControl
     }
 }
 
+public sealed record PreviewCustomMeshTransform(
+    float Scale,
+    float OffsetX,
+    float OffsetY,
+    float OffsetZ,
+    float RotationPitch,
+    float RotationYaw,
+    float RotationRoll);
+
 public sealed class PreviewPlacementSaveRequestedEventArgs : EventArgs
 {
     public PreviewPlacementSaveRequestedEventArgs(
@@ -271,7 +280,11 @@ public sealed class PreviewPlacementSaveRequestedEventArgs : EventArgs
         float offsetX,
         float offsetY,
         float offsetZ,
-        int? uvChannel)
+        int? uvChannel,
+        float? scaleMultiplier,
+        string? customMeshId = null,
+        PreviewCustomMeshTransform? customMeshTransform = null,
+        bool customMeshBakeRequested = false)
     {
         LayoutKey = layoutKey;
         Component = component;
@@ -279,6 +292,10 @@ public sealed class PreviewPlacementSaveRequestedEventArgs : EventArgs
         OffsetY = offsetY;
         OffsetZ = offsetZ;
         UvChannel = uvChannel;
+        ScaleMultiplier = scaleMultiplier;
+        CustomMeshId = customMeshId;
+        CustomMeshTransform = customMeshTransform;
+        CustomMeshBakeRequested = customMeshBakeRequested;
     }
 
     public string LayoutKey { get; }
@@ -287,6 +304,10 @@ public sealed class PreviewPlacementSaveRequestedEventArgs : EventArgs
     public float OffsetY { get; }
     public float OffsetZ { get; }
     public int? UvChannel { get; }
+    public float? ScaleMultiplier { get; }
+    public string? CustomMeshId { get; }
+    public PreviewCustomMeshTransform? CustomMeshTransform { get; }
+    public bool CustomMeshBakeRequested { get; }
 
     public static bool TryParse(string json, out PreviewPlacementSaveRequestedEventArgs args)
     {
@@ -296,11 +317,42 @@ public sealed class PreviewPlacementSaveRequestedEventArgs : EventArgs
             using var document = JsonDocument.Parse(json);
             var root = document.RootElement;
             if (!root.TryGetProperty("type", out var type) ||
-                !string.Equals(type.GetString(), "save-placement", StringComparison.Ordinal) ||
                 !root.TryGetProperty("layout", out var layoutProperty) ||
                 string.IsNullOrWhiteSpace(layoutProperty.GetString()) ||
                 !root.TryGetProperty("component", out var componentProperty) ||
-                string.IsNullOrWhiteSpace(componentProperty.GetString()) ||
+                string.IsNullOrWhiteSpace(componentProperty.GetString()))
+            {
+                return false;
+            }
+
+            var messageType = type.GetString();
+            if (string.Equals(messageType, "save-custom-mesh", StringComparison.Ordinal) ||
+                string.Equals(messageType, "save-custom-mesh-draft", StringComparison.Ordinal))
+            {
+                if (!root.TryGetProperty("customId", out var customIdProperty) ||
+                    string.IsNullOrWhiteSpace(customIdProperty.GetString()) ||
+                    !root.TryGetProperty("transform", out var transform) ||
+                    transform.ValueKind != JsonValueKind.Object ||
+                    !transform.TryGetProperty("scale", out var transformScaleProperty) ||
+                    !transformScaleProperty.TryGetSingle(out var scale) ||
+                    !float.IsFinite(scale) || scale is < 1f or > 1000f ||
+                    !TryReadTriple(transform, "offset", 100000f, out var customOffset) ||
+                    !TryReadTriple(transform, "rotation", 360f, out var rotation))
+                {
+                    return false;
+                }
+
+                var customTransform = new PreviewCustomMeshTransform(
+                    scale, customOffset[0], customOffset[1], customOffset[2], rotation[0], rotation[1], rotation[2]);
+                args = new PreviewPlacementSaveRequestedEventArgs(
+                    layoutProperty.GetString()!, componentProperty.GetString()!,
+                    customOffset[0], customOffset[1], customOffset[2], null, null,
+                    customIdProperty.GetString(), customTransform,
+                    customMeshBakeRequested: string.Equals(messageType, "save-custom-mesh", StringComparison.Ordinal));
+                return true;
+            }
+
+            if (!string.Equals(type.GetString(), "save-placement", StringComparison.Ordinal) ||
                 !root.TryGetProperty("offset", out var offset) ||
                 offset.ValueKind != JsonValueKind.Array ||
                 offset.GetArrayLength() != 3)
@@ -325,8 +377,19 @@ public sealed class PreviewPlacementSaveRequestedEventArgs : EventArgs
                 uvChannel = value;
             }
 
+            float? scaleMultiplier = null;
+            if (root.TryGetProperty("scale", out var scaleProperty) && scaleProperty.ValueKind != JsonValueKind.Null)
+            {
+                if (scaleProperty.ValueKind != JsonValueKind.Number || !scaleProperty.TryGetSingle(out var value) ||
+                    !float.IsFinite(value) || value is < 0.01f or > 100f)
+                {
+                    return false;
+                }
+                scaleMultiplier = value;
+            }
+
             args = new PreviewPlacementSaveRequestedEventArgs(
-                layoutProperty.GetString()!, componentProperty.GetString()!, values[0], values[1], values[2], uvChannel);
+                layoutProperty.GetString()!, componentProperty.GetString()!, values[0], values[1], values[2], uvChannel, scaleMultiplier);
             return true;
         }
         catch
@@ -334,5 +397,17 @@ public sealed class PreviewPlacementSaveRequestedEventArgs : EventArgs
             // A malformed page message must never break the embedded preview.
             return false;
         }
+    }
+
+    private static bool TryReadTriple(JsonElement root, string propertyName, float limit, out float[] values)
+    {
+        values = [];
+        if (!root.TryGetProperty(propertyName, out var property) ||
+            property.ValueKind != JsonValueKind.Array || property.GetArrayLength() != 3)
+        {
+            return false;
+        }
+        values = property.EnumerateArray().Select(value => value.GetSingle()).ToArray();
+        return values.All(value => float.IsFinite(value) && MathF.Abs(value) <= limit);
     }
 }

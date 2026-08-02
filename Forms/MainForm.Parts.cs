@@ -124,7 +124,8 @@ public sealed partial class MainForm
     {
         _characterSlots.Clear();
         _characterSlots.AddRange(DiscoverToyboxSlots()
-            .Where(slot => !slot.Component.Contains("face", StringComparison.OrdinalIgnoreCase)));
+            .Where(slot => !slot.Component.Contains("face", StringComparison.OrdinalIgnoreCase))
+            .Where(slot => IsToyboxVisualComponent(slot.Component)));
 
         // The figure needs its part art. A build made without Assets/ has none, so fall back to
         // the slot list rather than showing an empty panel.
@@ -186,10 +187,40 @@ public sealed partial class MainForm
         }
 
         ReadFieldsIntoProject(_currentProject);
+        if (GliderService.WingsuitCharFromMaterial(materialPath) is not null)
+        {
+            if (_partIndex is null)
+            {
+                LoadPartIndexAndRefreshGrid(logIfMissing: false);
+            }
+
+            var wingsuit = GliderService.FindWingsuitPartForMaterial(
+                _partIndex,
+                materialPath,
+                "playable");
+            if (wingsuit is null)
+            {
+                AppendLog("Glider: the matching native wingsuit was not found. Rebuild the part index and try again.");
+                return;
+            }
+
+            await ApplyNativeGliderPresetAsync(wingsuit, materialPath);
+            return;
+        }
+
         var glideComponent = new AnimArchetypeGraftService().BaseGlideVisualComponent(_currentProject);
         if (string.IsNullOrWhiteSpace(glideComponent))
         {
             AppendLog("Glider material: this base has no native glide-visual component to recolor.");
+            return;
+        }
+
+        var compatibility = GliderService.CheckMaterialCompatibility(
+            ActiveGliderVisualPart(_currentProject),
+            materialPath);
+        AppendLog($"Glider material check: {compatibility.Title}. {compatibility.Detail}");
+        if (compatibility.NeedsConfirmation && !ConfirmGliderMaterialOverride(compatibility, materialPath))
+        {
             return;
         }
 
@@ -209,17 +240,47 @@ public sealed partial class MainForm
         _session.RaiseChanged();
     }
 
-    private static bool IsWingsuitGliderActive(NativeSuitProject project) =>
-        false;
+    private NativeSuitPartRecord? ActiveGliderVisualPart(NativeSuitProject project)
+    {
+        var graft = project.PartGrafts.LastOrDefault(part => part.IsGlider);
+        return ResolveLivePart(graft?.Playable) ?? ResolveLivePart(graft?.Cutscene);
+    }
+
+    private bool ConfirmGliderMaterialOverride(GliderMaterialCompatibilityResult compatibility, string materialPath)
+    {
+        var model = new Dialog.Model
+        {
+            WindowTitle = "Glide material check",
+            Title = compatibility.Title,
+            Subtitle = UnrealPathUtil.AssetName(materialPath),
+            Message = compatibility.Detail,
+            Severity = Dialog.Level.Warn,
+            PrimaryText = "Use anyway",
+            SecondaryText = "Cancel",
+            CalloutTitle = "Preview before release",
+            CalloutDetail = "A glider mesh can use a different UV layout from a regular cape or body. This warning does not block deliberate material experiments."
+        };
+        model.Fields.Add(("Selected material", materialPath));
+        return Dialog.Show(this, model);
+    }
 
     private string? ActiveGliderVisualComponent(NativeSuitProject project)
     {
-        if (!IsWingsuitGliderActive(project))
+        var graft = project.PartGrafts.LastOrDefault(part => part.IsGlider);
+        if (graft is null)
         {
             return null;
         }
 
-        return new AnimArchetypeGraftService().BaseGlideVisualComponent(project);
+        if (!string.IsNullOrWhiteSpace(graft.ResolvedComponent))
+        {
+            return graft.ResolvedComponent;
+        }
+
+        var nativeComponent = new AnimArchetypeGraftService().BaseGlideVisualComponent(project);
+        return !string.IsNullOrWhiteSpace(nativeComponent)
+            ? nativeComponent
+            : graft.Slot;
     }
 
     private static bool RequirementTargetsComponent(string targetComponent, string component)
@@ -283,6 +344,26 @@ public sealed partial class MainForm
         return true;
     }
 
+    private bool EnsureVisualHeadAttachmentHidesDonorHead(NativeSuitProject project)
+    {
+        if (project.Requirements.Any(requirement =>
+                requirement.Kind.Equals("remove-component", StringComparison.OrdinalIgnoreCase) &&
+                RequirementTargetsComponent(requirement.TargetComponent, "Head")))
+        {
+            return false;
+        }
+
+        project.Requirements.Add(new NativeSuitRequirement
+        {
+            Id = "remove-head-0",
+            Kind = "remove-component",
+            SourcePackage = project.TargetPackages.Playable,
+            TargetComponent = ToyboxSlotKey("Head", 0),
+            Notes = "Hidden because the visual base supplies its own head attachment."
+        });
+        return true;
+    }
+
     /// <summary>
     /// Drops any saved material assignments targeting <paramref name="component"/>. Used when
     /// a glider preset is applied to the base's glide-visual component: the glider brings its
@@ -328,88 +409,6 @@ public sealed partial class MainForm
         }
     }
 
-    /// <summary>
-    /// Grafts the wingsuit glide-visual component (a "Cape" SkeletalMeshComponent
-    /// tagged Glider, holding SK_GA_Wingsuit + ABP_Wingsuit + the decal) into the
-    /// staged playable/cutscene, reusing the part-graft path. Runs once per suit
-    /// (guarded by GliderGrafted); later decal changes are Cape-slot material edits.
-    /// EXPERIMENTAL - needs in-game verification.
-    /// </summary>
-    private async Task ApplyGliderGraftAsync()
-    {
-        if (_currentProject is null)
-        {
-            return;
-        }
-        if (string.IsNullOrWhiteSpace(_currentProject.GliderMaterial))
-        {
-            AppendLog("Glider: pick a wingsuit decal (drag one onto the Glider row) so the wingsuit has a skin.");
-            return;
-        }
-        if (string.IsNullOrWhiteSpace(_slotIdText.Text.Trim()))
-        {
-            AppendLog("Glider: set a base character first (Base → Pick base character), then set the glider.");
-            return;
-        }
-
-        ReadFieldsIntoProject(_currentProject);
-
-        // The glide mesh is only shown by the base's glide-visibility wiring
-        // (GE_ShowGlider → "Visible.Glider" ABPTag → the glide component's anim BP),
-        // which only exists on bases that NATIVELY glide with a visual. Bail early
-        // with a clear message otherwise.
-        var glideComponent = new AnimArchetypeGraftService().BaseGlideVisualComponent(_currentProject);
-        if (string.IsNullOrWhiteSpace(glideComponent))
-        {
-            Dialog.Warn(null, "Glider not supported on this base", "This base character has no native glide visual (no cape/wingsuit), so a wingsuit can't be shown on it.\n\nBuild the suit on a base that already glides with a visual: Batman (cape), or Catwoman / Nightwing (wingsuit).");
-            AppendLog("Glider: base has no native glide visual — wingsuit not applied. Use a Batman/Catwoman/Nightwing base.");
-            return;
-        }
-
-        if (RemoveSavedRemovalForComponent(_currentProject, glideComponent))
-        {
-            AppendLog($"Glider: removed stale remove-component rule for native glide component '{glideComponent}'.");
-            try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject); } catch { /* best effort */ }
-        }
-
-        RestoreProtectedGliderComponent(_currentProject, glideComponent);
-
-        // Use the COMPLETE wingsuit component from the part index (full mesh + ABP +
-        // all materials + tags - far more faithful than a synthesized 1-material part),
-        // then graft it through the normal flow, which retargets to the base's glide
-        // component and refreshes the UI.
-        var chr = GliderService.WingsuitCharFromMaterial(_currentProject.GliderMaterial) ?? "CatWoman";
-        if (_partIndex is null)
-        {
-            LoadPartIndexAndRefreshGrid(logIfMissing: false);
-        }
-        var meshName = $"SK_GA_Wingsuit_{chr}";
-        var wingsuitPart = _partIndex?.Parts.FirstOrDefault(p =>
-            p.MeshObjectName.Equals(meshName, StringComparison.OrdinalIgnoreCase) &&
-            p.Context.Equals("playable", StringComparison.OrdinalIgnoreCase));
-        if (wingsuitPart is null)
-        {
-            AppendLog($"Glider: couldn't find {meshName} in the part index. Build the part index (Parts → Build index) and try again.");
-            return;
-        }
-
-        AppendLog($"Glider: applying the full {chr} wingsuit → base glide component '{glideComponent}'…");
-        if (_currentProject is not null)
-        {
-            await ApplyNativeGliderPresetAsync(wingsuitPart, _currentProject.GliderMaterial);
-            return;
-        }
-        SelectToyboxPart(wingsuitPart); // sets the playable + cutscene donors
-        await GraftSelectedPartsAsync(); // retargets Cape→glideComponent, repoints, refreshes
-        if (_currentProject is null)
-        {
-            return;
-        }
-        _currentProject.GliderGrafted = true;
-        RecordChange("Gliders", "Wingsuit visual", $"{chr} wingsuit → {glideComponent}", status: "staged");
-        try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject); } catch { /* best effort */ }
-    }
-
     private async Task ApplyNativeGliderPresetAsync(NativeSuitPartRecord part, string? materialOverride = null)
     {
         EnsureProject();
@@ -429,8 +428,7 @@ public sealed partial class MainForm
         var glideComponent = new AnimArchetypeGraftService().BaseGlideVisualComponent(project);
         if (string.IsNullOrWhiteSpace(glideComponent))
         {
-            // Civilian donors need a visual component added for gliding.
-            AppendLog("Glider: civilian base has no native glide visual — will ADD one (skeletal clone). The base already has the glide ability; this supplies the missing visual + pose.");
+            AppendLog("Glider: this base has no native glide visual. A dedicated Glider component and the native gliding ability set will be added.");
         }
 
         if (_partIndex is null)
@@ -520,6 +518,10 @@ public sealed partial class MainForm
 
                 foreach (var component in report.Components)
                 {
+                    if (!IsToyboxVisualComponent(component.Name))
+                    {
+                        continue;
+                    }
                     if (component.Slots.Count == 0)
                     {
                         AddDiscoveredSlot(discovered, component.Name, 0);
@@ -559,6 +561,7 @@ public sealed partial class MainForm
             if (discovered.Count > 0)
             {
                 return discovered.Values
+                    .Where(entry => IsToyboxVisualComponent(entry.Component))
                     .Where(entry => !IsToyboxSlotRemoved(entry.Component, entry.Slot))
                     .OrderBy(entry => SlotSortKey(entry.Component, entry.Slot))
                     .ThenBy(entry => entry.Component, StringComparer.OrdinalIgnoreCase)
@@ -596,7 +599,10 @@ public sealed partial class MainForm
         discovered[key] = (FriendlySlotLabel(component, slot), component, slot);
     }
 
-    private static bool ShouldShowToyboxScsComponent(string component)
+    private static bool ShouldShowToyboxScsComponent(string component) =>
+        IsToyboxVisualComponent(component);
+
+    private static bool IsToyboxVisualComponent(string component)
     {
         if (string.IsNullOrWhiteSpace(component))
         {
@@ -606,14 +612,29 @@ public sealed partial class MainForm
         var name = component.Trim();
         if (name.Equals("DefaultSceneRoot", StringComparison.OrdinalIgnoreCase) ||
             name.Equals("Root", StringComparison.OrdinalIgnoreCase) ||
-            name.Equals("None", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("TtCharacterAssetMinion", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("WubDialogueVoiceActor", StringComparison.OrdinalIgnoreCase))
+            name.Equals("None", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
 
-        return true;
+        var (baseName, _) = SplitGeneratedDuplicateComponent(name);
+        return baseName.Equals("CharacterMesh0", StringComparison.OrdinalIgnoreCase) ||
+               baseName.Equals("Mesh", StringComparison.OrdinalIgnoreCase) ||
+               baseName.Equals("Face", StringComparison.OrdinalIgnoreCase) ||
+               baseName.Equals("Head", StringComparison.OrdinalIgnoreCase) ||
+               baseName.Equals("Hair", StringComparison.OrdinalIgnoreCase) ||
+               baseName.Equals("Hat", StringComparison.OrdinalIgnoreCase) ||
+               baseName.Equals("Hip", StringComparison.OrdinalIgnoreCase) ||
+               baseName.Equals("Torso", StringComparison.OrdinalIgnoreCase) ||
+               baseName.Equals("Torso1", StringComparison.OrdinalIgnoreCase) ||
+               baseName.Equals("Torso2", StringComparison.OrdinalIgnoreCase) ||
+               baseName.StartsWith("Cape", StringComparison.OrdinalIgnoreCase) ||
+               new[]
+               {
+                   "body", "cowl", "hair", "hat", "helmet", "cape", "cloak", "collar",
+                   "spine", "shoulder", "pauldron", "belt", "hip", "pelvis", "wing",
+                   "backpack", "batpack", "tail", "horn", "costume", "arm", "hand", "leg", "foot"
+               }.Any(token => baseName.Contains(token, StringComparison.OrdinalIgnoreCase));
     }
 
     private static string FriendlySlotLabel(string component, int slot)
@@ -1249,6 +1270,233 @@ public sealed partial class MainForm
         };
     }
 
+    private List<VirtualTilePanel.Tile> CustomStaticMeshTiles(string search)
+    {
+        var tiles = new List<VirtualTilePanel.Tile>
+        {
+            new()
+            {
+                Section = "",
+                Title = "+ Import custom mesh",
+                Subtitle = "OBJ static attachment",
+                Accent = Theme.Parts,
+                Dashed = true,
+                OnClick = () => _ = OpenCustomStaticMeshDialogAsync(null),
+                ToolTip = "Imports a project-owned OBJ as a static attachment. Pick a real game socket, then set scale and local XYZ offset."
+            }
+        };
+
+        if (_currentProject?.CustomStaticMeshes is not { Count: > 0 })
+        {
+            var legacy = _currentProject is null
+                ? null
+                : new CustomStaticMeshImportService().FindLegacyObjProof(_currentProject, _projectRootText.Text.Trim());
+            if (legacy is not null && MatchesToyboxSearch(search, legacy.DisplayName, legacy.SourceObjPath, "legacy OBJ proof"))
+            {
+                tiles.Add(new VirtualTilePanel.Tile
+                {
+                    Section = "LEGACY MESHES",
+                    Title = $"Adopt {TrimMiddle(legacy.DisplayName, 20)}",
+                    Subtitle = "existing OBJ proof\nmake it editable",
+                    Accent = Theme.Parts,
+                    Dashed = true,
+                    OnClick = () => _ = AdoptLegacyStaticMeshAsync(legacy),
+                    ToolTip = "Copies this older OBJ proof into the suit. After adoption, click its tile or use the 3D viewer to save its real scale and local XYZ placement."
+                });
+            }
+            return tiles;
+        }
+
+        foreach (var mesh in _currentProject.CustomStaticMeshes)
+        {
+            var current = mesh;
+            var attachment = CustomStaticMeshImportService.ResolveAttachmentSlot(current.Target, current.AttachSocket);
+            if (!MatchesToyboxSearch(search, current.DisplayName, current.SourceObjRelativePath, attachment.Label, attachment.AttachSocket))
+            {
+                continue;
+            }
+            tiles.Add(new VirtualTilePanel.Tile
+            {
+                Section = "CUSTOM MESHES",
+                Title = TrimMiddle(current.DisplayName, 28),
+                Subtitle = $"{attachment.Label} · scale {current.Scale:0.###}\noffset {current.OffsetX:0.##}, {current.OffsetY:0.##}, {current.OffsetZ:0.##}",
+                Accent = Theme.Parts,
+                OnClick = () => _ = OpenCustomStaticMeshDialogAsync(current),
+                ToolTip = $"Project OBJ: {current.SourceObjRelativePath}\nSocket: {attachment.AttachSocket}\n\nClick to change the attachment slot, scale, or local XYZ offset, then rebuild this static attachment."
+            });
+        }
+        return tiles;
+    }
+
+    private async Task AdoptLegacyStaticMeshAsync(CustomStaticMeshImportService.LegacyObjProof legacy)
+    {
+        EnsureProject();
+        var project = _currentProject;
+        if (project?.PlayableTemplate is null || project.CutsceneTemplate is null)
+        {
+            Dialog.Warn(this, "Custom mesh", "Set a visual base first, then adopt the old OBJ proof.");
+            return;
+        }
+
+        var attachment = CustomStaticMeshImportService.ResolveAttachmentSlot("Head");
+        var mesh = new CustomStaticMeshImport
+        {
+            Id = "imported" + Guid.NewGuid().ToString("N")[..12],
+            DisplayName = legacy.DisplayName,
+            Target = attachment.Id,
+            AttachSocket = attachment.AttachSocket,
+            Scale = legacy.Scale,
+            OffsetX = legacy.OffsetX,
+            OffsetY = legacy.OffsetY,
+            OffsetZ = legacy.OffsetZ,
+            HideBaseHead = true,
+        };
+        var projectRoot = _projectRootText.Text.Trim();
+        var service = new CustomStaticMeshImportService();
+        try
+        {
+            service.CopySourceIntoProject(projectRoot, project, mesh, legacy.SourceObjPath);
+            project.CustomStaticMeshes.Add(mesh);
+            SyncCustomStaticMeshHeadRemoval(project);
+            (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(project);
+            await RebuildGraftStageFromDeclarativeAsync();
+        }
+        catch (Exception ex)
+        {
+            project.CustomStaticMeshes.Remove(mesh);
+            Dialog.Error(this, "Custom mesh", "Could not adopt the old OBJ proof. " + ex.Message);
+            return;
+        }
+
+        RecordChange("Parts", mesh.DisplayName, "adopted legacy OBJ proof", status: "staged");
+        AppendLog($"Custom mesh: adopted legacy OBJ proof '{mesh.DisplayName}'. It can now be edited in Parts or the 3D viewer.");
+        _session.RaiseChanged();
+        RefreshToyboxTiles();
+    }
+
+    private async Task OpenCustomStaticMeshDialogAsync(CustomStaticMeshImport? existing)
+    {
+        EnsureProject();
+        var project = _currentProject;
+        if (project?.PlayableTemplate is null || project.CutsceneTemplate is null)
+        {
+            Dialog.Warn(this, "Custom mesh", "Set a visual base first. The OBJ needs the suit's playable and cutscene Blueprints before it can be attached.");
+            return;
+        }
+
+        var projectRoot = _projectRootText.Text.Trim();
+        var service = new CustomStaticMeshImportService();
+        var sourcePath = existing is null || string.IsNullOrWhiteSpace(existing.SourceObjRelativePath)
+            ? ""
+            : Path.Combine(new SuitProjectService(projectRoot).ProjectOutputDirectory(project), existing.SourceObjRelativePath);
+        using var dialog = new CustomStaticMeshImportDialog(existing, sourcePath);
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        var mesh = existing ?? new CustomStaticMeshImport();
+        mesh.DisplayName = dialog.DisplayName;
+        mesh.Scale = dialog.ImportScale;
+        mesh.OffsetX = dialog.OffsetX;
+        mesh.OffsetY = dialog.OffsetY;
+        mesh.OffsetZ = dialog.OffsetZ;
+        mesh.RotationPitch = dialog.RotationPitch;
+        mesh.RotationYaw = dialog.RotationYaw;
+        mesh.RotationRoll = dialog.RotationRoll;
+        mesh.HideBaseHead = dialog.HideBaseHead;
+        mesh.Target = dialog.AttachmentSlot.Id;
+        mesh.AttachSocket = dialog.AttachmentSlot.AttachSocket;
+        try
+        {
+            service.CopySourceIntoProject(projectRoot, project, mesh, dialog.SourceObjPath);
+        }
+        catch (Exception ex)
+        {
+            Dialog.Error(this, "Custom mesh", ex.Message);
+            return;
+        }
+
+        if (existing is null)
+        {
+            project.CustomStaticMeshes.Add(mesh);
+        }
+        SyncCustomStaticMeshHeadRemoval(project);
+        try
+        {
+            (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(project);
+        }
+        catch (Exception ex)
+        {
+            Dialog.Error(this, "Custom mesh", "The mesh source was copied, but the suit project could not be saved. " + ex.Message);
+            return;
+        }
+
+        RecordChange("Parts", mesh.DisplayName, $"custom OBJ {dialog.AttachmentSlot.Label} · scale {mesh.Scale:0.###} · offset {mesh.OffsetX:0.##}, {mesh.OffsetY:0.##}, {mesh.OffsetZ:0.##} · rotation {mesh.RotationPitch:0.#}, {mesh.RotationYaw:0.#}, {mesh.RotationRoll:0.#}", status: "staged");
+        AppendLog($"Custom mesh: saved {Path.GetFileName(mesh.SourceObjRelativePath)} for {dialog.AttachmentSlot.Label} ({dialog.AttachmentSlot.AttachSocket}) with scale {mesh.Scale:0.###}, offset ({mesh.OffsetX:0.###}, {mesh.OffsetY:0.###}, {mesh.OffsetZ:0.###}), rotation ({mesh.RotationPitch:0.##}, {mesh.RotationYaw:0.##}, {mesh.RotationRoll:0.##}).");
+        try
+        {
+            await RebuildGraftStageFromDeclarativeAsync();
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Custom mesh: staging failed for '{mesh.DisplayName}': {ex.Message}");
+            Dialog.Error(this, "Custom mesh", "The OBJ was saved with this suit, but could not be staged for preview or build.\n\n" + ex.Message);
+            return;
+        }
+        _session.RaiseChanged();
+        RefreshToyboxTiles();
+    }
+
+    private async Task StageCustomStaticMeshesAsync(NativeSuitProject project)
+    {
+        if (project.CustomStaticMeshes is not { Count: > 0 })
+        {
+            return;
+        }
+
+        var projectRoot = _projectRootText.Text.Trim();
+        var service = new CustomStaticMeshImportService();
+        var errors = new List<string>();
+        foreach (var mesh in project.CustomStaticMeshes)
+        {
+            var result = await Task.Run(() => service.Stage(project, projectRoot, mesh));
+            if (!result.Status.Equals("created", StringComparison.OrdinalIgnoreCase))
+            {
+                AppendLog($"  custom mesh '{mesh.DisplayName}' was not staged: {result.Error}");
+                errors.Add($"{mesh.DisplayName}: {result.Error}");
+                continue;
+            }
+            foreach (var line in result.Log)
+            {
+                AppendLog($"  custom mesh: {line}");
+            }
+        }
+        if (errors.Count > 0)
+        {
+            throw new InvalidOperationException("Custom mesh staging failed. " + string.Join(" | ", errors));
+        }
+    }
+
+    private static void SyncCustomStaticMeshHeadRemoval(NativeSuitProject project)
+    {
+        const string requirementId = "custom-static-mesh-hide-head";
+        project.Requirements.RemoveAll(requirement => requirement.Id.Equals(requirementId, StringComparison.OrdinalIgnoreCase));
+        if (project.CustomStaticMeshes.Any(mesh =>
+                mesh.HideBaseHead &&
+                CustomStaticMeshImportService.ResolveAttachmentSlot(mesh.Target, mesh.AttachSocket).CanHideBaseHead))
+        {
+            project.Requirements.Add(new NativeSuitRequirement
+            {
+                Id = requirementId,
+                Kind = "remove-component",
+                SourcePackage = project.TargetPackages.Playable,
+                TargetComponent = ToyboxSlotKey("Head", 0),
+                Notes = "Hidden because a custom static head attachment is active."
+            });
+        }
+    }
+
     /// <summary>
     /// Faces are printed-expression materials (MI_FACE_*) on the shared SK_LEGOface
     /// mesh - swapping a face = assigning that material to the Face slot. Tiles are
@@ -1303,22 +1551,37 @@ public sealed partial class MainForm
             }
 
             var gliderSource = FilterVal(0);
+            var gliderKind = FilterVal(1);
             var parts = GliderService.NativeGliderParts(_partIndex, CurrentToyboxSearch())
                 .Where(part => gliderSource is null || part.CharacterFolder.Equals(gliderSource, StringComparison.OrdinalIgnoreCase))
+                .Where(part => gliderKind is null || GliderService.KindLabel(part).Equals(gliderKind, StringComparison.OrdinalIgnoreCase))
                 .ToList();
-            ShowVirtualTiles(
-                parts.Select(part => new VirtualTilePanel.Tile
+            var tiles = parts.Select(part => new VirtualTilePanel.Tile
+            {
+                Title = TrimMiddle(GliderService.GliderPresetLabel(part), 30),
+                Subtitle = GliderService.GliderPresetSubtitle(part),
+                Accent = Theme.Gliders,
+                OnClick = () => ShowGliderPresetDetail(part),
+                DragPayload = new ToyboxDragPayload { Kind = "part", Part = part },
+                MenuFactory = () => BuildPartTileMenu(part),
+                ToolTip = $"{GliderService.RoleLabel(part)} from {part.SourcePackagePath}\nMesh: {part.MeshObjectPath}\nAnim: {part.AnimClassObjectPath}\nNative materials: {string.Join(", ", part.Materials.Select(m => m.ObjectPath).Take(6))}",
+            }).ToList();
+            if (_currentProject?.PartGrafts.Any(graft => graft.IsGlider) == true)
+            {
+                tiles.Insert(0, new VirtualTilePanel.Tile
                 {
-                    Title = TrimMiddle(GliderService.GliderPresetLabel(part), 30),
-                    Subtitle = GliderService.GliderPresetSubtitle(part),
-                    Accent = Theme.Gliders,
-                    OnClick = () => { _ = ApplyNativeGliderPresetAsync(part); },
-                    DragPayload = new ToyboxDragPayload { Kind = "part", Part = part },
-                    MenuFactory = () => BuildPartTileMenu(part),
-                    ToolTip = $"{part.Slot} glider preset from {part.SourcePackagePath}\nMesh: {part.MeshObjectPath}\nAnim: {part.AnimClassObjectPath}\nMaterials: {string.Join(", ", part.Materials.Select(m => m.ObjectPath).Take(6))}",
-                }).ToList(),
-                header: "Native glider presets from extracted characters. Click a tile to apply it, or drag it onto Your Character. This uses the complete donor component instead of synthesizing a partial glider.",
-                emptyMessage: "No native glider/wingsuit/cape-glide parts matched the current search. Rebuild the part index if you recently extracted more characters.");
+                    Title = "Use base glider",
+                    Subtitle = "remove the custom glide visual and pose",
+                    Accent = Theme.Gold,
+                    Dashed = true,
+                    OnClick = () => { _ = ClearCustomGliderAsync(); },
+                    ToolTip = "Rebuilds the suit without its custom glider and restores the gameplay donor's original glide visual."
+                });
+            }
+            ShowVirtualTiles(
+                tiles,
+                header: "Native glide visuals only: glide capes, wingsuits, and character gliders. Cosmetic back capes stay in Parts. Click for the mount, animation blueprint, native materials, and pose dependencies before applying.",
+                emptyMessage: "No native glide visuals matched the current search. Rebuild the part index if you recently extracted more characters.");
             return;
         }
 
@@ -1350,46 +1613,97 @@ public sealed partial class MainForm
                 emptyMessage: "No wingsuit decals in the catalog.");
             return;
         }
-
-        // Glider type picker.
-        _toyboxTileFlow.Controls.Add(FullWidthNote(
-            "Choose how this character glides. Cape = classic Batman cape glide; Wingsuit = winged glide (per-character mesh + shared ABP_Wingsuit); Glider = the plain glider. Selecting a type records it on the suit; the archetype glider rewire is applied at package time (experimental)."));
-
-        foreach (var (choice, label, sub) in new[]
-        {
-            ("cape", "Cape", "classic cape glide"),
-            ("wingsuit", "Wingsuit", "winged glide + decals"),
-            ("glider", "Glider", "plain glider")
-        })
-        {
-            var current = string.Equals(_currentProject?.GliderType, choice, StringComparison.OrdinalIgnoreCase);
-            var tile = MakeTile(current ? $"✓ {label}" : label, sub, () => SetGliderType(choice), Theme.Gliders, dashed: !current);
-            _toyboxTileFlow.Controls.Add(tile);
-        }
-
-        if (!string.IsNullOrWhiteSpace(_currentProject?.GliderType))
-        {
-            _toyboxTileFlow.Controls.Add(MakeNoteTile($"Current glider type: {_currentProject!.GliderType}. Wingsuit meshes available: {string.Join(", ", GameDataService.Instance.AssetsOfClass("SkeletalMesh").Where(a => AttachmentCatalogService.AssetName(a.Path).StartsWith("SK_GA_Wingsuit_", StringComparison.OrdinalIgnoreCase)).Select(a => AttachmentCatalogService.AssetName(a.Path).Replace("SK_GA_Wingsuit_", "")).DefaultIfEmpty("none"))}."));
-        }
     }
 
-    private void SetGliderType(string choice)
+    private async Task ClearCustomGliderAsync()
     {
         EnsureProject();
-        if (_currentProject is null) return;
-        _currentProject.GliderType = choice;
-        RecordChange("Gliders", "Glider type", choice);
-        try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject); } catch { /* best effort */ }
-        AppendLog($"Glider type set to '{choice}'.");
-        if (string.Equals(choice, "wingsuit", StringComparison.OrdinalIgnoreCase))
+        var project = _currentProject;
+        if (project is null)
         {
-            AppendLog(string.IsNullOrWhiteSpace(_currentProject.GliderMaterial)
-                ? "Wingsuit selected — now drag a wingsuit decal onto the Glider row to graft the wings."
-                : "Wingsuit selected — grafting with the current decal…");
-            _ = ApplyGliderGraftAsync();
+            return;
         }
+
+        var activeComponent = ActiveGliderVisualComponent(project);
+        project.PartGrafts.RemoveAll(graft => graft.IsGlider);
+        project.GliderType = "";
+        project.GliderMaterial = "";
+        project.GliderGrafted = false;
+        project.GliderAnimLas = "";
+        project.GliderAnimMas = "";
+        if (!string.IsNullOrWhiteSpace(activeComponent))
+        {
+            RemoveSavedRemovalForComponent(project, activeComponent);
+        }
+
+        RecordChange("Gliders", "Glide visual", "restored gameplay donor default", status: "staged");
+        (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(project);
+        AppendLog("Glider: removed the custom preset and restored the gameplay donor's default glide visual.");
+        await RebuildGraftStageFromDeclarativeAsync();
+        _session.RaiseChanged();
         RefreshToyboxTiles();
-        PopulateToyboxSlots();
+    }
+
+    private void ShowGliderPresetDetail(NativeSuitPartRecord part)
+    {
+        var (las, mas) = GliderService.GliderAnimSetsForPart(part);
+        var currentComponent = _currentProject is null
+            ? ""
+            : new AnimArchetypeGraftService().BaseGlideVisualComponent(_currentProject);
+        var model = new Dialog.Model
+        {
+            WindowTitle = "Glider preset",
+            Title = GliderService.GliderPresetLabel(part),
+            Subtitle = $"{GliderService.KindLabel(part)} from {part.CharacterFolder}",
+            Message =
+                "This uses the donor's complete glide-only visual component: mesh, animation blueprint, " +
+                "material slots, attach socket, and visibility tags.",
+            Severity = Dialog.Level.Info,
+            PrimaryText = "Use preset",
+            SecondaryText = "Cancel"
+        };
+        model.Chips.Add((GliderService.KindLabel(part), Theme.Gliders));
+        model.Chips.Add((GliderService.MountLabel(part), Theme.Info));
+        model.Chips.Add((string.IsNullOrWhiteSpace(las) ? "native glide pose" : "matching pose graft", Theme.Good));
+        model.Fields.Add(("Mesh", part.MeshObjectPath));
+        model.Fields.Add(("Animation", string.IsNullOrWhiteSpace(part.AnimClassObjectPath) ? "(none)" : part.AnimClassObjectPath));
+        model.Fields.Add(("Parent", string.IsNullOrWhiteSpace(part.ParentComponentOrVariableName) ? "CharacterMesh0" : part.ParentComponentOrVariableName));
+        model.Fields.Add(("Socket", string.IsNullOrWhiteSpace(part.AttachSocket) ? "(root)" : part.AttachSocket));
+        model.Fields.Add(("Gameplay", GliderService.GlidingAbilitySetPackage));
+        model.Fields.Add(("Materials", $"{part.Materials.Count} donor slot(s)"));
+        if (!string.IsNullOrWhiteSpace(las))
+        {
+            model.Fields.Add(("Body LAS", las));
+        }
+        if (!string.IsNullOrWhiteSpace(mas))
+        {
+            model.Fields.Add(("Glide MAS", mas));
+        }
+
+        if (_currentProject is null)
+        {
+            model.CalloutTitle = "Set a suit base first";
+            model.CalloutDetail = "The preset can be inspected now, but it needs an active suit before it can be applied.";
+        }
+        else if (string.IsNullOrWhiteSpace(currentComponent))
+        {
+            model.CalloutTitle = "Adds a new glide visual";
+            model.CalloutDetail =
+                "This base has no existing glide component. Batcomputer will add the donor component " +
+                "under its own Glider slot, add AS_Gliding, and graft the matching body pose.";
+        }
+        else
+        {
+            model.CalloutTitle = $"Replaces {currentComponent}";
+            model.CalloutDetail =
+                "The existing glide visual stays wired to the game's Visible.Glider state while its " +
+                "mesh, animation blueprint, materials, and mount are replaced by this preset.";
+        }
+
+        if (Dialog.Show(this, model))
+        {
+            _ = ApplyNativeGliderPresetAsync(part);
+        }
     }
 
     /// <summary>
@@ -1439,8 +1753,27 @@ public sealed partial class MainForm
     {
         try
         {
-            var baseDcmd = DcmdGenService.ResolveBaseDcmdPath();
-            var names = new DcmdGenService(_projectRootText.Text.Trim()).ReadEquipmentSlots(baseDcmd);
+            var donorDcmd = _currentProject?.DcmdTemplate?.Uasset;
+            if (string.IsNullOrWhiteSpace(donorDcmd) || !File.Exists(donorDcmd))
+            {
+                donorDcmd = PackageToExtractedUasset(
+                    _currentProject?.DcmdTemplate?.PackagePath ?? "",
+                    AppSettings.Current.EffectiveExtractedContentRoot());
+            }
+            if (string.IsNullOrWhiteSpace(donorDcmd) || !File.Exists(donorDcmd))
+            {
+                var playable = _currentProject?.PlayableTemplate?.Uasset;
+                if (string.IsNullOrWhiteSpace(playable) || !File.Exists(playable))
+                {
+                    playable = PackageToExtractedUasset(
+                        _currentProject?.PlayableTemplate?.PackagePath ?? "",
+                        AppSettings.Current.EffectiveExtractedContentRoot());
+                }
+                donorDcmd = string.IsNullOrWhiteSpace(playable) ? null : FindDcmdSiblingForPlayable(playable);
+            }
+
+            donorDcmd ??= DcmdGenService.ResolveBaseDcmdPath();
+            var names = new DcmdGenService(_projectRootText.Text.Trim()).ReadEquipmentSlots(donorDcmd);
             if (names.Count > 0)
             {
                 // Strip DA_ETA_ prefix for readability.
@@ -1524,7 +1857,7 @@ public sealed partial class MainForm
         }
 
         var sourceFilter = FilterVal(2);
-        if (sourceFilter is not null)
+        if (sourceFilter is not null && !sourceFilter.Equals("Your meshes", StringComparison.OrdinalIgnoreCase))
         {
             query = query.Where(part => part.CharacterFolder.Equals(sourceFilter, StringComparison.OrdinalIgnoreCase));
         }
@@ -1637,6 +1970,25 @@ public sealed partial class MainForm
             .OrderByDescending(candidate => candidate.CharacterFolder.Equals(part.CharacterFolder, StringComparison.OrdinalIgnoreCase))
             .ThenByDescending(candidate => candidate.MeshObjectName.Equals(part.MeshObjectName, StringComparison.OrdinalIgnoreCase))
             .ThenByDescending(candidate => candidate.AnimClassObjectName.Equals(part.AnimClassObjectName, StringComparison.OrdinalIgnoreCase))
+            .ThenBy(candidate => candidate.SourcePackagePath, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+    }
+
+    private NativeSuitPartRecord? FindExactMeshCounterpartPart(NativeSuitPartRecord part, string desiredContext)
+    {
+        if (_partIndex is null || string.IsNullOrWhiteSpace(part.MeshObjectName))
+        {
+            return null;
+        }
+
+        return _partIndex.Parts
+            .Where(candidate =>
+                candidate.HasMesh &&
+                candidate.Context.Equals(desiredContext, StringComparison.OrdinalIgnoreCase) &&
+                (candidate.MeshObjectName.Equals(part.MeshObjectName, StringComparison.OrdinalIgnoreCase) ||
+                 (!string.IsNullOrWhiteSpace(part.MeshObjectPath) &&
+                  candidate.MeshObjectPath.Equals(part.MeshObjectPath, StringComparison.OrdinalIgnoreCase))))
+            .OrderByDescending(candidate => candidate.CharacterFolder.Equals(part.CharacterFolder, StringComparison.OrdinalIgnoreCase))
             .ThenBy(candidate => candidate.SourcePackagePath, StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault();
     }
@@ -2092,6 +2444,13 @@ public sealed partial class MainForm
         var isGliderPart = IsGliderVisualPart(samplePart);
         if (isGliderPart)
         {
+            if (!_currentProject.UseCustomArchetype)
+            {
+                _currentProject.UseCustomArchetype = true;
+                RecordChange("Animations", "archetype", "enabled for glider dependencies", status: "staged");
+                AppendLog("Glider: enabled the custom archetype for its gameplay and pose dependencies.");
+            }
+
             var glideComp = new AnimArchetypeGraftService().BaseGlideVisualComponent(_currentProject);
             if (!string.IsNullOrWhiteSpace(glideComp))
             {
@@ -2123,15 +2482,8 @@ public sealed partial class MainForm
             }
             else
             {
-                // Civilian base (ThomasWayne/BruceWayne): no native glide visual. The glide
-                // ABILITY is already granted by the family DPRD (AS_Gliding) - the character
-                // already glides, only the visual is missing. ADD a glide component (the graft
-                // clones a same-kind SKELETAL donor node, which civilian bases have), keeping
-                // the part's slot name + its "Glider" tag so the glide-visibility wiring
-                // (GE_ShowGlider → Visible.Glider tag → the component's ABP) drives it. The
-                // Stage-2 validator backstops a malformed add; the glide-anim injection below
-                // supplies the matching body pose.
-                AppendLog($"Glider on civilian base: no native glide visual — ADDING a '{targetSlot}' glide component (skeletal clone). The base already has the glide ability; this adds the missing wingsuit visual.");
+                targetSlot = "Glider";
+                AppendLog("Glider: adding a dedicated 'Glider' component so no existing torso or cape component is replaced.");
                 ClearMaterialAssignmentsForComponent(_currentProject, targetSlot);
             }
 
@@ -2263,7 +2615,7 @@ public sealed partial class MainForm
         {
             SourcePackagePath = part.SourcePackagePath,
             Slot = part.Slot,
-            Context = context,
+            Context = string.IsNullOrWhiteSpace(part.Context) ? context : part.Context,
             MeshObjectPath = part.MeshObjectPath,
             Stem = part.Stem,
             MeshKind = part.MeshKind,
@@ -2326,16 +2678,19 @@ public sealed partial class MainForm
 
     // Public entry: acquire the gate, then run the rebuild. Callers that already hold the gate
     // (UseAsBase) must call RebuildGraftStageCoreAsync directly to avoid deadlocking on this.
-    private async Task RebuildGraftStageFromDeclarativeAsync()
+    private async Task RebuildGraftStageFromDeclarativeAsync(
+        NativeSuitProject? projectOverride = null,
+        string? projectRootOverride = null)
     {
-        if (_currentProject is null)
+        var project = projectOverride ?? _currentProject;
+        if (project is null)
         {
             return;
         }
         await RebuildGate.WaitAsync();
         try
         {
-            await RebuildGraftStageCoreAsync();
+            await RebuildGraftStageCoreAsync(project, projectRootOverride);
         }
         finally
         {
@@ -2345,18 +2700,23 @@ public sealed partial class MainForm
 
     // The actual rebuild work. MUST be called while holding RebuildGate (via the public wrapper
     // above, or by UseAsBase which holds it across its whole staging pass).
-    private async Task RebuildGraftStageCoreAsync()
+    private async Task RebuildGraftStageCoreAsync(
+        NativeSuitProject? projectOverride = null,
+        string? projectRootOverride = null)
     {
-        if (_currentProject is null)
+        var project = projectOverride ?? _currentProject;
+        if (project is null)
         {
             return;
         }
-        var projectRoot = _projectRootText.Text.Trim();
+        var projectRoot = string.IsNullOrWhiteSpace(projectRootOverride)
+            ? _projectRootText.Text.Trim()
+            : projectRootOverride;
 
         // Delete the grafted stage so the graft service re-copies it fresh from the clean
         // PatchedNameMapStage (its first graft call copies patched→grafted only when absent).
         var graftStage = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "NativeSuitGuiProjects",
-            _currentProject.SlotId, "GraftedPartStage");
+            project.SlotId, "GraftedPartStage");
         try
         {
             if (Directory.Exists(graftStage))
@@ -2369,8 +2729,8 @@ public sealed partial class MainForm
             AppendLog($"  ⚠ could not clear graft stage before rebuild: {ex.Message}");
         }
 
-        AppendLog($"  replaying {_currentProject.PartGrafts.Count} declared part(s) onto a clean base…");
-        foreach (var pg in _currentProject.PartGrafts.ToList())
+        AppendLog($"  replaying {project.PartGrafts.Count} declared part(s) onto a clean base…");
+        foreach (var pg in project.PartGrafts.ToList())
         {
             var playable = ResolveLivePart(pg.Playable);
             var cutscene = ResolveLivePart(pg.Cutscene);
@@ -2385,7 +2745,7 @@ public sealed partial class MainForm
             try
             {
                 var result = await Task.Run(() => new PartGraftService(projectRoot).CreateSelectedPartGraftedStage(
-                    _currentProject, playable, cutscene, pg.Slot, cloneSlot, attachSocket));
+                    project, playable, cutscene, pg.Slot, cloneSlot, attachSocket));
                 foreach (var package in result.PackageResults)
                 {
                     AppendLog($"  {pg.Slot}/{package.Role}: slot={package.TargetSlot} success={package.Success} addedExports={package.AddedExports} componentExport={package.NewComponentExportIndex}");
@@ -2412,9 +2772,9 @@ public sealed partial class MainForm
                                  .Select(p => p.TargetSlot)
                                  .Distinct(StringComparer.OrdinalIgnoreCase))
                     {
-                        RemoveSavedRemovalForComponent(_currentProject, graftedSlot);
+                        RemoveSavedRemovalForComponent(project, graftedSlot);
                     }
-                    if (EnsureCrossKindHeadGraftHidesBaseHead(_currentProject))
+                    if (EnsureCrossKindHeadGraftHidesBaseHead(project))
                     {
                         AppendLog("  cross-kind head graft replaces the donor cowl; queued Head:0 for removal.");
                     }
@@ -2426,10 +2786,13 @@ public sealed partial class MainForm
             }
         }
 
+        SyncCustomStaticMeshHeadRemoval(project);
+        await StageCustomStaticMeshesAsync(project);
+
         // Re-apply the rest of the suit's declarative edits onto the freshly grafted stage.
-        ApplySavedComponentRemovals(_currentProject, logNoRemovals: false);
-        ApplySavedMaterials(_currentProject, logIfNone: false);
-        try { (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(_currentProject); } catch { /* best effort */ }
+        ApplySavedComponentRemovals(project, logNoRemovals: false);
+        ApplySavedMaterials(project, logIfNone: false);
+        try { (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(project); } catch { /* best effort */ }
         _session.RaiseChanged();
     }
 

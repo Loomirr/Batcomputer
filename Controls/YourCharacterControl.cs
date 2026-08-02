@@ -18,6 +18,19 @@ public partial class YourCharacterControl : UserControl
         _titleLabel.ForeColor = Theme.Gold;
         _titleLabel.Font = Theme.Eyebrow;
         _diagram.BackColor = Theme.PanelBg;
+        _minifigActions.BackColor = Theme.PanelBg;
+        Theme.StyleDarkButton(_viewIn3dButton);
+        _viewIn3dButton.FlatAppearance.BorderColor = Theme.Research;
+        _viewIn3dButton.FlatAppearance.MouseOverBackColor = Theme.Tint(Theme.Research);
+        _viewIn3dButton.ForeColor = Theme.Research;
+        _viewIn3dButton.Font = new Font(_viewIn3dButton.Font, FontStyle.Bold);
+        _viewIn3dButton.Click += (_, _) => ViewIn3DRequested?.Invoke(this, EventArgs.Empty);
+        _viewIn3dIcon.Click += (_, _) => _viewIn3dButton.PerformClick();
+        if (EmbeddedAssets.LoadAnimated("3D.gif") is { } animatedIcon)
+        {
+            _viewIn3dIcon.Image = animatedIcon;
+        }
+        _minifigActions.BringToFront();
     }
 
     /// <summary>The vertical flow of character-component rows (added/removed by PopulateToyboxSlots).</summary>
@@ -25,6 +38,9 @@ public partial class YourCharacterControl : UserControl
 
     /// <summary>The minifig figure (region tint + click-to-select).</summary>
     public MinifigDiagram Diagram => _diagram;
+
+    /// <summary>Raised when the minifig panel's preview command is selected.</summary>
+    public event EventHandler? ViewIn3DRequested;
 
     /// <summary>
     /// Switches between the minifig figure and the classic slot list (Settings → General →
@@ -34,5 +50,7 @@ public partial class YourCharacterControl : UserControl
     {
         _diagram.Visible = useMinifig;
         _slotFlow.Visible = !useMinifig;
+        _minifigActions.Visible = useMinifig;
+        _minifigActions.BringToFront();
     }
 }

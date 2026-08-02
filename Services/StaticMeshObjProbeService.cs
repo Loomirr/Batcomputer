@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Globalization;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using UAssetAPI;
 using UAssetAPI.ExportTypes;
@@ -51,6 +52,12 @@ public sealed class StaticMeshObjProbeService
         public string OutputPackagePath { get; set; } = "";
         public string ObjPath { get; set; } = "";
         public float Scale { get; set; } = 150f;
+        public float OffsetX { get; set; }
+        public float OffsetY { get; set; }
+        public float OffsetZ { get; set; }
+        public float RotationPitch { get; set; }
+        public float RotationYaw { get; set; }
+        public float RotationRoll { get; set; }
     }
 
     public sealed class Result
@@ -69,6 +76,13 @@ public sealed class StaticMeshObjProbeService
         public int IndexCount { get; set; }
         public int StaticMeshBytesBefore { get; set; }
         public int StaticMeshBytesAfter { get; set; }
+        public float Scale { get; set; }
+        public float OffsetX { get; set; }
+        public float OffsetY { get; set; }
+        public float OffsetZ { get; set; }
+        public float RotationPitch { get; set; }
+        public float RotationYaw { get; set; }
+        public float RotationRoll { get; set; }
         public string ObjSha256 { get; set; } = "";
         public string UexpSha256Before { get; set; } = "";
         public string UexpSha256After { get; set; } = "";
@@ -108,7 +122,14 @@ public sealed class StaticMeshObjProbeService
         var result = new Result
         {
             SourceObjPath = request.ObjPath,
-            OutputPackagePath = UnrealPathUtil.NormalizePackagePath(request.OutputPackagePath)
+            OutputPackagePath = UnrealPathUtil.NormalizePackagePath(request.OutputPackagePath),
+            Scale = request.Scale,
+            OffsetX = request.OffsetX,
+            OffsetY = request.OffsetY,
+            OffsetZ = request.OffsetZ,
+            RotationPitch = request.RotationPitch,
+            RotationYaw = request.RotationYaw,
+            RotationRoll = request.RotationRoll,
         };
 
         try
@@ -116,6 +137,16 @@ public sealed class StaticMeshObjProbeService
             if (request.Scale is < 1f or > 1000f)
             {
                 throw new ArgumentOutOfRangeException(nameof(request.Scale), "OBJ scale must be between 1 and 1000.");
+            }
+            if (!float.IsFinite(request.OffsetX) || !float.IsFinite(request.OffsetY) || !float.IsFinite(request.OffsetZ) ||
+                MathF.Abs(request.OffsetX) > 100000f || MathF.Abs(request.OffsetY) > 100000f || MathF.Abs(request.OffsetZ) > 100000f)
+            {
+                throw new ArgumentOutOfRangeException(nameof(request.OffsetX), "OBJ offsets must be finite values between -100000 and 100000.");
+            }
+            if (!float.IsFinite(request.RotationPitch) || !float.IsFinite(request.RotationYaw) || !float.IsFinite(request.RotationRoll) ||
+                MathF.Abs(request.RotationPitch) > 360f || MathF.Abs(request.RotationYaw) > 360f || MathF.Abs(request.RotationRoll) > 360f)
+            {
+                throw new ArgumentOutOfRangeException(nameof(request.RotationPitch), "OBJ rotations must be finite values between -360 and 360 degrees.");
             }
             if (!result.OutputPackagePath.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase))
             {
@@ -126,7 +157,13 @@ public sealed class StaticMeshObjProbeService
                 throw new FileNotFoundException("The OBJ file was not found.", request.ObjPath);
             }
 
-            var mesh = ParseObj(request.ObjPath, request.Scale);
+            var mesh = ParseObj(
+                request.ObjPath,
+                request.Scale,
+                new Vector3(request.OffsetX, request.OffsetY, request.OffsetZ),
+                request.RotationPitch,
+                request.RotationYaw,
+                request.RotationRoll);
             if (mesh.Vertices.Count > ushort.MaxValue)
             {
                 throw new InvalidOperationException("This first OBJ writer supports up to 65,535 flattened vertices.");
@@ -217,6 +254,7 @@ public sealed class StaticMeshObjProbeService
 
             result.Status = "created";
             result.Log.Add($"Parsed {result.VertexCount} flattened vertices and {result.TriangleCount} double-sided triangles from the OBJ.");
+            result.Log.Add($"Applied mesh transform: scale={request.Scale:0.###}, offset=({request.OffsetX:0.###}, {request.OffsetY:0.###}, {request.OffsetZ:0.###}), rotation=({request.RotationPitch:0.###}, {request.RotationYaw:0.###}, {request.RotationRoll:0.###}).");
             result.Log.Add("Expanded the final StaticMesh export's inline position, tangent, UV, and active index buffers.");
             result.Log.Add("Kept the donor's one material section, collision shell, and package identity structure.");
         }
@@ -235,6 +273,144 @@ public sealed class StaticMeshObjProbeService
         }
 
         return result;
+    }
+
+    /// <summary>Writes the cooked OBJ geometry in glTF meters for Batcomputer's local viewer.</summary>
+    public static void WritePreviewGlb(
+        string objPath,
+        string outputPath,
+        float scale,
+        float offsetX,
+        float offsetY,
+        float offsetZ,
+        float rotationPitch = 0f,
+        float rotationYaw = 0f,
+        float rotationRoll = 0f)
+    {
+        if (!File.Exists(objPath))
+        {
+            throw new FileNotFoundException("The custom mesh OBJ was not found.", objPath);
+        }
+        if (!float.IsFinite(scale) || scale is < 0.001f or > 1000f)
+        {
+            throw new ArgumentOutOfRangeException(nameof(scale), "Preview scale must be between 0.001 and 1000.");
+        }
+
+        // StaticMesh payloads use Unreal centimeters. CUE4Parse exports the character GLBs in
+        // meters, so convert the authored import transform before the two meet in the viewer.
+        const float unrealUnitsToMeters = 0.01f;
+        var mesh = ParseObj(
+            objPath,
+            scale * unrealUnitsToMeters,
+            new Vector3(offsetX, offsetY, offsetZ) * unrealUnitsToMeters,
+            rotationPitch,
+            rotationYaw,
+            rotationRoll);
+        // The cooked payload is UE space (X forward, Y right, Z up). CUE4Parse's
+        // character GLBs use (X, Z, -Y), so use that same basis here rather than
+        // handing the browser raw UE vertices.
+        var positions = mesh.Vertices.Select(vertex => UeToGltf(vertex.Position)).ToArray();
+        var min = new Vector3(positions.Min(value => value.X), positions.Min(value => value.Y), positions.Min(value => value.Z));
+        var max = new Vector3(positions.Max(value => value.X), positions.Max(value => value.Y), positions.Max(value => value.Z));
+
+        using var binary = new MemoryStream();
+        var positionOffset = checked((int)binary.Length);
+        foreach (var vertex in mesh.Vertices)
+        {
+            var position = UeToGltf(vertex.Position);
+            WriteSingle(binary, position.X);
+            WriteSingle(binary, position.Y);
+            WriteSingle(binary, position.Z);
+        }
+        var positionLength = checked((int)binary.Length - positionOffset);
+        Align4(binary);
+
+        var normalOffset = checked((int)binary.Length);
+        foreach (var vertex in mesh.Vertices)
+        {
+            var normal = UeToGltf(vertex.Normal);
+            WriteSingle(binary, normal.X);
+            WriteSingle(binary, normal.Y);
+            WriteSingle(binary, normal.Z);
+        }
+        var normalLength = checked((int)binary.Length - normalOffset);
+        Align4(binary);
+
+        var uvOffset = checked((int)binary.Length);
+        foreach (var vertex in mesh.Vertices)
+        {
+            WriteSingle(binary, vertex.Uv.U);
+            WriteSingle(binary, 1f - vertex.Uv.V);
+        }
+        var uvLength = checked((int)binary.Length - uvOffset);
+        Align4(binary);
+
+        var indexOffset = checked((int)binary.Length);
+        WriteIndices(binary, mesh.Indices);
+        var indexLength = checked((int)binary.Length - indexOffset);
+        Align4(binary);
+
+        var f = (float value) => value.ToString("0.######", CultureInfo.InvariantCulture);
+        var json = "{" +
+                   "\"asset\":{\"version\":\"2.0\",\"generator\":\"Batcomputer OBJ preview\"}," +
+                   "\"scene\":0,\"scenes\":[{\"nodes\":[0]}],\"nodes\":[{\"mesh\":0}]," +
+                   "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":2},\"indices\":3,\"mode\":4}]}]," +
+                   $"\"buffers\":[{{\"byteLength\":{binary.Length}}}]," +
+                   "\"bufferViews\":[" +
+                   $"{{\"buffer\":0,\"byteOffset\":{positionOffset},\"byteLength\":{positionLength},\"target\":34962}}," +
+                   $"{{\"buffer\":0,\"byteOffset\":{normalOffset},\"byteLength\":{normalLength},\"target\":34962}}," +
+                   $"{{\"buffer\":0,\"byteOffset\":{uvOffset},\"byteLength\":{uvLength},\"target\":34962}}," +
+                   $"{{\"buffer\":0,\"byteOffset\":{indexOffset},\"byteLength\":{indexLength},\"target\":34963}}]," +
+                   "\"accessors\":[" +
+                   $"{{\"bufferView\":0,\"componentType\":5126,\"count\":{mesh.Vertices.Count},\"type\":\"VEC3\",\"min\":[{f(min.X)},{f(min.Y)},{f(min.Z)}],\"max\":[{f(max.X)},{f(max.Y)},{f(max.Z)}]}}," +
+                   $"{{\"bufferView\":1,\"componentType\":5126,\"count\":{mesh.Vertices.Count},\"type\":\"VEC3\"}}," +
+                   $"{{\"bufferView\":2,\"componentType\":5126,\"count\":{mesh.Vertices.Count},\"type\":\"VEC2\"}}," +
+                   $"{{\"bufferView\":3,\"componentType\":5123,\"count\":{mesh.Indices.Count},\"type\":\"SCALAR\"}}]" +
+                   "}";
+        var jsonBytes = Encoding.UTF8.GetBytes(json);
+        var jsonLength = jsonBytes.Length;
+        Array.Resize(ref jsonBytes, Align4(jsonLength));
+        Array.Fill(jsonBytes, (byte)' ', jsonLength, jsonBytes.Length - jsonLength);
+        var binaryBytes = binary.ToArray();
+
+        Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+        using var stream = File.Create(outputPath);
+        using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
+        writer.Write(0x46546C67); // glTF
+        writer.Write(2);
+        writer.Write(checked(12 + 8 + jsonBytes.Length + 8 + binaryBytes.Length));
+        writer.Write(jsonBytes.Length);
+        writer.Write(0x4E4F534A); // JSON
+        writer.Write(jsonBytes);
+        writer.Write(binaryBytes.Length);
+        writer.Write(0x004E4942); // BIN\0
+        writer.Write(binaryBytes);
+    }
+
+    private static void Align4(Stream stream)
+    {
+        while (stream.Length % 4 != 0)
+        {
+            stream.WriteByte(0);
+        }
+    }
+
+    private static int Align4(int length)
+    {
+        return (length + 3) & ~3;
+    }
+
+    private static Vector3 UeToGltf(Vector3 value) => new(value.X, value.Z, -value.Y);
+
+    private static Vector3 RotateUnreal(Vector3 value, float pitch, float yaw, float roll)
+    {
+        const float degreesToRadians = MathF.PI / 180f;
+        var yawRotation = System.Numerics.Quaternion.CreateFromAxisAngle(System.Numerics.Vector3.UnitZ, yaw * degreesToRadians);
+        var pitchRotation = System.Numerics.Quaternion.CreateFromAxisAngle(System.Numerics.Vector3.UnitY, pitch * degreesToRadians);
+        var rollRotation = System.Numerics.Quaternion.CreateFromAxisAngle(System.Numerics.Vector3.UnitX, roll * degreesToRadians);
+        var rotation = System.Numerics.Quaternion.Normalize(yawRotation * pitchRotation * rollRotation);
+        var transformed = System.Numerics.Vector3.Transform(new System.Numerics.Vector3(value.X, value.Y, value.Z), rotation);
+        return new Vector3(transformed.X, transformed.Y, transformed.Z);
     }
 
     private static byte[] BuildPayload(byte[] source, ImportedMesh mesh, Result result)
@@ -287,7 +463,13 @@ public sealed class StaticMeshObjProbeService
         return payload;
     }
 
-    private static ImportedMesh ParseObj(string objPath, float scale)
+    private static ImportedMesh ParseObj(
+        string objPath,
+        float scale,
+        Vector3 offset,
+        float rotationPitch = 0f,
+        float rotationYaw = 0f,
+        float rotationRoll = 0f)
     {
         var positions = new List<Vector3> { default };
         var uvs = new List<Vector2> { default };
@@ -342,7 +524,7 @@ public sealed class StaticMeshObjProbeService
         {
             throw new InvalidOperationException("The OBJ contains no usable faces.");
         }
-        CenterAndBuildFrames(mesh);
+        CenterAndBuildFrames(mesh, offset, rotationPitch, rotationYaw, rotationRoll);
         return mesh;
     }
 
@@ -380,14 +562,20 @@ public sealed class StaticMeshObjProbeService
         return index;
     }
 
-    private static void CenterAndBuildFrames(ImportedMesh mesh)
+    private static void CenterAndBuildFrames(
+        ImportedMesh mesh,
+        Vector3 offset,
+        float rotationPitch,
+        float rotationYaw,
+        float rotationRoll)
     {
         var min = new Vector3(mesh.Vertices.Min(vertex => vertex.Position.X), mesh.Vertices.Min(vertex => vertex.Position.Y), mesh.Vertices.Min(vertex => vertex.Position.Z));
         var max = new Vector3(mesh.Vertices.Max(vertex => vertex.Position.X), mesh.Vertices.Max(vertex => vertex.Position.Y), mesh.Vertices.Max(vertex => vertex.Position.Z));
         var center = (min + max) * 0.5f;
         foreach (var vertex in mesh.Vertices)
         {
-            vertex.Position -= center;
+            vertex.Position = RotateUnreal(vertex.Position - center, rotationPitch, rotationYaw, rotationRoll) + offset;
+            vertex.Normal = RotateUnreal(vertex.Normal, rotationPitch, rotationYaw, rotationRoll);
         }
 
         for (var i = 0; i < mesh.Indices.Count; i += 3)
@@ -427,11 +615,17 @@ public sealed class StaticMeshObjProbeService
             vertex.Tangent = Normalize(tangent);
         }
 
-        var extent = new Vector3(
-            MathF.Max(MathF.Abs(min.X - center.X), MathF.Abs(max.X - center.X)),
-            MathF.Max(MathF.Abs(min.Y - center.Y), MathF.Abs(max.Y - center.Y)),
-            MathF.Max(MathF.Abs(min.Z - center.Z), MathF.Abs(max.Z - center.Z)));
-        mesh.Bounds = new Bounds(default, extent, MathF.Sqrt(Dot(extent, extent)));
+        var transformedMin = new Vector3(
+            mesh.Vertices.Min(vertex => vertex.Position.X),
+            mesh.Vertices.Min(vertex => vertex.Position.Y),
+            mesh.Vertices.Min(vertex => vertex.Position.Z));
+        var transformedMax = new Vector3(
+            mesh.Vertices.Max(vertex => vertex.Position.X),
+            mesh.Vertices.Max(vertex => vertex.Position.Y),
+            mesh.Vertices.Max(vertex => vertex.Position.Z));
+        var transformedCenter = (transformedMin + transformedMax) * 0.5f;
+        var extent = (transformedMax - transformedMin) * 0.5f;
+        mesh.Bounds = new Bounds(transformedCenter, extent, MathF.Sqrt(Dot(extent, extent)));
     }
 
     private static ObjKey ParseObjKey(string token, int positionCount, int uvCount, int normalCount)

@@ -46,6 +46,7 @@ public sealed partial class MainForm
         WireToyboxCharacterDropTarget(_yourCharacter);
         // The figure covers the panel now, so it has to accept the drops the rows used to.
         WireMinifigDropTarget(_yourCharacter.Diagram);
+        _yourCharacter.ViewIn3DRequested += (_, _) => ViewCurrentSuitIn3D();
         _yourCharacter.Diagram.RegionActivated += SelectFirstSlotInRegion;
         _yourCharacter.Diagram.RegionContextRequested += ShowRegionContextMenu;
         _yourCharacter.Diagram.RegionDescriber = DescribeRegion;
@@ -89,7 +90,7 @@ public sealed partial class MainForm
         _toyboxCategoryCombo.Items.AddRange(categories.ToArray());
         _toyboxCategoryCombo.SelectedIndex = 0;
         _toyboxCategoryCombo.Visible = false;
-        _toyboxCategoryCombo.SelectedIndexChanged += (_, _) => { PopulateToyboxTypes(); UpdatePrimaryAction(); ConfigureToyboxFilters(); SelectInspectorTabForCategory(); RefreshToyboxTiles(); };
+        _toyboxCategoryCombo.SelectedIndexChanged += (_, _) => { UpdateCategoryRailSelection(); PopulateToyboxTypes(); UpdatePrimaryAction(); ConfigureToyboxFilters(); SelectInspectorTabForCategory(); RefreshToyboxTiles(); };
         // The type list is now the filter button's "scope" section. This combo stays as the model
         // behind it - it is read and set from ~30 places - but is never shown.
         _toyboxTypeCombo.DropDownStyle = ComboBoxStyle.DropDownList;
@@ -408,6 +409,7 @@ public sealed partial class MainForm
         foreach (var (cat, glyph) in cats)
         {
             var button = RailButton(cat, glyph);
+            _categoryRailButtons[cat] = button;
             if (cat.Equals("Research", StringComparison.OrdinalIgnoreCase))
             {
                 _researchRailButton = button;
@@ -415,6 +417,7 @@ public sealed partial class MainForm
             }
             rail.Controls.Add(button);
         }
+        UpdateCategoryRailSelection();
         return rail;
     }
 
@@ -982,7 +985,7 @@ public sealed partial class MainForm
 
         try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject); } catch { /* best effort */ }
         ApplySavedMaterials(_currentProject, logIfNone: false);
-        AppendLog("Applied the visual source's body and face materials to the gameplay donor.");
+        AppendLog("Applied the visual source's body and face materials.");
     }
 
     private async Task ApplyVisualAttachmentsToGameplayDonorAsync(string visualSourcePackage)
@@ -1016,10 +1019,10 @@ public sealed partial class MainForm
         {
             var playable = source.Context.Equals("playable", StringComparison.OrdinalIgnoreCase)
                 ? source
-                : FindCounterpartPart(source, "playable") ?? source;
+                : FindExactMeshCounterpartPart(source, "playable") ?? source;
             var cutscene = source.Context.Equals("cutscene", StringComparison.OrdinalIgnoreCase)
                 ? source
-                : FindCounterpartPart(source, "cutscene") ?? source;
+                : FindExactMeshCounterpartPart(source, "cutscene") ?? source;
             UpsertPartGraft(source.Slot, false, playable, cutscene);
         }
 
@@ -1030,6 +1033,12 @@ public sealed partial class MainForm
         var hidden = new List<string>();
         try
         {
+            if (attachments.Any(part => OccupancyGroupOf(part).StartsWith("head.", StringComparison.OrdinalIgnoreCase)) &&
+                EnsureVisualHeadAttachmentHidesDonorHead(_currentProject))
+            {
+                hidden.Add("Head");
+            }
+
             var protectedGlider = ActiveGliderVisualComponent(_currentProject);
             var donorComponents = new ComponentRemoveService(_projectRootText.Text.Trim())
                 .ListScsComponentNames(_currentProject.SlotId, _currentProject.TargetPackages.Playable, "");
@@ -1254,10 +1263,14 @@ public sealed partial class MainForm
                 }
                 break;
             case "Equipment":
-                // Split by whether the gadget belongs to a playable family: "Playable equipment"
-                // (a real hero gadget - proven) vs "Testing / boss" (no family - boss/NPC weapons
-                // that don't reliably work as player gear yet). Default to the playable set.
-                _toyboxTypeCombo.Items.AddRange(new object[] { "Playable equipment", "Testing / boss (no family)", "All gadgets" });
+                _toyboxTypeCombo.Items.AddRange(new object[]
+                {
+                    "Recommended",
+                    "Special controllers",
+                    "Family-only",
+                    "Testing / boss",
+                    "All gadgets"
+                });
                 break;
             case "Gliders":
                 _toyboxTypeCombo.Items.AddRange(new object[] { "Glider presets", "Wingsuit decals" });
@@ -1294,6 +1307,7 @@ public sealed partial class MainForm
         _toyboxTileGrid.SetTiles(Array.Empty<VirtualTilePanel.Tile>());
         _toyboxTileGrid.Visible = false;
         _toyboxTileFlow.Visible = true;
+        _toyboxTileFlow.BringToFront();
     }
 
     /// <summary>Switches the tile cell to the virtualized grid and loads it with <paramref name="tiles"/>.
@@ -1304,6 +1318,7 @@ public sealed partial class MainForm
     {
         _toyboxTileFlow.Visible = false;
         _toyboxTileGrid.Visible = true;
+        _toyboxTileGrid.BringToFront();
         _toyboxTileGrid.SetHero(hero);
         _toyboxTileGrid.HeaderText = header;
         _toyboxTileGrid.EmptyMessage = emptyMessage;
@@ -1739,6 +1754,11 @@ public sealed partial class MainForm
         {
             var selectedSlot = _toyboxTypeCombo.SelectedItem?.ToString() ?? "<all parts>";
             var isAttachment = selectedSlot.StartsWith("Attachment:", StringComparison.OrdinalIgnoreCase);
+            var sourceFilter = FilterVal(2);
+            var showOnlyYourMeshes = string.Equals(sourceFilter, "Your meshes", StringComparison.OrdinalIgnoreCase);
+            var customMeshes = sourceFilter is null || showOnlyYourMeshes
+                ? CustomStaticMeshTiles(CurrentToyboxSearch())
+                : new List<VirtualTilePanel.Tile>();
 
             if (!isAttachment && _partIndex is null)
             {
@@ -1747,21 +1767,32 @@ public sealed partial class MainForm
 
             if (!isAttachment && (_partIndex is null || _partIndex.Parts.Count == 0))
             {
-                _toyboxTileFlow.Controls.Add(MakeTile("Build index", "scan extracted BPs", () => { _ = BuildPartIndexAsync(); }, Theme.Parts, dashed: true));
-                _toyboxTileFlow.Controls.Add(MakeNoteTile("First-time setup must point at your UAssetGUI extracted Content dump. Then build the part index to fill this toybox.\n\nTip: switch the dropdown to 'Attachment: Hair' or 'Attachment: Hat' — those come from the shipped catalog and need no part index."));
+                customMeshes.Add(new VirtualTilePanel.Tile
+                {
+                    Section = "NATIVE PARTS",
+                    Title = "Build part index",
+                    Subtitle = "scan extracted character Blueprints",
+                    Accent = Theme.Parts,
+                    Dashed = true,
+                    OnClick = () => _ = BuildPartIndexAsync(),
+                });
+                ShowVirtualTiles(customMeshes,
+                    header: "Import a custom OBJ now, or build the native part index to browse the game's parts. Attachment catalogs remain available without an index.",
+                    emptyMessage: "Build the native part index to browse extracted character parts.");
                 return;
             }
 
-            var parts = ToyboxPartCandidates(selectedSlot).ToList();
-            if (parts.Count == 0)
-            {
-                // Few controls - keep the note on the flow surface.
-                _toyboxTileFlow.Controls.Add(MakeNoteTile($"No indexed parts matched '{selectedSlot}'. Try <all parts> or rebuild the part index after changing setup paths."));
-                return;
-            }
+            var parts = showOnlyYourMeshes
+                ? new List<NativeSuitPartRecord>()
+                : ToyboxPartCandidates(selectedSlot).ToList();
+            customMeshes.AddRange(parts.Select(PartTile));
 
             // Virtualized: render ALL matches (no paging / "Load more") - only visible tiles paint.
-            ShowVirtualTiles(parts.Select(PartTile).ToList());
+            ShowVirtualTiles(customMeshes,
+                header: parts.Count == 0
+                    ? $"No native parts matched '{selectedSlot}'. Your custom imported meshes are still available here."
+                    : "",
+                emptyMessage: "No native parts matched. Try <all parts> or rebuild the part index after changing setup paths.");
             return;
         }
 
@@ -1933,6 +1964,7 @@ public sealed partial class MainForm
         switch (change.Category)
         {
             case "Gliders":
+                _currentProject.PartGrafts.RemoveAll(graft => graft.IsGlider);
                 _currentProject.GliderType = "";
                 _currentProject.GliderMaterial = "";
                 _currentProject.GliderGrafted = false;
@@ -1973,23 +2005,21 @@ public sealed partial class MainForm
             return;
         }
 
-        var basePath = _basePlayableText.Text.Trim();
+        var basePath = _currentProject?.BaseProfile?.GameplayDonorPackage;
+        if (string.IsNullOrWhiteSpace(basePath))
+        {
+            basePath = _currentProject?.PlayableTemplate?.PackagePath;
+        }
+        if (string.IsNullOrWhiteSpace(basePath))
+        {
+            basePath = _basePlayableText.Text.Trim();
+        }
         var family = gd.FamilyForBasePath(basePath);
         var familyLabel = family?.Name ?? "unknown";
 
-        // "Playable equipment" = gadget belongs to at least one playable family (a real hero gadget,
-        // proven). "Testing / boss (no family)" = NativeFamilies empty (boss/NPC weapons like
-        // FreezeGun/MachineGun - not reliably usable as player gear yet; parked research).
-        // Default (empty) + "Playable equipment" + "All gadgets" show playable; only the testing
-        // view (or "All") shows no-family gadgets.
-        var showPlayable = filter != "Testing / boss (no family)";
-        var showTesting = filter == "Testing / boss (no family)" || filter == "All gadgets";
-
-        var header = filter == "Testing / boss (no family)"
-            ? "Testing / boss equipment: gadgets with NO playable family (boss/NPC weapons, e.g. FreezeGun). These do NOT reliably work as player gear yet — parked research. Use at your own risk."
-            : family is null
-                ? $"Playable equipment (belongs to a hero family). Base family not recognized from '{(basePath.Length > 0 ? basePath : "<no base playable set>")}' — set the base playable to see ✓/⚠ per-gadget anim compatibility."
-                : $"Playable equipment. Base family: {familyLabel}.   ✓ native anims  ·  ⚠ foreign gadget — its anim sets graft in on package (needs the custom archetype).   Data shipped with the tool — no extraction needed.";
+        var header = family is null
+            ? "Pick a gameplay donor to see exact compatibility. Equipment is grouped by its real dependency type."
+            : $"Gameplay donor: {familyLabel}. Recommended gadgets are native or have a complete cross-family graft. Controller and family-only equipment are separated so their extra requirements stay visible.";
 
         var familyFilter = FilterVal(0);   // owning family
         var search = CurrentToyboxSearch();
@@ -2001,12 +2031,8 @@ public sealed partial class MainForm
                 continue;
             }
 
-            var hasFamily = eq.NativeFamilies.Count > 0;
-            if (hasFamily && !showPlayable)
-            {
-                continue;
-            }
-            if (!hasFamily && !showTesting)
+            var profile = EquipmentDependencyService.Analyze(eq, family?.Name);
+            if (!EquipmentMatchesView(profile, filter))
             {
                 continue;
             }
@@ -2019,35 +2045,47 @@ public sealed partial class MainForm
 
             var compat = gd.CheckEquipment(eq.Name, basePath);
 
-            var (glyph, accent) = compat.Level switch
+            var (glyph, accent) = profile.Support switch
             {
-                GameDataService.Compatibility.Native => ("", Theme.Equipment),
-                GameDataService.Compatibility.Foreign => ("⚠", Color.FromArgb(220, 160, 40)),
-                _ => ("•", Theme.OnDarkMuted),
+                EquipmentSupportKind.Native => ("", Theme.Equipment),
+                EquipmentSupportKind.CrossFamily => ("+", Theme.Info),
+                EquipmentSupportKind.Controller => ("!", Color.FromArgb(220, 160, 40)),
+                EquipmentSupportKind.FamilyOnly => ("!", Theme.Warn),
+                _ => ("?", Theme.OnDarkMuted),
             };
 
             var owners = eq.NativeFamilies.Count > 0 ? string.Join("/", eq.NativeFamilies) : "no family";
             var capturedEq = eq;
             var capturedCompat = compat;
+            var capturedProfile = profile;
             tiles.Add(new VirtualTilePanel.Tile
             {
                 Title = string.IsNullOrEmpty(glyph) ? eq.Name : $"{glyph} {eq.Name}",
-                Subtitle = owners,
+                Subtitle = $"{profile.SupportLabel} · {owners}",
                 Accent = accent,
-                OnClick = () => ShowEquipmentCompatDetail(capturedEq, capturedCompat),
+                OnClick = () => ShowEquipmentCompatDetail(capturedEq, capturedCompat, capturedProfile),
+                ToolTip = profile.Summary,
             });
         }
         ShowVirtualTiles(tiles, header, emptyMessage: "No gadgets matched the current filter/search.");
     }
 
-    private void ShowEquipmentCompatDetail(GameDataEquipment eq, GameDataService.CompatResult compat)
+    private static bool EquipmentMatchesView(EquipmentDependencyProfile profile, string? filter) =>
+        filter switch
+        {
+            "Special controllers" => profile.Support == EquipmentSupportKind.Controller,
+            "Family-only" => profile.Support == EquipmentSupportKind.FamilyOnly,
+            "Testing / boss" => profile.Support == EquipmentSupportKind.Experimental,
+            "All gadgets" => true,
+            _ => profile.Support is EquipmentSupportKind.Native or EquipmentSupportKind.CrossFamily
+        };
+
+    private void ShowEquipmentCompatDetail(
+        GameDataEquipment eq,
+        GameDataService.CompatResult compat,
+        EquipmentDependencyProfile profile)
     {
         var isForeign = compat.Level == GameDataService.Compatibility.Foreign;
-        var isHeld = eq.VisualAbilities.Count > 0;
-
-        // AnimArchetypeGraftService.Graft() clones MAS_Char/LAS_Char and injects a foreign gadget's
-        // anim blocks at package time - but ONLY when the suit uses its own archetype, and only for
-        // the anim sets the gadget actually ships. Both facts drive what this dialog says.
         var hasLayerAnims = !string.IsNullOrEmpty(eq.LayerAnimSet);
         var hasMontageAnims = !string.IsNullOrEmpty(eq.MontageAnimSet);
         var hasGraft = hasLayerAnims || hasMontageAnims;
@@ -2060,21 +2098,21 @@ public sealed partial class MainForm
             Subtitle = eq.NativeFamilies.Count > 0
                 ? $"Native to {string.Join(", ", eq.NativeFamilies)}"
                 : "No native family",
-            Severity = isForeign ? Dialog.Level.Warn : Dialog.Level.Good,
+            Message = profile.Summary,
+            Severity = profile.Support switch
+            {
+                EquipmentSupportKind.Native => Dialog.Level.Good,
+                EquipmentSupportKind.CrossFamily => Dialog.Level.Info,
+                EquipmentSupportKind.Controller => Dialog.Level.Warn,
+                EquipmentSupportKind.FamilyOnly => Dialog.Level.Warn,
+                _ => Dialog.Level.Crit
+            },
             PrimaryText = "Add gadget",
             SecondaryText = "Cancel",
         };
-        model.Chips.Add((compat.Level.ToString(), isForeign ? Theme.Warn : Theme.Good));
-        model.Chips.Add((isHeld ? "Held" : "Thrown", isHeld ? Theme.Info : Theme.OnDarkMuted));
+        model.Chips.Add((profile.SupportLabel, isForeign ? Theme.Warn : Theme.Good));
+        model.Chips.Add((profile.Architecture, profile.Support == EquipmentSupportKind.Controller ? Theme.Warn : Theme.Info));
         model.Chips.Add((hasGraft ? "anims graftable" : "no anim set", hasGraft ? Theme.Good : Theme.Warn));
-
-        if (!isHeld)
-        {
-            model.Message =
-                "This is a throwing weapon — it has no persistent held mesh and is only visible while " +
-                "aiming or throwing. That's the same as the base game. Use a held gadget (Whip, Batons, " +
-                "BattleStaff, CatClaws, Drone, Goggles, Tablet…) if you want it visible in-hand.";
-        }
 
         model.Fields.Add(("ETA", eq.EtaPackage));
         model.Fields.Add(("ED", string.IsNullOrEmpty(eq.EdPackage) ? "(none)" : eq.EdPackage));
@@ -2086,31 +2124,73 @@ public sealed partial class MainForm
         {
             model.Fields.Add(("Montage anims", eq.MontageAnimSet));
         }
-
-        if (isForeign)
+        if (profile.AbilitySets.Count > 0)
         {
-            if (!hasGraft)
-            {
+            model.Fields.Add(("Controller set", string.Join(", ", profile.AbilitySets)));
+        }
+        if (eq.VisualAbilities.Count > 0 || profile.ExtraGrantedAbilities.Count > 0)
+        {
+            var grantedCount = eq.VisualAbilities
+                .Concat(profile.ExtraGrantedAbilities)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count();
+            model.Fields.Add(("Granted abilities",
+                $"{grantedCount} native grant(s)"));
+        }
+        if (profile.DefinitionAbilities.Count > 0)
+        {
+            model.Fields.Add(("ED actions",
+                string.Join(", ", profile.DefinitionAbilities.Select(UnrealPathUtil.AssetName))));
+        }
+        if (profile.RuntimeActors.Count > 0)
+        {
+            model.Fields.Add(("Runtime actors", string.Join(", ", profile.RuntimeActors)));
+        }
+
+        switch (profile.Support)
+        {
+            case EquipmentSupportKind.Controller:
+                model.CalloutTitle = "Special controller graft";
+                model.CalloutDetail =
+                    "Packaging appends the gadget's complete native controller set to this suit's " +
+                    "cloned DPRD. That preserves its input tags, levels, granted attributes, and " +
+                    "gameplay cues. Deploy actions and spawned actors stay on the equipment definition.";
+                break;
+            case EquipmentSupportKind.FamilyOnly:
                 model.CalloutTitle = "No animation set to graft";
                 model.CalloutDetail =
-                    $"{eq.Name} is from another family and ships no equipment anim set, so there's nothing " +
-                    "to graft in. It will equip, but its animations may look wrong.";
-            }
-            else if (!customArchetype)
-            {
-                model.CalloutTitle = "Turn on the custom archetype";
+                    $"Use a {string.Join("/", eq.NativeFamilies)} gameplay donor for the reliable path. " +
+                    "A foreign donor has no separate ability or animation records the tool can safely graft.";
+                break;
+            case EquipmentSupportKind.Experimental:
+                model.CalloutTitle = "No playable-family dependency chain";
                 model.CalloutDetail =
-                    "Its animations graft in automatically when you package — but only if this suit uses " +
-                    "its own archetype. With that off, the gadget equips but may animate wrong.";
-            }
-            else
-            {
-                model.Severity = Dialog.Level.Info;
-                model.CalloutTitle = "Animations graft in when you package";
+                    "This can be staged for research, but the game may be missing player input, draw, " +
+                    "animation, or runtime actor wiring for it.";
+                break;
+            case EquipmentSupportKind.CrossFamily when !hasGraft:
+                model.CalloutTitle = "No equipment animation set";
                 model.CalloutDetail =
-                    $"{eq.Name} is from another family, so its anim sets are cloned into this suit's " +
-                    "MAS/LAS and its loadout entry added automatically on the next package.";
-            }
+                    "The loadout and listed abilities can be added, but this gadget does not expose a " +
+                    "separate equipment animation set to merge.";
+                break;
+            case EquipmentSupportKind.CrossFamily when !customArchetype:
+                model.CalloutTitle = "Custom archetype will be enabled";
+                model.CalloutDetail =
+                    "This suit needs its own archetype for foreign animation and ability data. " +
+                    "Batcomputer will enable it when the gadget is added.";
+                break;
+            case EquipmentSupportKind.CrossFamily:
+                model.CalloutTitle = "Dependency graft ready";
+                model.CalloutDetail =
+                    "The gadget loadout, listed abilities, and available MAS/LAS data will be merged " +
+                    "when the mod is built.";
+                break;
+            default:
+                model.CalloutTitle = "Native dependency path";
+                model.CalloutDetail =
+                    "The gameplay donor already supplies this gadget's character-side dependencies.";
+                break;
         }
 
         if (!Dialog.Show(this, model))
@@ -2152,17 +2232,18 @@ public sealed partial class MainForm
         _currentProject.EquipmentSlots.RemoveAll(s => s.Slot == slot);
         _currentProject.EquipmentSlots.Add(new EquipmentSlotChange { Slot = slot, Gadget = eq.Name });
 
-        // Persist immediately - otherwise a staged gadget is lost if the suit is
-        // reopened before packaging (reload reads the on-disk project, which never
-        // saw the change). This is why an equipped gadget could silently vanish.
+        if (isForeign && !_currentProject.UseCustomArchetype)
+        {
+            _currentProject.UseCustomArchetype = true;
+            RecordChange("Animations", "archetype", "enabled for foreign equipment", status: "staged");
+            AppendLog($"Enabled the custom archetype for '{eq.Name}' dependency grafting.");
+        }
+
         try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject); } catch { /* best effort */ }
 
-        var note = compat.Level == GameDataService.Compatibility.Foreign
-            ? "foreign — will equip; anims may need a graft"
-            : "native anims";
+        var note = profile.SupportLabel.ToLowerInvariant();
         RecordChange("Equipment", $"slot {slot + 1}", $"{eq.Name} ({note})", status: "staged");
         AppendLog($"Staged '{eq.Name}' into equipment slot {slot + 1} and saved. See Review.");
-        PopulateToyboxSlots(); // keep the character-panel Equipment row in sync
     }
 
     private Button MakeTile(string title, string subtitle, Action onClick, Color accent, bool dashed = false)
@@ -2316,6 +2397,7 @@ public sealed partial class MainForm
         "Faces" => "Face set",
         "Animations" => "Animation view",
         "Equipment" => "Gadget set",
+        "Gliders" => "Glider view",
         "Review" => "Change area",
         _ => "View",
     };
@@ -2357,7 +2439,7 @@ public sealed partial class MainForm
                 _toyboxFilters.SetGroups(
                     new FilterGroup("Context", "Any context", new[] { "Playable", "Cutscene" }),
                     new FilterGroup("Mesh", "Any mesh", new[] { "Skeletal", "Static" }),
-                    new FilterGroup("Source", "Any source", PartSources()));
+                    new FilterGroup("Source", "Any source", new[] { "Your meshes" }.Concat(PartSources())));
                 break;
             case "Equipment":
                 // Family (who owns the gadget) is concrete + base-independent. (Native/Foreign is
@@ -2367,7 +2449,8 @@ public sealed partial class MainForm
                 break;
             case "Gliders":
                 _toyboxFilters.SetGroups(
-                    new FilterGroup("Source", "Any source", GliderSources()));
+                    new FilterGroup("Source", "Any source", GliderSources()),
+                    new FilterGroup("Type", "Any type", new[] { "Glide cape", "Wingsuit", "Character glider" }));
                 break;
             case "Materials":
                 _toyboxFilters.SetGroups(
@@ -2453,6 +2536,12 @@ public sealed partial class MainForm
 
     private async Task<bool> UseAsBase()
     {
+        EnsureProject();
+        if (_currentProject is null || _projectService is null)
+        {
+            return false;
+        }
+
         var contentRoot = AppSettings.Current.EffectiveExtractedContentRoot();
         var playable = TemplateFromUasset(_basePlayableText.Text.Trim(), "playable", contentRoot);
         var cutscene = TemplateFromUasset(_baseCutsceneText.Text.Trim(), "cutscene", contentRoot);
@@ -2479,12 +2568,6 @@ public sealed partial class MainForm
             return false;
         }
 
-        EnsureProject();
-        if (_currentProject is null || _projectService is null)
-        {
-            return false;
-        }
-
         var previousSlotId = _currentProject.SlotId;
         var previousProjectPath = _projectService.ProjectPathForSlot(previousSlotId);
         _currentProject.PlayableTemplate = playable;
@@ -2507,8 +2590,10 @@ public sealed partial class MainForm
         ReadFieldsIntoProject(_currentProject);
         if (!ValidateUseAsBaseTargetPackages(_currentProject))
         {
+            RefreshInspector();
             return false;
         }
+        ApplyProjectToFields(_currentProject);
         UpdateSelectedLabels();
 
         try
@@ -2536,7 +2621,12 @@ public sealed partial class MainForm
 
             _projectService.CreateUnpatchedStage(_currentProject);
             AppendLog($"Staged base: {playable.Stem} + {cutscene.Stem}{(_currentProject.DcmdTemplate is null ? " (no DCMD)" : " + DCMD")}");
-            PatchNameMapsWithUAssetApi();
+            if (!PatchNameMapsWithUAssetApi())
+            {
+                AppendLog("Base stage did not complete, so its components cannot be edited yet. Fix the patch error above, then set the base again.");
+                RefreshInspector();
+                return false;
+            }
             var savedProjectPath = _projectService.SaveProject(_currentProject);
             if (!previousSlotId.Equals(_currentProject.SlotId, StringComparison.OrdinalIgnoreCase))
             {

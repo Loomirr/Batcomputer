@@ -42,6 +42,7 @@ public sealed partial class MainForm
             (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject);
         }
         catch { /* best effort — a save failure shouldn't break the edit */ }
+        _session.RaiseChanged();
     }
 
     private void CopyChangeSummary()
@@ -141,6 +142,7 @@ public sealed partial class MainForm
         _isRefreshingInspector = true;
         try
         {
+            SyncProjectFieldsForViews();
             var slotId = _slotIdText.Text.Trim();
             var pak = CurrentPackageBaseName();
             var packaged = false;

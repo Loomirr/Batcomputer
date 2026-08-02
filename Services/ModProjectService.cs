@@ -219,4 +219,55 @@ public sealed class ModProjectService
         }
         return updated;
     }
+
+    /// <summary>Removes every mod entry that points at a suit being deleted from the tool.</summary>
+    public int RemoveSuitReferences(NativeSuitProject deletedSuit, IEnumerable<string> deletedProjectPaths)
+    {
+        var deletedPaths = new HashSet<string>(
+            deletedProjectPaths
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Select(NormalizeProjectPath)
+                .Where(path => !string.IsNullOrWhiteSpace(path)),
+            StringComparer.OrdinalIgnoreCase);
+        var deletedSuitId = deletedSuit.SlotId?.Trim() ?? "";
+        var removed = 0;
+
+        foreach (var summary in ListMods())
+        {
+            var mod = LoadMod(summary.Path);
+            if (mod?.Suits is null || mod.Suits.Count == 0)
+            {
+                continue;
+            }
+
+            var removedHere = mod.Suits.RemoveAll(entry =>
+            {
+                var sameId = !string.IsNullOrWhiteSpace(deletedSuitId) &&
+                             string.Equals(entry.SuitId, deletedSuitId, StringComparison.OrdinalIgnoreCase);
+                var samePath = deletedPaths.Contains(NormalizeProjectPath(ResolveSuitProjectPath(entry)));
+                return sameId || samePath;
+            });
+            if (removedHere == 0)
+            {
+                continue;
+            }
+
+            SaveMod(mod);
+            removed += removedHere;
+        }
+
+        return removed;
+    }
+
+    private static string NormalizeProjectPath(string path)
+    {
+        try
+        {
+            return string.IsNullOrWhiteSpace(path) ? "" : Path.GetFullPath(path);
+        }
+        catch
+        {
+            return path ?? "";
+        }
+    }
 }

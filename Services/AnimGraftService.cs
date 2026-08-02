@@ -238,6 +238,76 @@ public sealed class AnimGraftService
         }
     }
 
+    /// <summary>Adds a native TtAbilitySet reference to a cloned DPRD.</summary>
+    public GraftResult AddAbilitySet(string dprdUassetPath, string abilitySetPackage)
+    {
+        var result = new GraftResult();
+        try
+        {
+            var mappings = LoadMappings();
+            if (mappings is null) { result.Status = "no-mappings"; result.Error = "usmap required."; return result; }
+            if (!File.Exists(dprdUassetPath)) { result.Status = "missing"; result.Error = $"DPRD not found: {dprdUassetPath}"; return result; }
+
+            var asset = new UAsset(dprdUassetPath, EngineVersion.VER_UE5_6, mappings, CustomSerializationFlags.None);
+            var export = asset.Exports.OfType<NormalExport>()
+                .FirstOrDefault(e => e.Data.Any(p => p.Name.ToString() == "AbilitySets"));
+            if (export is null)
+            {
+                result.Status = "no-ability-sets";
+                result.Error = "DPRD has no AbilitySets array.";
+                return result;
+            }
+
+            var array = export.Data.OfType<ArrayPropertyData>()
+                .First(p => p.Name.ToString() == "AbilitySets");
+            var package = UnrealPathUtil.NormalizePackagePath(abilitySetPackage);
+            var objectName = UnrealPathUtil.AssetName(package);
+            var items = array.Value.ToList();
+            var alreadyPresent = items
+                .OfType<ObjectPropertyData>()
+                .Any(item =>
+                    !item.Value.IsNull() &&
+                    item.Value.IsImport() &&
+                    item.Value.ToImport(asset).ObjectName.ToString()
+                        .Equals(objectName, StringComparison.OrdinalIgnoreCase));
+            if (alreadyPresent)
+            {
+                result.Status = "ok";
+                result.Skipped.Add($"{objectName} (already present)");
+                return result;
+            }
+
+            var import = EnsureObjectImport(
+                asset,
+                package,
+                objectName,
+                "/Script/TtGameplayAbilities",
+                "TtAbilitySet");
+            items.Add(new ObjectPropertyData(MakeName(asset, items.Count.ToString()))
+            {
+                Value = import
+            });
+            array.Value = items.ToArray();
+
+            var dependencies = export.CreateBeforeSerializationDependencies;
+            if (dependencies is not null && dependencies.All(item => item.Index != import.Index))
+            {
+                dependencies.Add(import);
+            }
+
+            asset.Write(dprdUassetPath);
+            result.Status = "ok";
+            result.Added.Add(objectName);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            result.Status = "error";
+            result.Error = ex.ToString();
+            return result;
+        }
+    }
+
     /// <summary>
     /// Replaces a parent set in a composite's ParentSetsArray by object name
     /// (e.g. LAS_Default_Batman → LAS_Default_Catwoman) so the suit uses another

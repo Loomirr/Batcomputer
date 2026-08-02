@@ -30,7 +30,12 @@ public static class ModelPreviewService
     /// <summary>Mount key for LotDK's unencrypted paks.</summary>
     private const string ZeroAes = "0x0000000000000000000000000000000000000000000000000000000000000000";
 
-    private static DefaultFileProvider MakeProvider(string paksDir, string usmapPath)
+    private const string GameContentFilePrefix = "LEGOBatmanLotDK/Content/";
+
+    private static DefaultFileProvider MakeProvider(
+        string paksDir,
+        string usmapPath,
+        IEnumerable<string>? looseContentRoots = null)
     {
         // Asset paths use mixed casing, so preview lookups stay case-insensitive.
         var provider = new DefaultFileProvider(
@@ -40,7 +45,49 @@ public static class ModelPreviewService
         provider.MappingsContainer = new FileUsmapTypeMappingsProvider(usmapPath);
         provider.Initialize();
         provider.SubmitKey(new FGuid(), new FAesKey(ZeroAes));
+        AddLooseContentOverlays(provider, looseContentRoots);
         return provider;
+    }
+
+    private static void AddLooseContentOverlays(DefaultFileProvider provider, IEnumerable<string>? contentRoots)
+    {
+        if (contentRoots is null)
+        {
+            return;
+        }
+
+        var roots = contentRoots
+            .Where(Directory.Exists)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        for (var index = 0; index < roots.Count; index++)
+        {
+            var root = roots[index];
+            try
+            {
+                using var loose = new DefaultFileProvider(
+                    root,
+                    SearchOption.AllDirectories,
+                    new VersionContainer(EGame.GAME_UE5_6),
+                    StringComparer.OrdinalIgnoreCase);
+                loose.Initialize();
+                if (loose.LooseFileCount == 0)
+                {
+                    continue;
+                }
+
+                var files = loose.Files.ToDictionary(
+                    pair => GameContentFilePrefix + pair.Key.TrimStart('/', '\\').Replace('\\', '/'),
+                    pair => pair.Value,
+                    StringComparer.OrdinalIgnoreCase);
+                provider.Files.AddFiles(files, long.MaxValue - index);
+                Console.WriteLine($"  preview overlay: {loose.LooseFileCount} asset(s) from {root}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  preview overlay skipped '{root}': {ex.Message.Split('\n')[0]}");
+            }
+        }
     }
 
     /// <summary>
@@ -93,6 +140,7 @@ public static class ModelPreviewService
         public IReadOnlyCollection<SavedPreviewPartPlacement> PlacementOverrides { get; init; } = Array.Empty<SavedPreviewPartPlacement>();
         public string? ViewerLayoutKey { get; init; }
         public string? ViewerLayoutProjectRoot { get; init; }
+        public string? StagedPlayablePath { get; init; }
         public bool AllowPartMover { get; init; } = true;
     }
 
@@ -104,10 +152,25 @@ public static class ModelPreviewService
         string? ParentComponent = null,
         string? AttachSocket = null,
         IReadOnlyList<string>? MaterialPaths = null,
-        bool ReplaceExisting = true);
+        bool ReplaceExisting = true,
+        string? SourceObjPath = null,
+        float SourceObjScale = 1f,
+        Vector3? SourceObjOffset = null,
+        Vector3? SourceObjRotation = null,
+        string? CustomMeshId = null);
 
     /// <summary>An explicit material assignment stored on a suit project.</summary>
-    public sealed record PreviewMaterialOverride(string ComponentName, int Slot, string MaterialPath);
+    public sealed record PreviewMaterialFallback(
+        string ParentMaterialPath,
+        IReadOnlyDictionary<string, string> TextureOverrides,
+        IReadOnlyDictionary<string, string> SourceTextureOverrides,
+        IReadOnlyDictionary<string, Color> ColourOverrides);
+
+    public sealed record PreviewMaterialOverride(
+        string ComponentName,
+        int Slot,
+        string MaterialPath,
+        PreviewMaterialFallback? LocalFallback = null);
 
     /// <summary>
     /// A mesh to preview. <paramref name="AttachToHead"/> marks the local-authored head attachments
@@ -118,14 +181,27 @@ public static class ModelPreviewService
         string MeshPath, bool AttachToHead, bool IsHeadPiece = false, FPackageIndex[]? Overrides = null,
         bool IsStaticAttachment = false, string ComponentName = "", PreviewComponentTransform? Transform = null,
         BlueprintAttachment? Attachment = null, Vector3? AttachmentOffset = null,
+        bool UsesRuntimeSocketCalibration = false,
         IReadOnlyDictionary<int, string>? MaterialPaths = null,
-        SavedPreviewPartPlacement? Adjustment = null);
+        IReadOnlyDictionary<int, PreviewMaterialFallback>? MaterialFallbacks = null,
+        SavedPreviewPartPlacement? Adjustment = null,
+        string? SourceObjPath = null,
+        float SourceObjScale = 1f,
+        Vector3? SourceObjOffset = null,
+        Vector3? SourceObjRotation = null,
+        string? CustomMeshId = null);
 
     /// <summary>
     /// The SCS is the Blueprint's real component hierarchy. Component templates themselves often
     /// omit AttachParent/AttachSocketName after cooking, so this data is required to place a part.
     /// </summary>
     private sealed record BlueprintAttachment(string? ParentName, string? SocketName);
+
+    private sealed record AttachmentPlacement(
+        Vector3 Offset,
+        PreviewComponentTransform? SocketTransform = null,
+        bool UsesRuntimeCalibration = false,
+        string? ProfileName = null);
 
     /// <summary>
     /// The final state of one visual component after applying the selected Blueprint over each of
@@ -195,31 +271,33 @@ public static class ModelPreviewService
     /// stands 0..1.388 along +Y. The reference skeleton is the real, consistent source: a clean Z-up
     /// spine. The exporter writes geometry Y-up in metres, so the conversion is Z-up -> Y-up / 100.
     /// </summary>
-    private static Vector3? BoneWorldInGltfSpace(USkeletalMesh mesh, string boneName)
+    private static PreviewComponentTransform? BoneWorldTransformInGltfSpace(USkeletalMesh mesh, string boneName)
     {
         if (!mesh.TryConvert(out var converted))
         {
             return null;
         }
         var bones = converted.RefSkeleton;
-        var world = new Matrix4x4[bones.Count];
+        var world = new PreviewComponentTransform?[bones.Count];
         for (var i = 0; i < bones.Count; i++)
         {
             var b = bones[i];
-            var local = Matrix4x4.CreateFromQuaternion(
-                            new Quaternion(b.Orientation.X, b.Orientation.Y, b.Orientation.Z, b.Orientation.W))
-                        * Matrix4x4.CreateTranslation(b.Position.X, b.Position.Y, b.Position.Z);
-            world[i] = b.ParentIndex >= 0 ? local * world[b.ParentIndex] : local;
+            var local = new PreviewComponentTransform(
+                new Vector3(b.Position.X / 100f, b.Position.Z / 100f, -b.Position.Y / 100f),
+                UeQuaternionToGltf(new Quaternion(b.Orientation.X, b.Orientation.Y, b.Orientation.Z, b.Orientation.W)),
+                Vector3.One);
+            world[i] = b.ParentIndex >= 0 ? ComposeTransforms(world[b.ParentIndex], local) ?? local : local;
 
             if (string.Equals(b.Name.Text, boneName, StringComparison.OrdinalIgnoreCase))
             {
-                var t = world[i].Translation;
-                // UE (X fwd, Y right, Z up) cm -> glTF (X, Y up, Z) metres.
-                return new Vector3(t.X / 100f, t.Z / 100f, -t.Y / 100f);
+                return world[i];
             }
         }
         return null;
     }
+
+    private static Vector3? BoneWorldInGltfSpace(USkeletalMesh mesh, string boneName) =>
+        BoneWorldTransformInGltfSpace(mesh, boneName)?.Translation;
 
     /// <summary>
     /// Component name -> body bone the attachment hangs off. Body-skinned parts (body, cape) carry the
@@ -286,6 +364,43 @@ public static class ModelPreviewService
         var basis = System.Numerics.Quaternion.CreateFromAxisAngle(Vector3.UnitX, -MathF.PI / 2f);
         return System.Numerics.Quaternion.Normalize(basis * ue * System.Numerics.Quaternion.Inverse(basis));
     }
+
+    private static System.Numerics.Quaternion UeQuaternionToGltf(System.Numerics.Quaternion ue)
+    {
+        if (ue.LengthSquared() < 0.000001f)
+        {
+            return System.Numerics.Quaternion.Identity;
+        }
+
+        var basis = System.Numerics.Quaternion.CreateFromAxisAngle(Vector3.UnitX, -MathF.PI / 2f);
+        return System.Numerics.Quaternion.Normalize(
+            basis * System.Numerics.Quaternion.Normalize(ue) * System.Numerics.Quaternion.Inverse(basis));
+    }
+
+    private static PreviewComponentTransform? ComposeTransforms(
+        PreviewComponentTransform? parent,
+        PreviewComponentTransform? child)
+    {
+        if (parent is null)
+        {
+            return child;
+        }
+        if (child is null)
+        {
+            return parent;
+        }
+
+        var childTranslation = child.Translation * parent.Scale;
+        var translation = parent.Translation + Vector3.Transform(childTranslation, parent.Rotation);
+        var rotation = System.Numerics.Quaternion.Normalize(parent.Rotation * child.Rotation);
+        var scale = parent.Scale * child.Scale;
+        return new PreviewComponentTransform(translation, rotation, scale);
+    }
+
+    private static PreviewComponentTransform ToGltfTransform(RuntimeSocketProfileService.SocketTransform transform) => new(
+        new Vector3(transform.TranslationUe.X / 100f, transform.TranslationUe.Z / 100f, -transform.TranslationUe.Y / 100f),
+        UeQuaternionToGltf(transform.RotationUe),
+        new Vector3(transform.ScaleUe.X, transform.ScaleUe.Z, transform.ScaleUe.Y));
 
     private static Dictionary<string, BlueprintAttachment> ReadBlueprintAttachments(IEnumerable<UObject> exports)
     {
@@ -572,8 +687,13 @@ public static class ModelPreviewService
             .ToList();
     }
 
-    private static Vector3? ResolveBodyAttachmentPoint(
-        USkeletalMesh? bodyMesh, BlueprintAttachment? attachment, string componentName, string meshPath)
+    private static AttachmentPlacement? ResolveBodyAttachmentPlacement(
+        RuntimeSocketProfileService.ProfileSet socketProfiles,
+        string? bodyMeshPath,
+        USkeletalMesh? bodyMesh,
+        BlueprintAttachment? attachment,
+        string componentName,
+        string meshPath)
     {
         if (bodyMesh is null)
         {
@@ -582,6 +702,25 @@ public static class ModelPreviewService
 
         var socket = attachment?.SocketName;
         var parentIsBody = attachment?.ParentName is { } parent && IsBodyMeshParent(parent);
+        if (string.IsNullOrWhiteSpace(socket) &&
+            (componentName.Contains("Hip", StringComparison.OrdinalIgnoreCase)
+             || componentName.Contains("Belt", StringComparison.OrdinalIgnoreCase)
+             || meshPath.Contains("/Hip/", StringComparison.OrdinalIgnoreCase)
+             || meshPath.Contains("Belt", StringComparison.OrdinalIgnoreCase)))
+        {
+            socket = "Pelvis_Minifig_Socket";
+            parentIsBody = true;
+        }
+
+        if (parentIsBody && socketProfiles.TryGet(bodyMeshPath, socket, out var calibrated) &&
+            BoneWorldTransformInGltfSpace(bodyMesh, calibrated.BoneName) is { } parentTransform)
+        {
+            var transform = ComposeTransforms(parentTransform, ToGltfTransform(calibrated))!;
+            Console.WriteLine($"  {componentName}: authored socket {socket} ({calibrated.ProfileName}) -> " +
+                              $"({transform.Translation.X:0.###}, {transform.Translation.Y:0.###}, {transform.Translation.Z:0.###})");
+            return new AttachmentPlacement(Vector3.Zero, transform, true, calibrated.ProfileName);
+        }
+
         string? bone = null;
         if (parentIsBody && !string.IsNullOrWhiteSpace(socket))
         {
@@ -628,10 +767,13 @@ public static class ModelPreviewService
         }
         if (bone.Equals("Head_Attach_01", StringComparison.OrdinalIgnoreCase))
         {
-            return HeadAttachmentPoint(bodyMesh);
+            return HeadAttachmentPoint(bodyMesh) is { } head ? new AttachmentPlacement(head) : null;
         }
-        return BoneWorldInGltfSpace(bodyMesh, bone);
+        return BoneWorldInGltfSpace(bodyMesh, bone) is { } point ? new AttachmentPlacement(point) : null;
     }
+
+    private static Vector3? ResolveHeadAttachmentPoint(USkeletalMesh? bodyMesh) =>
+        bodyMesh is null ? null : HeadAttachmentPoint(bodyMesh);
 
     /// <summary>
     /// SCS nodes spell the native body parent two ways: playable Blueprints use
@@ -650,7 +792,9 @@ public static class ModelPreviewService
         NativeSuitProject project,
         string projectRoot)
     {
+        var previewContentRoots = PreviewSuitContentRoots(project, projectRoot);
         var basePath = MountedObjectPath(project.PlayableTemplate?.Uasset);
+        var stagedBasePath = MountedObjectPath(project.TargetPackages.Playable);
         if (string.IsNullOrWhiteSpace(basePath))
         {
             throw new InvalidOperationException("This suit has no playable base character yet.");
@@ -688,11 +832,6 @@ public static class ModelPreviewService
                 .Where(path => !string.IsNullOrWhiteSpace(path))
                 .ToList();
 
-            // Older project files preserved the donor mesh identity but not always its SCS parent
-            // and socket. The part index retains both, so prefer the explicit saved values and
-            // heal the missing fields from the live record before falling back to the small set of
-            // LEGO attachment conventions below. Without this, a grafted hair mesh can be exported
-            // at world origin even though the indexed donor says it belongs on the head stud.
             var parent = string.IsNullOrWhiteSpace(donor.ParentComponentOrVariableName)
                 ? live?.ParentComponentOrVariableName
                 : donor.ParentComponentOrVariableName;
@@ -713,16 +852,85 @@ public static class ModelPreviewService
                 ReplaceExisting: true));
         }
 
+        // Imported static meshes are staged beside the suit rather than stored in the game paks.
+        // Include them explicitly so the viewer renders the same mesh and anchor the build uses.
+        foreach (var custom in project.CustomStaticMeshes ?? Enumerable.Empty<CustomStaticMeshImport>())
+        {
+            if (string.IsNullOrWhiteSpace(custom.Id))
+            {
+                continue;
+            }
+
+            var component = string.IsNullOrWhiteSpace(custom.ResolvedComponent)
+                ? "CustomMesh_" + new string(custom.Id.Where(char.IsLetterOrDigit).ToArray())
+                : custom.ResolvedComponent;
+            var attachment = CustomStaticMeshImportService.ResolveAttachmentSlot(custom.Target, custom.AttachSocket);
+            var material = string.IsNullOrWhiteSpace(custom.MaterialPath)
+                ? "/Game/Characters/Attachments/Hat/Batman08/MI_Hat_Batman08"
+                : custom.MaterialPath;
+            additions.Add(new PreviewAdditionalPart(
+                component,
+                UnrealPathUtil.ObjectPath(CustomStaticMeshImportService.MeshPackagePathFor(project, custom)),
+                IsStaticAttachment: true,
+                ParentComponent: "CharacterMesh0",
+                AttachSocket: attachment.AttachSocket,
+                MaterialPaths: [material],
+                // The staged Blueprint supplies the original component transform. This OBJ entry
+                // replaces its mesh export only, so the viewer uses the same attachment chain.
+                ReplaceExisting: true,
+                SourceObjPath: ProjectOwnedObjPath(project, projectRoot, custom),
+                SourceObjScale: custom.Scale,
+                SourceObjOffset: new Vector3(custom.OffsetX, custom.OffsetY, custom.OffsetZ),
+                SourceObjRotation: new Vector3(custom.RotationPitch, custom.RotationYaw, custom.RotationRoll),
+                CustomMeshId: custom.Id));
+        }
+
+        // Early OBJ proofs were staged before custom imports were saved in the project file.
+        // Keep those projects viewable without treating the recovered mesh as editable data.
+        if (project.CustomStaticMeshes is not { Count: > 0 })
+        {
+            foreach (var legacy in LegacyStagedStaticMeshes(project, projectRoot))
+            {
+                additions.Add(new PreviewAdditionalPart(
+                    "LegacyStatic_" + Path.GetFileNameWithoutExtension(legacy.MeshPackagePath),
+                    UnrealPathUtil.ObjectPath(legacy.MeshPackagePath),
+                    IsStaticAttachment: true,
+                    ParentComponent: "CharacterMesh0",
+                    AttachSocket: "HeadStud_Attach_Socket",
+                    MaterialPaths: ["/Game/Characters/Attachments/Hat/Batman08/MI_Hat_Batman08"],
+                    ReplaceExisting: false,
+                    SourceObjPath: legacy.SourceObjPath,
+                    SourceObjScale: legacy.SourceObjScale,
+                    SourceObjOffset: legacy.SourceObjOffset));
+            }
+        }
+
         var hidden = project.Requirements
             .Where(requirement => requirement.Kind.Equals("remove-component", StringComparison.OrdinalIgnoreCase))
             .Select(requirement => ComponentFromSlotKey(requirement.TargetComponent))
             .Where(component => !string.IsNullOrWhiteSpace(component))
             .ToList();
+        if (project.CustomStaticMeshes?.Any(mesh =>
+                mesh.HideBaseHead &&
+                CustomStaticMeshImportService.ResolveAttachmentSlot(mesh.Target, mesh.AttachSocket).CanHideBaseHead) == true &&
+            !hidden.Any(component => SameComponent(component, "Head")))
+        {
+            // The build removes Head:0 too, but the loose preview must hide it before a build.
+            hidden.Add("Head");
+        }
+        var generatedTextureSources = project.GeneratedTextures
+            .Where(texture => !string.IsNullOrWhiteSpace(texture.PackagePath) && File.Exists(texture.SourcePng))
+            .GroupBy(texture => UnrealPathUtil.NormalizePackagePath(texture.PackagePath), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Last().SourcePng, StringComparer.OrdinalIgnoreCase);
         var materials = project.MaterialAssignments
             .Where(material => material.Context is "both" or "playable")
             .Where(material => !IsFaceComponent(material.Component, null))
             .Where(material => material.Slot >= 0 && !string.IsNullOrWhiteSpace(material.MiPackagePath))
-            .Select(material => new PreviewMaterialOverride(material.Component, material.Slot, material.MiPackagePath))
+            .Select(material => new PreviewMaterialOverride(
+                material.Component,
+                material.Slot,
+                material.MiPackagePath,
+                ReadLocalMaterialFallback(material.MiPackagePath, previewContentRoots, projectRoot, generatedTextureSources)))
             .ToList();
 
         var layoutKey = ViewerLayoutService.SuitKey(project);
@@ -735,8 +943,186 @@ public static class ModelPreviewService
             MaterialOverrides = materials,
             ViewerLayoutKey = layoutKey,
             ViewerLayoutProjectRoot = projectRoot,
+            StagedPlayablePath = HasLoosePackage(previewContentRoots, stagedBasePath) ? stagedBasePath : null,
             AllowPartMover = true,
+        }, looseContentRoots: previewContentRoots);
+    }
+
+    private static bool HasLoosePackage(IEnumerable<string> contentRoots, string? packagePath)
+    {
+        if (string.IsNullOrWhiteSpace(packagePath))
+        {
+            return false;
+        }
+
+        var normalized = UnrealPathUtil.NormalizePackagePath(packagePath).TrimStart('/');
+        if (!normalized.StartsWith("Game/", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var relativeUasset = normalized["Game/".Length..].Replace('/', Path.DirectorySeparatorChar) + ".uasset";
+        return contentRoots.Any(root => File.Exists(Path.Combine(root, relativeUasset)));
+    }
+
+    private static IReadOnlyList<string> PreviewSuitContentRoots(NativeSuitProject project, string projectRoot)
+    {
+        var roots = new List<string> { AppSettings.Current.EffectiveExportContentRoot() };
+        var generatedRoot = Path.Combine(
+            AppSettings.GeneratedRootFor(projectRoot),
+            "NativeSuitGuiProjects",
+            project.SlotId);
+        roots.AddRange(new[]
+        {
+            Path.Combine(generatedRoot, "GraftedPartStage", "LEGOBatmanLotDK", "Content"),
+            Path.Combine(generatedRoot, "GraftedTorso2Stage", "LEGOBatmanLotDK", "Content"),
+            Path.Combine(generatedRoot, "PatchedNameMapStage", "LEGOBatmanLotDK", "Content"),
+            Path.Combine(generatedRoot, "IoStore", "Stage", "LEGOBatmanLotDK", "Content"),
         });
+
+        foreach (var texture in project.GeneratedTextures.Where(texture => !string.IsNullOrWhiteSpace(texture.OutputRoot)))
+        {
+            roots.Add(Path.Combine(texture.OutputRoot, "Cooked", "LEGOBatmanLotDK", "Content"));
+            roots.Add(Path.Combine(texture.OutputRoot, "IoStore", "Stage", "LEGOBatmanLotDK", "Content"));
+        }
+
+        return roots;
+    }
+
+    private sealed record LegacyStagedStaticMesh(
+        string MeshPackagePath,
+        string? SourceObjPath,
+        float SourceObjScale,
+        Vector3 SourceObjOffset);
+
+    private static string? ProjectOwnedObjPath(NativeSuitProject project, string projectRoot, CustomStaticMeshImport import)
+    {
+        if (string.IsNullOrWhiteSpace(import.SourceObjRelativePath))
+        {
+            return null;
+        }
+
+        var path = Path.Combine(new SuitProjectService(projectRoot).ProjectOutputDirectory(project), import.SourceObjRelativePath);
+        return File.Exists(path) ? path : null;
+    }
+
+    private static IReadOnlyList<LegacyStagedStaticMesh> LegacyStagedStaticMeshes(NativeSuitProject project, string projectRoot)
+    {
+        var contentRoot = Path.Combine(
+            AppSettings.GeneratedRootFor(projectRoot),
+            "NativeSuitGuiProjects",
+            project.SlotId,
+            "GraftedPartStage",
+            "LEGOBatmanLotDK",
+            "Content");
+        var modsRoot = Path.Combine(contentRoot, "Mods");
+        if (!Directory.Exists(modsRoot))
+        {
+            return Array.Empty<LegacyStagedStaticMesh>();
+        }
+
+        return Directory.EnumerateFiles(modsRoot, "*.uasset", SearchOption.AllDirectories)
+            .Where(path => Path.GetDirectoryName(path)?.EndsWith("Meshes", StringComparison.OrdinalIgnoreCase) == true)
+            .Select(path => ReadLegacyStagedStaticMesh(contentRoot, path))
+            .OrderBy(item => item.MeshPackagePath, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static LegacyStagedStaticMesh ReadLegacyStagedStaticMesh(string contentRoot, string meshUassetPath)
+    {
+        var packagePath = "/Game/" + Path.ChangeExtension(Path.GetRelativePath(contentRoot, meshUassetPath), null)!.Replace('\\', '/');
+        var reportPath = Path.ChangeExtension(meshUassetPath, ".obj-probe-report.json");
+        if (!File.Exists(reportPath))
+        {
+            return new LegacyStagedStaticMesh(packagePath, null, 1f, Vector3.Zero);
+        }
+
+        try
+        {
+            using var report = JsonDocument.Parse(File.ReadAllText(reportPath));
+            var root = report.RootElement;
+            var source = root.TryGetProperty("sourceObjPath", out var value)
+                ? value.GetString()
+                : null;
+            // The CLI OBJ proof predated persisted imports. It always used 150 unless the
+            // report recorded another value, so retain that real cook scale for faithful previews.
+            var scale = root.TryGetProperty("scale", out var scaleValue) && scaleValue.TryGetSingle(out var recordedScale)
+                ? recordedScale
+                : 150f;
+            static float ReadOffset(JsonElement root, string name) =>
+                root.TryGetProperty(name, out var value) && value.TryGetSingle(out var recorded) ? recorded : 0f;
+            return new LegacyStagedStaticMesh(
+                packagePath,
+                !string.IsNullOrWhiteSpace(source) && File.Exists(source) ? source : null,
+                scale,
+                new Vector3(ReadOffset(root, "offsetX"), ReadOffset(root, "offsetY"), ReadOffset(root, "offsetZ")));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  legacy OBJ report ignored '{reportPath}': {ex.Message}");
+            return new LegacyStagedStaticMesh(packagePath, null, 1f, Vector3.Zero);
+        }
+    }
+
+    private static PreviewMaterialFallback? ReadLocalMaterialFallback(
+        string materialPath,
+        IReadOnlyList<string> contentRoots,
+        string projectRoot,
+        IReadOnlyDictionary<string, string> generatedTextureSources)
+    {
+        var package = UnrealPathUtil.NormalizePackagePath(materialPath);
+        if (!package.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var relative = package["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar) + ".uasset";
+        var diskPath = contentRoots
+            .Select(root => Path.Combine(root, relative))
+            .FirstOrDefault(File.Exists);
+        if (string.IsNullOrWhiteSpace(diskPath))
+        {
+            return null;
+        }
+
+        var info = new MaterialGenService(projectRoot).ReadTemplate(diskPath);
+        if (!info.Status.Equals("ok", StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(info.ParentMaterialPath))
+        {
+            return null;
+        }
+
+        var textures = info.TextureParams
+            .Where(texture => texture.ObjectPath.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(texture => texture.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Last().ObjectPath, StringComparer.OrdinalIgnoreCase);
+        var sources = info.TextureParams
+            .Where(texture => !string.IsNullOrWhiteSpace(texture.ObjectPath))
+            .Select(texture => new
+            {
+                texture.Name,
+                PackagePath = UnrealPathUtil.NormalizePackagePath(texture.ObjectPath),
+            })
+            .Where(texture => generatedTextureSources.ContainsKey(texture.PackagePath))
+            .GroupBy(texture => texture.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => generatedTextureSources[group.Last().PackagePath],
+                StringComparer.OrdinalIgnoreCase);
+        var colours = info.ColorParams
+            .GroupBy(colour => colour.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => Color.FromArgb(
+                    255,
+                    (int)Math.Clamp(group.Last().R * 255f + 0.5f, 0, 255),
+                    (int)Math.Clamp(group.Last().G * 255f + 0.5f, 0, 255),
+                    (int)Math.Clamp(group.Last().B * 255f + 0.5f, 0, 255)),
+                StringComparer.OrdinalIgnoreCase);
+        Console.WriteLine($"  preview material: {Path.GetFileNameWithoutExtension(diskPath)} -> "
+                          + $"{info.ParentMaterialPath} ({textures.Count} texture, {sources.Count} source, "
+                          + $"{colours.Count} colour override(s))");
+        return new PreviewMaterialFallback(info.ParentMaterialPath, textures, sources, colours);
     }
 
     private static string? MountedObjectPath(string? path)
@@ -783,6 +1169,12 @@ public static class ModelPreviewService
     private static (string? Parent, string? Socket) InferAttachment(string component, string meshPath)
     {
         var name = ComponentFromSlotKey(component);
+        if (name.StartsWith("Face", StringComparison.OrdinalIgnoreCase) ||
+            meshPath.Contains("LEGOface", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("CharacterMesh0", "Head_Socket");
+        }
+
         if (name.StartsWith("Head", StringComparison.OrdinalIgnoreCase) ||
             name.StartsWith("Hair", StringComparison.OrdinalIgnoreCase) ||
             name.StartsWith("Hat", StringComparison.OrdinalIgnoreCase) ||
@@ -794,12 +1186,35 @@ public static class ModelPreviewService
             return ("CharacterMesh0", "HeadStud_Attach_Socket");
         }
 
+        if (name.Contains("Left", StringComparison.OrdinalIgnoreCase) &&
+            (name.Contains("Hand", StringComparison.OrdinalIgnoreCase) || name.Contains("Wrist", StringComparison.OrdinalIgnoreCase)))
+        {
+            return ("CharacterMesh0", "Hand_L_Attach_01");
+        }
+
+        if (name.Contains("Right", StringComparison.OrdinalIgnoreCase) &&
+            (name.Contains("Hand", StringComparison.OrdinalIgnoreCase) || name.Contains("Wrist", StringComparison.OrdinalIgnoreCase)))
+        {
+            return ("CharacterMesh0", "Hand_R_Attach_01");
+        }
+
         if (name.Contains("Hip", StringComparison.OrdinalIgnoreCase) ||
             name.Contains("Belt", StringComparison.OrdinalIgnoreCase) ||
             meshPath.Contains("/Hip/", StringComparison.OrdinalIgnoreCase) ||
             meshPath.Contains("Belt", StringComparison.OrdinalIgnoreCase))
         {
-            return ("CharacterMesh0", "Hip_Socket");
+            return ("CharacterMesh0", "Pelvis_Minifig_Socket");
+        }
+
+        if (name.StartsWith("Cape", StringComparison.OrdinalIgnoreCase) ||
+            meshPath.Contains("/Cape/", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("CharacterMesh0", "Root");
+        }
+
+        if (name.StartsWith("Torso", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("CharacterMesh0", "Chest_Socket");
         }
 
         return (null, null);
@@ -818,6 +1233,11 @@ public static class ModelPreviewService
     /// </summary>
     private static SavedPreviewPartPlacement? DefaultStaticHairHeadAdjustment(PreviewPart part)
     {
+        if (part.UsesRuntimeSocketCalibration)
+        {
+            return null;
+        }
+
         var attachesToHead = AttachBoneFor(part.ComponentName, part.Attachment?.SocketName)
             ?.Equals("Head_Attach_01", StringComparison.OrdinalIgnoreCase) == true;
         return part.IsStaticAttachment && attachesToHead &&
@@ -848,7 +1268,8 @@ public static class ModelPreviewService
         string usmapPath,
         string bpPath,
         string? bodyMeshPath = null,
-        CharacterPreviewOptions? previewOptions = null)
+        CharacterPreviewOptions? previewOptions = null,
+        IEnumerable<string>? looseContentRoots = null)
     {
         var options = previewOptions ?? new CharacterPreviewOptions();
         var viewerLayoutKey = string.IsNullOrWhiteSpace(options.ViewerLayoutKey)
@@ -858,8 +1279,16 @@ public static class ModelPreviewService
             ? AppSettings.Current.EffectiveProjectRoot()
             : options.ViewerLayoutProjectRoot!;
         var viewerPlacements = ViewerLayoutService.Load(viewerLayoutRoot, viewerLayoutKey);
-        var provider = MakeProvider(paksDir, usmapPath);
+        var socketProfiles = RuntimeSocketProfileService.Load();
+        if (socketProfiles.Count > 0)
+        {
+            Console.WriteLine($"  authored socket profiles: {socketProfiles.Count} bundled rig profile(s)");
+        }
+        var provider = MakeProvider(paksDir, usmapPath, looseContentRoots);
         var resolvedComponents = ResolveVisualBlueprintComponents(provider, bpPath);
+        var stagedComponents = string.IsNullOrWhiteSpace(options.StagedPlayablePath)
+            ? Array.Empty<ResolvedBlueprintComponent>()
+            : ResolveVisualBlueprintComponents(provider, options.StagedPlayablePath).ToArray();
         var resolvedBody = resolvedComponents.FirstOrDefault(component =>
             component.Key.Equals("CharacterMesh0", StringComparison.OrdinalIgnoreCase));
         var bodyPath = !string.IsNullOrWhiteSpace(bodyMeshPath)
@@ -894,7 +1323,7 @@ public static class ModelPreviewService
         var bodyMesh = string.IsNullOrWhiteSpace(bodyPath)
             ? null
             : provider.LoadPackageObject(bodyPath) as USkeletalMesh;
-        var bodyHeadPoint = bodyMesh is null ? null : HeadAttachmentPoint(bodyMesh);
+        var bodyHeadPoint = ResolveHeadAttachmentPoint(bodyMesh);
         if (bodyMesh is not null)
         {
             if (bodyHeadPoint is { } point)
@@ -923,9 +1352,8 @@ public static class ModelPreviewService
                 try
                 {
                     var inheritedBody = provider.LoadPackageObject(referenceBodyPath) as USkeletalMesh;
-                    referenceHeadPoint = inheritedBody is null
-                        ? activeHeadPoint
-                        : HeadAttachmentPoint(inheritedBody) ?? activeHeadPoint;
+                    referenceHeadPoint = ResolveHeadAttachmentPoint(inheritedBody)
+                                         ?? activeHeadPoint;
                 }
                 catch
                 {
@@ -975,20 +1403,26 @@ public static class ModelPreviewService
             }
             // The character's real look lives in the component's override materials (e.g.
             // MI_Batman_89_EOM), not in the base mesh's own material slots.
-            var attachment = component.Attachment;
-            var attachmentOffset = ResolveBodyAttachmentPoint(bodyMesh, attachment, componentName, path);
+            var inferredAttachment = InferAttachment(componentName, path);
+            var attachment = component.Attachment
+                ?? new BlueprintAttachment(inferredAttachment.Parent, inferredAttachment.Socket);
+            var attachmentPlacement = ResolveBodyAttachmentPlacement(
+                socketProfiles, bodyPath, bodyMesh, attachment, componentName, path);
             if (attachment is not null)
             {
                 Console.WriteLine($"  {componentName}: parent={attachment.ParentName ?? "(none)"}"
                                   + $" socket={attachment.SocketName ?? "(none)"}"
-                                  + (attachmentOffset is { } p
-                                      ? $" -> ({p.X:0.###}, {p.Y:0.###}, {p.Z:0.###})"
+                                  + (attachmentPlacement is { } placement
+                                      ? $" -> ({placement.Offset.X:0.###}, {placement.Offset.Y:0.###}, {placement.Offset.Z:0.###})"
                                       : ""));
             }
             parts.Add(new PreviewPart(path, AttachToHead: AttachBoneFor(componentName, attachment?.SocketName) is not null,
                 Overrides: component.Overrides, IsStaticAttachment: component.IsStaticAttachment,
-                ComponentName: componentName, Transform: component.Transform, Attachment: attachment,
-                AttachmentOffset: attachmentOffset));
+                ComponentName: componentName,
+                Transform: ComposeTransforms(attachmentPlacement?.SocketTransform, component.Transform),
+                Attachment: attachment,
+                AttachmentOffset: attachmentPlacement?.Offset,
+                UsesRuntimeSocketCalibration: attachmentPlacement?.UsesRuntimeCalibration == true));
         }
 
         foreach (var extra in options.AdditionalParts)
@@ -1000,20 +1434,39 @@ public static class ModelPreviewService
                 continue;
             }
 
-            var attachment = new BlueprintAttachment(extra.ParentComponent, extra.AttachSocket);
-            var attachmentOffset = ResolveBodyAttachmentPoint(bodyMesh, attachment, extra.ComponentName, extra.MeshPath);
+            // A custom mesh is rendered from its OBJ, but its staged component is still the
+            // authority for the donor-relative transform and SCS attachment.
+            var stagedComponent = string.IsNullOrWhiteSpace(extra.CustomMeshId)
+                ? null
+                : stagedComponents.FirstOrDefault(component => SameComponent(component.Key, extra.ComponentName));
+            var attachment = stagedComponent?.Attachment
+                ?? new BlueprintAttachment(extra.ParentComponent, extra.AttachSocket);
+            var attachmentPlacement = ResolveBodyAttachmentPlacement(
+                socketProfiles, bodyPath, bodyMesh, attachment, extra.ComponentName, extra.MeshPath);
             var materialPaths = extra.MaterialPaths?
                 .Select((path, index) => (path, index))
                 .Where(item => !string.IsNullOrWhiteSpace(item.path))
                 .ToDictionary(item => item.index, item => item.path);
             parts.Add(new PreviewPart(
                 extra.MeshPath,
-                AttachToHead: AttachBoneFor(extra.ComponentName, extra.AttachSocket) is not null,
+                AttachToHead: AttachBoneFor(extra.ComponentName, attachment.SocketName) is not null,
                 IsStaticAttachment: extra.IsStaticAttachment,
                 ComponentName: ComponentFromSlotKey(extra.ComponentName),
+                Transform: ComposeTransforms(attachmentPlacement?.SocketTransform, stagedComponent?.Transform),
                 Attachment: attachment,
-                AttachmentOffset: attachmentOffset,
-                MaterialPaths: materialPaths));
+                AttachmentOffset: attachmentPlacement?.Offset,
+                UsesRuntimeSocketCalibration: attachmentPlacement?.UsesRuntimeCalibration == true,
+                MaterialPaths: materialPaths,
+                SourceObjPath: extra.SourceObjPath,
+                SourceObjScale: extra.SourceObjScale,
+                SourceObjOffset: extra.SourceObjOffset,
+                SourceObjRotation: extra.SourceObjRotation,
+                CustomMeshId: extra.CustomMeshId));
+            if (stagedComponent?.Transform is { } transform)
+            {
+                Console.WriteLine($"  {extra.ComponentName}: staged component transform -> "
+                                  + $"({transform.Translation.X:0.###}, {transform.Translation.Y:0.###}, {transform.Translation.Z:0.###})");
+            }
         }
 
         for (var i = 0; i < parts.Count; i++)
@@ -1022,18 +1475,30 @@ public static class ModelPreviewService
             var materialPaths = part.MaterialPaths is null
                 ? new Dictionary<int, string>()
                 : new Dictionary<int, string>(part.MaterialPaths);
+            var materialFallbacks = part.MaterialFallbacks is null
+                ? new Dictionary<int, PreviewMaterialFallback>()
+                : new Dictionary<int, PreviewMaterialFallback>(part.MaterialFallbacks);
             foreach (var material in options.MaterialOverrides.Where(material => SameComponent(material.ComponentName, part.ComponentName)))
             {
                 materialPaths[material.Slot] = material.MaterialPath;
+                if (material.LocalFallback is not null)
+                {
+                    materialFallbacks[material.Slot] = material.LocalFallback;
+                }
             }
-            var adjustment = viewerPlacements
-                .FirstOrDefault(placement => SameComponent(placement.Component, part.ComponentName))
-                ?? options.PlacementOverrides
+            // Imported meshes own their transform in the suit project. A generic viewer-only
+            // nudge would make the preview disagree with the mesh that gets baked for the game.
+            var adjustment = !string.IsNullOrWhiteSpace(part.CustomMeshId)
+                ? null
+                : viewerPlacements
                     .FirstOrDefault(placement => SameComponent(placement.Component, part.ComponentName))
-                ?? DefaultStaticHairHeadAdjustment(part);
+                    ?? options.PlacementOverrides
+                        .FirstOrDefault(placement => SameComponent(placement.Component, part.ComponentName))
+                    ?? DefaultStaticHairHeadAdjustment(part);
             parts[i] = part with
             {
                 MaterialPaths = materialPaths.Count == 0 ? null : materialPaths,
+                MaterialFallbacks = materialFallbacks.Count == 0 ? null : materialFallbacks,
                 Adjustment = adjustment,
             };
         }
@@ -1095,17 +1560,27 @@ public static class ModelPreviewService
             var disabledSlots = DisabledSectionSlots(mesh);
             for (var si = 0; si < slotMats.Count; si++)
             {
-                var slotMat = ResolvePreviewMaterial(provider, part, si)
-                              ?? (part.Overrides is not null && si < part.Overrides.Length
-                                  ? part.Overrides[si]?.ResolvedObject?.Load()
-                                  : null)
-                              ?? slotMats[si];
+                var fallback = part.MaterialFallbacks is not null && part.MaterialFallbacks.TryGetValue(si, out var localFallback)
+                    ? localFallback
+                    : null;
+                if (fallback is not null)
+                {
+                    Console.WriteLine($"    generated material fallback [{si}]: {fallback.TextureOverrides.Count} texture, "
+                                      + $"{fallback.SourceTextureOverrides.Count} source, "
+                                      + $"{fallback.ColourOverrides.Count} colour override(s)");
+                }
+                UObject? slotMat = fallback is null
+                    ? ResolvePreviewMaterial(provider, part, si)
+                    : LoadPreviewMaterial(provider, fallback.ParentMaterialPath) ?? ResolvePreviewMaterial(provider, part, si);
+                slotMat ??= (part.Overrides is not null && si < part.Overrides.Length
+                    ? part.Overrides[si]?.ResolvedObject?.Load()
+                    : null) ?? slotMats[si];
                 if (si == 0 && part.MeshPath.Contains("LEGOface", StringComparison.OrdinalIgnoreCase))
                 {
                     _faceMaterial = slotMat;
                     _faceMeshPath = part.MeshPath;
                 }
-                var resolved = ResolveSlot(provider, slotMat, previewDir);
+                var resolved = ResolveSlot(provider, slotMat, previewDir, fallback);
                 if (disabledSlots.Contains(si))
                 {
                     resolved = resolved with { Hidden = true };
@@ -1135,9 +1610,15 @@ public static class ModelPreviewService
             // entirely in the component's override. Without this they render untextured.
             if (slotShading.Count == 0 && part.MaterialPaths is { Count: > 0 } savedMaterials)
             {
-                foreach (var (_, materialPath) in savedMaterials.OrderBy(entry => entry.Key))
+                foreach (var (slot, materialPath) in savedMaterials.OrderBy(entry => entry.Key))
                 {
-                    var solo = ResolveSlot(provider, ResolvePreviewMaterial(provider, part, materialPath), previewDir);
+                    var fallback = part.MaterialFallbacks is not null && part.MaterialFallbacks.TryGetValue(slot, out var localFallback)
+                        ? localFallback
+                        : null;
+                    UObject? material = fallback is null
+                        ? ResolvePreviewMaterial(provider, part, materialPath)
+                        : LoadPreviewMaterial(provider, fallback.ParentMaterialPath) ?? ResolvePreviewMaterial(provider, part, materialPath);
+                    var solo = ResolveSlot(provider, material, previewDir, fallback);
                     slotShading.Add(solo);
                 }
             }
@@ -1152,6 +1633,34 @@ public static class ModelPreviewService
             if (i == 0 && slotShading.Count > 0)
             {
                 bodyShading = slotShading;
+            }
+
+            if (!string.IsNullOrWhiteSpace(part.SourceObjPath) && File.Exists(part.SourceObjPath))
+            {
+                try
+                {
+                    var name = $"model{i}.glb";
+                    var output = Path.Combine(previewDir, name);
+                    var offset = part.SourceObjOffset ?? Vector3.Zero;
+                    var rotation = part.SourceObjRotation ?? Vector3.Zero;
+                    StaticMeshObjProbeService.WritePreviewGlb(
+                        part.SourceObjPath,
+                        output,
+                        part.SourceObjScale,
+                        offset.X,
+                        offset.Y,
+                        offset.Z,
+                        rotation.X,
+                        rotation.Y,
+                        rotation.Z);
+                    models.Add((name, part, slotShading));
+                    Console.WriteLine($"  {Path.GetFileName(part.SourceObjPath)} -> preview GLB from source OBJ");
+                    continue;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"  OBJ preview fallback failed '{part.SourceObjPath}': {ex.Message}");
+                }
             }
 
             bool Build(ExporterOptions opt)
@@ -1225,6 +1734,20 @@ public static class ModelPreviewService
         }
     }
 
+    private static CUE4Parse.UE4.Assets.Exports.Material.UUnrealMaterial? LoadPreviewMaterial(
+        DefaultFileProvider provider,
+        string path)
+    {
+        try
+        {
+            return provider.LoadPackageObject(path) as CUE4Parse.UE4.Assets.Exports.Material.UUnrealMaterial;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static CUE4Parse.UE4.Assets.Exports.Material.UUnrealMaterial? ResolvePreviewMaterial(
         DefaultFileProvider provider,
         PreviewPart part,
@@ -1287,10 +1810,17 @@ public static class ModelPreviewService
     {
         /// <summary>Authored component transform from the BP, converted into glTF space.</summary>
         public PreviewComponentTransform? Transform { get; init; }
+        /// <summary>True when the model is placed with a captured CharacterMesh0 socket transform.</summary>
+        public bool UsesRuntimeSocketCalibration { get; init; }
         /// <summary>Stable component identity used by the project-aware part mover.</summary>
         public string ComponentName { get; init; } = "";
         /// <summary>Saved small translation layered over the Blueprint's authored placement.</summary>
         public SavedPreviewPartPlacement? Adjustment { get; init; }
+        /// <summary>Project identity and baked transform for an imported static mesh.</summary>
+        public string? CustomMeshId { get; init; }
+        public float CustomMeshScale { get; init; }
+        public Vector3? CustomMeshOffset { get; init; }
+        public Vector3? CustomMeshRotation { get; init; }
         /// <summary>Triangle counts of the reordered face index buffer: [base, mouth, hidden].</summary>
         public int[]? FaceGroups { get; init; }
         /// <summary>Preview-relative path of the mouth feature print (alpha = cutout).</summary>
@@ -2603,6 +3133,7 @@ public static class ModelPreviewService
             Console.WriteLine($"    base colour: {tex.Name} ({tex.Format})");
             return rel;
         }
+        Console.WriteLine($"    base colour export failed: {tex.Name} ({tex.Format})");
         return null;
 
         static string MakeSafe(string name) =>
@@ -2714,7 +3245,11 @@ public static class ModelPreviewService
     }
 
     /// <summary>Resolves one material slot to a texture or a flat colour, plus its normal/MMR maps.</summary>
-    private static SlotShading ResolveSlot(DefaultFileProvider provider, UObject? material, string previewDir)
+    private static SlotShading ResolveSlot(
+        DefaultFileProvider provider,
+        UObject? material,
+        string previewDir,
+        PreviewMaterialFallback? fallback = null)
     {
         if (material is null)
         {
@@ -2724,9 +3259,11 @@ public static class ModelPreviewService
         // Capes are woven cloth: the base M_Cape_EoM graph (stripped from the cooked build, wiring
         // recovered from a near-exact Blender recreation) shades them from the shared PongeeFabric
         // texture set, not from any parameter on the instance. Bake those instead of the generic path.
+        var fallbackColour = FindFallbackColour(fallback);
         if (IsCapeMaterial(material))
         {
-            return ResolveCapeSlot(provider, material, previewDir);
+            var cape = ResolveCapeSlot(provider, material, previewDir);
+            return fallbackColour is null ? cape : cape with { Colour = fallbackColour };
         }
 
         // The game's own BaseColour_SolidColour switch distinguishes a vector-coloured piece from
@@ -2734,7 +3271,7 @@ public static class ModelPreviewService
         // of guessing from an asset name or the presence of CT (which is a control map, not albedo).
         if (ResolveSolidColourSlot(provider, material, previewDir) is { } solidColourSlot)
         {
-            return solidColourSlot;
+            return fallbackColour is null ? solidColourSlot : solidColourSlot with { Colour = fallbackColour };
         }
 
         // Faces: the Blender recreation binds the face print's REAL alpha as opacity - the opposite
@@ -2770,8 +3307,23 @@ public static class ModelPreviewService
             }
         }
 
-        var tex = ExportMaterialTexture(material, previewDir);
-        var normal = ExportSlot(material, "DNRM_Pristine", previewDir, isNormal: true)
+        var sourceBaseColour = ExportFallbackSourceTexture(fallback, BaseColourSlots, previewDir);
+        var fallbackBaseColour = sourceBaseColour is null
+            ? FindFallbackTexture(provider, fallback, BaseColourSlots)
+            : null;
+        var tex = fallbackColour is not null && sourceBaseColour is null && fallbackBaseColour is null
+            ? null
+            : sourceBaseColour ?? ExportBaseColourTexture(fallbackBaseColour ?? FindBaseColourTexture(material, 0), previewDir);
+        var normal = ExportFallbackSourceTexture(
+                         fallback,
+                         new[] { "DNRM_Pristine", "DNRM", "HeadLowerUnder NML", "NRM" },
+                         previewDir,
+                         isNormal: true)
+                     ?? ExportTexture(
+                         FindFallbackTexture(provider, fallback, "DNRM_Pristine", "DNRM", "HeadLowerUnder NML"),
+                         previewDir,
+                         isNormal: true)
+                     ?? ExportSlot(material, "DNRM_Pristine", previewDir, isNormal: true)
                      ?? ExportSlot(material, "DNRM", previewDir, isNormal: true)
                      ?? ExportSlot(material, "HeadLowerUnder NML", previewDir, isNormal: true);
         // No atlas normal: the part's base "NRM" (UV0) becomes the normal map, with the game's
@@ -2801,7 +3353,93 @@ public static class ModelPreviewService
         {
             Console.WriteLine($"      flat colour #{colour.Value.R:X2}{colour.Value.G:X2}{colour.Value.B:X2}");
         }
-        return new SlotShading(tex, normal, mmr, colour, Nrm2: nrm2);
+        return new SlotShading(tex, normal, mmr, fallbackColour ?? colour, Nrm2: nrm2);
+    }
+
+    private static Color? FindFallbackColour(PreviewMaterialFallback? fallback)
+    {
+        if (fallback is null)
+        {
+            return null;
+        }
+
+        foreach (var name in new[] { "Base Color", "BaseColor", "Base Colour", "BaseColour", "HeadLowerUnder Tint" })
+        {
+            if (fallback.ColourOverrides.TryGetValue(name, out var colour))
+            {
+                return colour;
+            }
+        }
+
+        return null;
+    }
+
+    private static UTexture2D? FindFallbackTexture(
+        DefaultFileProvider provider,
+        PreviewMaterialFallback? fallback,
+        params string[] names)
+    {
+        if (fallback is null)
+        {
+            return null;
+        }
+
+        foreach (var name in names)
+        {
+            if (!fallback.TextureOverrides.TryGetValue(name, out var path) || string.IsNullOrWhiteSpace(path))
+            {
+                continue;
+            }
+
+            try
+            {
+                var loaded = provider.LoadPackageObject(path);
+                if (loaded is UTexture2D texture)
+                {
+                    return texture;
+                }
+                Console.WriteLine($"    generated texture ignored: {path} ({loaded.ExportType})");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"    generated texture unavailable: {path} ({ex.Message.Split('\n')[0]})");
+            }
+        }
+
+        return null;
+    }
+
+    private static string? ExportFallbackSourceTexture(
+        PreviewMaterialFallback? fallback,
+        IEnumerable<string> names,
+        string previewDir,
+        bool isNormal = false)
+    {
+        if (fallback is null)
+        {
+            return null;
+        }
+
+        foreach (var name in names)
+        {
+            if (!fallback.SourceTextureOverrides.TryGetValue(name, out var source) || !File.Exists(source))
+            {
+                continue;
+            }
+
+            var rel = "textures/" + MakeSafeName(Path.GetFileNameWithoutExtension(source))
+                + (isNormal ? "_source_nrm.png" : "_source.png");
+            var destination = Path.Combine(previewDir, rel.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            if (!File.Exists(destination))
+            {
+                File.Copy(source, destination);
+            }
+            Console.WriteLine($"    generated source texture: {Path.GetFileName(source)} ({name})");
+            return rel;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -3023,12 +3661,22 @@ public static class ModelPreviewService
     private static string? ExportSlot(UObject? material, string slot, string previewDir, bool isNormal = false)
     {
         var t = FindTextureParam(material, slot, 0);
-        if (t is null) return null;
+        return ExportTexture(t, previewDir, isNormal, slot);
+    }
+
+    private static string? ExportTexture(UTexture2D? texture, string previewDir, bool isNormal, string? slot = null)
+    {
+        if (texture is null)
+        {
+            return null;
+        }
+
+        var t = texture;
         var rel = "textures/" + string.Concat(t.Name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)) + ".png";
         var dest = Path.Combine(previewDir, rel.Replace('/', Path.DirectorySeparatorChar));
         if (File.Exists(dest) || TextureDecodeService.TryExportPng(t, dest, isNormal))
         {
-            Console.WriteLine($"    {slot}: {t.Name} ({t.Format})");
+            Console.WriteLine($"    {slot ?? "texture"}: {t.Name} ({t.Format})");
             return rel;
         }
         return null;
@@ -3134,10 +3782,20 @@ public static class ModelPreviewService
             var isFace = part.MeshPath.Contains("LEGOface", StringComparison.OrdinalIgnoreCase);
             var isHead = part.IsHeadPiece;
             var attachmentOffset = part.AttachmentOffset ?? Vector3.Zero;
-            if (!part.AttachToHead || headBase is null)
+            PlacedModel Place(Vector3 offset) => new(file, offset, slots, isBody, isFace, isHead)
             {
-                result.Add(new PlacedModel(file, attachmentOffset, slots, isBody, isFace, isHead)
-                    { Transform = part.Transform, ComponentName = part.ComponentName, Adjustment = part.Adjustment });
+                Transform = part.Transform,
+                UsesRuntimeSocketCalibration = part.UsesRuntimeSocketCalibration,
+                ComponentName = part.ComponentName,
+                Adjustment = part.Adjustment,
+                CustomMeshId = part.CustomMeshId,
+                CustomMeshScale = part.SourceObjScale,
+                CustomMeshOffset = part.SourceObjOffset,
+                CustomMeshRotation = part.SourceObjRotation,
+            };
+            if (part.UsesRuntimeSocketCalibration || !part.AttachToHead || headBase is null)
+            {
+                result.Add(Place(attachmentOffset));
                 continue;
             }
             // Hair and other rigid head pieces are authored around their own origin and pinned to
@@ -3145,6 +3803,16 @@ public static class ModelPreviewService
             // puts them in the wrong place. Anchor them to the head attach bone instead.
             if (part.IsStaticAttachment && headB3 is { } hb)
             {
+                // Imported OBJs are centered into their StaticMesh payload, then attached at
+                // their chosen game socket. Preserve that authored origin; generic static hairs
+                // need the older bounds-centering treatment below.
+                if (!string.IsNullOrWhiteSpace(part.SourceObjPath))
+                {
+                    result.Add(Place(attachmentOffset));
+                    Console.WriteLine($"  {file}: imported mesh anchored at {part.Attachment?.SocketName ?? "component origin"}");
+                    continue;
+                }
+
                 // Cooked meshes carry no sockets, and the head attach bone sits at the very TOP of
                 // the skull - anchoring there leaves hair hovering. A hair piece is modelled to
                 // sheathe the head, so centre it on the head in all three axes: that also corrects
@@ -3158,8 +3826,7 @@ public static class ModelPreviewService
                     var delta = headCentre - partCentre;
                     Console.WriteLine($"  {file}: head attachment centred after component transform -> "
                                       + $"({delta.X:0.###}, {delta.Y:0.###}, {delta.Z:0.###})");
-                    result.Add(new PlacedModel(file, delta, slots, isBody, isFace, isHead)
-                        { Transform = part.Transform, ComponentName = part.ComponentName, Adjustment = part.Adjustment });
+                    result.Add(Place(delta));
                     continue;
                 }
             }
@@ -3167,8 +3834,7 @@ public static class ModelPreviewService
             var b3 = GlbInspector.Bounds3(Path.Combine(dir, file));
             if (b3 is null)
             {
-                result.Add(new PlacedModel(file, attachmentOffset, slots, isBody, isFace, isHead)
-                    { Transform = part.Transform, ComponentName = part.ComponentName, Adjustment = part.Adjustment });
+                result.Add(Place(attachmentOffset));
                 continue;
             }
             var dy = headBase.Value - b3.Value.Min.Y;
@@ -3191,8 +3857,7 @@ public static class ModelPreviewService
             }
             Console.WriteLine($"  {file}: spans y {b3.Value.Min.Y:0.###}..{b3.Value.Max.Y:0.###} -> lift {dy:0.###}" +
                               (dx != 0 ? $", forward {dx:0.####}" : ""));
-            result.Add(new PlacedModel(file, new Vector3(dx, dy, 0), slots, isBody, isFace, isHead)
-                { Transform = part.Transform, ComponentName = part.ComponentName, Adjustment = part.Adjustment });
+            result.Add(Place(new Vector3(dx, dy, 0)));
         }
         return result;
     }
@@ -3240,12 +3905,18 @@ public static class ModelPreviewService
             var adjustment = m.Adjustment is null
                 ? "[0,0,0]"
                 : $"[{F(m.Adjustment.OffsetX)},{F(m.Adjustment.OffsetY)},{F(m.Adjustment.OffsetZ)}]";
-            var movable = !m.IsBody && !m.IsHead && !m.IsFace &&
+            var isCustomStaticMesh = !string.IsNullOrWhiteSpace(m.CustomMeshId);
+            var movable = !isCustomStaticMesh && !m.IsBody && !m.IsHead && !m.IsFace &&
                           !string.IsNullOrWhiteSpace(m.ComponentName) &&
                           !m.ComponentName.StartsWith("__", StringComparison.Ordinal);
+            var customMesh = !isCustomStaticMesh
+                ? "null"
+                : $"{{\"id\":{Q(m.CustomMeshId)},\"scale\":{F(m.CustomMeshScale)}," +
+                  $"\"offset\":[{F(m.CustomMeshOffset?.X ?? 0f)},{F(m.CustomMeshOffset?.Y ?? 0f)},{F(m.CustomMeshOffset?.Z ?? 0f)}]," +
+                  $"\"rotation\":[{F(m.CustomMeshRotation?.X ?? 0f)},{F(m.CustomMeshRotation?.Y ?? 0f)},{F(m.CustomMeshRotation?.Z ?? 0f)}]}}";
             return $"{{\"file\":\"{m.File}\",\"base\":\"{baseName}\",\"body\":{(m.IsBody ? "true" : "false")},\"isface\":{(m.IsFace ? "true" : "false")},\"ishead\":{(m.IsHead ? "true" : "false")}," +
                     $"{transform}," +
-                    $"\"part\":{Q(m.ComponentName)},\"move\":{(movable ? "true" : "false")},\"adj\":{adjustment}," +
+                    $"\"part\":{Q(m.ComponentName)},\"move\":{(movable ? "true" : "false")},\"custom\":{(isCustomStaticMesh ? "true" : "false")},\"mesh\":{customMesh},\"adj\":{adjustment}," +
                    $"\"fgroups\":{fg},\"mouth\":{Q(m.MouthTex)},\"mhide\":{(m.MouthHidden ? "true" : "false")}," +
                     $"\"fbands\":[{string.Join(",", (m.Bands ?? new()).Select(b => $"[{b.Band},{b.Tris},{Q(b.Tex)},{(b.Tint is null ? "null" : $"\"#{b.Tint.Value.R:X2}{b.Tint.Value.G:X2}{b.Tint.Value.B:X2}\"")},{b.Mode},{Q(b.Feature)},{F(b.Pdo)},{Q(b.Nrm)},{Q(b.Orm)},{(b.Roughness is null ? "null" : F(b.Roughness.Value))},{(b.Metallic is null ? "null" : F(b.Metallic.Value))},{Q(b.Emissive)},{(b.EmissiveColour is null ? "null" : $"\"#{b.EmissiveColour.Value.R:X2}{b.EmissiveColour.Value.G:X2}{b.EmissiveColour.Value.B:X2}\"")},{(b.EmissiveStrength is null ? "null" : F(b.EmissiveStrength.Value))},{UvLayerJson(b.EyeSpecLayer)},{MouthLayersJson(b.MouthLayers)}]"))}]," +
                    $"\"poses\":{PoseJson(m.Poses)},\"curves\":{CurveJson(m.Curves)}," +
@@ -3324,18 +3995,18 @@ public static class ModelPreviewService
   #exprwrap label{color:#f0c230;margin-right:4px}
   #expr{background:#22262c;color:#e6e9ee;border:1px solid #3a4048;border-radius:5px;padding:3px 6px;
     font-family:inherit;font-size:13px;outline:none}
-  #partmove{position:absolute;right:14px;top:12px;width:184px;color:#dfe4ea;font-size:12px;
+  #partmove,#meshmove{position:absolute;right:14px;top:12px;width:214px;color:#dfe4ea;font-size:12px;
     background:rgba(26,29,34,.9);padding:9px 10px;border:1px solid #333a44;border-radius:6px}
-  #partmove label{display:block;color:#f0c230;margin-bottom:5px}
-  #partmove select{box-sizing:border-box;width:100%;margin-bottom:7px;background:#22262c;color:#e6e9ee;
+  #partmove label,#meshmove label{display:block;color:#f0c230;margin-bottom:5px}
+  #partmove select,#meshmove select{box-sizing:border-box;width:100%;margin-bottom:7px;background:#22262c;color:#e6e9ee;
     border:1px solid #3a4048;border-radius:4px;padding:4px;font:inherit}
-  #partmove .axis{display:grid;grid-template-columns:14px 1fr;align-items:center;gap:5px;margin:3px 0;color:#9ea6b2}
-  #partmove input{box-sizing:border-box;width:100%;background:#171a1f;color:#e6e9ee;border:1px solid #3a4048;
+  #partmove .axis,#meshmove .axis{display:grid;grid-template-columns:38px 1fr;align-items:center;gap:5px;margin:3px 0;color:#9ea6b2}
+  #partmove input,#meshmove input{box-sizing:border-box;width:100%;background:#171a1f;color:#e6e9ee;border:1px solid #3a4048;
     border-radius:4px;padding:3px 5px;font:12px Consolas,monospace}
-  #partmove .actions{display:flex;gap:6px;margin-top:8px}
-  #partmove button{border:1px solid #3a4048;border-radius:4px;background:#232833;color:#dfe4ea;padding:4px 7px;cursor:pointer;font:inherit}
-  #partmove button.save{border-color:#aa8b1b;color:#f0c230}
-  #partmove button:disabled{opacity:.45;cursor:default}
+  #partmove .actions,#meshmove .actions{display:flex;gap:6px;margin-top:8px}
+  #partmove button,#meshmove button{border:1px solid #3a4048;border-radius:4px;background:#232833;color:#dfe4ea;padding:4px 7px;cursor:pointer;font:inherit}
+  #partmove button.save,#meshmove button.save{border-color:#aa8b1b;color:#f0c230}
+  #partmove button:disabled,#meshmove button:disabled{opacity:.45;cursor:default}
   #err{position:absolute;left:12px;bottom:12px;color:#f0c230;font-size:12px;line-height:1.5;font-family:Consolas,monospace}
   canvas{display:block}
 </style></head><body>
@@ -3389,6 +4060,11 @@ function setPartAdjustment(component,adjustment){
   state.scene.position.copy(state.basePosition).add(new THREE.Vector3(
     state.adjustment[0],state.adjustment[1],state.adjustment[2]));
 }
+function setPartScale(component,multiplier){
+  const state=partStates.get(component);if(!state||!state.custom)return;
+  state.scale=Math.min(100,Math.max(.01,Number(multiplier)||1));
+  state.scene.scale.copy(state.baseScale).multiplyScalar(state.scale);
+}
 function uvAttribute(mesh,channel){
   const attrs=mesh.geometry.attributes;
   if(channel===0)return attrs.aUv0||attrs.uv||null;
@@ -3423,15 +4099,17 @@ function setPartUv(component,channel){
   return applied>0;
 }
 function buildPartMover(){
-  const parts=[...partStates.values()];if(!parts.length)return;
+  const allParts=[...partStates.values()];
+  if(allParts.some(state=>state.custom))return;
+  const parts=allParts;if(!parts.length)return;
   const panel=document.createElement('div');panel.id='partmove';
-  const label=document.createElement('label');label.textContent='Part';panel.appendChild(label);
+   const label=document.createElement('label');label.textContent='Part';panel.appendChild(label);
   const select=document.createElement('select');
   parts.forEach(state=>{const option=document.createElement('option');option.value=state.component;
     option.textContent=state.component;select.appendChild(option);});
   panel.appendChild(select);
   const inputs=[];
-  ['X','Y','Z'].forEach((axis,index)=>{
+   ['X','Y','Z'].forEach((axis,index)=>{
     const row=document.createElement('div');row.className='axis';
     const axisLabel=document.createElement('span');axisLabel.textContent=axis;row.appendChild(axisLabel);
     const input=document.createElement('input');input.type='number';input.step='0.005';input.value='0';
@@ -3439,29 +4117,124 @@ function buildPartMover(){
       const state=partStates.get(select.value);if(!state)return;
       const next=state.adjustment.slice();next[index]=Number(input.value)||0;setPartAdjustment(select.value,next);
     });
-    row.appendChild(input);panel.appendChild(row);inputs.push(input);
-  });
+     row.appendChild(input);panel.appendChild(row);inputs.push(input);
+   });
   const uvLabel=document.createElement('label');uvLabel.textContent='UV';panel.appendChild(uvLabel);
   const uvSelect=document.createElement('select');panel.appendChild(uvSelect);
   uvSelect.onchange=()=>{const state=partStates.get(select.value);if(!state)return;
     const channel=Number(uvSelect.value);if(setPartUv(state.component,channel))sync();};
   const actions=document.createElement('div');actions.className='actions';
   const reset=document.createElement('button');reset.type='button';reset.textContent='↺';reset.title='Reset alignment';
-  reset.onclick=()=>{setPartAdjustment(select.value,[0,0,0]);sync();};actions.appendChild(reset);
+   reset.onclick=()=>{setPartAdjustment(select.value,[0,0,0]);sync();};actions.appendChild(reset);
   const save=document.createElement('button');save.type='button';save.className='save';save.textContent='Save';
    save.disabled=!window.PREVIEW_CAN_SAVE_PLACEMENTS||!window.PREVIEW_LAYOUT_KEY;
    save.onclick=()=>{const state=partStates.get(select.value);if(!state)return;
-     postToHost({type:'save-placement',layout:window.PREVIEW_LAYOUT_KEY,component:state.component,
-       offset:state.adjustment,uv:state.uvChannel===state.defaultUv?null:state.uvChannel});
+      postToHost({type:'save-placement',layout:window.PREVIEW_LAYOUT_KEY,component:state.component,
+        offset:state.adjustment,uv:state.uvChannel===state.defaultUv?null:state.uvChannel,
+        scale:null});
      const label=save.textContent;save.textContent='Saved';setTimeout(()=>save.textContent=label,850);};
   actions.appendChild(save);panel.appendChild(actions);
-  function sync(){const state=partStates.get(select.value);if(!state)return;
-    inputs.forEach((input,index)=>{input.value=(state.adjustment[index]||0).toFixed(4);input.disabled=!state.movable;});
-    reset.disabled=!state.movable;
+   function sync(){const state=partStates.get(select.value);if(!state)return;
+    label.textContent='Part';
+     inputs.forEach((input,index)=>{input.value=(state.adjustment[index]||0).toFixed(4);input.disabled=!state.movable;});
+    save.title='Save this viewer-only alignment';
+     reset.disabled=!state.movable;
     uvSelect.innerHTML='';state.uvs.forEach(channel=>{const option=document.createElement('option');
       option.value=channel;option.textContent='UV '+channel;uvSelect.appendChild(option);});
     uvSelect.value=String(state.uvChannel);uvSelect.disabled=state.uvs.length<2;}
   select.onchange=sync;sync();document.body.appendChild(panel);
+}
+function buildCustomMeshMover(){
+  const parts=[...partStates.values()].filter(state=>state.custom&&state.customId&&state.authored);
+  if(!parts.length)return;
+  const panel=document.createElement('div');panel.id='meshmove';
+  panel.title='Custom mesh changes are local to the selected attachment socket. Offsets use Unreal centimeters.';
+  const label=document.createElement('label');label.textContent='Custom mesh';panel.appendChild(label);
+  const select=document.createElement('select');
+  parts.forEach(state=>{const option=document.createElement('option');option.value=state.component;
+    option.textContent=state.component;select.appendChild(option);});
+  select.disabled=parts.length===1;panel.appendChild(select);
+  const inputs={};
+  [['Scale','scale',.1],['X offset (cm)','x',.1],['Y offset (cm)','y',.1],['Z offset (cm)','z',.1],
+   ['Pitch','pitch',1],['Yaw','yaw',1],['Roll','roll',1]].forEach(([title,key,step])=>{
+    const row=document.createElement('div');row.className='axis';
+    const rowLabel=document.createElement('span');rowLabel.textContent=title;row.appendChild(rowLabel);
+    const input=document.createElement('input');input.type='number';input.step=String(step);input.dataset.key=key;
+    row.appendChild(input);panel.appendChild(row);inputs[key]=input;
+  });
+  const actions=document.createElement('div');actions.className='actions';
+  const save=document.createElement('button');save.type='button';save.className='save';save.textContent='Bake to game';
+  save.disabled=!window.PREVIEW_CAN_SAVE_PLACEMENTS||!window.PREVIEW_LAYOUT_KEY;
+  save.title='Rebuild the game mesh using these saved values. Preview changes are saved automatically.';
+  const readTransform=()=>{const number=key=>Number(inputs[key].value)||0;return {
+    scale:number('scale'),offset:[number('x'),number('y'),number('z')],rotation:[number('pitch'),number('yaw'),number('roll')]};};
+  const postTransform=(type,state,transform=readTransform())=>{if(!state||!state.authored)return;
+    postToHost({type,layout:window.PREVIEW_LAYOUT_KEY,component:state.component,customId:state.customId,
+      transform});};
+  save.onclick=()=>{const state=partStates.get(select.value);if(!state||!state.authored)return;
+    postTransform('save-custom-mesh',state);
+    save.textContent='Saving...';save.disabled=true;};
+  actions.appendChild(save);panel.appendChild(actions);
+  function sync(){const state=partStates.get(select.value);if(!state||!state.authored)return;
+    const transform=state.liveTransform||state.authored;
+    inputs.scale.value=Number(transform.scale||1).toFixed(3);
+    inputs.x.value=Number((transform.offset||[])[0]||0).toFixed(3);
+    inputs.y.value=Number((transform.offset||[])[1]||0).toFixed(3);
+    inputs.z.value=Number((transform.offset||[])[2]||0).toFixed(3);
+    inputs.pitch.value=Number((transform.rotation||[])[0]||0).toFixed(1);
+    inputs.yaw.value=Number((transform.rotation||[])[1]||0).toFixed(1);
+    inputs.roll.value=Number((transform.rotation||[])[2]||0).toFixed(1);
+    applyCustomMeshPreview(state);
+  }
+  let draftTimer=0;
+  Object.values(inputs).forEach(input=>input.oninput=()=>{
+    const state=partStates.get(select.value);if(!state)return;applyCustomMeshPreview(state);
+    const transform=readTransform();state.liveTransform=transform;
+    save.textContent='Bake to game';save.disabled=!window.PREVIEW_CAN_SAVE_PLACEMENTS||!window.PREVIEW_LAYOUT_KEY;
+    window.clearTimeout(draftTimer);draftTimer=window.setTimeout(()=>postTransform('save-custom-mesh-draft',state,transform),550);
+  });
+  window.addEventListener('pagehide',()=>{const state=partStates.get(select.value);if(state)postTransform('save-custom-mesh-draft',state);},{once:true});
+  select.onchange=sync;sync();document.body.appendChild(panel);
+  function applyCustomMeshPreview(state){
+    if(!state.customGeometry||!state.authored)return;
+    const number=key=>Number(inputs[key].value)||0;
+    const saved=state.authored;
+    const ratio=number('scale')/Math.max(.0001,Number(saved.scale)||1);
+    const delta=ueToGltfRotation(number('pitch'),number('yaw'),number('roll'))
+      .multiply(ueToGltfRotation(Number((saved.rotation||[])[0])||0,Number((saved.rotation||[])[1])||0,Number((saved.rotation||[])[2])||0).invert());
+    const oldOffset=ueToGltfPosition(saved.offset||[]);
+    const newOffset=ueToGltfPosition([number('x'),number('y'),number('z')]);
+    state.customGeometry.forEach(entry=>{
+      const position=entry.mesh.geometry.attributes.position;
+      const normal=entry.mesh.geometry.attributes.normal;
+      for(let i=0;i<entry.position.length;i+=3){
+        temp.set(entry.position[i],entry.position[i+1],entry.position[i+2]).sub(oldOffset).multiplyScalar(ratio).applyQuaternion(delta).add(newOffset);
+        position.setXYZ(i/3,temp.x,temp.y,temp.z);
+      }
+      position.needsUpdate=true;
+      if(normal&&entry.normal){
+        for(let i=0;i<entry.normal.length;i+=3){
+          temp.set(entry.normal[i],entry.normal[i+1],entry.normal[i+2]).applyQuaternion(delta).normalize();
+          normal.setXYZ(i/3,temp.x,temp.y,temp.z);
+        }
+        normal.needsUpdate=true;
+      }
+      entry.mesh.geometry.computeBoundingBox();entry.mesh.geometry.computeBoundingSphere();
+    });
+  }
+}
+const temp=new THREE.Vector3();
+function ueToGltfPosition(values){
+  // Custom mesh offsets are authored in Unreal centimeters; preview geometry is in glTF meters.
+  return new THREE.Vector3(Number(values[0])||0,Number(values[2])||0,-(Number(values[1])||0)).multiplyScalar(.01);
+}
+function ueToGltfRotation(pitch,yaw,roll){
+  const rad=Math.PI/180;
+  const ue=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),yaw*rad)
+    .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),pitch*rad))
+    .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),roll*rad));
+  const basis=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),-Math.PI/2);
+  return basis.clone().multiply(ue).multiply(basis.clone().invert());
 }
 // CUE4Parse writes textures as loose .png beside the .glb rather than embedding them, so the base
 // colour map is applied here from the path the exporter reported.
@@ -3998,9 +4771,20 @@ Promise.all(models.map(load)).then(loaded=>{
     if(x.m.part&&!x.m.part.startsWith('__')&&(x.m.move||availableUvs.length)){
       const defaultUv=availableUvs.indexOf(x.m.uvdefault)>=0?x.m.uvdefault:availableUvs[0];
       const selectedUv=availableUvs.indexOf(x.m.uv)>=0?x.m.uv:defaultUv;
-      partStates.set(x.m.part,{component:x.m.part,scene:x.scene,basePosition:basePosition,
+      partStates.set(x.m.part,{component:x.m.part,scene:x.scene,basePosition:basePosition,baseScale:x.scene.scale.clone(),custom:!!x.m.custom,
+        customId:x.m.mesh&&x.m.mesh.id||null,authored:x.m.mesh||null,scale:1,
         movable:!!x.m.move,adjustment:[adjustment[0]||0,adjustment[1]||0,adjustment[2]||0],
         uvs:availableUvs,defaultUv:defaultUv,uvChannel:selectedUv});
+      const state=partStates.get(x.m.part);
+      if(state&&state.custom){
+        state.customGeometry=[];
+        x.scene.traverse(o=>{
+          const position=o.isMesh&&o.geometry&&o.geometry.attributes.position;
+          if(!position)return;
+          const normal=o.geometry.attributes.normal;
+          state.customGeometry.push({mesh:o,position:Float32Array.from(position.array),normal:normal?Float32Array.from(normal.array):null});
+        });
+      }
       setPartUv(x.m.part,selectedUv);
     }
     root.add(x.scene);
@@ -4010,6 +4794,7 @@ Promise.all(models.map(load)).then(loaded=>{
   // "stuck camera" with no error on screen.
   frameAll();
   buildPartMover();
+  buildCustomMeshMover();
 });
 // Calibration aid: arrows move the face piece in 0.004 steps and report the total, so the right
 // permanent offset can be read straight off the HUD instead of guessed.

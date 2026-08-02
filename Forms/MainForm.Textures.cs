@@ -77,13 +77,18 @@ public sealed partial class MainForm
             _currentProject.PlayableTemplate,
             _currentProject.CutsceneTemplate);
         var donorIcons = donor?.IconPaths ?? NativeMetadataDonorService.Icons.Empty;
+        var generatedUiTextures = _currentProject.GeneratedTextures
+            .Where(texture => IsUiTextureKind(texture.Kind) && !string.IsNullOrWhiteSpace(texture.PackagePath))
+            .OrderBy(texture => texture.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
         using var dlg = new UimdIconsDialog(
             donor?.UimdPackagePath ?? "",
             donorIcons,
             IconValueForDialog(_currentProject, _currentProject.IconMenu),
             IconValueForDialog(_currentProject, _currentProject.IconSuit),
             IconValueForDialog(_currentProject, _currentProject.IconLeft),
-            IconValueForDialog(_currentProject, _currentProject.IconRight));
+            IconValueForDialog(_currentProject, _currentProject.IconRight),
+            generatedUiTextures);
         if (dlg.ShowDialog(this) != DialogResult.OK)
         {
             return;
@@ -505,6 +510,16 @@ public sealed partial class MainForm
         var packageBaseName = MakeSafePackageBaseName($"Texture_{MakeSafeTextureToken(requestedName)}_{slotIndex:00000}_P");
         var safeSlot = MakeSafePackageBaseName(string.IsNullOrWhiteSpace(_currentProject.SlotId) ? "unsaved_suit" : _currentProject.SlotId);
         var outputRoot = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureImports", safeSlot, $"{MakeSafeTextureToken(requestedName)}_{slotIndex:00000}");
+        string sourcePng;
+        try
+        {
+            sourcePng = CopyTextureSourceIntoOutput(dlg.FileName, outputRoot);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Texture import could not cache its source PNG: {ex.Message}");
+            return;
+        }
 
         AppendLog($"Texture import: {Path.GetFileName(dlg.FileName)} as '{requestedName}' ({textureKind})");
         AppendLog($"  package path: {outputPackagePath}");
@@ -514,7 +529,7 @@ public sealed partial class MainForm
         _toyboxPrimaryActionButton.Enabled = false;
         try
         {
-            var nearestMips = UseNearestNeighborMipsForTextureKind(textureKind);
+            var nearestMips = UseNearestNeighborMipsForTextureKind(textureKind, cookPreset.Id);
             AppendLog(nearestMips
                 ? "  mip mode: nearest-neighbor"
                 : "  mip mode: high-quality UI mips (alpha-safe)");
@@ -522,7 +537,7 @@ public sealed partial class MainForm
             var cookedContentRoot = Path.Combine(outputRoot, "Cooked", "LEGOBatmanLotDK", "Content");
             var cookResult = await Task.Run(() => new TextureCookService(projectRoot).Cook(new TextureCookService.Request
             {
-                SourceImagePath = dlg.FileName,
+                SourceImagePath = sourcePng,
                 TemplateJsonPath = templateJson,
                 OutputContentRoot = cookedContentRoot,
                 OutputPackagePath = outputPackagePath,
@@ -548,7 +563,7 @@ public sealed partial class MainForm
 
             var entry = BuildTextureEntryFromSummary(
                 outputRoot,
-                dlg.FileName,
+                sourcePng,
                 templateJson,
                 rawRoot,
                 outputPackagePath,
@@ -613,6 +628,15 @@ public sealed partial class MainForm
         {
             UseWaitCursor = false;
         }
+    }
+
+    private static string CopyTextureSourceIntoOutput(string sourcePng, string outputRoot)
+    {
+        var sourceDirectory = Path.Combine(outputRoot, "Source");
+        Directory.CreateDirectory(sourceDirectory);
+        var destination = Path.Combine(sourceDirectory, Path.GetFileName(sourcePng));
+        File.Copy(sourcePng, destination, overwrite: true);
+        return destination;
     }
 
     private GeneratedTextureEntry BuildTextureEntryFromSummary(
@@ -728,6 +752,8 @@ public sealed partial class MainForm
         }
         else if (IsUiTextureKind(textureKind))
         {
+            Add("ui-2k-dxt5-legacy", "2K DXT5 UI (legacy)", dxt5Path, 2048, 2048, "PF_DXT5",
+                TextureProfileSafety.Verified, "Original UI cook route. Verified before the BGRA8 UI profile was added.");
             Add("ui-2k-bgra8", "2K BGRA8 UI", bgraPath, 2048, 2048, "PF_B8G8R8A8",
                 TextureProfileSafety.Verified, "Used by the current generated Electric menu art.");
             Add("ui-1k-bgra8", "1K BGRA8 UI", bgra1kPath, 1024, 1024, "PF_B8G8R8A8",
@@ -751,6 +777,7 @@ public sealed partial class MainForm
         "normal-2k-bc5-legacy" => TextureProfileSafety.Verified,
         "character-2k-bgra8" => TextureProfileSafety.Verified,
         "mask-2k-bgra8" => TextureProfileSafety.Verified,
+        "ui-2k-dxt5-legacy" => TextureProfileSafety.Verified,
         "ui-2k-bgra8" => TextureProfileSafety.Verified,
         _ => TextureProfileSafety.Experimental,
     };
@@ -764,6 +791,7 @@ public sealed partial class MainForm
         "normal-2k-bc5-legacy" => "Verified on Electric's body normal map in game.",
         "character-2k-bgra8" => "Verified on Electric's base-colour maps in game.",
         "mask-2k-bgra8" => "Verified on Electric's current Red Brick colour mask.",
+        "ui-2k-dxt5-legacy" => "Original UI cook route, verified before the BGRA8 UI profile was added.",
         "ui-2k-bgra8" => "Used by the current generated Electric menu art.",
         "character-1k-bgra8" => "Lower-resolution character colour; verify visual quality in game.",
         "mask-1k-bgra8" => "Lower-resolution profile; verify the target use in game.",
@@ -1144,8 +1172,9 @@ public sealed partial class MainForm
         (textureKind.Contains("ui", StringComparison.OrdinalIgnoreCase) ||
          textureKind.Contains("icon", StringComparison.OrdinalIgnoreCase));
 
-    private static bool UseNearestNeighborMipsForTextureKind(string? textureKind) =>
-        !IsUiTextureKind(textureKind);
+    private static bool UseNearestNeighborMipsForTextureKind(string? textureKind, string? cookProfile = null) =>
+        !IsUiTextureKind(textureKind) ||
+        string.Equals(cookProfile, "ui-2k-dxt5-legacy", StringComparison.OrdinalIgnoreCase);
 
     private bool AutoAssignGeneratedUiIconSlots(NativeSuitProject project)
     {
@@ -1812,7 +1841,7 @@ public sealed partial class MainForm
             return false;
         }
 
-        var nearestMips = UseNearestNeighborMipsForTextureKind(texture.Kind);
+        var nearestMips = UseNearestNeighborMipsForTextureKind(texture.Kind, texture.CookProfile);
         AppendLog($"Recooking texture '{texture.DisplayName}' with encoder v{TextureCookService.CurrentEncoderVersion} ({(nearestMips ? "nearest mips" : "high-quality UI mips")})...");
         var result = new TextureCookService(_projectRootText.Text.Trim()).Cook(new TextureCookService.Request
         {

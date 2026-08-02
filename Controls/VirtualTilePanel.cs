@@ -195,9 +195,7 @@ public sealed class VirtualTilePanel : Panel
             y += TileH + Gap;
         }
 
-        // Extra bottom clearance (a full tile) so the last row always scrolls fully into view even
-        // when the panel is short (non-maximized) - a few px of slack at the very bottom is fine.
-        AutoScrollMinSize = new Size(0, y + TileH);
+        AutoScrollMinSize = new Size(0, y + Gap * 2);
     }
 
     protected override void OnClientSizeChanged(EventArgs e)

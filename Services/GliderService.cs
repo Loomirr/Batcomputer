@@ -1,5 +1,28 @@
 namespace Batcomputer;
 
+public enum GliderVisualKind
+{
+    GlideCape,
+    Wingsuit,
+    CharacterGlider
+}
+
+public enum GliderMaterialCompatibility
+{
+    NativeMatch,
+    CustomMaterial,
+    DifferentNativeMaterial,
+    Unknown
+}
+
+public sealed class GliderMaterialCompatibilityResult
+{
+    public GliderMaterialCompatibility Kind { get; init; }
+    public string Title { get; init; } = "";
+    public string Detail { get; init; } = "";
+    public bool NeedsConfirmation => Kind == GliderMaterialCompatibility.DifferentNativeMaterial;
+}
+
 /// <summary>
 /// Helpers for selecting and applying native glide visuals. The important rule:
 /// gliders should come from real indexed character components whenever possible
@@ -8,11 +31,12 @@ namespace Batcomputer;
 /// </summary>
 public static class GliderService
 {
-    private const string WingsuitAbp = "/Game/Animation/LEGOfig/Nightwing/Traversal/ABP_Wingsuit";
+    public const string GlidingAbilitySetPackage =
+        "/Game/Characters/Abilities/CoreAbilities/Gliding/AS_Gliding";
 
     public static bool IsNativeGliderPart(NativeSuitPartRecord part)
     {
-        if (part.ComponentTags.Any(tag => tag.Equals("Glider", StringComparison.OrdinalIgnoreCase)))
+        if (HasGlideTag(part))
         {
             return true;
         }
@@ -30,8 +54,25 @@ public static class GliderService
         });
 
         return haystack.Contains("Wingsuit", StringComparison.OrdinalIgnoreCase) ||
+               haystack.Contains("Cape_Glide", StringComparison.OrdinalIgnoreCase) ||
+               haystack.Contains("GA_Glider", StringComparison.OrdinalIgnoreCase) ||
+               haystack.Contains("GA_Wingsuit", StringComparison.OrdinalIgnoreCase) ||
                haystack.Contains("Glide", StringComparison.OrdinalIgnoreCase) ||
                haystack.Contains("Glider", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool IsCosmeticCapeAttachment(NativeSuitPartRecord part)
+    {
+        if (IsNativeGliderPart(part))
+        {
+            return false;
+        }
+
+        return part.ComponentTags.Any(tag =>
+                   tag.Equals("Cape", StringComparison.OrdinalIgnoreCase) ||
+                   tag.Equals("TtCharacterAsset.Cape", StringComparison.OrdinalIgnoreCase)) ||
+               part.MeshObjectName.Contains("Cape", StringComparison.OrdinalIgnoreCase) ||
+               part.MeshPackagePath.Contains("/Cape/", StringComparison.OrdinalIgnoreCase);
     }
 
     public static IEnumerable<NativeSuitPartRecord> NativeGliderParts(NativeSuitPartIndex? partIndex, string search)
@@ -92,29 +133,124 @@ public static class GliderService
 
     public static string GliderPresetLabel(NativeSuitPartRecord part)
     {
-        var name = !string.IsNullOrWhiteSpace(part.MeshObjectName)
-            ? part.MeshObjectName
-            : AssetName(part.MeshPackagePath);
+        var character = HumanizeCharacter(part.CharacterFolder);
+        var kind = KindForPart(part);
+        var visual = kind switch
+        {
+            GliderVisualKind.GlideCape when part.MeshObjectName.Contains("Short", StringComparison.OrdinalIgnoreCase) => "short glide cape",
+            GliderVisualKind.GlideCape => "glide cape",
+            GliderVisualKind.Wingsuit => "wingsuit",
+            _ => "glider"
+        };
 
-        foreach (var prefix in new[]
+        var variant = part.MeshObjectName.EndsWith("_2", StringComparison.OrdinalIgnoreCase)
+            ? " 2"
+            : "";
+        return $"{character} {visual}{variant}".Trim();
+    }
+
+    public static GliderVisualKind KindForPart(NativeSuitPartRecord part)
+    {
+        var name = $"{part.MeshObjectName} {part.MeshPackagePath} {part.AnimClassObjectName} {part.AnimClassPackagePath}";
+        if (name.Contains("Wingsuit", StringComparison.OrdinalIgnoreCase))
         {
-            "SK_GA_Wingsuit_",
-            "SK_GA_Glider_",
-            "SM_GA_Glider_",
-            "SK_CAPE_",
-            "SM_CAPE_",
-            "SK_",
-            "SM_"
-        })
-        {
-            if (name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                name = name[prefix.Length..];
-                break;
-            }
+            return GliderVisualKind.Wingsuit;
         }
 
-        return string.IsNullOrWhiteSpace(name) ? part.CharacterFolder : name;
+        if (HasGlideTag(part) ||
+            name.Contains("CAPE_Glide", StringComparison.OrdinalIgnoreCase))
+        {
+            return GliderVisualKind.GlideCape;
+        }
+
+        return GliderVisualKind.CharacterGlider;
+    }
+
+    public static string KindLabel(NativeSuitPartRecord part) => KindForPart(part) switch
+    {
+        GliderVisualKind.GlideCape => "Glide cape",
+        GliderVisualKind.Wingsuit => "Wingsuit",
+        _ => "Character glider"
+    };
+
+    public static string RoleLabel(NativeSuitPartRecord part) => KindForPart(part) switch
+    {
+        GliderVisualKind.GlideCape => "glide-only cape visual",
+        GliderVisualKind.Wingsuit => "glide-only wingsuit visual",
+        _ => "glide-only character visual"
+    };
+
+    public static GliderMaterialCompatibilityResult CheckMaterialCompatibility(
+        NativeSuitPartRecord? glideVisual,
+        string materialPath)
+    {
+        if (glideVisual is null)
+        {
+            return new GliderMaterialCompatibilityResult
+            {
+                Kind = GliderMaterialCompatibility.Unknown,
+                Title = "Glide visual not identified",
+                Detail = "Batcomputer cannot compare this material until a native glide visual has been selected. Preview it before building."
+            };
+        }
+
+        var candidate = NormalizeMaterialPackage(materialPath);
+        var nativeMaterials = glideVisual.Materials
+            .Select(material => NormalizeMaterialPackage(string.IsNullOrWhiteSpace(material.PackagePath) ? material.ObjectPath : material.PackagePath))
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (nativeMaterials.Count == 0)
+        {
+            return new GliderMaterialCompatibilityResult
+            {
+                Kind = GliderMaterialCompatibility.Unknown,
+                Title = "No native material record",
+                Detail = "This glide component has no indexed override materials, so Batcomputer cannot check its UV family. Preview it before building."
+            };
+        }
+
+        if (nativeMaterials.Contains(candidate, StringComparer.OrdinalIgnoreCase))
+        {
+            return new GliderMaterialCompatibilityResult
+            {
+                Kind = GliderMaterialCompatibility.NativeMatch,
+                Title = "Native glide material",
+                Detail = "This is one of the selected glide visual's original material overrides. Its UV layout is the expected match."
+            };
+        }
+
+        if (candidate.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase))
+        {
+            return new GliderMaterialCompatibilityResult
+            {
+                Kind = GliderMaterialCompatibility.CustomMaterial,
+                Title = "Custom glide material",
+                Detail = "Custom materials can be correct, but their source UV family is not stored with the asset. Check the 3D preview and test in-game before release."
+            };
+        }
+
+        return new GliderMaterialCompatibilityResult
+        {
+            Kind = GliderMaterialCompatibility.DifferentNativeMaterial,
+            Title = "Different native material family",
+            Detail = "This material is not one of this glide visual's native overrides. It may use a different UV layout and appear stretched, tiled, or misplaced."
+        };
+    }
+
+    public static string MountLabel(NativeSuitPartRecord part)
+    {
+        var socket = part.AttachSocket?.Trim() ?? "";
+        if (socket.Contains("Chest", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Chest-mounted";
+        }
+        if (socket.Equals("Root", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(socket))
+        {
+            return "Root-mounted";
+        }
+        return $"{socket}-mounted";
     }
 
     public static string GliderPresetSubtitle(NativeSuitPartRecord part)
@@ -123,7 +259,7 @@ public static class GliderService
         var anim = string.IsNullOrWhiteSpace(part.AnimClassObjectName)
             ? "no anim"
             : part.AnimClassObjectName.Replace("_C", "", StringComparison.OrdinalIgnoreCase);
-        return $"{part.Slot} - {anim} - {materialCount} material{(materialCount == 1 ? "" : "s")}";
+        return $"{RoleLabel(part)} | {MountLabel(part)} | {anim} | {materialCount} mat{(materialCount == 1 ? "" : "s")}";
     }
 
     public static NativeSuitPartRecord WithWingsuitDecalOverride(NativeSuitPartRecord part, string materialPath)
@@ -176,57 +312,6 @@ public static class GliderService
     }
 
     /// <summary>
-    /// Legacy fallback for old material-driven tests. New glider UI uses the
-    /// indexed native glider records above so we preserve all slots/tags/anim data.
-    /// </summary>
-    public static NativeSuitPartRecord? BuildWingsuitPart(string gliderMaterialGamePath)
-    {
-        var chr = WingsuitCharFromMaterial(gliderMaterialGamePath);
-        if (chr is null) return null;
-
-        var meshPkg = $"/Game/Models/Gadgets/GA_Wingsuit_{chr}/SK_GA_Wingsuit_{chr}";
-        var meshName = $"SK_GA_Wingsuit_{chr}";
-        var matPkg = gliderMaterialGamePath.Contains('.') ? gliderMaterialGamePath[..gliderMaterialGamePath.IndexOf('.')] : gliderMaterialGamePath;
-        var matName = matPkg[(matPkg.LastIndexOf('/') + 1)..];
-
-        var part = new NativeSuitPartRecord
-        {
-            SourcePackagePath = meshPkg,
-            SourceUasset = meshName + ".uasset",
-            CharacterFolder = $"GA_Wingsuit_{chr}",
-            Stem = meshName,
-            Context = "playable",
-            Slot = "Cape",
-            ComponentClass = "SkeletalMeshComponentBudgeted",
-            MeshKind = "SkeletalMesh",
-            MeshObjectName = meshName,
-            MeshPackagePath = meshPkg,
-            MeshObjectPath = $"{meshPkg}.{meshName}",
-            AnimClassObjectName = "ABP_Wingsuit_C",
-            AnimClassPackagePath = WingsuitAbp,
-            AnimClassObjectPath = $"{WingsuitAbp}.ABP_Wingsuit_C",
-            Materials = new List<NativeSuitObjectRef>
-            {
-                new()
-                {
-                    ObjectName = matName,
-                    PackagePath = matPkg,
-                    ObjectPath = $"{matPkg}.{matName}",
-                    ClassName = "MaterialInstanceConstant"
-                }
-            },
-            ComponentTags = new List<string> { "TtCharacterAsset.Cape", "Glider" },
-            IsKnownVisualSlot = true,
-            IsLikelyGraftCandidate = true,
-            SemanticKind = "Cape",
-            IsSynthesized = true,
-            Notes = $"Wingsuit glide visual ({chr}) - synthesized legacy glider graft."
-        };
-        part.RecipeKey = PartRecipeService.BuildRecipeKey(part);
-        return part;
-    }
-
-    /// <summary>
     /// The donor character's glide ANIMATION sets for a glider preset, injected as parent
     /// sets so the body plays that character's glide pose. A cross-type glider (wingsuit on
     /// a cape base) needs this or the membrane collapses (invisible). Returns ("","") when
@@ -266,7 +351,7 @@ public static class GliderService
     {
         var mesh = !string.IsNullOrWhiteSpace(part.MeshObjectName) ? part.MeshObjectName : part.MeshPackagePath;
         var anim = !string.IsNullOrWhiteSpace(part.AnimClassObjectName) ? part.AnimClassObjectName : part.AnimClassPackagePath;
-        return $"{part.CharacterFolder}|{part.Slot}|{mesh}|{anim}";
+        return $"{part.CharacterFolder}|{mesh}|{anim}";
     }
 
     private static int GliderSlotRankForPart(NativeSuitPartRecord part) => GliderSlotRank(part.Slot);
@@ -278,6 +363,17 @@ public static class GliderService
         "torso2" => 2,
         _ => 10
     };
+
+    private static bool HasGlideTag(NativeSuitPartRecord part) => part.ComponentTags.Any(tag =>
+        tag.Equals("Glider", StringComparison.OrdinalIgnoreCase) ||
+        tag.Equals("GlideCape", StringComparison.OrdinalIgnoreCase));
+
+    private static string NormalizeMaterialPackage(string path)
+    {
+        var trimmed = path?.Trim() ?? "";
+        var dot = trimmed.IndexOf('.');
+        return dot > 0 ? trimmed[..dot] : trimmed;
+    }
 
     private static bool MatchesSearch(string search, params string?[] values)
     {
@@ -358,5 +454,15 @@ public static class GliderService
         var path = PackagePathFromObjectPath(packagePath);
         var slash = path.LastIndexOf('/');
         return slash >= 0 ? path[(slash + 1)..] : path;
+    }
+
+    private static string HumanizeCharacter(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "Unknown";
+        }
+
+        return value.Replace('_', ' ');
     }
 }

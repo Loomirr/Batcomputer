@@ -548,14 +548,34 @@ public sealed class MaterialReplaceService
 
     private string? ResolveStageContentRoot(string slotId)
     {
-        var baseDir = Path.Combine(AppSettings.GeneratedRootFor(ProjectRoot), "NativeSuitGuiProjects", slotId);
-        var candidates = new[]
+        if (string.IsNullOrWhiteSpace(slotId))
         {
-            Path.Combine(baseDir, "GraftedPartStage", "LEGOBatmanLotDK", "Content"),
-            Path.Combine(baseDir, "GraftedTorso2Stage", "LEGOBatmanLotDK", "Content"),
-            Path.Combine(baseDir, "PatchedNameMapStage", "LEGOBatmanLotDK", "Content")
-        };
-        return candidates.FirstOrDefault(Directory.Exists);
+            return null;
+        }
+
+        // A project opened from an older portable workspace can retain a nested
+        // Generated path. The active tool root remains the reliable fallback.
+        var projectRoots = new[] { ProjectRoot, AppSettings.Current.EffectiveProjectRoot() }
+            .Where(root => !string.IsNullOrWhiteSpace(root))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var projectRoot in projectRoots)
+        {
+            var baseDir = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "NativeSuitGuiProjects", slotId);
+            var candidates = new[]
+            {
+                Path.Combine(baseDir, "GraftedPartStage", "LEGOBatmanLotDK", "Content"),
+                Path.Combine(baseDir, "GraftedTorso2Stage", "LEGOBatmanLotDK", "Content"),
+                Path.Combine(baseDir, "PatchedNameMapStage", "LEGOBatmanLotDK", "Content")
+            };
+            var found = candidates.FirstOrDefault(Directory.Exists);
+            if (found is not null)
+            {
+                return found;
+            }
+        }
+
+        return null;
     }
 
     // ---- UAssetAPI helpers (self-contained) ---------------------------------

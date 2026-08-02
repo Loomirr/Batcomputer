@@ -24,7 +24,8 @@ public sealed partial class UimdIconsDialog : Form
         string menu,
         string suit,
         string left,
-        string right)
+        string right,
+        IEnumerable<GeneratedTextureEntry>? generatedUiTextures = null)
     {
         InitializeComponent();
         if (WinFormsDesignerSupport.IsInDesigner())
@@ -49,6 +50,7 @@ public sealed partial class UimdIconsDialog : Form
         _suit.Text = FirstNonEmpty(suit, donorIcons.Suit);
         _left.Text = FirstNonEmpty(left, donorIcons.Left);
         _right.Text = FirstNonEmpty(right, donorIcons.Right);
+        var generatedTextures = (generatedUiTextures ?? Enumerable.Empty<GeneratedTextureEntry>()).ToList();
 
         var root = new TableLayoutPanel
         {
@@ -106,10 +108,10 @@ public sealed partial class UimdIconsDialog : Form
         {
             fields.RowStyles.Add(new RowStyle(SizeType.Percent, 25));
         }
-        fields.Controls.Add(Row("Menu icon", "Character menu portrait", _menu), 0, 0);
-        fields.Controls.Add(Row("Suit icon", "Suit selector tile", _suit), 0, 1);
-        fields.Controls.Add(Row("Left-facing", "Character-card left view", _left), 0, 2);
-        fields.Controls.Add(Row("Right-facing", "Character-card right view", _right), 0, 3);
+        fields.Controls.Add(Row("Menu icon", "Character menu portrait", _menu, generatedTextures), 0, 0);
+        fields.Controls.Add(Row("Suit icon", "Suit selector tile", _suit, generatedTextures), 0, 1);
+        fields.Controls.Add(Row("Left-facing", "Character-card left view", _left, generatedTextures), 0, 2);
+        fields.Controls.Add(Row("Right-facing", "Character-card right view", _right, generatedTextures), 0, 3);
         card.Controls.Add(fields);
         root.Controls.Add(card, 0, 1);
 
@@ -154,11 +156,16 @@ public sealed partial class UimdIconsDialog : Form
     private static string FirstNonEmpty(string current, string donor) =>
         !string.IsNullOrWhiteSpace(current) ? current : donor;
 
-    private static Control Row(string title, string detail, TextBox input)
+    private static Control Row(
+        string title,
+        string detail,
+        TextBox input,
+        IReadOnlyList<GeneratedTextureEntry> generatedTextures)
     {
-        var row = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
+        var row = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Margin = Padding.Empty };
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 148));
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 184));
         var label = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
         label.Controls.Add(new Label
         {
@@ -182,6 +189,65 @@ public sealed partial class UimdIconsDialog : Form
         input.Margin = new Padding(0, 8, 0, 8);
         Theme.StyleDarkInput(input);
         row.Controls.Add(input, 1, 0);
+
+        var picker = new ThemedDropDown
+        {
+            Dock = DockStyle.Fill,
+            Margin = new Padding(8, 8, 0, 8),
+            Placeholder = generatedTextures.Count == 0 ? "No generated UI textures" : "Use generated UI texture",
+            Enabled = generatedTextures.Count > 0,
+        };
+        picker.Items.Add(new GeneratedUiTextureChoice(null));
+        foreach (var texture in generatedTextures)
+        {
+            picker.Items.Add(new GeneratedUiTextureChoice(texture));
+        }
+
+        var currentPath = UnrealPathUtil.NormalizePackagePath(input.Text);
+        var currentIndex = -1;
+        for (var index = 0; index < generatedTextures.Count; index++)
+        {
+            if (string.Equals(
+                    UnrealPathUtil.NormalizePackagePath(generatedTextures[index].PackagePath),
+                    currentPath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                currentIndex = index;
+                break;
+            }
+        }
+        picker.SelectedIndex = currentIndex >= 0 ? currentIndex + 1 : -1;
+        picker.SelectedIndexChanged += (_, _) =>
+        {
+            if (picker.SelectedItem is GeneratedUiTextureChoice { Texture: { } texture })
+            {
+                input.Text = texture.PackagePath;
+            }
+        };
+        row.Controls.Add(picker, 2, 0);
         return row;
+    }
+
+    private sealed class GeneratedUiTextureChoice
+    {
+        public GeneratedTextureEntry? Texture { get; }
+
+        public GeneratedUiTextureChoice(GeneratedTextureEntry? texture)
+        {
+            Texture = texture;
+        }
+
+        public override string ToString()
+        {
+            if (Texture is null)
+            {
+                return "Keep current path";
+            }
+
+            var name = string.IsNullOrWhiteSpace(Texture.DisplayName)
+                ? UnrealPathUtil.AssetName(Texture.PackagePath)
+                : Texture.DisplayName;
+            return name + " · " + UnrealPathUtil.AssetName(Texture.PackagePath);
+        }
     }
 }
