@@ -2112,6 +2112,10 @@ public sealed partial class MainForm
         };
         model.Chips.Add((profile.SupportLabel, isForeign ? Theme.Warn : Theme.Good));
         model.Chips.Add((profile.Architecture, profile.Support == EquipmentSupportKind.Controller ? Theme.Warn : Theme.Info));
+        if (!string.IsNullOrWhiteSpace(profile.RequiredGameplayFamily))
+        {
+            model.Chips.Add(($"{profile.RequiredGameplayFamily} base required", Theme.Warn));
+        }
         model.Chips.Add((hasGraft ? "anims graftable" : "no anim set", hasGraft ? Theme.Good : Theme.Warn));
 
         model.Fields.Add(("ETA", eq.EtaPackage));
@@ -2150,11 +2154,26 @@ public sealed partial class MainForm
         switch (profile.Support)
         {
             case EquipmentSupportKind.Controller:
-                model.CalloutTitle = "Special controller graft";
-                model.CalloutDetail =
-                    "Packaging appends the gadget's complete native controller set to this suit's " +
-                    "cloned DPRD. That preserves its input tags, levels, granted attributes, and " +
-                    "gameplay cues. Deploy actions and spawned actors stay on the equipment definition.";
+                var requiredFamily = profile.RequiredGameplayFamily;
+                var currentFamily = _currentProject?.BaseProfile?.GameplayFamily;
+                if (!string.IsNullOrWhiteSpace(requiredFamily) &&
+                    !string.Equals(requiredFamily, currentFamily, StringComparison.OrdinalIgnoreCase))
+                {
+                    model.CalloutTitle = $"Requires a {requiredFamily} gameplay base";
+                    model.CalloutDetail =
+                        $"{eq.Name} controls a remote pawn. It is confirmed to work only with a {requiredFamily} gameplay donor, " +
+                        $"not {(string.IsNullOrWhiteSpace(currentFamily) ? "this base" : currentFamily)}. You can record it, " +
+                        "but the controller will not function in-game until the gameplay base is changed.";
+                    model.PrimaryText = "Add anyway";
+                }
+                else
+                {
+                    model.CalloutTitle = "Special controller graft";
+                    model.CalloutDetail =
+                        "Packaging appends the gadget's complete native controller set to this suit's " +
+                        "cloned DPRD. That preserves its input tags, levels, granted attributes, and " +
+                        "gameplay cues. Deploy actions and spawned actors stay on the equipment definition.";
+                }
                 break;
             case EquipmentSupportKind.FamilyOnly:
                 model.CalloutTitle = "No animation set to graft";

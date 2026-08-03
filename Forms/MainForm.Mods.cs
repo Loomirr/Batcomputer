@@ -670,9 +670,7 @@ public sealed partial class MainForm
     }
 
     /// <summary>
-    /// Copies a built mod's three products into the game: trio → ~mods/Slot,
-    /// <c>&lt;ModId&gt;PawnTags.ini</c> → Config/Tags, <c>mod.json</c> →
-    /// ue4ss/Mods/NewSuitSlotNative/SuitMods/&lt;ModId&gt;/.
+    /// Copies a built mod's release files into the LOTDK Expanded game layout.
     /// </summary>
     private void InstallMod(string modProjectPath)
     {
@@ -765,30 +763,23 @@ public sealed partial class MainForm
                 AppendLog($"  {mod.ModId}PawnTags.ini → {tagsDest}");
             }
 
-            // 3) mod.json → ue4ss/Mods/NewSuitSlotNative/SuitMods/<ModId>/
+            // 3) mod.json → ue4ss/LOTDKExpanded/Mods/<ModId>/
             var modJsonSrc = Path.Combine(outRoot, "mod.json");
-            result.RegistryDestination = Path.Combine(gameRoot, "Binaries", "Win64", "ue4ss", "Mods", "NewSuitSlotNative", "SuitMods", mod.ModId);
+            result.RegistryDestination = LotdkExpandedLayout.ContentPackDirectory(gameRoot, mod.ModId);
             ModReleaseStep("Installing the mod registry entry…");
             if (File.Exists(modJsonSrc))
             {
-                var suitModsDest = result.RegistryDestination;
-                Directory.CreateDirectory(suitModsDest);
-                File.Copy(modJsonSrc, Path.Combine(suitModsDest, "mod.json"), overwrite: true);
+                var packDestination = result.RegistryDestination;
+                Directory.CreateDirectory(result.RegistryDestination);
+                File.Copy(modJsonSrc, Path.Combine(result.RegistryDestination, "mod.json"), overwrite: true);
                 installed++;
                 registryInstalled = true;
-                AppendLog($"  mod.json → {suitModsDest}");
+                AppendLog($"  mod.json → {packDestination}");
             }
 
             AppendLog($"Installed mod '{mod.DisplayName}' — {installed} file(s). Restart the game to load it.");
             var plugin = RegistryPluginService.CreateLayout(outRoot, mod.ModId);
-            result.AssetRegistryDestination = Path.Combine(
-                gameRoot,
-                "Binaries",
-                "Win64",
-                "ue4ss",
-                "SuitSlots",
-                "RegistryPlugins",
-                plugin.PluginName);
+            result.AssetRegistryDestination = LotdkExpandedLayout.RegistryPluginDirectory(gameRoot, plugin.PluginName);
             ModReleaseStep("Installing the Asset Registry plugin...");
             if (File.Exists(plugin.DescriptorPath) && File.Exists(plugin.RegistryPath) &&
                 !string.IsNullOrWhiteSpace(result.AssetRegistryDestination))
@@ -821,16 +812,7 @@ public sealed partial class MainForm
     /// <summary>Walks up from the game paks mod folder to the game's LEGOBatmanLotDK root.</summary>
     private static string? GameLegoRoot()
     {
-        var cursor = new DirectoryInfo(Path.GetFullPath(AppSettings.Current.EffectiveGamePaksModFolder()));
-        while (cursor is not null)
-        {
-            if (cursor.Name.Equals("LEGOBatmanLotDK", StringComparison.OrdinalIgnoreCase))
-            {
-                return cursor.FullName;
-            }
-            cursor = cursor.Parent;
-        }
-        return null;
+        return LotdkExpandedLayout.TryFindGameRoot(AppSettings.Current.EffectiveGamePaksModFolder());
     }
 
     /// <summary>Copies only this mod's generated plugin files; other installed mods remain untouched.</summary>
@@ -900,13 +882,18 @@ public sealed partial class MainForm
                 $"{ArchiveRoot}/LEGOBatmanLotDK/Config/Tags/{mod.ModId}PawnTags.ini");
             AddRequired(
                 Path.Combine(outRoot, "mod.json"),
-                $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/Mods/NewSuitSlotNative/SuitMods/{mod.ModId}/mod.json");
-            AddRequired(
-                plugin.DescriptorPath,
-                $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/SuitSlots/RegistryPlugins/{plugin.PluginName}/{Path.GetFileName(plugin.DescriptorPath)}");
-            AddRequired(
-                plugin.RegistryPath,
-                $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/SuitSlots/RegistryPlugins/{plugin.PluginName}/{Path.GetFileName(plugin.RegistryPath)}");
+                $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/Mods/{mod.ModId}/mod.json");
+            AddRequired(plugin.DescriptorPath,
+                $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{plugin.PluginName}/{Path.GetFileName(plugin.DescriptorPath)}");
+            AddRequired(plugin.RegistryPath,
+                $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{plugin.PluginName}/{Path.GetFileName(plugin.RegistryPath)}");
+            foreach (var pluginFile in Directory.EnumerateFiles(plugin.PluginDirectory, "*", SearchOption.AllDirectories))
+            {
+                if (files.Any(file => file.Source.Equals(pluginFile, StringComparison.OrdinalIgnoreCase))) continue;
+                var relative = Path.GetRelativePath(plugin.PluginDirectory, pluginFile).Replace('\\', '/');
+                files.Add((pluginFile,
+                    $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{plugin.PluginName}/{relative}"));
+            }
         }
         catch (FileNotFoundException ex)
         {
@@ -1068,7 +1055,7 @@ public sealed partial class MainForm
             inputs,
             AppSettings.Current.EffectiveExportContentRoot(),
             AppSettings.GeneratedRootFor(_projectRootText.Text.Trim()),
-            EffectiveGameRuntimeSuitsFolder());
+            EffectiveGameContentPacksFolder());
         AppendLog($"Release preflight: {(result.Passed ? "passed" : "blocked")} ({result.ErrorCount} error(s), {result.WarningCount} warning(s)).");
         foreach (var finding in result.Findings.Where(f => !f.Severity.Equals("INFO", StringComparison.OrdinalIgnoreCase)))
         {
@@ -1479,7 +1466,7 @@ public sealed partial class MainForm
             AppendLog($"Build mod '{mod.DisplayName}' COMPLETE — installable trio for {mergedSuits} suit(s):");
             AppendLog($"  {trioBase}.pak / .ucas / .utoc");
             AppendLog($"  {mod.ModId}PawnTags.ini + mod.json also under {outRoot}");
-            AppendLog($"  Install: trio → ~mods/Slot,  ini → Config/Tags,  mod.json → ue4ss/Mods/NewSuitSlotNative/SuitMods/{mod.ModId}/");
+            AppendLog($"  Install: trio → ~mods/Slot, ini → Config/Tags, mod.json → ue4ss/{LotdkExpandedLayout.ModuleId}/Mods/{mod.ModId}/");
             RefreshHomeTiles();
             return true;
         }

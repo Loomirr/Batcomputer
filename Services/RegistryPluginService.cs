@@ -221,9 +221,8 @@ public sealed class RegistryPluginService
         {
             Directory.CreateDirectory(layout.PluginDirectory);
             File.WriteAllText(layout.DescriptorPath, BuildDescriptorJson(layout.PluginName, modDisplayName));
-            // Configuration is owned by the user's SuitSlots installation, never by
-            // a generated author-mod release. Clear an older generated copy so a
-            // rebuilt or zipped release cannot accidentally ship it.
+            // This registry plugin has no configuration of its own. Clear an old copy
+            // so a rebuilt release cannot accidentally ship unrelated settings.
             var staleGameIni = Path.Combine(layout.PluginDirectory, "Config", "Game.ini");
             if (File.Exists(staleGameIni))
             {

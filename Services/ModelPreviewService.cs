@@ -128,8 +128,8 @@ public static class ModelPreviewService
     /// </summary>
     private const string DefaultHeadMesh = "/Game/Characters/LEGOfig/SK_LEGOfig_Minifig_Head.SK_LEGOfig_Minifig_Head";
 
-    // Keep unfinished face rendering out of the regular preview.
-    private static readonly bool IncludeFacePreview = false;
+    // Neutral face profiles are safe to show; expression playback remains intentionally disabled.
+    private const bool IncludeNeutralFacePreview = true;
 
     /// <summary>Project-specific data layered over a base character preview.</summary>
     public sealed class CharacterPreviewOptions
@@ -1390,7 +1390,7 @@ public static class ModelPreviewService
                 Console.WriteLine($"  {componentName}: hidden by Blueprint component state");
                 continue;
             }
-            if ((!IncludeFacePreview && IsFaceComponent(componentName, path)) ||
+            if ((!IncludeNeutralFacePreview && IsFaceComponent(componentName, path)) ||
                 options.HiddenComponents.Any(hidden => SameComponent(hidden, componentName)) ||
                 options.AdditionalParts.Any(extra => extra.ReplaceExisting && SameComponent(extra.ComponentName, componentName)))
             {
@@ -1428,7 +1428,7 @@ public static class ModelPreviewService
         foreach (var extra in options.AdditionalParts)
         {
             if (string.IsNullOrWhiteSpace(extra.MeshPath) ||
-                (!IncludeFacePreview && IsFaceComponent(extra.ComponentName, extra.MeshPath)) ||
+                (!IncludeNeutralFacePreview && IsFaceComponent(extra.ComponentName, extra.MeshPath)) ||
                 options.HiddenComponents.Any(hidden => SameComponent(hidden, extra.ComponentName)))
             {
                 continue;
@@ -1488,7 +1488,7 @@ public static class ModelPreviewService
             }
             // Imported meshes own their transform in the suit project. A generic viewer-only
             // nudge would make the preview disagree with the mesh that gets baked for the game.
-            var adjustment = !string.IsNullOrWhiteSpace(part.CustomMeshId)
+            var adjustment = !string.IsNullOrWhiteSpace(part.CustomMeshId) || IsFaceComponent(part.ComponentName, part.MeshPath)
                 ? null
                 : viewerPlacements
                     .FirstOrDefault(placement => SameComponent(placement.Component, part.ComponentName))
@@ -1517,6 +1517,16 @@ public static class ModelPreviewService
         bool allowPartMover = false,
         string? viewerLayoutKey = null)
     {
+        _faceMaterial = null;
+        _faceBaseline = null;
+        _faceMeshPath = null;
+        _faceAnimHome = null;
+        var faceProfiles = RuntimeFaceProfileService.Load();
+        if (faceProfiles.Count > 0)
+        {
+            Console.WriteLine($"  neutral face profiles: {faceProfiles.Count}");
+        }
+
         var options = new ExporterOptions
         {
             MeshFormat = EMeshFormat.Gltf2,
@@ -1579,6 +1589,10 @@ public static class ModelPreviewService
                 {
                     _faceMaterial = slotMat;
                     _faceMeshPath = part.MeshPath;
+                    _faceBaseline = faceProfiles.TryGet(slotMat?.GetPathName(), out var profile) ? profile : null;
+                    Console.WriteLine(_faceBaseline is null
+                        ? "    face neutral profile: material defaults"
+                        : $"    face neutral profile: {_faceBaseline.MaterialPath} ({_faceBaseline.Scalars.Count} scalar values)");
                 }
                 var resolved = ResolveSlot(provider, slotMat, previewDir, fallback);
                 if (disabledSlots.Contains(si))
@@ -1702,7 +1716,7 @@ public static class ModelPreviewService
         }
 
         var placed = AlignToHead(previewDir, models);
-        if (IncludeFacePreview)
+        if (IncludeNeutralFacePreview)
         {
             placed = PrepareFaceFeatures(provider, previewDir, placed);
         }
@@ -1852,6 +1866,8 @@ public static class ModelPreviewService
     /// skeleton (verified on Eye_L, Mouth_L, Lips_UL_3, Brows_M): position (X, Z, Y)/100,
     /// quaternion (x, z, y, w) - the axis swap alone, W is NOT negated - and scale (X, Z, Y).
     /// </summary>
+    private static readonly double[] FacePoseSamples = { 0.15, 0.3, 0.45, 0.6, 0.75, 0.9 };
+
     private static Dictionary<int, Dictionary<string, (Vector3 P, System.Numerics.Quaternion Q, Vector3 S)>>? LoadFacePose(
         DefaultFileProvider provider, string expression, string? character,
         out Dictionary<int, Dictionary<string, float>>? materialCurves)
@@ -2483,6 +2499,9 @@ public static class ModelPreviewService
     /// <summary>Face material of the current build, so feature bands can read their own params.</summary>
     private static UObject? _faceMaterial;
 
+    /// <summary>Captured neutral values for the current face material, when one is bundled.</summary>
+    private static RuntimeFaceProfileService.FaceProfile? _faceBaseline;
+
     /// <summary>
     /// World position (glTF space) of the head attach bone. Cooked meshes carry NO sockets - the
     /// Sockets array is empty on the body, head, face and full-figure meshes - so the component's
@@ -2606,7 +2625,7 @@ public static class ModelPreviewService
         }
 
         float Scalar(string suffix, float fallback) =>
-            FindScalarParam(material, curvePrefix + suffix, 0) ?? fallback;
+            FindFaceScalarParam(material, curvePrefix + suffix) ?? fallback;
         return new FaceUvLayer(
             rel,
             FindColourParam(material, materialPrefix + " Tint", 0) ?? defaultTint,
@@ -2651,7 +2670,7 @@ public static class ModelPreviewService
 
         var scalarPrefix = "EyeSpec" + side;
         float Scalar(string suffix, float fallback) =>
-            FindScalarParam(material, scalarPrefix + suffix, 0) ?? fallback;
+            FindFaceScalarParam(material, scalarPrefix + suffix) ?? fallback;
         return new FaceUvLayer(
             rel,
             FindColourParam(material, $"Eye {side} Spec Tint", 0)
@@ -2678,32 +2697,6 @@ public static class ModelPreviewService
     }
 
     /// <summary>
-    /// Expression applied to the face rig, and the character whose set to take it from.
-    ///
-    /// OFF by default: the ACL pose decodes correctly (59 bones, real position/rotation/scale), but
-    /// mapping it onto the exported glTF rig still renders wrong - the rotation handedness and the
-    /// scale axis order are inferred, not measured, so shells come out deformed. The unposed face
-    /// (band-classified geometry + game materials) is the good state; this stays opt-in until the
-    /// conversion is verified against the reference skeleton's own bone orientations.
-    /// </summary>
-    public static bool ApplyFacePose { get; set; }
-    /// <summary>Every expression name the game ships for the LEGOface rig.</summary>
-    public static readonly string[] FaceExpressions =
-    {
-        "Neutral", "Smiling", "Smirking", "Grinning", "Laughing", "Frowning", "Sullen", "Enraged",
-        "Grimacing", "Screaming", "Crying", "Dazed", "Sensing", "Yearning", "Open", "Closed",
-        // Character-specific gameplay poses - these resolve only for characters that ship them
-        // (Batman has Idle/Jump/Land in his own LEGOface folder).
-        "Idle", "Jump", "Land",
-    };
-
-    /// <summary>Points through each expression clip to sample, as fractions of its length.</summary>
-    public static readonly double[] FacePoseSamples = { 0.15, 0.3, 0.45, 0.6, 0.75, 0.9 };
-
-    public static string FaceExpression { get; set; } = "Neutral";
-    /// <summary>Override for whose expression set to use; null = detect from the face material.</summary>
-    public static string? FaceCharacter { get; set; }
-
     /// <summary>
     /// Face post-pass: split the merged face mesh into base/mouth/hidden groups (see
     /// GlbInspector.TryGroupFaceFeatures) and export the mouth print. The mouth is a separate shell
@@ -2730,7 +2723,7 @@ public static class ModelPreviewService
             // ordinary faces inherit the master mouth stencil, while their instance serialises a
             // dummy override. MouthHide, not that dummy, is the game-side opt-out.
             string? mouthRel = null;
-            var mouthHidden = (FindScalarParam(_faceMaterial, "MouthHide", 0) ?? 0f) > 0.5f;
+            var mouthHidden = (FindFaceScalarParam(_faceMaterial, "MouthHide") ?? 0f) > 0.5f;
             var faceMaterial = _faceMaterial;
             var mouthTex = FindFirstRealTexture(faceMaterial, "Mouth BC Prestine", "Mouth BC");
             if (!mouthHidden && mouthTex is null)
@@ -3037,45 +3030,13 @@ public static class ModelPreviewService
             }
             Console.WriteLine("  face bands (* = textured): " + string.Join(", ",
                 bands.Select(b => $"{b.Band}:{b.Tris}{(b.Tex is null ? "" : "*")}{(b.Tint is null ? "" : "t")}{(b.Mode == 2 ? "x" : b.Mode == 1 ? "+" : "")}")));
-            // Load every expression the game ships for this rig so the viewer can switch between
-            // them. Batman's own folder only has Neutral; the rest of the set lives under other
-            // characters, and they all pose the same shared SKEL_LEGOface rig.
-            // Whose expression set to use is read from the face material itself
-            // (…/Face/FACE_<Character>/MI_FACE_<Character>_…), so any character works without
-            // being named here. Falls back to the shared sets when they ship no own animations.
-            var character = FaceCharacter ?? CharacterFromFaceMaterial(_faceMaterial);
-            if (character is not null)
-            {
-                Console.WriteLine($"  face character: {character}");
-            }
-            _faceAnimHome = ResolveFaceAnimHome(provider, _bpCharacter)
-                            ?? ResolveFaceAnimHome(provider, character);
-            if (_faceAnimHome is not null)
-            {
-                Console.WriteLine($"  face anim home (from ABP_LEGOface_*): {_faceAnimHome}");
-            }
             Console.WriteLine($"  face mesh: {_faceMeshPath ?? "(unknown)"}"
                               + (_faceMeshPath?.Contains("Superhero", StringComparison.OrdinalIgnoreCase) == true
                                  ? "  -> SUPERHERO rig" : "  -> standard rig"));
-            var poses = new Dictionary<string, Dictionary<int, Dictionary<string, (Vector3, System.Numerics.Quaternion, Vector3)>>>();
-            var curves = new Dictionary<string, Dictionary<int, Dictionary<string, float>>>();
-            foreach (var expr in FaceExpressions)
-            {
-                var one = LoadFacePose(provider, expr, character, out var oneCurves);
-                if (one is not null)
-                {
-                    poses[expr] = one;
-                    if (oneCurves is not null)
-                    {
-                        curves[expr] = oneCurves;
-                    }
-                }
-            }
-            Console.WriteLine($"  face expressions available: {string.Join(", ", poses.Keys)}");
             placed[i] = placed[i] with
             {
                 FaceGroups = groups, MouthTex = mouthRel, Bands = bands,
-                Poses = poses, Curves = curves, MouthHidden = mouthHidden,
+                MouthHidden = mouthHidden,
             };
         }
         return placed;
@@ -3209,6 +3170,15 @@ public static class ModelPreviewService
         return FindScalarParam(material.GetOrDefault<FPackageIndex>("Parent")?.ResolvedObject?.Load(), name, depth + 1);
     }
 
+    private static float? FindFaceScalarParam(UObject? material, string name)
+    {
+        if (ReferenceEquals(material, _faceMaterial) && _faceBaseline?.TryGetScalar(name, out var value) == true)
+        {
+            return value;
+        }
+        return FindScalarParam(material, name, 0);
+    }
+
     private static Color? FindColourParam(UObject? material, string name, int depth)
     {
         if (material is null || depth > 5)
@@ -3260,16 +3230,15 @@ public static class ModelPreviewService
         // recovered from a near-exact Blender recreation) shades them from the shared PongeeFabric
         // texture set, not from any parameter on the instance. Bake those instead of the generic path.
         var fallbackColour = FindFallbackColour(fallback);
-        if (IsCapeMaterial(material))
+        if (IsCapeMaterial(material, fallback))
         {
-            var cape = ResolveCapeSlot(provider, material, previewDir);
-            return fallbackColour is null ? cape : cape with { Colour = fallbackColour };
+            return ResolveCapeSlot(provider, material, previewDir, fallback);
         }
 
         // The game's own BaseColour_SolidColour switch distinguishes a vector-coloured piece from
         // a real BC atlas. It applies to hair, hats, and other attachment parts, so use it instead
         // of guessing from an asset name or the presence of CT (which is a control map, not albedo).
-        if (ResolveSolidColourSlot(provider, material, previewDir) is { } solidColourSlot)
+        if (ResolveSolidColourSlot(provider, material, previewDir, fallback) is { } solidColourSlot)
         {
             return fallbackColour is null ? solidColourSlot : solidColourSlot with { Colour = fallbackColour };
         }
@@ -3339,15 +3308,12 @@ public static class ModelPreviewService
         {
             nrm2 = BakeNoisedNrm(provider, material, previewDir);
         }
-        var mmr = ExportMmrSlot(material, previewDir);
+        var mmr = ExportFallbackMmrSlot(provider, fallback, previewDir) ?? ExportMmrSlot(material, previewDir);
 
         // No texture anywhere: the material states its colour directly (capes do this). Keep the
         // tint when a texture exists as well; body TPAGEs usually leave it at white.
-        Color? colour = FindColourParam(material, "HeadLowerUnder Tint", 0)
-            ?? FindColourParam(material, "Base Color", 0)
-            ?? FindColourParam(material, "BaseColor", 0)
-            ?? FindColourParam(material, "Base Colour", 0)
-            ?? FindColourParam(material, "BaseColour", 0);
+        Color? colour = ResolveColour(fallback, material,
+            "HeadLowerUnder Tint", "Base Color", "BaseColor", "Base Colour", "BaseColour");
 
         if (tex is null && colour is not null)
         {
@@ -3356,14 +3322,19 @@ public static class ModelPreviewService
         return new SlotShading(tex, normal, mmr, fallbackColour ?? colour, Nrm2: nrm2);
     }
 
-    private static Color? FindFallbackColour(PreviewMaterialFallback? fallback)
+    private static Color? FindFallbackColour(PreviewMaterialFallback? fallback, params string[] names)
     {
         if (fallback is null)
         {
             return null;
         }
 
-        foreach (var name in new[] { "Base Color", "BaseColor", "Base Colour", "BaseColour", "HeadLowerUnder Tint" })
+        if (names.Length == 0)
+        {
+            names = ["Base Color", "BaseColor", "Base Colour", "BaseColour", "Cape Color", "CapeColor", "Cape Colour", "CapeColour", "HeadLowerUnder Tint"];
+        }
+
+        foreach (var name in names)
         {
             if (fallback.ColourOverrides.TryGetValue(name, out var colour))
             {
@@ -3372,6 +3343,12 @@ public static class ModelPreviewService
         }
 
         return null;
+    }
+
+    private static Color? ResolveColour(PreviewMaterialFallback? fallback, UObject material, params string[] names)
+    {
+        return FindFallbackColour(fallback, names)
+               ?? names.Select(name => FindColourParam(material, name, 0)).FirstOrDefault(colour => colour is not null);
     }
 
     private static UTexture2D? FindFallbackTexture(
@@ -3448,23 +3425,26 @@ public static class ModelPreviewService
     /// retain the surface definition. A material without this switch continues through the normal
     /// BC/BC_Pristine atlas resolver below.
     /// </summary>
-    private static SlotShading? ResolveSolidColourSlot(DefaultFileProvider provider, UObject material, string previewDir)
+    private static SlotShading? ResolveSolidColourSlot(
+        DefaultFileProvider provider,
+        UObject material,
+        string previewDir,
+        PreviewMaterialFallback? fallback)
     {
         if (FindStaticSwitch(material, "BaseColour_SolidColour") != true)
         {
             return null;
         }
 
-        var colour = FindColourParam(material, "Base Color", 0)
-                     ?? FindColourParam(material, "BaseColor", 0)
-                     ?? FindColourParam(material, "Base Colour", 0)
-                     ?? FindColourParam(material, "BaseColour", 0);
+        var colour = ResolveColour(fallback, material, "Base Color", "BaseColor", "Base Colour", "BaseColour");
         if (colour is null)
         {
             return null;
         }
 
-        var normal = ExportSlot(material, "DNRM_Pristine", previewDir, isNormal: true)
+        var normal = ExportFallbackSourceTexture(fallback, ["DNRM_Pristine", "DNRM", "NRM"], previewDir, isNormal: true)
+                     ?? ExportTexture(FindFallbackTexture(provider, fallback, "DNRM_Pristine", "DNRM", "NRM"), previewDir, isNormal: true)
+                     ?? ExportSlot(material, "DNRM_Pristine", previewDir, isNormal: true)
                      ?? ExportSlot(material, "DNRM", previewDir, isNormal: true);
         string? nrm2 = null;
         if (normal is null)
@@ -3475,7 +3455,7 @@ public static class ModelPreviewService
         {
             nrm2 = BakeNoisedNrm(provider, material, previewDir);
         }
-        var mmr = ExportMmrSlot(material, previewDir);
+        var mmr = ExportFallbackMmrSlot(provider, fallback, previewDir) ?? ExportMmrSlot(material, previewDir);
         var ao = ExportRaoAoSlot(material, previewDir);
         Console.WriteLine($"    solid Base Color: #{colour.Value.R:X2}{colour.Value.G:X2}{colour.Value.B:X2}"
                           + (ao is null ? " (no RAO)" : " + RAO.G AO")
@@ -3540,12 +3520,18 @@ public static class ModelPreviewService
     private static string MakeSafeName(string name) =>
         string.Concat(name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
 
-    /// <summary>True when the material's parent chain reaches the M_Cape_EoM cloth master.</summary>
-    private static bool IsCapeMaterial(UObject? material)
+    /// <summary>True when the instance or its parent chain belongs to the cape cloth family.</summary>
+    private static bool IsCapeMaterial(UObject? material, PreviewMaterialFallback? fallback)
     {
-        for (var depth = 0; material is not null && depth < 6; depth++)
+        if (!string.IsNullOrWhiteSpace(fallback?.ParentMaterialPath) &&
+            IsCapePath(fallback.ParentMaterialPath))
         {
-            if (material.Name.StartsWith("M_Cape_EoM", StringComparison.OrdinalIgnoreCase))
+            return true;
+        }
+
+        for (var depth = 0; material is not null && depth < 12; depth++)
+        {
+            if (IsCapePath(material.Name) || IsCapePath(material.GetPathName()))
             {
                 return true;
             }
@@ -3554,6 +3540,12 @@ public static class ModelPreviewService
         return false;
     }
 
+    private static bool IsCapePath(string value) =>
+        value.Contains("M_Cape_EoM", StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("/Cape/", StringComparison.OrdinalIgnoreCase) ||
+        value.StartsWith("Cape_", StringComparison.OrdinalIgnoreCase) ||
+        value.StartsWith("MI_Cape", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Shared cape fabric source textures - referenced by the stripped base graph directly.</summary>
     private const string CapeFabricDir = "/Game/Characters/Textures/Attachments/Cape/Batman_EOM/";
 
@@ -3561,9 +3553,21 @@ public static class ModelPreviewService
     /// Cape cloth shading: flat "Base Colour" from the instance (linear, usually near-black), plus the
     /// baked PongeeFabric weave maps (roughness/normal/alpha). See TryBakeCapeFabric for the recipe.
     /// </summary>
-    private static SlotShading ResolveCapeSlot(DefaultFileProvider provider, UObject material, string previewDir)
+    private static SlotShading ResolveCapeSlot(
+        DefaultFileProvider provider,
+        UObject material,
+        string previewDir,
+        PreviewMaterialFallback? fallback)
     {
-        var colour = FindColourParam(material, "Base Colour", 0) ?? FindColourParam(material, "BaseColour", 0);
+        var colour = ResolveColour(fallback, material,
+            "Base Colour", "BaseColour", "Base Color", "BaseColor",
+            "Cape Colour", "CapeColour", "Cape Color", "CapeColor");
+        var sourceBaseColour = ExportFallbackSourceTexture(fallback, BaseColourSlots, previewDir);
+        var overrideBaseColour = sourceBaseColour is null
+            ? FindFallbackTexture(provider, fallback, BaseColourSlots)
+            : null;
+        var baseColour = sourceBaseColour
+                         ?? ExportBaseColourTexture(overrideBaseColour ?? FindBaseColourTexture(material, 0), previewDir);
 
         const string ormRel = "textures/cape_fabric_orm.png";
         const string nrmRel = "textures/cape_fabric_nrm.png";
@@ -3591,11 +3595,14 @@ public static class ModelPreviewService
             }
         }
 
+        var overrideNormal = ExportFallbackSourceTexture(fallback, ["DNRM_Pristine", "DNRM", "NRM"], previewDir, isNormal: true)
+                             ?? ExportTexture(FindFallbackTexture(provider, fallback, "DNRM_Pristine", "DNRM", "NRM"), previewDir, isNormal: true);
+        var overrideMmr = ExportFallbackMmrSlot(provider, fallback, previewDir);
         return new SlotShading(
-            Texture: null,
-            Normal: baked && File.Exists(nrm) ? nrmRel : null,
-            Mmr: baked ? ormRel : null,
-            Colour: colour ?? Color.FromArgb(255, 4, 4, 5),
+            Texture: baseColour,
+            Normal: overrideNormal ?? (baked && File.Exists(nrm) ? nrmRel : null),
+            Mmr: overrideMmr ?? (baked ? ormRel : null),
+            Colour: colour ?? (baseColour is null ? Color.FromArgb(255, 4, 4, 5) : Color.White),
             Alpha: baked && File.Exists(alpha) ? alphaRel : null);
     }
 
@@ -3624,6 +3631,35 @@ public static class ModelPreviewService
     private static string? ExportMmrSlot(UObject? material, string previewDir)
     {
         var t = FindTextureParam(material, "MMR_Pristine", 0) ?? FindTextureParam(material, "MMR", 0);
+        return ExportMmrTexture(t, previewDir);
+    }
+
+    private static string? ExportFallbackMmrSlot(
+        DefaultFileProvider provider,
+        PreviewMaterialFallback? fallback,
+        string previewDir)
+    {
+        if (fallback is not null)
+        {
+            foreach (var name in new[] { "MMR_Pristine", "MMR" })
+            {
+                if (fallback.SourceTextureOverrides.TryGetValue(name, out var source) && File.Exists(source))
+                {
+                    var rel = "textures/" + MakeSafeName(Path.GetFileNameWithoutExtension(source)) + "_source_orm.png";
+                    var dest = Path.Combine(previewDir, rel.Replace('/', Path.DirectorySeparatorChar));
+                    if (File.Exists(dest) || TextureDecodeService.TryConvertMmrPngToOrm(source, dest))
+                    {
+                        Console.WriteLine($"    generated source MMR: {Path.GetFileName(source)} ({name})");
+                        return rel;
+                    }
+                }
+            }
+        }
+        return ExportMmrTexture(FindFallbackTexture(provider, fallback, "MMR_Pristine", "MMR"), previewDir);
+    }
+
+    private static string? ExportMmrTexture(UTexture2D? t, string previewDir)
+    {
         if (t is null) return null;
         var safe = string.Concat(t.Name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
         var rel = "textures/" + safe + "_orm.png";
@@ -3761,6 +3797,9 @@ public static class ModelPreviewService
     /// </summary>
     private static List<PlacedModel> AlignToHead(string dir, IReadOnlyList<(string File, PreviewPart Part, List<SlotShading> Slots)> models)
     {
+        // Face prints sit nearly on top of the head. Apply this after the socket/component
+        // transform so it stays a consistent frontward clearance for every character.
+        const float facePostSocketClearanceX = 0.005f;
         var head = models.FirstOrDefault(m => m.Part.IsHeadPiece);
         (Vector3 Min, Vector3 Max)? headB3 = null;
         if (head.File is not null && GlbInspector.Bounds3(Path.Combine(dir, head.File)) is { } rawHeadBounds)
@@ -3782,17 +3821,27 @@ public static class ModelPreviewService
             var isFace = part.MeshPath.Contains("LEGOface", StringComparison.OrdinalIgnoreCase);
             var isHead = part.IsHeadPiece;
             var attachmentOffset = part.AttachmentOffset ?? Vector3.Zero;
-            PlacedModel Place(Vector3 offset) => new(file, offset, slots, isBody, isFace, isHead)
+            PlacedModel Place(Vector3 offset)
             {
-                Transform = part.Transform,
-                UsesRuntimeSocketCalibration = part.UsesRuntimeSocketCalibration,
-                ComponentName = part.ComponentName,
-                Adjustment = part.Adjustment,
-                CustomMeshId = part.CustomMeshId,
-                CustomMeshScale = part.SourceObjScale,
-                CustomMeshOffset = part.SourceObjOffset,
-                CustomMeshRotation = part.SourceObjRotation,
-            };
+                // `offset` is applied by the viewer after `Transform`, which already contains
+                // the captured attachment socket. Keep the face nudge in that final layer.
+                if (isFace)
+                {
+                    offset.X += facePostSocketClearanceX;
+                }
+
+                return new(file, offset, slots, isBody, isFace, isHead)
+                {
+                    Transform = part.Transform,
+                    UsesRuntimeSocketCalibration = part.UsesRuntimeSocketCalibration,
+                    ComponentName = part.ComponentName,
+                    Adjustment = part.Adjustment,
+                    CustomMeshId = part.CustomMeshId,
+                    CustomMeshScale = part.SourceObjScale,
+                    CustomMeshOffset = part.SourceObjOffset,
+                    CustomMeshRotation = part.SourceObjRotation,
+                };
+            }
             if (part.UsesRuntimeSocketCalibration || !part.AttachToHead || headBase is null)
             {
                 result.Add(Place(attachmentOffset));
@@ -3846,7 +3895,9 @@ public static class ModelPreviewService
             var dx = 0f;
             if (part.MeshPath.Contains("LEGOface", StringComparison.OrdinalIgnoreCase) && headB3 is not null)
             {
-                dx = headB3.Value.Max.X + 0.002f - b3.Value.Max.X;
+                // The stable face overlay needs a further 0.01m clearance beyond the original
+                // shell nudge; it keeps every neutral print in front of the head at close range.
+                dx = headB3.Value.Max.X + 0.016f - b3.Value.Max.X;
                 // The face does NOT sit flush with the head base. Calibrated against the aligned
                 // community Blender scene by anchoring the mouth print itself (it must land 18.6% of
                 // head height above the head base): our exported SK_LEGOface glb includes every
@@ -3902,7 +3953,7 @@ public static class ModelPreviewService
                 : $"\"pos\":[{F(m.Transform.Translation.X)},{F(m.Transform.Translation.Y)},{F(m.Transform.Translation.Z)}]," +
                   $"\"rot\":[{F(m.Transform.Rotation.X)},{F(m.Transform.Rotation.Y)},{F(m.Transform.Rotation.Z)},{F(m.Transform.Rotation.W)}]," +
                   $"\"scale\":[{F(m.Transform.Scale.X)},{F(m.Transform.Scale.Y)},{F(m.Transform.Scale.Z)}]";
-            var adjustment = m.Adjustment is null
+            var adjustment = m.IsFace || m.Adjustment is null
                 ? "[0,0,0]"
                 : $"[{F(m.Adjustment.OffsetX)},{F(m.Adjustment.OffsetY)},{F(m.Adjustment.OffsetZ)}]";
             var isCustomStaticMesh = !string.IsNullOrWhiteSpace(m.CustomMeshId);
@@ -4099,9 +4150,7 @@ function setPartUv(component,channel){
   return applied>0;
 }
 function buildPartMover(){
-  const allParts=[...partStates.values()];
-  if(allParts.some(state=>state.custom))return;
-  const parts=allParts;if(!parts.length)return;
+  const parts=[...partStates.values()].filter(state=>!state.custom&&!state.face);if(!parts.length)return;
   const panel=document.createElement('div');panel.id='partmove';
    const label=document.createElement('label');label.textContent='Part';panel.appendChild(label);
   const select=document.createElement('select');
@@ -4135,7 +4184,7 @@ function buildPartMover(){
      const label=save.textContent;save.textContent='Saved';setTimeout(()=>save.textContent=label,850);};
   actions.appendChild(save);panel.appendChild(actions);
    function sync(){const state=partStates.get(select.value);if(!state)return;
-    label.textContent='Part';
+    label.textContent=state.face?'Face placement':'Part';
      inputs.forEach((input,index)=>{input.value=(state.adjustment[index]||0).toFixed(4);input.disabled=!state.movable;});
     save.title='Save this viewer-only alignment';
      reset.disabled=!state.movable;
@@ -4195,6 +4244,8 @@ function buildCustomMeshMover(){
   });
   window.addEventListener('pagehide',()=>{const state=partStates.get(select.value);if(state)postTransform('save-custom-mesh-draft',state);},{once:true});
   select.onchange=sync;sync();document.body.appendChild(panel);
+  const partPanel=document.getElementById('partmove');
+  if(partPanel)partPanel.style.top=(panel.offsetHeight+26)+'px';
   function applyCustomMeshPreview(state){
     if(!state.customGeometry||!state.authored)return;
     const number=key=>Number(inputs[key].value)||0;
@@ -4461,8 +4512,8 @@ function dress(g,info){
       // the printed features remain over the head piece. The shell hugs the head surface, so bias
       // the depth test toward the camera (the game's PixelDepthOffset equivalent).
       if(s.cut){m.alphaTest=0.5;m.polygonOffset=true;m.polygonOffsetFactor=-2;m.polygonOffsetUnits=-2;}
-      // Cloth (the cape) is authored single-sided; without double-siding you see through to its
-      // inside faces. Cheap to always enable for a static preview.
+      // CUE4Parse's converted face zones do not retain a consistent winding order. Keep them
+      // two-sided, but use the face-specific depth rules below so the layers stay stable.
       m.side=THREE.DoubleSide;
       // The body mesh carries a COLOR_0 vertex-colour set (a mask/AO), which GLTFLoader turns into
       // vertexColors=true. That multiplies the albedo - if those colours are dark the whole surface
@@ -4490,6 +4541,8 @@ function dress(g,info){
         const m2=new THREE.MeshStandardMaterial({color:0xffffff,
           roughness:(rough===null||rough===undefined)?0.3:rough,
           metalness:(metal===null||metal===undefined)?0:metal});
+        // Some exported face-zone triangles are reverse-wound after the Unreal-to-glTF conversion.
+        // They must stay visible from both sides; depth writes are controlled per layer below.
         m2.side=THREE.DoubleSide;
         // r128 requires a material to OPT IN to skeletal deformation. GLTFLoader sets this on the
         // materials it creates; ours are built from scratch, so without it the face renders in BIND
@@ -4502,7 +4555,7 @@ function dress(g,info){
           // M_LEGOface is BLEND_Masked in the cooked game material. Keep a depth-writing cutout
           // rather than alpha-blending the feature shell into the head; Unreal's default masked
           // clip value is 0.333.
-          m2.transparent=false;m2.alphaTest=0.333;m2.depthWrite=true;
+          m2.transparent=false;m2.alphaTest=0.333;
           // The rest of the feature's material. Without these the prints render as flat decals:
           // the normal map is what makes printed ink sit proud of the plastic, and the MMR is what
           // stops every zone sharing one uniform gloss.
@@ -4535,10 +4588,12 @@ function dress(g,info){
         // D28856 nose/mouth print is so close to skin it vanishes. Converting matches the game -
         // near-black brows and a print that actually reads against the head.
         if(tint)m2.color=new THREE.Color(tint).convertSRGBToLinear();
-        // Layered shells sit on the same surface; bias the ones above the base skin forward.
-        // The master orders these coincident shells with a Pixel Depth Offset; use the game's own
-        // values rather than a flat guess, so eyelids sit over the eye and the eye back sits behind.
-        if(band!==8){m2.polygonOffset=true;m2.polygonOffsetFactor=-1-pdo*4;m2.polygonOffsetUnits=-1-pdo*4;}
+        // Keep the full skin shell in the depth buffer. Every printed feature is a masked overlay:
+        // it should test just in front of the skin but never write depth over another feature.
+        // Three.js polygon-offset factors depend on camera angle, so they are not a replacement for
+        // Unreal's PixelDepthOffset on these nearly coincident face shells.
+        m2.depthTest=true;m2.depthWrite=band===8;
+        if(band!==8){m2.polygonOffset=true;m2.polygonOffsetFactor=0;m2.polygonOffsetUnits=-2;}
         // Setting .skinning alone is not enough: the flag feeds SHADER COMPILATION, and a plain
         // property assignment does not mark the program dirty. Without needsUpdate the material
         // keeps its unskinned program and the face stays in bind pose.
@@ -4552,8 +4607,7 @@ function dress(g,info){
       // Fires after this mesh's first real draw, which is the moment the material swap becomes
       // meaningful. Works even where requestAnimationFrame never runs.
       o.onAfterRender=function(){faceDrawn=true;};
-      say(info.file+': face bands '+info.fbands.filter(b=>b[2]).length+'/'+info.fbands.length+' textured');
-      buildBandInspector();
+      say(info.file+': neutral face layers '+info.fbands.filter(b=>b[2]).length+'/'+info.fbands.length+' textured');
     }
   });
 }
@@ -4771,7 +4825,7 @@ Promise.all(models.map(load)).then(loaded=>{
     if(x.m.part&&!x.m.part.startsWith('__')&&(x.m.move||availableUvs.length)){
       const defaultUv=availableUvs.indexOf(x.m.uvdefault)>=0?x.m.uvdefault:availableUvs[0];
       const selectedUv=availableUvs.indexOf(x.m.uv)>=0?x.m.uv:defaultUv;
-      partStates.set(x.m.part,{component:x.m.part,scene:x.scene,basePosition:basePosition,baseScale:x.scene.scale.clone(),custom:!!x.m.custom,
+      partStates.set(x.m.part,{component:x.m.part,scene:x.scene,basePosition:basePosition,baseScale:x.scene.scale.clone(),custom:!!x.m.custom,face:!!x.m.isface,
         customId:x.m.mesh&&x.m.mesh.id||null,authored:x.m.mesh||null,scale:1,
         movable:!!x.m.move,adjustment:[adjustment[0]||0,adjustment[1]||0,adjustment[2]||0],
         uvs:availableUvs,defaultUv:defaultUv,uvChannel:selectedUv});

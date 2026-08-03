@@ -14,6 +14,7 @@ public sealed class EquipmentDependencyProfile
     public EquipmentSupportKind Support { get; init; }
     public string Architecture { get; init; } = "Standard gadget";
     public string Summary { get; init; } = "";
+    public string? RequiredGameplayFamily { get; init; }
     public IReadOnlyList<string> AbilitySets { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> ExtraGrantedAbilities { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> DefinitionAbilities { get; init; } = Array.Empty<string>();
@@ -32,6 +33,7 @@ public sealed class EquipmentDependencyProfile
 public static class EquipmentDependencyService
 {
     private sealed record ControllerDependencies(
+        string RequiredGameplayFamily,
         string AbilitySet,
         string[] GrantedAbilities,
         string[] DefinitionAbilities,
@@ -41,6 +43,7 @@ public static class EquipmentDependencyService
         new(StringComparer.OrdinalIgnoreCase)
         {
             ["Drone"] = new(
+                "Batgirl",
                 "/Game/Characters/Equipment/Drone/Abilities/AS_DroneUser",
                 new[]
                 {
@@ -60,6 +63,7 @@ public static class EquipmentDependencyService
                 },
                 new[] { "BP_Drone_Inst" }),
             ["RemoteKitten"] = new(
+                "Catwoman",
                 "/Game/Characters/Equipment/RemoteKitten/AS_RemoteKittenUser",
                 new[]
                 {
@@ -92,10 +96,11 @@ public static class EquipmentDependencyService
 
         if (controller is not null)
         {
+            var currentFamily = string.IsNullOrWhiteSpace(donorFamily) ? "no gameplay donor" : donorFamily;
             return Build(
                 EquipmentSupportKind.Controller,
                 controller,
-                $"This is a remote controller, not a normal held gadget. Packaging will attach its complete {AssetName(controller.AbilitySet)} controller set as well as its equipment definition and animation sets.");
+                $"This is a remote controller, not a normal held gadget. It is confirmed to work only with a {controller.RequiredGameplayFamily} gameplay donor; the current donor is {currentFamily}. Packaging can stage its files, but the remote pawn will not operate on another family.");
         }
 
         if (equipment.NativeFamilies.Count == 0)
@@ -140,6 +145,7 @@ public static class EquipmentDependencyService
             Support = support,
             Architecture = controller is null ? "Standard gadget" : "Remote controller",
             Summary = summary,
+            RequiredGameplayFamily = controller?.RequiredGameplayFamily,
             AbilitySets = controller is null ? Array.Empty<string>() : new[] { controller.AbilitySet },
             ExtraGrantedAbilities = controller?.GrantedAbilities ?? Array.Empty<string>(),
             DefinitionAbilities = controller?.DefinitionAbilities ?? Array.Empty<string>(),

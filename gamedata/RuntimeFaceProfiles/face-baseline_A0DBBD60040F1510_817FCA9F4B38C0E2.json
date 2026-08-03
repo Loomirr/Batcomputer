@@ -1,0 +1,2553 @@
+{
+  "schema_version": 1,
+  "capture_kind": "face-baseline",
+  "captured_utc": "2026-08-02T18:35:59.038Z",
+  "capture_source": "manual-hotkey",
+  "game_build": "unavailable",
+  "capture_status": "ok",
+  "rig_hash": "A0DBBD60040F1510",
+  "face_hash": "817FCA9F4B38C0E2",
+  "capture_summary": {
+    "component_count": 85,
+    "face_related_component_count": 5,
+    "face_material_slot_count": 2,
+    "observed_asset_count": 32
+  },
+  "pawn": {
+    "object_path": "BP_RobinDickGrayson_New52_Playable_C /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741",
+    "class_path": "BlueprintGeneratedClass /Game/Characters/Minifig/Robin_DickGrayson/BP_RobinDickGrayson_New52_Playable.BP_RobinDickGrayson_New52_Playable_C",
+    "pawn_tag": "unavailable"
+  },
+  "rig": {
+    "body_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CharacterMesh0",
+    "skeletal_mesh": "SkeletalMesh /Game/Characters/LEGOfig/SK_LEGOfig_Smallfig.SK_LEGOfig_Smallfig",
+    "skeleton": "Skeleton /Game/Characters/LEGOfig/SKEL_LEGOfig.SKEL_LEGOfig",
+    "rig_key": "SkeletalMesh /Game/Characters/LEGOfig/SK_LEGOfig_Smallfig.SK_LEGOfig_Smallfig|Skeleton /Game/Characters/LEGOfig/SKEL_LEGOfig.SKEL_LEGOfig"
+  },
+  "context": {
+    "requested_label": "Neutral",
+    "capture_phase": "rest",
+    "level": "Level /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel"
+  },
+  "body_animation": {
+    "animation_mode": "AnimationBlueprint",
+    "anim_class": "AnimBlueprintGeneratedClass /Game/Animation/LEGOfig/ABP_LEGOFig.ABP_LEGOFig_C",
+    "anim_instance": "ABP_LEGOFig_C /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CharacterMesh0.ABP_LEGOFig_C_2147439740",
+    "active_montage": "",
+    "face_curve_capture_status": "not-yet-enumerated"
+  },
+  "face_component_paths": [
+    "InfluenceAgentComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.PlayerHeadingInfluence",
+    "SceneComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.HeadTargetPoint",
+    "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.Face",
+    "StaticMeshComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.Head",
+    "WubHeadListenerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.WubHeadListener"
+  ],
+  "observed_assets": [
+    {
+      "path": "ABP_LEGOFig_C /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CharacterMesh0.ABP_LEGOFig_C_2147439740",
+      "observed_source": "animation"
+    },
+    {
+      "path": "AnimBlueprintGeneratedClass /Game/Animation/LEGOfig/ABP_LEGOFig.ABP_LEGOFig_C",
+      "observed_source": "animation"
+    },
+    {
+      "path": "SkeletalMesh /Game/Characters/Attachments/Cape/SK_CAPE_Short_Glide.SK_CAPE_Short_Glide",
+      "observed_source": "component"
+    },
+    {
+      "path": "SkeletalMesh /Game/Characters/Attachments/Cape/VeryShort/SK_CAPE_VeryShort.SK_CAPE_VeryShort",
+      "observed_source": "component"
+    },
+    {
+      "path": "SkeletalMesh /Game/Characters/Attachments/LEGOface/SK_LEGOface_Superhero.SK_LEGOface_Superhero",
+      "observed_source": "component"
+    },
+    {
+      "path": "SkeletalMesh /Game/Characters/LEGOfig/SK_LEGOfig_Smallfig.SK_LEGOfig_Smallfig",
+      "observed_source": "component"
+    },
+    {
+      "path": "Skeleton /Game/Characters/LEGOfig/SKEL_LEGOfig.SKEL_LEGOfig",
+      "observed_source": "component"
+    },
+    {
+      "path": "StaticMesh /Game/Characters/Attachments/Hair/ShortTousledSidePart/SM_HAIR_ShortTousledSidePart.SM_HAIR_ShortTousledSidePart",
+      "observed_source": "component"
+    },
+    {
+      "path": "StaticMesh /Game/Characters/LEGOfig/SM_LEGOFig_DistanceField_Mesh.SM_LEGOFig_DistanceField_Mesh",
+      "observed_source": "component"
+    },
+    {
+      "path": "StaticMesh /Game/Characters/LEGOfig/SM_LEGOFig_Minifig_HipPegs.SM_LEGOFig_Minifig_HipPegs",
+      "observed_source": "component"
+    },
+    {
+      "path": "StaticMesh /Game/Characters/LEGOfig/SM_LEGOFig_Minifig_NeckPeg.SM_LEGOFig_Minifig_NeckPeg",
+      "observed_source": "component"
+    },
+    {
+      "path": "Material /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial",
+      "observed_source": "material"
+    },
+    {
+      "path": "Material /Game/Characters/Materials/M_Masters/EoM/M_Cape_EoM.M_Cape_EoM",
+      "observed_source": "material"
+    },
+    {
+      "path": "Material /Game/Characters/Materials/M_Masters/EoM/M_Char_EoM_Master.M_Char_EoM_Master",
+      "observed_source": "material"
+    },
+    {
+      "path": "Material /Game/Characters/Materials/M_Masters/LEGOface/M_LEGOface.M_LEGOface",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Attachments/Cape/VeryShort/MI_CAPE_VeryShort_Black_LOD0.MI_CAPE_VeryShort_Black_LOD0",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Attachments/Cape/VeryShort/MI_CAPE_VeryShort_Black_LOD1.MI_CAPE_VeryShort_Black_LOD1",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Attachments/Cape/VeryShortGlide/MI_CAPE_VeryShort_Black_Glide_LOD0.MI_CAPE_VeryShort_Black_Glide_LOD0",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Attachments/Cape/VeryShortGlide/MI_CAPE_VeryShort_Black_Glide_LOD1.MI_CAPE_VeryShort_Black_Glide_LOD1",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Attachments/Face/FACE_Robin/MI_FACE_Robin.MI_FACE_Robin",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Attachments/Face/FACE_Robin/MI_FACE_Robin_New52.MI_FACE_Robin_New52",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Attachments/Hair/ShortTousledSidePart/MI_HAIR_ShortTousledSidePart.MI_HAIR_ShortTousledSidePart",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/GlobalController/MI_Cape_EoM_GlobalController.MI_Cape_EoM_GlobalController",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/GlobalController/MI_Char_EoM_GlobalController.MI_Char_EoM_GlobalController",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Attatchment_EoM_Controller.MI_Attatchment_EoM_Controller",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Cape_LOD0_Controller.MI_Cape_LOD0_Controller",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Cape_LOD1_Controller.MI_Cape_LOD1_Controller",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Smallfig_EoM_Controller.MI_Smallfig_EoM_Controller",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Materials/M_Masters/LEGOface/MI_LEGOface-Defaults.MI_LEGOface-Defaults",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Materials/M_Masters/LEGOface/MI_LEGOface-Defaults_Superhero.MI_LEGOface-Defaults_Superhero",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Minifig/Robin_DickGrayson/Material/MI_Robin_New52.MI_Robin_New52",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.Face.MID_MI_FACE_Robin_New52_2147439717",
+      "observed_source": "material"
+    }
+  ],
+  "components": [
+    {
+      "object": "AbilityComboTreeComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.AbilityComboTreeComponent",
+      "name": "AbilityComboTreeComponent",
+      "class": "Class /Script/AbilityComboTree.AbilityComboTreeComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "ActorMarkerPositionComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.ActorMarkerPosition",
+      "name": "ActorMarkerPosition",
+      "class": "Class /Script/TtHUDMarkers.ActorMarkerPositionComponent",
+      "parent_component": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CollisionCylinder",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=-0.000000,Y=-0.000000,Z=120.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "True",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "BP_ActorComponent_AdditionalCapeCollision_C /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.BP_ActorComponent_AdditionalCapeCollision",
+      "name": "BP_ActorComponent_AdditionalCapeCollision",
+      "class": "BlueprintGeneratedClass /Game/Animation/Blueprints/BP_ActorComponent_AdditionalCapeCollision.BP_ActorComponent_AdditionalCapeCollision_C",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "BP_ActorComponent_FirstPersonLookAt_C /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.BP_ActorComponent_FirstPersonLookAt",
+      "name": "BP_ActorComponent_FirstPersonLookAt",
+      "class": "BlueprintGeneratedClass /Game/Animation/Blueprints/BP_ActorComponent_FirstPersonLookAt.BP_ActorComponent_FirstPersonLookAt_C",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "True",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "BP_ActorComponent_WindSource_C /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.BP_ActorComponent_WindSource",
+      "name": "BP_ActorComponent_WindSource",
+      "class": "BlueprintGeneratedClass /Game/Animation/Blueprints/BP_ActorComponent_WindSource.BP_ActorComponent_WindSource_C",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "BP_ActorComponent_WubOutputLevelGetterHolder_C /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.BP_ActorComponent_WubOutputLevelGetterHolder_C_2147438863",
+      "name": "BP_ActorComponent_WubOutputLevelGetterHolder_C_2147438863",
+      "class": "BlueprintGeneratedClass /Game/Animation/Blueprints/BP_ActorComponent_WubOutputLevelGetterHolder.BP_ActorComponent_WubOutputLevelGetterHolder_C",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "BigTakeHitComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.BigTakeHitComponent",
+      "name": "BigTakeHitComponent",
+      "class": "Class /Script/MeleeCombat.BigTakeHitComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "BoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.Box",
+      "name": "Box",
+      "class": "Class /Script/Engine.BoxComponent",
+      "parent_component": "InfluenceAgentComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.PlayerHeadingInfluence",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=140.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "True",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "CameraObjectFaderComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CameraObjectFader",
+      "name": "CameraObjectFader",
+      "class": "Class /Script/TtCamera.CameraObjectFaderComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CollisionCylinder",
+      "name": "CollisionCylinder",
+      "class": "Class /Script/Engine.CapsuleComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=-5063.962451,Y=-10947.001053,Z=2020.533109)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=116.728144,Roll=-0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "True",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "CharacterLookAtComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.Look At Component",
+      "name": "Look At Component",
+      "class": "Class /Script/TtUtilities.CharacterLookAtComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "CombatComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CombatComponent",
+      "name": "CombatComponent",
+      "class": "Class /Script/MeleeCombat.CombatComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "ContextEffectsComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.ContextEffects",
+      "name": "ContextEffects",
+      "class": "Class /Script/TtFx.ContextEffectsComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "CurrentThreatComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CurrentThreatComponent",
+      "name": "CurrentThreatComponent",
+      "class": "Class /Script/TtThreatAndAggro.CurrentThreatComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerAudioAbilityTagWatcherComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.DinnerAudioAbilityTagWatcher",
+      "name": "DinnerAudioAbilityTagWatcher",
+      "class": "Class /Script/Dinner.DinnerAudioAbilityTagWatcherComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerCharacterIdentityComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.IdentityComponent",
+      "name": "IdentityComponent",
+      "class": "Class /Script/Dinner.DinnerCharacterIdentityComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerCharacterMovementComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CharMoveComp",
+      "name": "CharMoveComp",
+      "class": "Class /Script/Dinner.DinnerCharacterMovementComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "True",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerCharacterTargetableComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.Targetable",
+      "name": "Targetable",
+      "class": "Class /Script/Dinner.DinnerCharacterTargetableComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "True",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerInputComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.PawnInputComponent0",
+      "name": "PawnInputComponent0",
+      "class": "Class /Script/Dinner.DinnerInputComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerLocationAttachmentManagerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.LocationAttachmentManager",
+      "name": "LocationAttachmentManager",
+      "class": "Class /Script/Dinner.DinnerLocationAttachmentManagerComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerMenuActionsComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.DinnerMenuActions",
+      "name": "DinnerMenuActions",
+      "class": "Class /Script/Dinner.DinnerMenuActionsComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerPegArticulationVisibilityComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.DinnerPegArticulationVisibility",
+      "name": "DinnerPegArticulationVisibility",
+      "class": "Class /Script/Dinner.DinnerPegArticulationVisibilityComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerUpgradesComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.Upgrades Component",
+      "name": "Upgrades Component",
+      "class": "Class /Script/Dinner.DinnerUpgradesComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "FieldSystemComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.FieldSystemComponent_2147439426",
+      "name": "FieldSystemComponent_2147439426",
+      "class": "Class /Script/FieldSystemEngine.FieldSystemComponent",
+      "parent_component": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CollisionCylinder",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "GameplayEventToDialogueComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.GameplayEventToDialogue",
+      "name": "GameplayEventToDialogue",
+      "class": "Class /Script/Dinner.GameplayEventToDialogueComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "GliderCharacterComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.GliderCharacter",
+      "name": "GliderCharacter",
+      "class": "Class /Script/GlidingRuntime.GliderCharacterComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "HighContrastActorComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.HighContrastActor",
+      "name": "HighContrastActor",
+      "class": "Class /Script/TtAccessibility.HighContrastActorComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "HitBoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.LeftFootHitBoxComponent",
+      "name": "LeftFootHitBoxComponent",
+      "class": "Class /Script/MeleeCombat.HitBoxComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "HitBoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.LeftHandHitboxComponent",
+      "name": "LeftHandHitboxComponent",
+      "class": "Class /Script/MeleeCombat.HitBoxComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "HitBoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.RightFootHitBoxComponent",
+      "name": "RightFootHitBoxComponent",
+      "class": "Class /Script/MeleeCombat.HitBoxComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "HitBoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.RightHandHitboxComponent",
+      "name": "RightHandHitboxComponent",
+      "class": "Class /Script/MeleeCombat.HitBoxComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=-0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "HitBoxManagerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.HitBoxManager",
+      "name": "HitBoxManager",
+      "class": "Class /Script/MeleeCombat.HitBoxManagerComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "InfluenceAgentComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.PlayerHeadingInfluence",
+      "name": "PlayerHeadingInfluence",
+      "class": "Class /Script/TtInfluenceMap.InfluenceAgentComponent",
+      "parent_component": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CollisionCylinder",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": true,
+      "materials": [
+      ]
+    },
+    {
+      "object": "InfluenceAgentComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.TakeDownInfluenceComponent",
+      "name": "TakeDownInfluenceComponent",
+      "class": "Class /Script/TtInfluenceMap.InfluenceAgentComponent",
+      "parent_component": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CollisionCylinder",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "InfluencePollingComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.InfluencePolling",
+      "name": "InfluencePolling",
+      "class": "Class /Script/TtInfluenceMap.InfluencePollingComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "ManageDynamicMaterialComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.Manage Dynamic Material Component",
+      "name": "Manage Dynamic Material Component",
+      "class": "Class /Script/Dinner.ManageDynamicMaterialComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "MassAgentComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.MassAgent",
+      "name": "MassAgent",
+      "class": "Class /Script/MassActors.MassAgentComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "MotionWarpingComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.MotionWarping",
+      "name": "MotionWarping",
+      "class": "Class /Script/MotionWarping.MotionWarpingComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "NavTrailComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.NavTrailComponent",
+      "name": "NavTrailComponent",
+      "class": "Class /Script/TtPathFollowerBreadcrumbs.NavTrailComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "NiagaraComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.BreathVfx",
+      "name": "BreathVfx",
+      "class": "Class /Script/Niagara.NiagaraComponent",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CharacterMesh0",
+      "parent_socket": "MouthSocket",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=-90.000000,Roll=-0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "NiagaraComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.NiagaraComponent_2147438979",
+      "name": "NiagaraComponent_2147438979",
+      "class": "Class /Script/Niagara.NiagaraComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=-5093.069407,Y=-10933.667444,Z=2021.383109)",
+      "relative_rotation_ue": "(Pitch=-90.000000,Yaw=-63.271856,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.200000,Y=1.200000,Z=1.200000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "NiagaraComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.NiagaraComponent_2147438982",
+      "name": "NiagaraComponent_2147438982",
+      "class": "Class /Script/Niagara.NiagaraComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=-5050.597017,Y=-10929.074392,Z=2021.383109)",
+      "relative_rotation_ue": "(Pitch=-90.000000,Yaw=-63.271856,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.200000,Y=1.200000,Z=1.200000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "PingableActorComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.PingableActor",
+      "name": "PingableActor",
+      "class": "Class /Script/TtPingPlugin.PingableActorComponent",
+      "parent_component": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CollisionCylinder",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "PossessionReroutingPawnComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.PossessionRerouting",
+      "name": "PossessionRerouting",
+      "class": "Class /Script/TtPossessionRerouting.PossessionReroutingPawnComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "PurchasingPawnComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.PurchasingComponent",
+      "name": "PurchasingComponent",
+      "class": "Class /Script/TtPurchasableActors.PurchasingPawnComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "RiderComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.RiderComponent",
+      "name": "RiderComponent",
+      "class": "Class /Script/TtRideables.RiderComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SafePositionComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.SafePositionComponent",
+      "name": "SafePositionComponent",
+      "class": "Class /Script/SafePosition.SafePositionComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SceneComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CharacterLookAtTarget",
+      "name": "CharacterLookAtTarget",
+      "class": "Class /Script/Engine.SceneComponent",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CharacterMesh0",
+      "parent_socket": "VFX_Face_Socket",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SceneComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.HeadTargetPoint",
+      "name": "HeadTargetPoint",
+      "class": "Class /Script/Engine.SceneComponent",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CharacterMesh0",
+      "parent_socket": "Head_Socket",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=-0.000000,Z=17.907125)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": true,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SceneComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.Tetherable.ExpectedTetherTargetIconLocator",
+      "name": "ExpectedTetherTargetIconLocator",
+      "class": "Class /Script/Engine.SceneComponent",
+      "parent_component": "TetherableComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.Tetherable",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=50.000000,Y=-0.000000,Z=-0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SceneComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.TorsoTargetPont",
+      "name": "TorsoTargetPont",
+      "class": "Class /Script/Engine.SceneComponent",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CharacterMesh0",
+      "parent_socket": "Chest_Socket",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.Cape",
+      "name": "Cape",
+      "class": "Class /Script/AnimationBudgetAllocator.SkeletalMeshComponentBudgeted",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CharacterMesh0",
+      "parent_socket": "Root",
+      "skeletal_mesh": "SkeletalMesh /Game/Characters/Attachments/Cape/VeryShort/SK_CAPE_VeryShort.SK_CAPE_VeryShort",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "True",
+      "materials_status": "ok",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+        {
+          "slot_index": 0,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceConstant /Game/Characters/Attachments/Cape/VeryShort/MI_CAPE_VeryShort_Black_LOD0.MI_CAPE_VeryShort_Black_LOD0",
+            "class": "Class /Script/Engine.MaterialInstanceConstant",
+            "parent_chain": [
+              "MaterialInstanceConstant /Game/Characters/Attachments/Cape/VeryShort/MI_CAPE_VeryShort_Black_LOD0.MI_CAPE_VeryShort_Black_LOD0",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Cape_LOD0_Controller.MI_Cape_LOD0_Controller",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/GlobalController/MI_Cape_EoM_GlobalController.MI_Cape_EoM_GlobalController",
+              "Material /Game/Characters/Materials/M_Masters/EoM/M_Cape_EoM.M_Cape_EoM"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"BC\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/Shared/EoM/T_Dummy_Alpha_Off.T_Dummy_Alpha_Off'\",ExpressionGUID=00FBB1964990DDB7B8D0FC8211774A0F)",
+                  "(ParameterInfo=(Name=\"ColourMask\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/Attachments/Cape/VeryShort/T_CAPE_VeryShort_ColourMask.T_CAPE_VeryShort_ColourMask'\",ExpressionGUID=EE65D3DA42372A6396D26493E215C274)",
+                  "(ParameterInfo=(Name=\"Cape Masks\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/Attachments/Cape/VeryShort/T_CAPE_VeryShort_Masks.T_CAPE_VeryShort_Masks'\",ExpressionGUID=F1BA7E064E7C466EC4906A8307BEBC8C)"
+                ]
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"ColourChannel_Picker\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=CBD6D96A41C5E155848372B8CE773774)",
+                  "(ParameterInfo=(Name=\"RefractionDepthBias\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)"
+                ]
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"Base Colour\",Association=GlobalParameter,Index=-1),ParameterValue=(R=0.015686,G=0.015686,B=0.019608,A=1.000000),ExpressionGUID=47B49C5E4A9CCE4BBBE09EAD7469767E)"
+                ]
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        },
+        {
+          "slot_index": 1,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceConstant /Game/Characters/Attachments/Cape/VeryShort/MI_CAPE_VeryShort_Black_LOD1.MI_CAPE_VeryShort_Black_LOD1",
+            "class": "Class /Script/Engine.MaterialInstanceConstant",
+            "parent_chain": [
+              "MaterialInstanceConstant /Game/Characters/Attachments/Cape/VeryShort/MI_CAPE_VeryShort_Black_LOD1.MI_CAPE_VeryShort_Black_LOD1",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Cape_LOD1_Controller.MI_Cape_LOD1_Controller",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/GlobalController/MI_Cape_EoM_GlobalController.MI_Cape_EoM_GlobalController",
+              "Material /Game/Characters/Materials/M_Masters/EoM/M_Cape_EoM.M_Cape_EoM"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"BC\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/Shared/EoM/T_Dummy_Alpha_Off.T_Dummy_Alpha_Off'\",ExpressionGUID=00FBB1964990DDB7B8D0FC8211774A0F)",
+                  "(ParameterInfo=(Name=\"ColourMask\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/Attachments/Cape/VeryShort/T_CAPE_VeryShort_ColourMask.T_CAPE_VeryShort_ColourMask'\",ExpressionGUID=EE65D3DA42372A6396D26493E215C274)",
+                  "(ParameterInfo=(Name=\"Cape Masks\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/Attachments/Cape/VeryShort/T_CAPE_VeryShort_Masks.T_CAPE_VeryShort_Masks'\",ExpressionGUID=F1BA7E064E7C466EC4906A8307BEBC8C)"
+                ]
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"ColourChannel_Picker\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=CBD6D96A41C5E155848372B8CE773774)",
+                  "(ParameterInfo=(Name=\"RefractionDepthBias\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)"
+                ]
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"Base Colour\",Association=GlobalParameter,Index=-1),ParameterValue=(R=0.015686,G=0.015686,B=0.019608,A=1.000000),ExpressionGUID=47B49C5E4A9CCE4BBBE09EAD7469767E)"
+                ]
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        },
+        {
+          "slot_index": 2,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceConstant /Game/Characters/Attachments/Cape/VeryShort/MI_CAPE_VeryShort_Black_LOD1.MI_CAPE_VeryShort_Black_LOD1",
+            "class": "Class /Script/Engine.MaterialInstanceConstant",
+            "parent_chain": [
+              "MaterialInstanceConstant /Game/Characters/Attachments/Cape/VeryShort/MI_CAPE_VeryShort_Black_LOD1.MI_CAPE_VeryShort_Black_LOD1",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Cape_LOD1_Controller.MI_Cape_LOD1_Controller",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/GlobalController/MI_Cape_EoM_GlobalController.MI_Cape_EoM_GlobalController",
+              "Material /Game/Characters/Materials/M_Masters/EoM/M_Cape_EoM.M_Cape_EoM"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"BC\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/Shared/EoM/T_Dummy_Alpha_Off.T_Dummy_Alpha_Off'\",ExpressionGUID=00FBB1964990DDB7B8D0FC8211774A0F)",
+                  "(ParameterInfo=(Name=\"ColourMask\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/Attachments/Cape/VeryShort/T_CAPE_VeryShort_ColourMask.T_CAPE_VeryShort_ColourMask'\",ExpressionGUID=EE65D3DA42372A6396D26493E215C274)",
+                  "(ParameterInfo=(Name=\"Cape Masks\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/Attachments/Cape/VeryShort/T_CAPE_VeryShort_Masks.T_CAPE_VeryShort_Masks'\",ExpressionGUID=F1BA7E064E7C466EC4906A8307BEBC8C)"
+                ]
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"ColourChannel_Picker\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=CBD6D96A41C5E155848372B8CE773774)",
+                  "(ParameterInfo=(Name=\"RefractionDepthBias\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)"
+                ]
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"Base Colour\",Association=GlobalParameter,Index=-1),ParameterValue=(R=0.015686,G=0.015686,B=0.019608,A=1.000000),ExpressionGUID=47B49C5E4A9CCE4BBBE09EAD7469767E)"
+                ]
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "object": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CharacterMesh0",
+      "name": "CharacterMesh0",
+      "class": "Class /Script/AnimationBudgetAllocator.SkeletalMeshComponentBudgeted",
+      "parent_component": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CollisionCylinder",
+      "parent_socket": "None",
+      "skeletal_mesh": "SkeletalMesh /Game/Characters/LEGOfig/SK_LEGOfig_Smallfig.SK_LEGOfig_Smallfig",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=-82.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "True",
+      "materials_status": "ok",
+      "is_body_component": true,
+      "is_face_related": false,
+      "materials": [
+        {
+          "slot_index": 0,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceConstant /Game/Characters/Minifig/Robin_DickGrayson/Material/MI_Robin_New52.MI_Robin_New52",
+            "class": "Class /Script/Engine.MaterialInstanceConstant",
+            "parent_chain": [
+              "MaterialInstanceConstant /Game/Characters/Minifig/Robin_DickGrayson/Material/MI_Robin_New52.MI_Robin_New52",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Smallfig_EoM_Controller.MI_Smallfig_EoM_Controller",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/GlobalController/MI_Char_EoM_GlobalController.MI_Char_EoM_GlobalController",
+              "Material /Game/Characters/Materials/M_Masters/EoM/M_Char_EoM_Master.M_Char_EoM_Master"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"BC\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/EoM/T_TPAGE_Robin_New52_DIST_BC.T_TPAGE_Robin_New52_DIST_BC'\",ExpressionGUID=C457523E4F09BFAC5BC01FB87261512C)",
+                  "(ParameterInfo=(Name=\"MMR\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/EoM/T_TPAGE_Robin_New52_DIST_MMR.T_TPAGE_Robin_New52_DIST_MMR'\",ExpressionGUID=9FD39B584CDECBE375CA69A62E675776)",
+                  "(ParameterInfo=(Name=\"DNRM\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/EoM/T_TPAGE_Robin_New52_DIST_DNRM.T_TPAGE_Robin_New52_DIST_DNRM'\",ExpressionGUID=A92FEA8047F5A83125C8F8A7A440DFF1)",
+                  "(ParameterInfo=(Name=\"BC_Pristine\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/EoM/T_TPAGE_Robin_New52_BC.T_TPAGE_Robin_New52_BC'\",ExpressionGUID=5CA6E710436AC5AA0B3E6D9F99C310C6)",
+                  "(ParameterInfo=(Name=\"ColourMask\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/EoM/T_TPAGE_Robin_New52_ColourMask.T_TPAGE_Robin_New52_ColourMask'\",ExpressionGUID=3E34429C442A60750276DDA28EAD9D95)"
+                ]
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"RefractionDepthBias\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)"
+                ]
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "object": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.Face",
+      "name": "Face",
+      "class": "Class /Script/AnimationBudgetAllocator.SkeletalMeshComponentBudgeted",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CharacterMesh0",
+      "parent_socket": "Head_Socket",
+      "skeletal_mesh": "SkeletalMesh /Game/Characters/Attachments/LEGOface/SK_LEGOface_Superhero.SK_LEGOface_Superhero",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "True",
+      "materials_status": "ok",
+      "is_body_component": false,
+      "is_face_related": true,
+      "materials": [
+        {
+          "slot_index": 0,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.Face.MID_MI_FACE_Robin_New52_2147439717",
+            "class": "Class /Script/Engine.MaterialInstanceDynamic",
+            "parent_chain": [
+              "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.Face.MID_MI_FACE_Robin_New52_2147439717",
+              "MaterialInstanceConstant /Game/Characters/Attachments/Face/FACE_Robin/MI_FACE_Robin_New52.MI_FACE_Robin_New52",
+              "MaterialInstanceConstant /Game/Characters/Attachments/Face/FACE_Robin/MI_FACE_Robin.MI_FACE_Robin",
+              "MaterialInstanceConstant /Game/Characters/Materials/M_Masters/LEGOface/MI_LEGOface-Defaults_Superhero.MI_LEGOface-Defaults_Superhero",
+              "MaterialInstanceConstant /Game/Characters/Materials/M_Masters/LEGOface/MI_LEGOface-Defaults.MI_LEGOface-Defaults",
+              "Material /Game/Characters/Materials/M_Masters/LEGOface/M_LEGOface.M_LEGOface"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"EyeSpecLOffsetV\",Association=GlobalParameter,Index=-1),ParameterValue=-0.501500,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeSpecLScaleU\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeSpecLScaleV\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeSpecROffsetV\",Association=GlobalParameter,Index=-1),ParameterValue=-0.446685,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeSpecRScaleU\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeSpecRScaleV\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TeethDOffsetV\",Association=GlobalParameter,Index=-1),ParameterValue=-5.096834,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TeethDScaleU\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TeethDScaleV\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TeethUOffsetV\",Association=GlobalParameter,Index=-1),ParameterValue=-9.478259,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TeethUScaleU\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TeethUScaleV\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TongueOffsetV\",Association=GlobalParameter,Index=-1),ParameterValue=-5.526774,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TongueScaleU\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TongueScaleV\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"eyelidlowerlshow\",Association=GlobalParameter,Index=-1),ParameterValue=1.000002,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"eyelidlowerrshow\",Association=GlobalParameter,Index=-1),ParameterValue=1.000002,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"eyelidupperlshow\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"eyelidupperrshow\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"eyespecloffsetu\",Association=GlobalParameter,Index=-1),ParameterValue=-0.000015,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"eyespecroffsetu\",Association=GlobalParameter,Index=-1),ParameterValue=-0.002803,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"teethdoffsetu\",Association=GlobalParameter,Index=-1),ParameterValue=0.559062,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"teethdrotate\",Association=GlobalParameter,Index=-1),ParameterValue=0.010888,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"teethuoffsetu\",Association=GlobalParameter,Index=-1),ParameterValue=0.154790,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"teethurotate\",Association=GlobalParameter,Index=-1),ParameterValue=0.010888,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"tongueoffsetu\",Association=GlobalParameter,Index=-1),ParameterValue=0.495005,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"tonguerotate\",Association=GlobalParameter,Index=-1),ParameterValue=0.010888,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"MouthHide\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"BrowLHide\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"BrowRHide\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeLHide\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeRHide\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeSpecLRotate\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeSpecRRotate\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)"
+                ]
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "object": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.Torso",
+      "name": "Torso",
+      "class": "Class /Script/AnimationBudgetAllocator.SkeletalMeshComponentBudgeted",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CharacterMesh0",
+      "parent_socket": "Chest_Socket",
+      "skeletal_mesh": "SkeletalMesh /Game/Characters/Attachments/Cape/SK_CAPE_Short_Glide.SK_CAPE_Short_Glide",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "False",
+      "hidden_in_game": "False",
+      "active": "True",
+      "materials_status": "ok",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+        {
+          "slot_index": 0,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceConstant /Game/Characters/Attachments/Cape/VeryShortGlide/MI_CAPE_VeryShort_Black_Glide_LOD0.MI_CAPE_VeryShort_Black_Glide_LOD0",
+            "class": "Class /Script/Engine.MaterialInstanceConstant",
+            "parent_chain": [
+              "MaterialInstanceConstant /Game/Characters/Attachments/Cape/VeryShortGlide/MI_CAPE_VeryShort_Black_Glide_LOD0.MI_CAPE_VeryShort_Black_Glide_LOD0",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Cape_LOD0_Controller.MI_Cape_LOD0_Controller",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/GlobalController/MI_Cape_EoM_GlobalController.MI_Cape_EoM_GlobalController",
+              "Material /Game/Characters/Materials/M_Masters/EoM/M_Cape_EoM.M_Cape_EoM"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"BC\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/Shared/EoM/T_Dummy_Alpha_Off.T_Dummy_Alpha_Off'\",ExpressionGUID=00FBB1964990DDB7B8D0FC8211774A0F)",
+                  "(ParameterInfo=(Name=\"Cape Masks\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/Attachments/Cape/VeryShortGlide/T_CAPE_VeryShort_Glide_Masks.T_CAPE_VeryShort_Glide_Masks'\",ExpressionGUID=F1BA7E064E7C466EC4906A8307BEBC8C)"
+                ]
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"ColourChannel_Picker\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=CBD6D96A41C5E155848372B8CE773774)",
+                  "(ParameterInfo=(Name=\"Micro Detail Tiling\",Association=GlobalParameter,Index=-1),ParameterValue=12.000000,ExpressionGUID=01F26CA14937746CE85B80814DA71B86)",
+                  "(ParameterInfo=(Name=\"RefractionDepthBias\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)"
+                ]
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"Base Colour\",Association=GlobalParameter,Index=-1),ParameterValue=(R=0.015686,G=0.015686,B=0.019608,A=1.000000),ExpressionGUID=47B49C5E4A9CCE4BBBE09EAD7469767E)"
+                ]
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        },
+        {
+          "slot_index": 1,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceConstant /Game/Characters/Attachments/Cape/VeryShortGlide/MI_CAPE_VeryShort_Black_Glide_LOD1.MI_CAPE_VeryShort_Black_Glide_LOD1",
+            "class": "Class /Script/Engine.MaterialInstanceConstant",
+            "parent_chain": [
+              "MaterialInstanceConstant /Game/Characters/Attachments/Cape/VeryShortGlide/MI_CAPE_VeryShort_Black_Glide_LOD1.MI_CAPE_VeryShort_Black_Glide_LOD1",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Cape_LOD1_Controller.MI_Cape_LOD1_Controller",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/GlobalController/MI_Cape_EoM_GlobalController.MI_Cape_EoM_GlobalController",
+              "Material /Game/Characters/Materials/M_Masters/EoM/M_Cape_EoM.M_Cape_EoM"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"BC\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/Shared/EoM/T_Dummy_Alpha_Off.T_Dummy_Alpha_Off'\",ExpressionGUID=00FBB1964990DDB7B8D0FC8211774A0F)",
+                  "(ParameterInfo=(Name=\"Cape Masks\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/Shared/EoM/T_Dummy_Alpha_Off.T_Dummy_Alpha_Off'\",ExpressionGUID=F1BA7E064E7C466EC4906A8307BEBC8C)"
+                ]
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"ColourChannel_Picker\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=CBD6D96A41C5E155848372B8CE773774)",
+                  "(ParameterInfo=(Name=\"Micro Detail Tiling\",Association=GlobalParameter,Index=-1),ParameterValue=12.000000,ExpressionGUID=01F26CA14937746CE85B80814DA71B86)",
+                  "(ParameterInfo=(Name=\"RefractionDepthBias\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)"
+                ]
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"Base Colour\",Association=GlobalParameter,Index=-1),ParameterValue=(R=0.015686,G=0.015686,B=0.019608,A=1.000000),ExpressionGUID=47B49C5E4A9CCE4BBBE09EAD7469767E)"
+                ]
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "object": "SkillsComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.SkillsComponent",
+      "name": "SkillsComponent",
+      "class": "Class /Script/Dinner.SkillsComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SphereComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.LeftFootSphere",
+      "name": "LeftFootSphere",
+      "class": "Class /Script/Engine.SphereComponent",
+      "parent_component": "HitBoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.LeftFootHitBoxComponent",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "True",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SphereComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.LeftHandSphere",
+      "name": "LeftHandSphere",
+      "class": "Class /Script/Engine.SphereComponent",
+      "parent_component": "HitBoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.LeftHandHitboxComponent",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "True",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SphereComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.RightFootSphere",
+      "name": "RightFootSphere",
+      "class": "Class /Script/Engine.SphereComponent",
+      "parent_component": "HitBoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.RightFootHitBoxComponent",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "True",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SphereComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.RightHandSphere",
+      "name": "RightHandSphere",
+      "class": "Class /Script/Engine.SphereComponent",
+      "parent_component": "HitBoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.RightHandHitboxComponent",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "True",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SphereComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.Sphere",
+      "name": "Sphere",
+      "class": "Class /Script/Engine.SphereComponent",
+      "parent_component": "InfluenceAgentComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.TakeDownInfluenceComponent",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "True",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "StaticMeshComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.DistanceField_Mesh",
+      "name": "DistanceField_Mesh",
+      "class": "Class /Script/Engine.StaticMeshComponent",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CharacterMesh0",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "StaticMesh /Game/Characters/LEGOfig/SM_LEGOFig_DistanceField_Mesh.SM_LEGOFig_DistanceField_Mesh",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "False",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "ok",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+        {
+          "slot_index": 0,
+          "is_component_override": false,
+          "material":           {
+            "interface": "Material /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial",
+            "class": "Class /Script/Engine.Material",
+            "parent_chain": [
+              "Material /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "not-found",
+                "values": []
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "not-found",
+                "values": []
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "not-found",
+                "values": []
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "not-found",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "not-found",
+                "values": []
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "object": "StaticMeshComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.Head",
+      "name": "Head",
+      "class": "Class /Script/Engine.StaticMeshComponent",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CharacterMesh0",
+      "parent_socket": "HeadStud_Attach_Socket",
+      "skeletal_mesh": "",
+      "static_mesh": "StaticMesh /Game/Characters/Attachments/Hair/ShortTousledSidePart/SM_HAIR_ShortTousledSidePart.SM_HAIR_ShortTousledSidePart",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "ok",
+      "is_body_component": false,
+      "is_face_related": true,
+      "materials": [
+        {
+          "slot_index": 0,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceConstant /Game/Characters/Attachments/Hair/ShortTousledSidePart/MI_HAIR_ShortTousledSidePart.MI_HAIR_ShortTousledSidePart",
+            "class": "Class /Script/Engine.MaterialInstanceConstant",
+            "parent_chain": [
+              "MaterialInstanceConstant /Game/Characters/Attachments/Hair/ShortTousledSidePart/MI_HAIR_ShortTousledSidePart.MI_HAIR_ShortTousledSidePart",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Attatchment_EoM_Controller.MI_Attatchment_EoM_Controller",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/GlobalController/MI_Char_EoM_GlobalController.MI_Char_EoM_GlobalController",
+              "Material /Game/Characters/Materials/M_Masters/EoM/M_Char_EoM_Master.M_Char_EoM_Master"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"BC\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/TtPopulation/Test_Setup/Assets/AimContent/Textures/LEGO_Colours/T_LEGO_Black17.T_LEGO_Black17'\",ExpressionGUID=C457523E4F09BFAC5BC01FB87261512C)",
+                  "(ParameterInfo=(Name=\"RAO\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/Attachments/HAIR/ShortTousledSidePart/T_HAIR_ShortTousledSidePart_RAO.T_HAIR_ShortTousledSidePart_RAO'\",ExpressionGUID=BC70C1A4468D9CCDD5B721B6BE29F819)",
+                  "(ParameterInfo=(Name=\"CT\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/Attachments/HAIR/ShortTousledSidePart/T_HAIR_ShortTousledSidePart_CT.T_HAIR_ShortTousledSidePart_CT'\",ExpressionGUID=15A7303E42D6578EDF216981D0C41576)",
+                  "(ParameterInfo=(Name=\"NRM\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/Attachments/HAIR/ShortTousledSidePart/T_HAIR_ShortTousledSidePart_NRM.T_HAIR_ShortTousledSidePart_NRM'\",ExpressionGUID=44FFD5AB4D674A88426B029091574F4B)"
+                ]
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"ColourChannel_Picker\",Association=GlobalParameter,Index=-1),ParameterValue=3.000000,ExpressionGUID=CBD6D96A41C5E155848372B8CE773774)",
+                  "(ParameterInfo=(Name=\"RefractionDepthBias\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)"
+                ]
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"Base Color\",Association=GlobalParameter,Index=-1),ParameterValue=(R=0.015686,G=0.015686,B=0.019608,A=1.000000),ExpressionGUID=6185339B4F4F706E2B04A9A87507CFD1)"
+                ]
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "object": "StaticMeshComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.HipPegs",
+      "name": "HipPegs",
+      "class": "Class /Script/Engine.StaticMeshComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "StaticMesh /Game/Characters/LEGOfig/SM_LEGOFig_Minifig_HipPegs.SM_LEGOFig_Minifig_HipPegs",
+      "child_actor": "",
+      "relative_location_ue": "(X=-16.500000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "False",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "ok",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+        {
+          "slot_index": 0,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceConstant /Game/Characters/Minifig/Robin_DickGrayson/Material/MI_Robin_New52.MI_Robin_New52",
+            "class": "Class /Script/Engine.MaterialInstanceConstant",
+            "parent_chain": [
+              "MaterialInstanceConstant /Game/Characters/Minifig/Robin_DickGrayson/Material/MI_Robin_New52.MI_Robin_New52",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Smallfig_EoM_Controller.MI_Smallfig_EoM_Controller",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/GlobalController/MI_Char_EoM_GlobalController.MI_Char_EoM_GlobalController",
+              "Material /Game/Characters/Materials/M_Masters/EoM/M_Char_EoM_Master.M_Char_EoM_Master"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"BC\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/EoM/T_TPAGE_Robin_New52_DIST_BC.T_TPAGE_Robin_New52_DIST_BC'\",ExpressionGUID=C457523E4F09BFAC5BC01FB87261512C)",
+                  "(ParameterInfo=(Name=\"MMR\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/EoM/T_TPAGE_Robin_New52_DIST_MMR.T_TPAGE_Robin_New52_DIST_MMR'\",ExpressionGUID=9FD39B584CDECBE375CA69A62E675776)",
+                  "(ParameterInfo=(Name=\"DNRM\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/EoM/T_TPAGE_Robin_New52_DIST_DNRM.T_TPAGE_Robin_New52_DIST_DNRM'\",ExpressionGUID=A92FEA8047F5A83125C8F8A7A440DFF1)",
+                  "(ParameterInfo=(Name=\"BC_Pristine\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/EoM/T_TPAGE_Robin_New52_BC.T_TPAGE_Robin_New52_BC'\",ExpressionGUID=5CA6E710436AC5AA0B3E6D9F99C310C6)",
+                  "(ParameterInfo=(Name=\"ColourMask\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/EoM/T_TPAGE_Robin_New52_ColourMask.T_TPAGE_Robin_New52_ColourMask'\",ExpressionGUID=3E34429C442A60750276DDA28EAD9D95)"
+                ]
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"RefractionDepthBias\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)"
+                ]
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "object": "StaticMeshComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.NeckPeg",
+      "name": "NeckPeg",
+      "class": "Class /Script/Engine.StaticMeshComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "StaticMesh /Game/Characters/LEGOfig/SM_LEGOFig_Minifig_NeckPeg.SM_LEGOFig_Minifig_NeckPeg",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "False",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "ok",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+        {
+          "slot_index": 0,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceConstant /Game/Characters/Minifig/Robin_DickGrayson/Material/MI_Robin_New52.MI_Robin_New52",
+            "class": "Class /Script/Engine.MaterialInstanceConstant",
+            "parent_chain": [
+              "MaterialInstanceConstant /Game/Characters/Minifig/Robin_DickGrayson/Material/MI_Robin_New52.MI_Robin_New52",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Smallfig_EoM_Controller.MI_Smallfig_EoM_Controller",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/GlobalController/MI_Char_EoM_GlobalController.MI_Char_EoM_GlobalController",
+              "Material /Game/Characters/Materials/M_Masters/EoM/M_Char_EoM_Master.M_Char_EoM_Master"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"BC\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/EoM/T_TPAGE_Robin_New52_DIST_BC.T_TPAGE_Robin_New52_DIST_BC'\",ExpressionGUID=C457523E4F09BFAC5BC01FB87261512C)",
+                  "(ParameterInfo=(Name=\"MMR\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/EoM/T_TPAGE_Robin_New52_DIST_MMR.T_TPAGE_Robin_New52_DIST_MMR'\",ExpressionGUID=9FD39B584CDECBE375CA69A62E675776)",
+                  "(ParameterInfo=(Name=\"DNRM\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/EoM/T_TPAGE_Robin_New52_DIST_DNRM.T_TPAGE_Robin_New52_DIST_DNRM'\",ExpressionGUID=A92FEA8047F5A83125C8F8A7A440DFF1)",
+                  "(ParameterInfo=(Name=\"BC_Pristine\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/EoM/T_TPAGE_Robin_New52_BC.T_TPAGE_Robin_New52_BC'\",ExpressionGUID=5CA6E710436AC5AA0B3E6D9F99C310C6)",
+                  "(ParameterInfo=(Name=\"ColourMask\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/EoM/T_TPAGE_Robin_New52_ColourMask.T_TPAGE_Robin_New52_ColourMask'\",ExpressionGUID=3E34429C442A60750276DDA28EAD9D95)"
+                ]
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"RefractionDepthBias\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)"
+                ]
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "object": "TetherableComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.Tetherable",
+      "name": "Tetherable",
+      "class": "Class /Script/TetherLauncher.TetherableComponent",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CharacterMesh0",
+      "parent_socket": "Chest_Socket",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TimeSincePossessionChangedComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.TimeSincePossessionChangedComponent",
+      "name": "TimeSincePossessionChangedComponent",
+      "class": "Class /Script/TtArtificialIntelligence.TimeSincePossessionChangedComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TimelineComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.Timeline",
+      "name": "Timeline",
+      "class": "Class /Script/Engine.TimelineComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtAbilitySystemComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.AbilitySystem",
+      "name": "AbilitySystem",
+      "class": "Class /Script/TtGameplayAbilities.TtAbilitySystemComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "True",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtAimManagerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.TtAimManager",
+      "name": "TtAimManager",
+      "class": "Class /Script/TtRangedCombat.TtAimManagerComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtAnimLinkedLayerManagerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.AnimLinkedLayerManager",
+      "name": "AnimLinkedLayerManager",
+      "class": "Class /Script/TtAnimLinkedLayerManager.TtAnimLinkedLayerManagerComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtAudioIdlePlaybackComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.TtAudioIdlePlayback",
+      "name": "TtAudioIdlePlayback",
+      "class": "Class /Script/TtAudio.TtAudioIdlePlaybackComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtCameraComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.Camera",
+      "name": "Camera",
+      "class": "Class /Script/TtCamera.TtCameraComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=-5234.460264,Y=-10461.647102,Z=2061.912848)",
+      "relative_rotation_ue": "(Pitch=1.886308,Yaw=-59.435265,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "True",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtCharacterAssetMinionComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.TtCharacterAssetMinion",
+      "name": "TtCharacterAssetMinion",
+      "class": "Class /Script/TtCharacterAsset.TtCharacterAssetMinionComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtCombatLogComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CombatLogComponent",
+      "name": "CombatLogComponent",
+      "class": "Class /Script/TtCombatLog.TtCombatLogComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtEquipmentManagerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.EquipmentManager",
+      "name": "EquipmentManager",
+      "class": "Class /Script/TtEquipment.TtEquipmentManagerComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtGameplayTagActionsComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.GameplayTagActionsComponent",
+      "name": "GameplayTagActionsComponent",
+      "class": "Class /Script/TtEnhancedInput.TtGameplayTagActionsComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtHapticsManagerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.ResistiveTriggerManagerComponent",
+      "name": "ResistiveTriggerManagerComponent",
+      "class": "Class /Script/TtHaptics.TtHapticsManagerComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtInputPromptComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.TtInputPromptComponent",
+      "name": "TtInputPromptComponent",
+      "class": "Class /Script/TtInputPrompts.TtInputPromptComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtPartyPawnComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.PartyPawnComponent",
+      "name": "PartyPawnComponent",
+      "class": "Class /Script/TtPartySystem.TtPartyPawnComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtSignificanceComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.Significance",
+      "name": "Significance",
+      "class": "Class /Script/TtSignificance.TtSignificanceComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtWeatherableComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.TtWeatherable",
+      "name": "TtWeatherable",
+      "class": "Class /Script/TtWeather.TtWeatherableComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "WindDirectionalSourceComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.WindDirectionalSourceComponent_2147439421",
+      "name": "WindDirectionalSourceComponent_2147439421",
+      "class": "Class /Script/Engine.WindDirectionalSourceComponent",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.Cape",
+      "parent_socket": "AttachRoot",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=1.500000,Y=0.000000,Z=3.500000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "WubFocusListenerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.WubFocusListener",
+      "name": "WubFocusListener",
+      "class": "Class /Script/Wub.WubFocusListenerComponent",
+      "parent_component": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.CollisionCylinder",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "True",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "WubHeadListenerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.WubHeadListener",
+      "name": "WubHeadListener",
+      "class": "Class /Script/Wub.WubHeadListenerComponent",
+      "parent_component": "TtCameraComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_RobinDickGrayson_New52_Playable_C_2147439741.Camera",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "True",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": true,
+      "materials": [
+      ]
+    }
+  ],
+  "diagnostics": [
+    "Read-only manual capture. Material parameter arrays are raw reflected evidence; no material, mesh, animation, tag, or pawn state was changed.",
+    "Live pose data is intentionally omitted from the baseline. Socket rest-pose data remains in the separate runtime socket profile."
+  ]
+}

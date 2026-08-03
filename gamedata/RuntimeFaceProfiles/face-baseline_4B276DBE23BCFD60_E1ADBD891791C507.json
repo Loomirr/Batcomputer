@@ -1,0 +1,2099 @@
+{
+  "schema_version": 1,
+  "capture_kind": "face-baseline",
+  "captured_utc": "2026-08-02T18:36:08.214Z",
+  "capture_source": "manual-hotkey",
+  "game_build": "unavailable",
+  "capture_status": "ok",
+  "rig_hash": "4B276DBE23BCFD60",
+  "face_hash": "E1ADBD891791C507",
+  "capture_summary": {
+    "component_count": 78,
+    "face_related_component_count": 5,
+    "face_material_slot_count": 2,
+    "observed_asset_count": 21
+  },
+  "pawn": {
+    "object_path": "BP_BruceWayne_Suit_Default_Playable_C /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367",
+    "class_path": "BlueprintGeneratedClass /Game/Characters/Minifig/BruceWayne/BP_BruceWayne_Suit_Default_Playable.BP_BruceWayne_Suit_Default_Playable_C",
+    "pawn_tag": "unavailable"
+  },
+  "rig": {
+    "body_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.CharacterMesh0",
+    "skeletal_mesh": "SkeletalMesh /Game/Characters/LEGOfig/SK_LEGOfig_Minifig.SK_LEGOfig_Minifig",
+    "skeleton": "Skeleton /Game/Characters/LEGOfig/SKEL_LEGOfig.SKEL_LEGOfig",
+    "rig_key": "SkeletalMesh /Game/Characters/LEGOfig/SK_LEGOfig_Minifig.SK_LEGOfig_Minifig|Skeleton /Game/Characters/LEGOfig/SKEL_LEGOfig.SKEL_LEGOfig"
+  },
+  "context": {
+    "requested_label": "Neutral",
+    "capture_phase": "rest",
+    "level": "Level /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel"
+  },
+  "body_animation": {
+    "animation_mode": "AnimationBlueprint",
+    "anim_class": "AnimBlueprintGeneratedClass /Game/Animation/LEGOfig/ABP_LEGOFig.ABP_LEGOFig_C",
+    "anim_instance": "ABP_LEGOFig_C /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.CharacterMesh0.ABP_LEGOFig_C_2147436366",
+    "active_montage": "AnimMontage /Game/Animation/LEGOfig/Batman/Movement/AM_PoseChange_Batman.AM_PoseChange_Batman",
+    "face_curve_capture_status": "not-yet-enumerated"
+  },
+  "face_component_paths": [
+    "InfluenceAgentComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.PlayerHeadingInfluence",
+    "SceneComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.HeadTargetPoint",
+    "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.Face",
+    "StaticMeshComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.Head",
+    "WubHeadListenerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.WubHeadListener"
+  ],
+  "observed_assets": [
+    {
+      "path": "ABP_LEGOFig_C /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.CharacterMesh0.ABP_LEGOFig_C_2147436366",
+      "observed_source": "animation"
+    },
+    {
+      "path": "AnimBlueprintGeneratedClass /Game/Animation/LEGOfig/ABP_LEGOFig.ABP_LEGOFig_C",
+      "observed_source": "animation"
+    },
+    {
+      "path": "AnimMontage /Game/Animation/LEGOfig/Batman/Movement/AM_PoseChange_Batman.AM_PoseChange_Batman",
+      "observed_source": "animation"
+    },
+    {
+      "path": "SkeletalMesh /Game/Characters/Attachments/LEGOface/SK_LEGOface.SK_LEGOface",
+      "observed_source": "component"
+    },
+    {
+      "path": "SkeletalMesh /Game/Characters/LEGOfig/SK_LEGOfig_Minifig.SK_LEGOfig_Minifig",
+      "observed_source": "component"
+    },
+    {
+      "path": "Skeleton /Game/Characters/LEGOfig/SKEL_LEGOfig.SKEL_LEGOfig",
+      "observed_source": "component"
+    },
+    {
+      "path": "StaticMesh /Game/Characters/Attachments/Hair/SweptBackWidowsPeakSideburns/SM_HAIR_SweptBackWidowsPeakSideburns.SM_HAIR_SweptBackWidowsPeakSideburns",
+      "observed_source": "component"
+    },
+    {
+      "path": "StaticMesh /Game/Characters/LEGOfig/SM_LEGOFig_DistanceField_Mesh.SM_LEGOFig_DistanceField_Mesh",
+      "observed_source": "component"
+    },
+    {
+      "path": "StaticMesh /Game/Characters/LEGOfig/SM_LEGOFig_Minifig_HipPegs.SM_LEGOFig_Minifig_HipPegs",
+      "observed_source": "component"
+    },
+    {
+      "path": "StaticMesh /Game/Characters/LEGOfig/SM_LEGOFig_Minifig_NeckPeg.SM_LEGOFig_Minifig_NeckPeg",
+      "observed_source": "component"
+    },
+    {
+      "path": "Material /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial",
+      "observed_source": "material"
+    },
+    {
+      "path": "Material /Game/Characters/Materials/M_Masters/EoM/M_Char_EoM_Master.M_Char_EoM_Master",
+      "observed_source": "material"
+    },
+    {
+      "path": "Material /Game/Characters/Materials/M_Masters/LEGOface/M_LEGOface.M_LEGOface",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Attachments/Face/FACE_BruceAdult/MI_FACE_BruceAdult.MI_FACE_BruceAdult",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Attachments/Hair/SweptBackWidowsPeakSideburns/MI_HAIR_SweptBackWidPeakSideburns_DarkBrown_EoM.MI_HAIR_SweptBackWidPeakSideburns_DarkBrown_EoM",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/GlobalController/MI_Char_EoM_GlobalController.MI_Char_EoM_GlobalController",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Attatchment_EoM_Controller.MI_Attatchment_EoM_Controller",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Minifig_EoM_Controller.MI_Minifig_EoM_Controller",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Materials/M_Masters/LEGOface/MI_LEGOface-Defaults.MI_LEGOface-Defaults",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Minifig/BruceWayne/Material/MI_BruceWayne_SuitBlack_EoM.MI_BruceWayne_SuitBlack_EoM",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.Face.MID_MI_FACE_BruceAdult_2147436352",
+      "observed_source": "material"
+    }
+  ],
+  "components": [
+    {
+      "object": "AbilityComboTreeComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.AbilityComboTreeComponent",
+      "name": "AbilityComboTreeComponent",
+      "class": "Class /Script/AbilityComboTree.AbilityComboTreeComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "ActorMarkerPositionComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.ActorMarkerPosition",
+      "name": "ActorMarkerPosition",
+      "class": "Class /Script/TtHUDMarkers.ActorMarkerPositionComponent",
+      "parent_component": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.CollisionCylinder",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=-0.000000,Y=-0.000000,Z=120.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "True",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "BP_ActorComponent_FirstPersonLookAt_C /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.BP_ActorComponent_FirstPersonLookAt",
+      "name": "BP_ActorComponent_FirstPersonLookAt",
+      "class": "BlueprintGeneratedClass /Game/Animation/Blueprints/BP_ActorComponent_FirstPersonLookAt.BP_ActorComponent_FirstPersonLookAt_C",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "True",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "BigTakeHitComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.BigTakeHitComponent",
+      "name": "BigTakeHitComponent",
+      "class": "Class /Script/MeleeCombat.BigTakeHitComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "BoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.Box",
+      "name": "Box",
+      "class": "Class /Script/Engine.BoxComponent",
+      "parent_component": "InfluenceAgentComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.PlayerHeadingInfluence",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=140.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "True",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "CameraObjectFaderComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.CameraObjectFader",
+      "name": "CameraObjectFader",
+      "class": "Class /Script/TtCamera.CameraObjectFaderComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.CollisionCylinder",
+      "name": "CollisionCylinder",
+      "class": "Class /Script/Engine.CapsuleComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=-4811.881743,Y=-10947.061354,Z=2032.613089)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=116.728144,Roll=-0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "True",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "CharacterLookAtComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.Look At Component",
+      "name": "Look At Component",
+      "class": "Class /Script/TtUtilities.CharacterLookAtComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "CombatComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.CombatComponent",
+      "name": "CombatComponent",
+      "class": "Class /Script/MeleeCombat.CombatComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "ContextEffectsComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.ContextEffects",
+      "name": "ContextEffects",
+      "class": "Class /Script/TtFx.ContextEffectsComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "CurrentThreatComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.CurrentThreatComponent",
+      "name": "CurrentThreatComponent",
+      "class": "Class /Script/TtThreatAndAggro.CurrentThreatComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerAudioAbilityTagWatcherComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.DinnerAudioAbilityTagWatcher",
+      "name": "DinnerAudioAbilityTagWatcher",
+      "class": "Class /Script/Dinner.DinnerAudioAbilityTagWatcherComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerCharacterIdentityComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.IdentityComponent",
+      "name": "IdentityComponent",
+      "class": "Class /Script/Dinner.DinnerCharacterIdentityComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerCharacterMovementComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.CharMoveComp",
+      "name": "CharMoveComp",
+      "class": "Class /Script/Dinner.DinnerCharacterMovementComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "True",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerCharacterTargetableComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.Targetable",
+      "name": "Targetable",
+      "class": "Class /Script/Dinner.DinnerCharacterTargetableComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "True",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerInputComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.PawnInputComponent0",
+      "name": "PawnInputComponent0",
+      "class": "Class /Script/Dinner.DinnerInputComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerLocationAttachmentManagerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.LocationAttachmentManager",
+      "name": "LocationAttachmentManager",
+      "class": "Class /Script/Dinner.DinnerLocationAttachmentManagerComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerMenuActionsComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.DinnerMenuActions",
+      "name": "DinnerMenuActions",
+      "class": "Class /Script/Dinner.DinnerMenuActionsComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerPegArticulationVisibilityComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.DinnerPegArticulationVisibility",
+      "name": "DinnerPegArticulationVisibility",
+      "class": "Class /Script/Dinner.DinnerPegArticulationVisibilityComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerUpgradesComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.Upgrades Component",
+      "name": "Upgrades Component",
+      "class": "Class /Script/Dinner.DinnerUpgradesComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "GameplayEventToDialogueComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.GameplayEventToDialogue",
+      "name": "GameplayEventToDialogue",
+      "class": "Class /Script/Dinner.GameplayEventToDialogueComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "GliderCharacterComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.GliderCharacter",
+      "name": "GliderCharacter",
+      "class": "Class /Script/GlidingRuntime.GliderCharacterComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "HighContrastActorComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.HighContrastActor",
+      "name": "HighContrastActor",
+      "class": "Class /Script/TtAccessibility.HighContrastActorComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "HitBoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.LeftFootHitBoxComponent",
+      "name": "LeftFootHitBoxComponent",
+      "class": "Class /Script/MeleeCombat.HitBoxComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "HitBoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.LeftHandHitboxComponent",
+      "name": "LeftHandHitboxComponent",
+      "class": "Class /Script/MeleeCombat.HitBoxComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "HitBoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.RightFootHitBoxComponent",
+      "name": "RightFootHitBoxComponent",
+      "class": "Class /Script/MeleeCombat.HitBoxComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "HitBoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.RightHandHitboxComponent",
+      "name": "RightHandHitboxComponent",
+      "class": "Class /Script/MeleeCombat.HitBoxComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=-0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "HitBoxManagerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.HitBoxManager",
+      "name": "HitBoxManager",
+      "class": "Class /Script/MeleeCombat.HitBoxManagerComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "InfluenceAgentComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.PlayerHeadingInfluence",
+      "name": "PlayerHeadingInfluence",
+      "class": "Class /Script/TtInfluenceMap.InfluenceAgentComponent",
+      "parent_component": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.CollisionCylinder",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": true,
+      "materials": [
+      ]
+    },
+    {
+      "object": "InfluenceAgentComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.TakeDownInfluenceComponent",
+      "name": "TakeDownInfluenceComponent",
+      "class": "Class /Script/TtInfluenceMap.InfluenceAgentComponent",
+      "parent_component": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.CollisionCylinder",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "InfluencePollingComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.InfluencePolling",
+      "name": "InfluencePolling",
+      "class": "Class /Script/TtInfluenceMap.InfluencePollingComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "ManageDynamicMaterialComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.Manage Dynamic Material Component",
+      "name": "Manage Dynamic Material Component",
+      "class": "Class /Script/Dinner.ManageDynamicMaterialComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "MassAgentComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.MassAgent",
+      "name": "MassAgent",
+      "class": "Class /Script/MassActors.MassAgentComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "MotionWarpingComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.MotionWarping",
+      "name": "MotionWarping",
+      "class": "Class /Script/MotionWarping.MotionWarpingComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "NavTrailComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.NavTrailComponent",
+      "name": "NavTrailComponent",
+      "class": "Class /Script/TtPathFollowerBreadcrumbs.NavTrailComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "NiagaraComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.BreathVfx",
+      "name": "BreathVfx",
+      "class": "Class /Script/Niagara.NiagaraComponent",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.CharacterMesh0",
+      "parent_socket": "MouthSocket",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=-90.000000,Roll=-0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "NiagaraComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.NiagaraComponent_2147435590",
+      "name": "NiagaraComponent_2147435590",
+      "class": "Class /Script/Niagara.NiagaraComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=-4796.267520,Y=-10933.600445,Z=2013.463089)",
+      "relative_rotation_ue": "(Pitch=-30.000000,Yaw=-63.271856,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.200000,Y=1.200000,Z=1.200000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "NiagaraComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.NiagaraComponent_2147435594",
+      "name": "NiagaraComponent_2147435594",
+      "class": "Class /Script/Niagara.NiagaraComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=-4831.993543,Y=-10951.590756,Z=2013.463089)",
+      "relative_rotation_ue": "(Pitch=-30.000000,Yaw=-63.271856,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.200000,Y=1.200000,Z=1.200000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "PingableActorComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.PingableActor",
+      "name": "PingableActor",
+      "class": "Class /Script/TtPingPlugin.PingableActorComponent",
+      "parent_component": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.CollisionCylinder",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "PossessionReroutingPawnComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.PossessionRerouting",
+      "name": "PossessionRerouting",
+      "class": "Class /Script/TtPossessionRerouting.PossessionReroutingPawnComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "PurchasingPawnComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.PurchasingComponent",
+      "name": "PurchasingComponent",
+      "class": "Class /Script/TtPurchasableActors.PurchasingPawnComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "RiderComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.RiderComponent",
+      "name": "RiderComponent",
+      "class": "Class /Script/TtRideables.RiderComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SafePositionComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.SafePositionComponent",
+      "name": "SafePositionComponent",
+      "class": "Class /Script/SafePosition.SafePositionComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SceneComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.CharacterLookAtTarget",
+      "name": "CharacterLookAtTarget",
+      "class": "Class /Script/Engine.SceneComponent",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.CharacterMesh0",
+      "parent_socket": "VFX_Face_Socket",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SceneComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.HeadTargetPoint",
+      "name": "HeadTargetPoint",
+      "class": "Class /Script/Engine.SceneComponent",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.CharacterMesh0",
+      "parent_socket": "Head_Socket",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=-0.000000,Z=17.907125)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": true,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SceneComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.Tetherable.ExpectedTetherTargetIconLocator",
+      "name": "ExpectedTetherTargetIconLocator",
+      "class": "Class /Script/Engine.SceneComponent",
+      "parent_component": "TetherableComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.Tetherable",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=50.000000,Y=-0.000000,Z=-0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SceneComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.TorsoTargetPont",
+      "name": "TorsoTargetPont",
+      "class": "Class /Script/Engine.SceneComponent",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.CharacterMesh0",
+      "parent_socket": "Chest_Socket",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.CharacterMesh0",
+      "name": "CharacterMesh0",
+      "class": "Class /Script/AnimationBudgetAllocator.SkeletalMeshComponentBudgeted",
+      "parent_component": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.CollisionCylinder",
+      "parent_socket": "None",
+      "skeletal_mesh": "SkeletalMesh /Game/Characters/LEGOfig/SK_LEGOfig_Minifig.SK_LEGOfig_Minifig",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=-82.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "True",
+      "materials_status": "ok",
+      "is_body_component": true,
+      "is_face_related": false,
+      "materials": [
+        {
+          "slot_index": 0,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceConstant /Game/Characters/Minifig/BruceWayne/Material/MI_BruceWayne_SuitBlack_EoM.MI_BruceWayne_SuitBlack_EoM",
+            "class": "Class /Script/Engine.MaterialInstanceConstant",
+            "parent_chain": [
+              "MaterialInstanceConstant /Game/Characters/Minifig/BruceWayne/Material/MI_BruceWayne_SuitBlack_EoM.MI_BruceWayne_SuitBlack_EoM",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Minifig_EoM_Controller.MI_Minifig_EoM_Controller",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/GlobalController/MI_Char_EoM_GlobalController.MI_Char_EoM_GlobalController",
+              "Material /Game/Characters/Materials/M_Masters/EoM/M_Char_EoM_Master.M_Char_EoM_Master"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"BC\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/EoM/T_BruceWayne_SuitBlack_BC.T_BruceWayne_SuitBlack_BC'\",ExpressionGUID=C457523E4F09BFAC5BC01FB87261512C)",
+                  "(ParameterInfo=(Name=\"MMR\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/EoM/T_BruceWayne_SuitBlack_MMR.T_BruceWayne_SuitBlack_MMR'\",ExpressionGUID=9FD39B584CDECBE375CA69A62E675776)",
+                  "(ParameterInfo=(Name=\"DNRM\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/EoM/T_BruceWayne_SuitBlack_DNRM.T_BruceWayne_SuitBlack_DNRM'\",ExpressionGUID=A92FEA8047F5A83125C8F8A7A440DFF1)"
+                ]
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"RefractionDepthBias\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)"
+                ]
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "object": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.Face",
+      "name": "Face",
+      "class": "Class /Script/AnimationBudgetAllocator.SkeletalMeshComponentBudgeted",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.CharacterMesh0",
+      "parent_socket": "Head_Socket",
+      "skeletal_mesh": "SkeletalMesh /Game/Characters/Attachments/LEGOface/SK_LEGOface.SK_LEGOface",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "True",
+      "materials_status": "ok",
+      "is_body_component": false,
+      "is_face_related": true,
+      "materials": [
+        {
+          "slot_index": 0,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.Face.MID_MI_FACE_BruceAdult_2147436352",
+            "class": "Class /Script/Engine.MaterialInstanceDynamic",
+            "parent_chain": [
+              "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.Face.MID_MI_FACE_BruceAdult_2147436352",
+              "MaterialInstanceConstant /Game/Characters/Attachments/Face/FACE_BruceAdult/MI_FACE_BruceAdult.MI_FACE_BruceAdult",
+              "MaterialInstanceConstant /Game/Characters/Materials/M_Masters/LEGOface/MI_LEGOface-Defaults.MI_LEGOface-Defaults",
+              "Material /Game/Characters/Materials/M_Masters/LEGOface/M_LEGOface.M_LEGOface"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"EyeSpecLOffsetV\",Association=GlobalParameter,Index=-1),ParameterValue=-0.464338,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeSpecLScaleU\",Association=GlobalParameter,Index=-1),ParameterValue=0.970000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeSpecLScaleV\",Association=GlobalParameter,Index=-1),ParameterValue=0.950000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeSpecROffsetV\",Association=GlobalParameter,Index=-1),ParameterValue=-0.464338,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeSpecRScaleU\",Association=GlobalParameter,Index=-1),ParameterValue=0.970000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeSpecRScaleV\",Association=GlobalParameter,Index=-1),ParameterValue=0.950000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TeethDOffsetV\",Association=GlobalParameter,Index=-1),ParameterValue=-6.308912,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TeethDScaleU\",Association=GlobalParameter,Index=-1),ParameterValue=1.269597,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TeethDScaleV\",Association=GlobalParameter,Index=-1),ParameterValue=1.201597,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TeethUOffsetV\",Association=GlobalParameter,Index=-1),ParameterValue=-10.454420,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TeethUScaleU\",Association=GlobalParameter,Index=-1),ParameterValue=1.269597,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TeethUScaleV\",Association=GlobalParameter,Index=-1),ParameterValue=1.201597,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TongueOffsetV\",Association=GlobalParameter,Index=-1),ParameterValue=-6.224800,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TongueScaleU\",Association=GlobalParameter,Index=-1),ParameterValue=1.269597,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TongueScaleV\",Association=GlobalParameter,Index=-1),ParameterValue=1.201597,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"eyelidlowerlshow\",Association=GlobalParameter,Index=-1),ParameterValue=-0.000014,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"eyelidlowerrshow\",Association=GlobalParameter,Index=-1),ParameterValue=-0.000014,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"eyelidupperlshow\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"eyelidupperrshow\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"eyespecloffsetu\",Association=GlobalParameter,Index=-1),ParameterValue=-0.039408,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"eyespecroffsetu\",Association=GlobalParameter,Index=-1),ParameterValue=0.040592,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"teethdoffsetu\",Association=GlobalParameter,Index=-1),ParameterValue=0.000034,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"teethdrotate\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"teethuoffsetu\",Association=GlobalParameter,Index=-1),ParameterValue=-0.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"teethurotate\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"tongueoffsetu\",Association=GlobalParameter,Index=-1),ParameterValue=-0.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"tonguerotate\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"MouthHide\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"BrowLHide\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"BrowRHide\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeLHide\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeRHide\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeSpecLRotate\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeSpecRRotate\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)"
+                ]
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"EyeLSocket_Location\",Association=GlobalParameter,Index=-1),ParameterValue=(R=20.054508,G=-5.476411,B=17.116642,A=1.000000),ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeLSocket_Rotation\",Association=GlobalParameter,Index=-1),ParameterValue=(R=-0.000000,G=-0.000000,B=-15.470239,A=1.000000),ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeLSocket_Scale\",Association=GlobalParameter,Index=-1),ParameterValue=(R=1.000000,G=1.000000,B=1.000000,A=1.000000),ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeRSocket_Location\",Association=GlobalParameter,Index=-1),ParameterValue=(R=20.054512,G=5.476416,B=17.116642,A=1.000000),ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeRSocket_Rotation\",Association=GlobalParameter,Index=-1),ParameterValue=(R=0.000000,G=0.000000,B=15.470245,A=1.000000),ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeRSocket_Scale\",Association=GlobalParameter,Index=-1),ParameterValue=(R=1.000000,G=1.000000,B=1.000000,A=1.000000),ExpressionGUID=00000000000000000000000000000000)"
+                ]
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "object": "SkillsComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.SkillsComponent",
+      "name": "SkillsComponent",
+      "class": "Class /Script/Dinner.SkillsComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SphereComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.LeftFootSphere",
+      "name": "LeftFootSphere",
+      "class": "Class /Script/Engine.SphereComponent",
+      "parent_component": "HitBoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.LeftFootHitBoxComponent",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "True",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SphereComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.LeftHandSphere",
+      "name": "LeftHandSphere",
+      "class": "Class /Script/Engine.SphereComponent",
+      "parent_component": "HitBoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.LeftHandHitboxComponent",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "True",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SphereComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.RightFootSphere",
+      "name": "RightFootSphere",
+      "class": "Class /Script/Engine.SphereComponent",
+      "parent_component": "HitBoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.RightFootHitBoxComponent",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "True",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SphereComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.RightHandSphere",
+      "name": "RightHandSphere",
+      "class": "Class /Script/Engine.SphereComponent",
+      "parent_component": "HitBoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.RightHandHitboxComponent",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "True",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SphereComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.Sphere",
+      "name": "Sphere",
+      "class": "Class /Script/Engine.SphereComponent",
+      "parent_component": "InfluenceAgentComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.TakeDownInfluenceComponent",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "True",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "StaticMeshComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.DistanceField_Mesh",
+      "name": "DistanceField_Mesh",
+      "class": "Class /Script/Engine.StaticMeshComponent",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.CharacterMesh0",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "StaticMesh /Game/Characters/LEGOfig/SM_LEGOFig_DistanceField_Mesh.SM_LEGOFig_DistanceField_Mesh",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "False",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "ok",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+        {
+          "slot_index": 0,
+          "is_component_override": false,
+          "material":           {
+            "interface": "Material /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial",
+            "class": "Class /Script/Engine.Material",
+            "parent_chain": [
+              "Material /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "not-found",
+                "values": []
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "not-found",
+                "values": []
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "not-found",
+                "values": []
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "not-found",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "not-found",
+                "values": []
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "object": "StaticMeshComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.Head",
+      "name": "Head",
+      "class": "Class /Script/Engine.StaticMeshComponent",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.CharacterMesh0",
+      "parent_socket": "HeadStud_Attach_Socket",
+      "skeletal_mesh": "",
+      "static_mesh": "StaticMesh /Game/Characters/Attachments/Hair/SweptBackWidowsPeakSideburns/SM_HAIR_SweptBackWidowsPeakSideburns.SM_HAIR_SweptBackWidowsPeakSideburns",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "ok",
+      "is_body_component": false,
+      "is_face_related": true,
+      "materials": [
+        {
+          "slot_index": 0,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceConstant /Game/Characters/Attachments/Hair/SweptBackWidowsPeakSideburns/MI_HAIR_SweptBackWidPeakSideburns_DarkBrown_EoM.MI_HAIR_SweptBackWidPeakSideburns_DarkBrown_EoM",
+            "class": "Class /Script/Engine.MaterialInstanceConstant",
+            "parent_chain": [
+              "MaterialInstanceConstant /Game/Characters/Attachments/Hair/SweptBackWidowsPeakSideburns/MI_HAIR_SweptBackWidPeakSideburns_DarkBrown_EoM.MI_HAIR_SweptBackWidPeakSideburns_DarkBrown_EoM",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Attatchment_EoM_Controller.MI_Attatchment_EoM_Controller",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/GlobalController/MI_Char_EoM_GlobalController.MI_Char_EoM_GlobalController",
+              "Material /Game/Characters/Materials/M_Masters/EoM/M_Char_EoM_Master.M_Char_EoM_Master"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"RAO\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/Attachments/HAIR/SweptBackWidowsPeakSideburns/T_HAIR_SweptBackWidowsPeakSideburns_RAO.T_HAIR_SweptBackWidowsPeakSideburns_RAO'\",ExpressionGUID=BC70C1A4468D9CCDD5B721B6BE29F819)",
+                  "(ParameterInfo=(Name=\"CT\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/Attachments/HAIR/SweptBackWidowsPeakSideburns/T_HAIR_SweptBackWidowsPeakSideburns_CT.T_HAIR_SweptBackWidowsPeakSideburns_CT'\",ExpressionGUID=15A7303E42D6578EDF216981D0C41576)",
+                  "(ParameterInfo=(Name=\"NRM\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/Attachments/HAIR/SweptBackWidowsPeakSideburns/T_HAIR_SweptBackWidowsPeakSideburns_NRM.T_HAIR_SweptBackWidowsPeakSideburns_NRM'\",ExpressionGUID=44FFD5AB4D674A88426B029091574F4B)"
+                ]
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"RefractionDepthBias\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)"
+                ]
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"Base Color\",Association=GlobalParameter,Index=-1),ParameterValue=(R=0.058800,G=0.027300,B=0.024100,A=1.000000),ExpressionGUID=6185339B4F4F706E2B04A9A87507CFD1)"
+                ]
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "object": "StaticMeshComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.HipPegs",
+      "name": "HipPegs",
+      "class": "Class /Script/Engine.StaticMeshComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "StaticMesh /Game/Characters/LEGOfig/SM_LEGOFig_Minifig_HipPegs.SM_LEGOFig_Minifig_HipPegs",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "False",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "ok",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+        {
+          "slot_index": 0,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceConstant /Game/Characters/Minifig/BruceWayne/Material/MI_BruceWayne_SuitBlack_EoM.MI_BruceWayne_SuitBlack_EoM",
+            "class": "Class /Script/Engine.MaterialInstanceConstant",
+            "parent_chain": [
+              "MaterialInstanceConstant /Game/Characters/Minifig/BruceWayne/Material/MI_BruceWayne_SuitBlack_EoM.MI_BruceWayne_SuitBlack_EoM",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Minifig_EoM_Controller.MI_Minifig_EoM_Controller",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/GlobalController/MI_Char_EoM_GlobalController.MI_Char_EoM_GlobalController",
+              "Material /Game/Characters/Materials/M_Masters/EoM/M_Char_EoM_Master.M_Char_EoM_Master"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"BC\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/EoM/T_BruceWayne_SuitBlack_BC.T_BruceWayne_SuitBlack_BC'\",ExpressionGUID=C457523E4F09BFAC5BC01FB87261512C)",
+                  "(ParameterInfo=(Name=\"MMR\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/EoM/T_BruceWayne_SuitBlack_MMR.T_BruceWayne_SuitBlack_MMR'\",ExpressionGUID=9FD39B584CDECBE375CA69A62E675776)",
+                  "(ParameterInfo=(Name=\"DNRM\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/EoM/T_BruceWayne_SuitBlack_DNRM.T_BruceWayne_SuitBlack_DNRM'\",ExpressionGUID=A92FEA8047F5A83125C8F8A7A440DFF1)"
+                ]
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"RefractionDepthBias\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)"
+                ]
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "object": "StaticMeshComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.NeckPeg",
+      "name": "NeckPeg",
+      "class": "Class /Script/Engine.StaticMeshComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "StaticMesh /Game/Characters/LEGOfig/SM_LEGOFig_Minifig_NeckPeg.SM_LEGOFig_Minifig_NeckPeg",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "False",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "ok",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+        {
+          "slot_index": 0,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceConstant /Game/Characters/Minifig/BruceWayne/Material/MI_BruceWayne_SuitBlack_EoM.MI_BruceWayne_SuitBlack_EoM",
+            "class": "Class /Script/Engine.MaterialInstanceConstant",
+            "parent_chain": [
+              "MaterialInstanceConstant /Game/Characters/Minifig/BruceWayne/Material/MI_BruceWayne_SuitBlack_EoM.MI_BruceWayne_SuitBlack_EoM",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Minifig_EoM_Controller.MI_Minifig_EoM_Controller",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/GlobalController/MI_Char_EoM_GlobalController.MI_Char_EoM_GlobalController",
+              "Material /Game/Characters/Materials/M_Masters/EoM/M_Char_EoM_Master.M_Char_EoM_Master"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"BC\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/EoM/T_BruceWayne_SuitBlack_BC.T_BruceWayne_SuitBlack_BC'\",ExpressionGUID=C457523E4F09BFAC5BC01FB87261512C)",
+                  "(ParameterInfo=(Name=\"MMR\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/EoM/T_BruceWayne_SuitBlack_MMR.T_BruceWayne_SuitBlack_MMR'\",ExpressionGUID=9FD39B584CDECBE375CA69A62E675776)",
+                  "(ParameterInfo=(Name=\"DNRM\",Association=GlobalParameter,Index=-1),ParameterValue=\"/Script/Engine.Texture2D'/Game/Characters/Textures/EoM/T_BruceWayne_SuitBlack_DNRM.T_BruceWayne_SuitBlack_DNRM'\",ExpressionGUID=A92FEA8047F5A83125C8F8A7A440DFF1)"
+                ]
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"RefractionDepthBias\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)"
+                ]
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "object": "TetherableComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.Tetherable",
+      "name": "Tetherable",
+      "class": "Class /Script/TetherLauncher.TetherableComponent",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.CharacterMesh0",
+      "parent_socket": "Chest_Socket",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TimeSincePossessionChangedComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.TimeSincePossessionChangedComponent",
+      "name": "TimeSincePossessionChangedComponent",
+      "class": "Class /Script/TtArtificialIntelligence.TimeSincePossessionChangedComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TimelineComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.Timeline",
+      "name": "Timeline",
+      "class": "Class /Script/Engine.TimelineComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtAbilitySystemComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.AbilitySystem",
+      "name": "AbilitySystem",
+      "class": "Class /Script/TtGameplayAbilities.TtAbilitySystemComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "True",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtAimManagerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.TtAimManager",
+      "name": "TtAimManager",
+      "class": "Class /Script/TtRangedCombat.TtAimManagerComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtAnimLinkedLayerManagerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.AnimLinkedLayerManager",
+      "name": "AnimLinkedLayerManager",
+      "class": "Class /Script/TtAnimLinkedLayerManager.TtAnimLinkedLayerManagerComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtAudioIdlePlaybackComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.TtAudioIdlePlayback",
+      "name": "TtAudioIdlePlayback",
+      "class": "Class /Script/TtAudio.TtAudioIdlePlaybackComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtCameraComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.Camera",
+      "name": "Camera",
+      "class": "Class /Script/TtCamera.TtCameraComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=-5007.775784,Y=-10418.704322,Z=2092.347873)",
+      "relative_rotation_ue": "(Pitch=1.886308,Yaw=-59.435272,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "True",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtCharacterAssetMinionComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.TtCharacterAssetMinion",
+      "name": "TtCharacterAssetMinion",
+      "class": "Class /Script/TtCharacterAsset.TtCharacterAssetMinionComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtCombatLogComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.CombatLogComponent",
+      "name": "CombatLogComponent",
+      "class": "Class /Script/TtCombatLog.TtCombatLogComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtEquipmentManagerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.EquipmentManager",
+      "name": "EquipmentManager",
+      "class": "Class /Script/TtEquipment.TtEquipmentManagerComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtGameplayTagActionsComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.GameplayTagActionsComponent",
+      "name": "GameplayTagActionsComponent",
+      "class": "Class /Script/TtEnhancedInput.TtGameplayTagActionsComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtHapticsManagerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.ResistiveTriggerManagerComponent",
+      "name": "ResistiveTriggerManagerComponent",
+      "class": "Class /Script/TtHaptics.TtHapticsManagerComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtInputPromptComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.TtInputPromptComponent",
+      "name": "TtInputPromptComponent",
+      "class": "Class /Script/TtInputPrompts.TtInputPromptComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtPartyPawnComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.PartyPawnComponent",
+      "name": "PartyPawnComponent",
+      "class": "Class /Script/TtPartySystem.TtPartyPawnComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtSignificanceComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.Significance",
+      "name": "Significance",
+      "class": "Class /Script/TtSignificance.TtSignificanceComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtWeatherableComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.TtWeatherable",
+      "name": "TtWeatherable",
+      "class": "Class /Script/TtWeather.TtWeatherableComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "WubFocusListenerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.WubFocusListener",
+      "name": "WubFocusListener",
+      "class": "Class /Script/Wub.WubFocusListenerComponent",
+      "parent_component": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.CollisionCylinder",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "True",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "WubHeadListenerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.WubHeadListener",
+      "name": "WubHeadListener",
+      "class": "Class /Script/Wub.WubHeadListenerComponent",
+      "parent_component": "TtCameraComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_BruceWayne_Suit_Default_Playable_C_2147436367.Camera",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "True",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": true,
+      "materials": [
+      ]
+    }
+  ],
+  "diagnostics": [
+    "Read-only manual capture. Material parameter arrays are raw reflected evidence; no material, mesh, animation, tag, or pawn state was changed.",
+    "Live pose data is intentionally omitted from the baseline. Socket rest-pose data remains in the separate runtime socket profile."
+  ]
+}

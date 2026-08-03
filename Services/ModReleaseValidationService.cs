@@ -34,7 +34,7 @@ public sealed class ModReleaseValidationService
         IReadOnlyList<SuitInput> inputs,
         string exportContentRoot,
         string generatedRoot,
-        string? installedSuitModsRoot)
+        string? installedContentPacksRoot)
     {
         var result = new Result();
         ValidateModIdentity(mod, result);
@@ -91,7 +91,7 @@ public sealed class ModReleaseValidationService
             result.AddError("Asset Registry", error);
         }
 
-        ValidateInstalledCollisions(installedSuitModsRoot, mod.ModId, suitIds, pawnTags, packageOwners, result);
+        ValidateInstalledCollisions(installedContentPacksRoot, mod.ModId, suitIds, pawnTags, packageOwners, result);
         return result;
     }
 
@@ -348,18 +348,20 @@ public sealed class ModReleaseValidationService
     }
 
     private static void ValidateInstalledCollisions(
-        string? installedSuitModsRoot,
+        string? installedContentPacksRoot,
         string activeModId,
         IReadOnlyDictionary<string, string> suitIds,
         IReadOnlyDictionary<string, string> pawnTags,
         IReadOnlyDictionary<string, string> packageOwners,
         Result result)
     {
-        if (string.IsNullOrWhiteSpace(installedSuitModsRoot) || !Directory.Exists(installedSuitModsRoot)) return;
+        if (string.IsNullOrWhiteSpace(installedContentPacksRoot) || !Directory.Exists(installedContentPacksRoot)) return;
 
         try
         {
-            foreach (var manifestPath in Directory.EnumerateFiles(installedSuitModsRoot, "mod.json", SearchOption.AllDirectories))
+            foreach (var manifestPath in Directory.EnumerateDirectories(installedContentPacksRoot)
+                         .Select(packDirectory => Path.Combine(packDirectory, "mod.json"))
+                         .Where(File.Exists))
             {
                 using var document = JsonDocument.Parse(File.ReadAllText(manifestPath));
                 var root = document.RootElement;

@@ -1,0 +1,2643 @@
+{
+  "schema_version": 1,
+  "capture_kind": "face-baseline",
+  "captured_utc": "2026-08-02T18:36:17.850Z",
+  "capture_source": "manual-hotkey",
+  "game_build": "unavailable",
+  "capture_status": "ok",
+  "rig_hash": "4B276DBE23BCFD60",
+  "face_hash": "459E3177F303626F",
+  "capture_summary": {
+    "component_count": 88,
+    "face_related_component_count": 6,
+    "face_material_slot_count": 8,
+    "observed_asset_count": 45
+  },
+  "pawn": {
+    "object_path": "BP_Gordon_Formal_Playable_C /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283",
+    "class_path": "BlueprintGeneratedClass /Game/Characters/Minifig/Gordon/BP_Gordon_Formal_Playable.BP_Gordon_Formal_Playable_C",
+    "pawn_tag": "unavailable"
+  },
+  "rig": {
+    "body_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CharacterMesh0",
+    "skeletal_mesh": "SkeletalMesh /Game/Characters/LEGOfig/SK_LEGOfig_Minifig.SK_LEGOfig_Minifig",
+    "skeleton": "Skeleton /Game/Characters/LEGOfig/SKEL_LEGOfig.SKEL_LEGOfig",
+    "rig_key": "SkeletalMesh /Game/Characters/LEGOfig/SK_LEGOfig_Minifig.SK_LEGOfig_Minifig|Skeleton /Game/Characters/LEGOfig/SKEL_LEGOfig.SKEL_LEGOfig"
+  },
+  "context": {
+    "requested_label": "Neutral",
+    "capture_phase": "rest",
+    "level": "Level /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel"
+  },
+  "body_animation": {
+    "animation_mode": "AnimationBlueprint",
+    "anim_class": "AnimBlueprintGeneratedClass /Game/Animation/LEGOfig/ABP_LEGOFig.ABP_LEGOFig_C",
+    "anim_instance": "ABP_LEGOFig_C /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CharacterMesh0.ABP_LEGOFig_C_2147430282",
+    "active_montage": "AnimMontage /Game/Animation/LEGOfig/Gordon/Gadgets/RubberBulletPistol/AM_RubberBulletPistol_Reload_Minifig.AM_RubberBulletPistol_Reload_Minifig",
+    "face_curve_capture_status": "not-yet-enumerated"
+  },
+  "face_component_paths": [
+    "InfluenceAgentComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.PlayerHeadingInfluence",
+    "SceneComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.HeadTargetPoint",
+    "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Cape",
+    "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Face",
+    "StaticMeshComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Head",
+    "WubHeadListenerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.WubHeadListener"
+  ],
+  "observed_assets": [
+    {
+      "path": "ABP_LEGOFig_C /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CharacterMesh0.ABP_LEGOFig_C_2147430282",
+      "observed_source": "animation"
+    },
+    {
+      "path": "AnimBlueprintGeneratedClass /Game/Animation/LEGOfig/ABP_LEGOFig.ABP_LEGOFig_C",
+      "observed_source": "animation"
+    },
+    {
+      "path": "AnimMontage /Game/Animation/LEGOfig/Gordon/Gadgets/RubberBulletPistol/AM_RubberBulletPistol_Reload_Minifig.AM_RubberBulletPistol_Reload_Minifig",
+      "observed_source": "animation"
+    },
+    {
+      "path": "SkeletalMesh /Game/Characters/Attachments/LEGOface/SK_LEGOface.SK_LEGOface",
+      "observed_source": "component"
+    },
+    {
+      "path": "SkeletalMesh /Game/Characters/LEGOfig/SK_LEGOfig_Minifig.SK_LEGOfig_Minifig",
+      "observed_source": "component"
+    },
+    {
+      "path": "SkeletalMesh /Game/Models/Gadgets/GA_Glider_Gordon/SK_GA_Glider_Gordon.SK_GA_Glider_Gordon",
+      "observed_source": "component"
+    },
+    {
+      "path": "Skeleton /Game/Characters/LEGOfig/SKEL_LEGOfig.SKEL_LEGOfig",
+      "observed_source": "component"
+    },
+    {
+      "path": "StaticMesh /Game/Characters/Attachments/Hat/PoliceHat/SM_HAT_PoliceHat.SM_HAT_PoliceHat",
+      "observed_source": "component"
+    },
+    {
+      "path": "StaticMesh /Game/Characters/LEGOfig/SM_LEGOFig_DistanceField_Mesh.SM_LEGOFig_DistanceField_Mesh",
+      "observed_source": "component"
+    },
+    {
+      "path": "StaticMesh /Game/Characters/LEGOfig/SM_LEGOFig_Minifig_HipPegs.SM_LEGOFig_Minifig_HipPegs",
+      "observed_source": "component"
+    },
+    {
+      "path": "StaticMesh /Game/Characters/LEGOfig/SM_LEGOFig_Minifig_NeckPeg.SM_LEGOFig_Minifig_NeckPeg",
+      "observed_source": "component"
+    },
+    {
+      "path": "Material /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial",
+      "observed_source": "material"
+    },
+    {
+      "path": "Material /Game/Characters/Materials/M_Masters/EoM/M_Char_EoM_Master.M_Char_EoM_Master",
+      "observed_source": "material"
+    },
+    {
+      "path": "Material /Game/Characters/Materials/M_Masters/LEGOface/M_LEGOface.M_LEGOface",
+      "observed_source": "material"
+    },
+    {
+      "path": "Material /Game/Global/Materials/LEGO_Material_Library/Project/Custom/Materials/Decal/Materials/M_Decal_Master.M_Decal_Master",
+      "observed_source": "material"
+    },
+    {
+      "path": "Material /Game/Global/Materials/LEGO_Material_Library/Project/Custom/Materials/M_LEGO_ShadowImposter.M_LEGO_ShadowImposter",
+      "observed_source": "material"
+    },
+    {
+      "path": "Material /TtLEGOMaterials/Materials/M_LEGO_Master.M_LEGO_Master",
+      "observed_source": "material"
+    },
+    {
+      "path": "Material /TtLEGOMaterials/Materials/M_LEGO_Translucent_Master.M_LEGO_Translucent_Master",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Attachments/Face/FACE_JimGordonDetective_TheBatman/MI_FACE_JimGordonDetective_TheBatman.MI_FACE_JimGordonDetective_TheBatman",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Attachments/Hat/PoliceHat/MI_HAT_PoliceHat_GordonFormal.MI_HAT_PoliceHat_GordonFormal",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/GlobalController/MI_Char_EoM_GlobalController.MI_Char_EoM_GlobalController",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Attatchment_Decal_EoM_Controller.MI_Attatchment_Decal_EoM_Controller",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Minifig_EoM_Controller.MI_Minifig_EoM_Controller",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Materials/M_Masters/LEGOface/MI_LEGOface-Defaults.MI_LEGOface-Defaults",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Characters/Minifig/Gordon/Materials/MI_Gordon_Formal.MI_Gordon_Formal",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Global/Materials/LEGO_Material_Library/Project/Custom/Material_Instances/MI_LEGO_ShadowImposter.MI_LEGO_ShadowImposter",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Global/Materials/LEGO_Material_Library/Project/LEGO_Models/Material_Instances/Mi_LEGO_MD_Solid_DynamicTPage_LCS.Mi_LEGO_MD_Solid_DynamicTPage_LCS",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Global/Materials/LEGO_Material_Library/Project/LEGO_Models/Material_Instances/Mi_LEGO_MD_Transp_DynamicTPage_LCS.Mi_LEGO_MD_Transp_DynamicTPage_LCS",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /Game/Models/Gadgets/GA_Glider_Gordon/MI_Decal_Glider_Gordon_Formal.MI_Decal_Glider_Gordon_Formal",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /TtLEGOMaterials/MaterialInstances/MI_LEGO_BaseSolid.MI_LEGO_BaseSolid",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /TtLEGOMaterials/MaterialInstances/MI_LEGO_Base_Transp.MI_LEGO_Base_Transp",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /TtLEGOMaterials/MaterialInstances/MI_LEGO_Master.MI_LEGO_Master",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceConstant /TtLEGOMaterials/MaterialInstances/MI_LEGO_Translucent_Master.MI_LEGO_Translucent_Master",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Cape.MID_MI_Decal_Glider_Gordon_Formal_2147429417",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Cape.MID_MI_Decal_Glider_Gordon_Formal_2147429420",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Cape.MID_MI_LEGO_ShadowImposter_2147429421",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Cape.MID_Mi_LEGO_MD_Solid_DynamicTPage_LCS_2147429418",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Cape.MID_Mi_LEGO_MD_Transp_DynamicTPage_LCS_2147429419",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Cape.MID_Mi_LEGO_MD_Transp_DynamicTPage_LCS_2147429422",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CharacterMesh0.MID_MI_Gordon_Formal_2147429427",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.DistanceField_Mesh.MID_WorldGridMaterial_2147429426",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Face.MID_MI_FACE_JimGordonDetective_TheBatman_2147430268",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Head.MID_MI_HAT_PoliceHat_GordonFormal_2147429423",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.HipPegs.MID_MI_Gordon_Formal_2147429425",
+      "observed_source": "material"
+    },
+    {
+      "path": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.NeckPeg.MID_MI_Gordon_Formal_2147429424",
+      "observed_source": "material"
+    }
+  ],
+  "components": [
+    {
+      "object": "AbilityComboTreeComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.AbilityComboTreeComponent",
+      "name": "AbilityComboTreeComponent",
+      "class": "Class /Script/AbilityComboTree.AbilityComboTreeComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "ActorMarkerPositionComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.ActorMarkerPosition",
+      "name": "ActorMarkerPosition",
+      "class": "Class /Script/TtHUDMarkers.ActorMarkerPositionComponent",
+      "parent_component": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CollisionCylinder",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=-0.000000,Y=-0.000000,Z=120.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "True",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "BP_ActorComponent_FirstPersonLookAt_C /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.BP_ActorComponent_FirstPersonLookAt",
+      "name": "BP_ActorComponent_FirstPersonLookAt",
+      "class": "BlueprintGeneratedClass /Game/Animation/Blueprints/BP_ActorComponent_FirstPersonLookAt.BP_ActorComponent_FirstPersonLookAt_C",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "True",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "BP_ActorComponent_WubOutputLevelGetterHolder_C /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.BP_ActorComponent_WubOutputLevelGetterHolder_C_2147429679",
+      "name": "BP_ActorComponent_WubOutputLevelGetterHolder_C_2147429679",
+      "class": "BlueprintGeneratedClass /Game/Animation/Blueprints/BP_ActorComponent_WubOutputLevelGetterHolder.BP_ActorComponent_WubOutputLevelGetterHolder_C",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "BigTakeHitComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.BigTakeHitComponent",
+      "name": "BigTakeHitComponent",
+      "class": "Class /Script/MeleeCombat.BigTakeHitComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "BoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Box",
+      "name": "Box",
+      "class": "Class /Script/Engine.BoxComponent",
+      "parent_component": "InfluenceAgentComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.PlayerHeadingInfluence",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=140.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "True",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "CameraObjectFaderComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CameraObjectFader",
+      "name": "CameraObjectFader",
+      "class": "Class /Script/TtCamera.CameraObjectFaderComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CollisionCylinder",
+      "name": "CollisionCylinder",
+      "class": "Class /Script/Engine.CapsuleComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=-4632.177786,Y=-10970.319447,Z=2020.533095)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=116.728144,Roll=-0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "True",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "CharacterLookAtComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Look At Component",
+      "name": "Look At Component",
+      "class": "Class /Script/TtUtilities.CharacterLookAtComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "CombatComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CombatComponent",
+      "name": "CombatComponent",
+      "class": "Class /Script/MeleeCombat.CombatComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "ContextEffectsComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.ContextEffects",
+      "name": "ContextEffects",
+      "class": "Class /Script/TtFx.ContextEffectsComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "CurrentThreatComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CurrentThreatComponent",
+      "name": "CurrentThreatComponent",
+      "class": "Class /Script/TtThreatAndAggro.CurrentThreatComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerAudioAbilityTagWatcherComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.DinnerAudioAbilityTagWatcher",
+      "name": "DinnerAudioAbilityTagWatcher",
+      "class": "Class /Script/Dinner.DinnerAudioAbilityTagWatcherComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerCharacterIdentityComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.IdentityComponent",
+      "name": "IdentityComponent",
+      "class": "Class /Script/Dinner.DinnerCharacterIdentityComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerCharacterMovementComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CharMoveComp",
+      "name": "CharMoveComp",
+      "class": "Class /Script/Dinner.DinnerCharacterMovementComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "True",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerCharacterTargetableComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Targetable",
+      "name": "Targetable",
+      "class": "Class /Script/Dinner.DinnerCharacterTargetableComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "True",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerInputComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.PawnInputComponent0",
+      "name": "PawnInputComponent0",
+      "class": "Class /Script/Dinner.DinnerInputComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerLocationAttachmentManagerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.LocationAttachmentManager",
+      "name": "LocationAttachmentManager",
+      "class": "Class /Script/Dinner.DinnerLocationAttachmentManagerComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerMenuActionsComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.DinnerMenuActions",
+      "name": "DinnerMenuActions",
+      "class": "Class /Script/Dinner.DinnerMenuActionsComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerPegArticulationVisibilityComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.DinnerPegArticulationVisibility",
+      "name": "DinnerPegArticulationVisibility",
+      "class": "Class /Script/Dinner.DinnerPegArticulationVisibilityComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "DinnerUpgradesComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Upgrades Component",
+      "name": "Upgrades Component",
+      "class": "Class /Script/Dinner.DinnerUpgradesComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "GameplayEventToDialogueComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.GameplayEventToDialogue",
+      "name": "GameplayEventToDialogue",
+      "class": "Class /Script/Dinner.GameplayEventToDialogueComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "GliderCharacterComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.GliderCharacter",
+      "name": "GliderCharacter",
+      "class": "Class /Script/GlidingRuntime.GliderCharacterComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "HighContrastActorComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.HighContrastActor",
+      "name": "HighContrastActor",
+      "class": "Class /Script/TtAccessibility.HighContrastActorComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "HitBoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.LeftFootHitBoxComponent",
+      "name": "LeftFootHitBoxComponent",
+      "class": "Class /Script/MeleeCombat.HitBoxComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "HitBoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.LeftHandHitboxComponent",
+      "name": "LeftHandHitboxComponent",
+      "class": "Class /Script/MeleeCombat.HitBoxComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "HitBoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.RightFootHitBoxComponent",
+      "name": "RightFootHitBoxComponent",
+      "class": "Class /Script/MeleeCombat.HitBoxComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "HitBoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.RightHandHitboxComponent",
+      "name": "RightHandHitboxComponent",
+      "class": "Class /Script/MeleeCombat.HitBoxComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=-0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "HitBoxManagerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.HitBoxManager",
+      "name": "HitBoxManager",
+      "class": "Class /Script/MeleeCombat.HitBoxManagerComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "InfluenceAgentComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.PlayerHeadingInfluence",
+      "name": "PlayerHeadingInfluence",
+      "class": "Class /Script/TtInfluenceMap.InfluenceAgentComponent",
+      "parent_component": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CollisionCylinder",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": true,
+      "materials": [
+      ]
+    },
+    {
+      "object": "InfluenceAgentComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.TakeDownInfluenceComponent",
+      "name": "TakeDownInfluenceComponent",
+      "class": "Class /Script/TtInfluenceMap.InfluenceAgentComponent",
+      "parent_component": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CollisionCylinder",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "InfluencePollingComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.InfluencePolling",
+      "name": "InfluencePolling",
+      "class": "Class /Script/TtInfluenceMap.InfluencePollingComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "ManageDynamicMaterialComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Manage Dynamic Material Component",
+      "name": "Manage Dynamic Material Component",
+      "class": "Class /Script/Dinner.ManageDynamicMaterialComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "MassAgentComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.MassAgent",
+      "name": "MassAgent",
+      "class": "Class /Script/MassActors.MassAgentComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "MotionWarpingComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.MotionWarping",
+      "name": "MotionWarping",
+      "class": "Class /Script/MotionWarping.MotionWarpingComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "NavTrailComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.NavTrailComponent",
+      "name": "NavTrailComponent",
+      "class": "Class /Script/TtPathFollowerBreadcrumbs.NavTrailComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "NiagaraComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.BreathVfx",
+      "name": "BreathVfx",
+      "class": "Class /Script/Niagara.NiagaraComponent",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CharacterMesh0",
+      "parent_socket": "MouthSocket",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=-90.000000,Roll=-0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "NiagaraComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.NS_FlashingLights_Blue",
+      "name": "NS_FlashingLights_Blue",
+      "class": "Class /Script/Niagara.NiagaraComponent",
+      "parent_component": "PointLightComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.BlueLight_R",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=2.361969)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "False",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "NiagaraComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.NS_FlashingLights_Blue1",
+      "name": "NS_FlashingLights_Blue1",
+      "class": "Class /Script/Niagara.NiagaraComponent",
+      "parent_component": "PointLightComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.BlueLight_L",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=-3.163723)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "False",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "NiagaraComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.NS_FlashingLights_Red",
+      "name": "NS_FlashingLights_Red",
+      "class": "Class /Script/Niagara.NiagaraComponent",
+      "parent_component": "PointLightComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.RedLight_R",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=2.361969)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "False",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "NiagaraComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.NS_FlashingLights_Red1",
+      "name": "NS_FlashingLights_Red1",
+      "class": "Class /Script/Niagara.NiagaraComponent",
+      "parent_component": "PointLightComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.RedLight_L",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=-3.163723)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "False",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "NiagaraComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.NiagaraComponent_2147429481",
+      "name": "NiagaraComponent_2147429481",
+      "class": "Class /Script/Niagara.NiagaraComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=-4654.474726,Y=-10992.743686,Z=1986.383095)",
+      "relative_rotation_ue": "(Pitch=-30.000000,Yaw=-63.271856,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "NiagaraComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.NiagaraComponent_2147429484",
+      "name": "NiagaraComponent_2147429484",
+      "class": "Class /Script/Niagara.NiagaraComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=-4616.468089,Y=-10990.399423,Z=2001.383095)",
+      "relative_rotation_ue": "(Pitch=-45.000000,Yaw=-63.271856,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "PingableActorComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.PingableActor",
+      "name": "PingableActor",
+      "class": "Class /Script/TtPingPlugin.PingableActorComponent",
+      "parent_component": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CollisionCylinder",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "PointLightComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.BlueLight_L",
+      "name": "BlueLight_L",
+      "class": "Class /Script/Engine.PointLightComponent",
+      "parent_component": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CollisionCylinder",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "False",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "PointLightComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.BlueLight_R",
+      "name": "BlueLight_R",
+      "class": "Class /Script/Engine.PointLightComponent",
+      "parent_component": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CollisionCylinder",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "False",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "PointLightComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.RedLight_L",
+      "name": "RedLight_L",
+      "class": "Class /Script/Engine.PointLightComponent",
+      "parent_component": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CollisionCylinder",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "False",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "PointLightComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.RedLight_R",
+      "name": "RedLight_R",
+      "class": "Class /Script/Engine.PointLightComponent",
+      "parent_component": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CollisionCylinder",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "False",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "PossessionReroutingPawnComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.PossessionRerouting",
+      "name": "PossessionRerouting",
+      "class": "Class /Script/TtPossessionRerouting.PossessionReroutingPawnComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "PurchasingPawnComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.PurchasingComponent",
+      "name": "PurchasingComponent",
+      "class": "Class /Script/TtPurchasableActors.PurchasingPawnComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "RiderComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.RiderComponent",
+      "name": "RiderComponent",
+      "class": "Class /Script/TtRideables.RiderComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SafePositionComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.SafePositionComponent",
+      "name": "SafePositionComponent",
+      "class": "Class /Script/SafePosition.SafePositionComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SceneComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CharacterLookAtTarget",
+      "name": "CharacterLookAtTarget",
+      "class": "Class /Script/Engine.SceneComponent",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CharacterMesh0",
+      "parent_socket": "VFX_Face_Socket",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SceneComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.HeadTargetPoint",
+      "name": "HeadTargetPoint",
+      "class": "Class /Script/Engine.SceneComponent",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CharacterMesh0",
+      "parent_socket": "Head_Socket",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=-0.000000,Z=17.907125)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": true,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SceneComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Tetherable.ExpectedTetherTargetIconLocator",
+      "name": "ExpectedTetherTargetIconLocator",
+      "class": "Class /Script/Engine.SceneComponent",
+      "parent_component": "TetherableComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Tetherable",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=50.000000,Y=-0.000000,Z=-0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SceneComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.TorsoTargetPont",
+      "name": "TorsoTargetPont",
+      "class": "Class /Script/Engine.SceneComponent",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CharacterMesh0",
+      "parent_socket": "Chest_Socket",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Cape",
+      "name": "Cape",
+      "class": "Class /Script/AnimationBudgetAllocator.SkeletalMeshComponentBudgeted",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CharacterMesh0",
+      "parent_socket": "Root",
+      "skeletal_mesh": "SkeletalMesh /Game/Models/Gadgets/GA_Glider_Gordon/SK_GA_Glider_Gordon.SK_GA_Glider_Gordon",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "False",
+      "hidden_in_game": "False",
+      "active": "True",
+      "materials_status": "ok",
+      "is_body_component": false,
+      "is_face_related": true,
+      "materials": [
+        {
+          "slot_index": 0,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Cape.MID_Mi_LEGO_MD_Transp_DynamicTPage_LCS_2147429422",
+            "class": "Class /Script/Engine.MaterialInstanceDynamic",
+            "parent_chain": [
+              "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Cape.MID_Mi_LEGO_MD_Transp_DynamicTPage_LCS_2147429422",
+              "MaterialInstanceConstant /Game/Global/Materials/LEGO_Material_Library/Project/LEGO_Models/Material_Instances/Mi_LEGO_MD_Transp_DynamicTPage_LCS.Mi_LEGO_MD_Transp_DynamicTPage_LCS",
+              "MaterialInstanceConstant /TtLEGOMaterials/MaterialInstances/MI_LEGO_Base_Transp.MI_LEGO_Base_Transp",
+              "MaterialInstanceConstant /TtLEGOMaterials/MaterialInstances/MI_LEGO_Translucent_Master.MI_LEGO_Translucent_Master",
+              "Material /TtLEGOMaterials/Materials/M_LEGO_Translucent_Master.M_LEGO_Translucent_Master"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        },
+        {
+          "slot_index": 1,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Cape.MID_MI_LEGO_ShadowImposter_2147429421",
+            "class": "Class /Script/Engine.MaterialInstanceDynamic",
+            "parent_chain": [
+              "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Cape.MID_MI_LEGO_ShadowImposter_2147429421",
+              "MaterialInstanceConstant /Game/Global/Materials/LEGO_Material_Library/Project/Custom/Material_Instances/MI_LEGO_ShadowImposter.MI_LEGO_ShadowImposter",
+              "Material /Game/Global/Materials/LEGO_Material_Library/Project/Custom/Materials/M_LEGO_ShadowImposter.M_LEGO_ShadowImposter"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        },
+        {
+          "slot_index": 2,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Cape.MID_MI_Decal_Glider_Gordon_Formal_2147429420",
+            "class": "Class /Script/Engine.MaterialInstanceDynamic",
+            "parent_chain": [
+              "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Cape.MID_MI_Decal_Glider_Gordon_Formal_2147429420",
+              "MaterialInstanceConstant /Game/Models/Gadgets/GA_Glider_Gordon/MI_Decal_Glider_Gordon_Formal.MI_Decal_Glider_Gordon_Formal",
+              "Material /Game/Global/Materials/LEGO_Material_Library/Project/Custom/Materials/Decal/Materials/M_Decal_Master.M_Decal_Master"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        },
+        {
+          "slot_index": 3,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Cape.MID_Mi_LEGO_MD_Transp_DynamicTPage_LCS_2147429419",
+            "class": "Class /Script/Engine.MaterialInstanceDynamic",
+            "parent_chain": [
+              "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Cape.MID_Mi_LEGO_MD_Transp_DynamicTPage_LCS_2147429419",
+              "MaterialInstanceConstant /Game/Global/Materials/LEGO_Material_Library/Project/LEGO_Models/Material_Instances/Mi_LEGO_MD_Transp_DynamicTPage_LCS.Mi_LEGO_MD_Transp_DynamicTPage_LCS",
+              "MaterialInstanceConstant /TtLEGOMaterials/MaterialInstances/MI_LEGO_Base_Transp.MI_LEGO_Base_Transp",
+              "MaterialInstanceConstant /TtLEGOMaterials/MaterialInstances/MI_LEGO_Translucent_Master.MI_LEGO_Translucent_Master",
+              "Material /TtLEGOMaterials/Materials/M_LEGO_Translucent_Master.M_LEGO_Translucent_Master"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        },
+        {
+          "slot_index": 4,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Cape.MID_Mi_LEGO_MD_Solid_DynamicTPage_LCS_2147429418",
+            "class": "Class /Script/Engine.MaterialInstanceDynamic",
+            "parent_chain": [
+              "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Cape.MID_Mi_LEGO_MD_Solid_DynamicTPage_LCS_2147429418",
+              "MaterialInstanceConstant /Game/Global/Materials/LEGO_Material_Library/Project/LEGO_Models/Material_Instances/Mi_LEGO_MD_Solid_DynamicTPage_LCS.Mi_LEGO_MD_Solid_DynamicTPage_LCS",
+              "MaterialInstanceConstant /TtLEGOMaterials/MaterialInstances/MI_LEGO_BaseSolid.MI_LEGO_BaseSolid",
+              "MaterialInstanceConstant /TtLEGOMaterials/MaterialInstances/MI_LEGO_Master.MI_LEGO_Master",
+              "Material /TtLEGOMaterials/Materials/M_LEGO_Master.M_LEGO_Master"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        },
+        {
+          "slot_index": 5,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Cape.MID_MI_Decal_Glider_Gordon_Formal_2147429417",
+            "class": "Class /Script/Engine.MaterialInstanceDynamic",
+            "parent_chain": [
+              "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Cape.MID_MI_Decal_Glider_Gordon_Formal_2147429417",
+              "MaterialInstanceConstant /Game/Models/Gadgets/GA_Glider_Gordon/MI_Decal_Glider_Gordon_Formal.MI_Decal_Glider_Gordon_Formal",
+              "Material /Game/Global/Materials/LEGO_Material_Library/Project/Custom/Materials/Decal/Materials/M_Decal_Master.M_Decal_Master"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "object": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CharacterMesh0",
+      "name": "CharacterMesh0",
+      "class": "Class /Script/AnimationBudgetAllocator.SkeletalMeshComponentBudgeted",
+      "parent_component": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CollisionCylinder",
+      "parent_socket": "None",
+      "skeletal_mesh": "SkeletalMesh /Game/Characters/LEGOfig/SK_LEGOfig_Minifig.SK_LEGOfig_Minifig",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=-82.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "True",
+      "materials_status": "ok",
+      "is_body_component": true,
+      "is_face_related": false,
+      "materials": [
+        {
+          "slot_index": 0,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CharacterMesh0.MID_MI_Gordon_Formal_2147429427",
+            "class": "Class /Script/Engine.MaterialInstanceDynamic",
+            "parent_chain": [
+              "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CharacterMesh0.MID_MI_Gordon_Formal_2147429427",
+              "MaterialInstanceConstant /Game/Characters/Minifig/Gordon/Materials/MI_Gordon_Formal.MI_Gordon_Formal",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Minifig_EoM_Controller.MI_Minifig_EoM_Controller",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/GlobalController/MI_Char_EoM_GlobalController.MI_Char_EoM_GlobalController",
+              "Material /Game/Characters/Materials/M_Masters/EoM/M_Char_EoM_Master.M_Char_EoM_Master"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "object": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Face",
+      "name": "Face",
+      "class": "Class /Script/AnimationBudgetAllocator.SkeletalMeshComponentBudgeted",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CharacterMesh0",
+      "parent_socket": "Head_Socket",
+      "skeletal_mesh": "SkeletalMesh /Game/Characters/Attachments/LEGOface/SK_LEGOface.SK_LEGOface",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "True",
+      "materials_status": "ok",
+      "is_body_component": false,
+      "is_face_related": true,
+      "materials": [
+        {
+          "slot_index": 0,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Face.MID_MI_FACE_JimGordonDetective_TheBatman_2147430268",
+            "class": "Class /Script/Engine.MaterialInstanceDynamic",
+            "parent_chain": [
+              "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Face.MID_MI_FACE_JimGordonDetective_TheBatman_2147430268",
+              "MaterialInstanceConstant /Game/Characters/Attachments/Face/FACE_JimGordonDetective_TheBatman/MI_FACE_JimGordonDetective_TheBatman.MI_FACE_JimGordonDetective_TheBatman",
+              "MaterialInstanceConstant /Game/Characters/Materials/M_Masters/LEGOface/MI_LEGOface-Defaults.MI_LEGOface-Defaults",
+              "Material /Game/Characters/Materials/M_Masters/LEGOface/M_LEGOface.M_LEGOface"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"EyeSpecLOffsetV\",Association=GlobalParameter,Index=-1),ParameterValue=-0.540000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeSpecLScaleU\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeSpecLScaleV\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeSpecROffsetV\",Association=GlobalParameter,Index=-1),ParameterValue=-0.540000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeSpecRScaleU\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeSpecRScaleV\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TeethDOffsetV\",Association=GlobalParameter,Index=-1),ParameterValue=-6.134145,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TeethDScaleU\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TeethDScaleV\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TeethUOffsetV\",Association=GlobalParameter,Index=-1),ParameterValue=-10.522411,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TeethUScaleU\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TeethUScaleV\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TongueOffsetV\",Association=GlobalParameter,Index=-1),ParameterValue=-5.120133,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TongueScaleU\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"TongueScaleV\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"eyelidlowerlshow\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"eyelidlowerrshow\",Association=GlobalParameter,Index=-1),ParameterValue=1.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"eyelidupperlshow\",Association=GlobalParameter,Index=-1),ParameterValue=-0.000004,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"eyelidupperrshow\",Association=GlobalParameter,Index=-1),ParameterValue=-0.000004,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"eyespecloffsetu\",Association=GlobalParameter,Index=-1),ParameterValue=0.000961,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"eyespecroffsetu\",Association=GlobalParameter,Index=-1),ParameterValue=0.000961,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"teethdoffsetu\",Association=GlobalParameter,Index=-1),ParameterValue=-0.556040,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"teethdrotate\",Association=GlobalParameter,Index=-1),ParameterValue=-0.008954,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"teethuoffsetu\",Association=GlobalParameter,Index=-1),ParameterValue=-0.365865,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"teethurotate\",Association=GlobalParameter,Index=-1),ParameterValue=-0.008954,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"tongueoffsetu\",Association=GlobalParameter,Index=-1),ParameterValue=-0.699175,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"tonguerotate\",Association=GlobalParameter,Index=-1),ParameterValue=-0.008954,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"MouthHide\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"BrowLHide\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"BrowRHide\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeLHide\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeRHide\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeSpecLRotate\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeSpecRRotate\",Association=GlobalParameter,Index=-1),ParameterValue=0.000000,ExpressionGUID=00000000000000000000000000000000)"
+                ]
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": [
+                  "(ParameterInfo=(Name=\"EyeLSocket_Location\",Association=GlobalParameter,Index=-1),ParameterValue=(R=20.054348,G=-5.477005,B=17.115217,A=1.000000),ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeLSocket_Rotation\",Association=GlobalParameter,Index=-1),ParameterValue=(R=-5.158271,G=-0.000074,B=-15.471872,A=1.000000),ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeLSocket_Scale\",Association=GlobalParameter,Index=-1),ParameterValue=(R=1.000000,G=1.001720,B=1.001357,A=1.000000),ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeRSocket_Location\",Association=GlobalParameter,Index=-1),ParameterValue=(R=20.050566,G=5.490614,B=17.492462,A=1.000000),ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeRSocket_Rotation\",Association=GlobalParameter,Index=-1),ParameterValue=(R=1.174742,G=0.000148,B=15.509974,A=1.000000),ExpressionGUID=00000000000000000000000000000000)",
+                  "(ParameterInfo=(Name=\"EyeRSocket_Scale\",Association=GlobalParameter,Index=-1),ParameterValue=(R=1.000000,G=1.003190,B=1.003947,A=1.000000),ExpressionGUID=00000000000000000000000000000000)"
+                ]
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "object": "SkillsComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.SkillsComponent",
+      "name": "SkillsComponent",
+      "class": "Class /Script/Dinner.SkillsComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SphereComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.LeftFootSphere",
+      "name": "LeftFootSphere",
+      "class": "Class /Script/Engine.SphereComponent",
+      "parent_component": "HitBoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.LeftFootHitBoxComponent",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "True",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SphereComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.LeftHandSphere",
+      "name": "LeftHandSphere",
+      "class": "Class /Script/Engine.SphereComponent",
+      "parent_component": "HitBoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.LeftHandHitboxComponent",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "True",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SphereComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.RightFootSphere",
+      "name": "RightFootSphere",
+      "class": "Class /Script/Engine.SphereComponent",
+      "parent_component": "HitBoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.RightFootHitBoxComponent",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "True",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SphereComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.RightHandSphere",
+      "name": "RightHandSphere",
+      "class": "Class /Script/Engine.SphereComponent",
+      "parent_component": "HitBoxComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.RightHandHitboxComponent",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "True",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "SphereComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Sphere",
+      "name": "Sphere",
+      "class": "Class /Script/Engine.SphereComponent",
+      "parent_component": "InfluenceAgentComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.TakeDownInfluenceComponent",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "True",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "StaticMeshComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.DistanceField_Mesh",
+      "name": "DistanceField_Mesh",
+      "class": "Class /Script/Engine.StaticMeshComponent",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CharacterMesh0",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "StaticMesh /Game/Characters/LEGOfig/SM_LEGOFig_DistanceField_Mesh.SM_LEGOFig_DistanceField_Mesh",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "False",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "ok",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+        {
+          "slot_index": 0,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.DistanceField_Mesh.MID_WorldGridMaterial_2147429426",
+            "class": "Class /Script/Engine.MaterialInstanceDynamic",
+            "parent_chain": [
+              "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.DistanceField_Mesh.MID_WorldGridMaterial_2147429426",
+              "Material /Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "object": "StaticMeshComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Head",
+      "name": "Head",
+      "class": "Class /Script/Engine.StaticMeshComponent",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CharacterMesh0",
+      "parent_socket": "HeadStud_Attach_Socket",
+      "skeletal_mesh": "",
+      "static_mesh": "StaticMesh /Game/Characters/Attachments/Hat/PoliceHat/SM_HAT_PoliceHat.SM_HAT_PoliceHat",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "ok",
+      "is_body_component": false,
+      "is_face_related": true,
+      "materials": [
+        {
+          "slot_index": 0,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Head.MID_MI_HAT_PoliceHat_GordonFormal_2147429423",
+            "class": "Class /Script/Engine.MaterialInstanceDynamic",
+            "parent_chain": [
+              "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Head.MID_MI_HAT_PoliceHat_GordonFormal_2147429423",
+              "MaterialInstanceConstant /Game/Characters/Attachments/Hat/PoliceHat/MI_HAT_PoliceHat_GordonFormal.MI_HAT_PoliceHat_GordonFormal",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Attatchment_Decal_EoM_Controller.MI_Attatchment_Decal_EoM_Controller",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/GlobalController/MI_Char_EoM_GlobalController.MI_Char_EoM_GlobalController",
+              "Material /Game/Characters/Materials/M_Masters/EoM/M_Char_EoM_Master.M_Char_EoM_Master"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "object": "StaticMeshComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.HipPegs",
+      "name": "HipPegs",
+      "class": "Class /Script/Engine.StaticMeshComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "StaticMesh /Game/Characters/LEGOfig/SM_LEGOFig_Minifig_HipPegs.SM_LEGOFig_Minifig_HipPegs",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "False",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "ok",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+        {
+          "slot_index": 0,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.HipPegs.MID_MI_Gordon_Formal_2147429425",
+            "class": "Class /Script/Engine.MaterialInstanceDynamic",
+            "parent_chain": [
+              "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.HipPegs.MID_MI_Gordon_Formal_2147429425",
+              "MaterialInstanceConstant /Game/Characters/Minifig/Gordon/Materials/MI_Gordon_Formal.MI_Gordon_Formal",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Minifig_EoM_Controller.MI_Minifig_EoM_Controller",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/GlobalController/MI_Char_EoM_GlobalController.MI_Char_EoM_GlobalController",
+              "Material /Game/Characters/Materials/M_Masters/EoM/M_Char_EoM_Master.M_Char_EoM_Master"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "object": "StaticMeshComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.NeckPeg",
+      "name": "NeckPeg",
+      "class": "Class /Script/Engine.StaticMeshComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "StaticMesh /Game/Characters/LEGOfig/SM_LEGOFig_Minifig_NeckPeg.SM_LEGOFig_Minifig_NeckPeg",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "False",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "ok",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+        {
+          "slot_index": 0,
+          "is_component_override": true,
+          "material":           {
+            "interface": "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.NeckPeg.MID_MI_Gordon_Formal_2147429424",
+            "class": "Class /Script/Engine.MaterialInstanceDynamic",
+            "parent_chain": [
+              "MaterialInstanceDynamic /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.NeckPeg.MID_MI_Gordon_Formal_2147429424",
+              "MaterialInstanceConstant /Game/Characters/Minifig/Gordon/Materials/MI_Gordon_Formal.MI_Gordon_Formal",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Minifig_EoM_Controller.MI_Minifig_EoM_Controller",
+              "MaterialInstanceConstant /Game/Characters/Materials/MI_Instances/EoM/Controller/GlobalController/MI_Char_EoM_GlobalController.MI_Char_EoM_GlobalController",
+              "Material /Game/Characters/Materials/M_Masters/EoM/M_Char_EoM_Master.M_Char_EoM_Master"
+            ],
+            "static_parameters": "",
+            "static_parameters_status": "not-found",
+            "parameter_arrays": [
+              {
+                "name": "TextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "ScalarParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "VectorParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "RuntimeVirtualTextureParameterValues",
+                "status": "ok",
+                "values": []
+              },
+              {
+                "name": "FontParameterValues",
+                "status": "ok",
+                "values": []
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "object": "TetherableComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Tetherable",
+      "name": "Tetherable",
+      "class": "Class /Script/TetherLauncher.TetherableComponent",
+      "parent_component": "SkeletalMeshComponentBudgeted /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CharacterMesh0",
+      "parent_socket": "Chest_Socket",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TimeSincePossessionChangedComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.TimeSincePossessionChangedComponent",
+      "name": "TimeSincePossessionChangedComponent",
+      "class": "Class /Script/TtArtificialIntelligence.TimeSincePossessionChangedComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TimelineComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Timeline",
+      "name": "Timeline",
+      "class": "Class /Script/Engine.TimelineComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtAbilitySystemComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.AbilitySystem",
+      "name": "AbilitySystem",
+      "class": "Class /Script/TtGameplayAbilities.TtAbilitySystemComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "True",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtAimManagerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.TtAimManager",
+      "name": "TtAimManager",
+      "class": "Class /Script/TtRangedCombat.TtAimManagerComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtAnimLinkedLayerManagerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.AnimLinkedLayerManager",
+      "name": "AnimLinkedLayerManager",
+      "class": "Class /Script/TtAnimLinkedLayerManager.TtAnimLinkedLayerManagerComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtAudioIdlePlaybackComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.TtAudioIdlePlayback",
+      "name": "TtAudioIdlePlayback",
+      "class": "Class /Script/TtAudio.TtAudioIdlePlaybackComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtCameraComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Camera",
+      "name": "Camera",
+      "class": "Class /Script/TtCamera.TtCameraComponent",
+      "parent_component": "",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=-4828.071818,Y=-10441.962439,Z=2080.270481)",
+      "relative_rotation_ue": "(Pitch=1.886308,Yaw=-59.435272,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "True",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtCharacterAssetMinionComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.TtCharacterAssetMinion",
+      "name": "TtCharacterAssetMinion",
+      "class": "Class /Script/TtCharacterAsset.TtCharacterAssetMinionComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtCombatLogComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CombatLogComponent",
+      "name": "CombatLogComponent",
+      "class": "Class /Script/TtCombatLog.TtCombatLogComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtEquipmentManagerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.EquipmentManager",
+      "name": "EquipmentManager",
+      "class": "Class /Script/TtEquipment.TtEquipmentManagerComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtGameplayTagActionsComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.GameplayTagActionsComponent",
+      "name": "GameplayTagActionsComponent",
+      "class": "Class /Script/TtEnhancedInput.TtGameplayTagActionsComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtHapticsManagerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.ResistiveTriggerManagerComponent",
+      "name": "ResistiveTriggerManagerComponent",
+      "class": "Class /Script/TtHaptics.TtHapticsManagerComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtInputPromptComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.TtInputPromptComponent",
+      "name": "TtInputPromptComponent",
+      "class": "Class /Script/TtInputPrompts.TtInputPromptComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtPartyPawnComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.PartyPawnComponent",
+      "name": "PartyPawnComponent",
+      "class": "Class /Script/TtPartySystem.TtPartyPawnComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtSignificanceComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Significance",
+      "name": "Significance",
+      "class": "Class /Script/TtSignificance.TtSignificanceComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "TtWeatherableComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.TtWeatherable",
+      "name": "TtWeatherable",
+      "class": "Class /Script/TtWeather.TtWeatherableComponent",
+      "parent_component": "",
+      "parent_socket": "",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "",
+      "relative_rotation_ue": "",
+      "relative_scale_ue": "",
+      "visibility": "",
+      "hidden_in_game": "",
+      "active": "False",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "WubFocusListenerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.WubFocusListener",
+      "name": "WubFocusListener",
+      "class": "Class /Script/Wub.WubFocusListenerComponent",
+      "parent_component": "CapsuleComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.CollisionCylinder",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "True",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": false,
+      "materials": [
+      ]
+    },
+    {
+      "object": "WubHeadListenerComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.WubHeadListener",
+      "name": "WubHeadListener",
+      "class": "Class /Script/Wub.WubHeadListenerComponent",
+      "parent_component": "TtCameraComponent /Game/Levels/Batcave/Batcave.Batcave:PersistentLevel.BP_Gordon_Formal_Playable_C_2147430283.Camera",
+      "parent_socket": "None",
+      "skeletal_mesh": "",
+      "static_mesh": "",
+      "child_actor": "",
+      "relative_location_ue": "(X=0.000000,Y=0.000000,Z=0.000000)",
+      "relative_rotation_ue": "(Pitch=0.000000,Yaw=0.000000,Roll=0.000000)",
+      "relative_scale_ue": "(X=1.000000,Y=1.000000,Z=1.000000)",
+      "visibility": "True",
+      "hidden_in_game": "False",
+      "active": "True",
+      "materials_status": "function-unavailable",
+      "is_body_component": false,
+      "is_face_related": true,
+      "materials": [
+      ]
+    }
+  ],
+  "diagnostics": [
+    "Read-only manual capture. Material parameter arrays are raw reflected evidence; no material, mesh, animation, tag, or pawn state was changed.",
+    "Live pose data is intentionally omitted from the baseline. Socket rest-pose data remains in the separate runtime socket profile."
+  ]
+}

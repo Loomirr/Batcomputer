@@ -346,8 +346,18 @@ public sealed class StageValidationService
                 var actors = profile.RuntimeActors.Count == 0
                     ? ""
                     : " Runtime actors: " + string.Join(", ", profile.RuntimeActors) + ".";
-                findings.Add(new("WARN",
-                    $"Equipment '{equipment.Name}' is a controller setup. The tool stages its ability set, but controller spawn and recall behavior still needs an in-game check.{actors}"));
+                if (!string.IsNullOrWhiteSpace(profile.RequiredGameplayFamily) &&
+                    !string.Equals(profile.RequiredGameplayFamily, donorFamily, StringComparison.OrdinalIgnoreCase))
+                {
+                    findings.Add(new("WARN",
+                        $"Equipment '{equipment.Name}' only works from a {profile.RequiredGameplayFamily} gameplay base. " +
+                        $"The current donor is {donorFamily ?? "not set"}; its remote pawn will not operate in-game.{actors}"));
+                }
+                else
+                {
+                    findings.Add(new("WARN",
+                        $"Equipment '{equipment.Name}' is a controller setup. The tool stages its ability set, but controller spawn and recall behavior still needs an in-game check.{actors}"));
+                }
             }
             else if (profile.Support is EquipmentSupportKind.Experimental or EquipmentSupportKind.FamilyOnly)
             {

@@ -256,21 +256,9 @@ public sealed partial class MainForm
                 }
             }
 
-            string jsonInstallMessage = "";
-            if (_currentProject is not null)
-            {
-                var runtimeJson = StageRuntimeV2SuitJson(_currentProject);
-                var suitsRoot = EffectiveGameRuntimeSuitsFolder();
-                var suitJsonDir = Path.Combine(suitsRoot, slotId);
-                Directory.CreateDirectory(suitJsonDir);
-                var installedJson = Path.Combine(suitJsonDir, "suit.json");
-                File.Copy(runtimeJson, installedJson, overwrite: true);
-                jsonInstallMessage = $" Runtime JSON installed to {installedJson}.";
-            }
-
             AppendLog(count == 0
-                ? $"No .pak/.ucas/.utoc found in {ioStoreDir}.{jsonInstallMessage}"
-                : $"Installed {count} file(s) to {dest}.{jsonInstallMessage}");
+                ? $"No .pak/.ucas/.utoc found in {ioStoreDir}."
+                : $"Installed {count} file(s) to {dest}. Build Mod to install the LOTDK Expanded manifest and registry plugin.");
         }
         catch (Exception ex)
         {
@@ -855,46 +843,6 @@ public sealed partial class MainForm
         catch (Exception ex)
         {
             warnings.Add($"stage structural validation could not run: {ex.Message}");
-        }
-
-        // Registration uniqueness: another installed suit reusing our pak base name (under a
-        // different slot) would overwrite our pak, or be overwritten by it - the shared
-        // ThomasWayneBP_P / three-Thomas-buttons incident. Block on a real collision.
-        try
-        {
-            var suitsRoot = EffectiveGameRuntimeSuitsFolder();
-            var ourPak = CurrentPackageBaseName();
-            if (Directory.Exists(suitsRoot) && !string.IsNullOrWhiteSpace(ourPak))
-            {
-                foreach (var dir in Directory.EnumerateDirectories(suitsRoot))
-                {
-                    var otherJson = Path.Combine(dir, "suit.json");
-                    if (!File.Exists(otherJson))
-                    {
-                        continue;
-                    }
-                    try
-                    {
-                        using var doc = JsonDocument.Parse(File.ReadAllText(otherJson));
-                        var root = doc.RootElement;
-                        var otherSlot = root.TryGetProperty("slot_id", out var s) ? s.GetString() ?? "" : "";
-                        var otherPak = root.TryGetProperty("package_base_name", out var p) ? p.GetString() ?? "" : "";
-                        if (otherSlot.Equals(project.SlotId, StringComparison.OrdinalIgnoreCase))
-                        {
-                            continue; // our own installed entry — expected on re-package
-                        }
-                        if (!string.IsNullOrWhiteSpace(otherPak) && otherPak.Equals(ourPak, StringComparison.OrdinalIgnoreCase))
-                        {
-                            errors.Add($"another installed suit '{otherSlot}' ({Path.GetFileName(dir)}) uses the same pak name '{ourPak}' — packaging would overwrite it (or be overwritten). Give this suit a unique package_base_name.");
-                        }
-                    }
-                    catch { /* skip unreadable suit.json */ }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            warnings.Add($"registration uniqueness check could not run: {ex.Message}");
         }
 
         // Package-PATH collision: every suit ships its assets under

@@ -1139,23 +1139,7 @@ public sealed partial class MainForm : Form
             }
         }
 
-        var suitsRoot = Path.GetFullPath(EffectiveGameRuntimeSuitsFolder());
-        var suitDir = Path.GetFullPath(Path.Combine(suitsRoot, SafeSuitFolderName(project.SlotId)));
-        if (IsPathUnder(suitDir, suitsRoot) && Directory.Exists(suitDir))
-        {
-            var json = Path.Combine(suitDir, "suit.json");
-            if (File.Exists(json))
-            {
-                File.Delete(json);
-                removed++;
-            }
-            if (!Directory.EnumerateFileSystemEntries(suitDir).Any())
-            {
-                Directory.Delete(suitDir);
-            }
-        }
-
-        AppendLog($"Removed {removed} installed file(s) for '{project.DisplayName}'.");
+        AppendLog($"Removed {removed} installed file(s) for '{project.DisplayName}'. Shared LOTDK Expanded pack data is kept; remove the suit from its mod and rebuild that mod to update its manifest.");
     }
 
     private void ClearCurrentSuitAfterDeletion()
@@ -2494,32 +2478,12 @@ public sealed partial class MainForm : Form
         return $"{pkg}.{leaf}";
     }
 
-    private string EffectiveGameRuntimeSuitsFolder()
+    private string EffectiveGameContentPacksFolder()
     {
-        var paksFolder = Path.GetFullPath(AppSettings.Current.EffectiveGamePaksModFolder());
-        var cursor = new DirectoryInfo(paksFolder);
-        while (cursor is not null)
-        {
-            if (cursor.Name.Equals("LEGOBatmanLotDK", StringComparison.OrdinalIgnoreCase))
-            {
-                return Path.Combine(
-                    cursor.FullName,
-                    "Binaries",
-                    "Win64",
-                    "ue4ss",
-                    "Mods",
-                    "NewSuitSlotNative",
-                    "Suits");
-            }
-
-            cursor = cursor.Parent;
-        }
-
-        return Path.Combine(
-            _projectRootText.Text.Trim(),
-            "Mods",
-            "NewSuitSlotNative",
-            "Suits");
+        var gameRoot = LotdkExpandedLayout.TryFindGameRoot(AppSettings.Current.EffectiveGamePaksModFolder());
+        return gameRoot is not null
+            ? LotdkExpandedLayout.ContentPacksRoot(gameRoot)
+            : Path.Combine(_projectRootText.Text.Trim(), LotdkExpandedLayout.ModuleId, "Mods");
     }
 
     private static string FirstNonEmpty(params string?[] values) =>

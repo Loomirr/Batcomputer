@@ -303,6 +303,57 @@ internal static class TextureDecodeService
         }
     }
 
+    /// <summary>Repacks a source PNG using the same MMR-to-ORM mapping as cooked textures.</summary>
+    public static bool TryConvertMmrPngToOrm(string sourcePath, string destPath)
+    {
+        try
+        {
+            using var source = new Bitmap(sourcePath);
+            using var input = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(input))
+            {
+                g.DrawImageUnscaled(source, 0, 0);
+            }
+            using var output = new Bitmap(input.Width, input.Height, PixelFormat.Format32bppArgb);
+            var rect = new Rectangle(0, 0, input.Width, input.Height);
+            var inputBits = input.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            var outputBits = output.LockBits(rect, ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+            try
+            {
+                var inputRow = new byte[input.Width * 4];
+                var outputRow = new byte[output.Width * 4];
+                for (var y = 0; y < input.Height; y++)
+                {
+                    System.Runtime.InteropServices.Marshal.Copy(inputBits.Scan0 + y * inputBits.Stride, inputRow, 0, inputRow.Length);
+                    for (var x = 0; x < input.Width; x++)
+                    {
+                        var o = x * 4;
+                        var metalness = inputRow[o + 2];
+                        var roughness = inputRow[o];
+                        outputRow[o] = metalness;
+                        outputRow[o + 1] = (byte)Math.Clamp(37 + roughness * (255 - 37) / 255, 0, 255);
+                        outputRow[o + 2] = 255;
+                        outputRow[o + 3] = 255;
+                    }
+                    System.Runtime.InteropServices.Marshal.Copy(outputRow, 0, outputBits.Scan0 + y * outputBits.Stride, outputRow.Length);
+                }
+            }
+            finally
+            {
+                input.UnlockBits(inputBits);
+                output.UnlockBits(outputBits);
+            }
+            Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+            output.Save(destPath, ImageFormat.Png);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"    source MMR repack failed for {Path.GetFileName(sourcePath)}: {ex.Message.Split('\n')[0]}");
+            return false;
+        }
+    }
+
     /// <summary>
     /// Bakes the shared LEGO mouth sheet into a drawable mouth.
     ///

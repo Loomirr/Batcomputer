@@ -5,7 +5,7 @@ It assembles custom playable suits from shipped character assets, then builds an
 mod release for the game.
 
 This repository contains the authoring tool only. It does not contain game files, extracted assets,
-Oodle, or the SuitSlots runtime mod.
+Oodle, or the LOTDK Expanded runtime.
 
 ## What It Does
 
@@ -26,7 +26,7 @@ Oodle, or the SuitSlots runtime mod.
 - A local installation of *LEGO Batman: Legacy of the Dark Knight*.
 - A matching `.usmap` file for the current game build.
 - Unreal Engine 5.6 to build the small Asset Registry writer used by native releases.
-- The separate SuitSlots / NewSuitSlotNative runtime installed in the game.
+- The separate LOTDK Expanded runtime installed in the game.
 
 ### Optional compact packages
 
@@ -36,7 +36,7 @@ copied into a mod, release ZIP, or this repository.
 
 ### Players
 
-Players only need the finished mod and the SuitSlots runtime. They do not need Batcomputer, .NET,
+Players only need the finished mod and the LOTDK Expanded runtime. They do not need Batcomputer, .NET,
 Unreal Engine, mappings, or extracted game assets.
 
 ## Portable Layout
@@ -64,6 +64,12 @@ until its source or the configured UE build changes.
 Setup can then run the full character extraction. It reads only the shipped, top-level Paks
 containers and ignores nested `~mods` folders. The standard all-character extraction includes
 character, animation, and localisation assets and needs about 18 GB of free space.
+
+## LOTDK Expanded Runtime
+
+The native runtime is installed separately. Batcomputer installs each mod's `mod.json` under
+`ue4ss\LOTDKExpanded\Mods` and its registry plugin under
+`ue4ss\LOTDKExpanded\RegistryPlugins`; it does not modify the runtime DLL or `mods.txt`.
 
 ## Building a Suit
 
