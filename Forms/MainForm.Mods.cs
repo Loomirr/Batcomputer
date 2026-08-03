@@ -233,6 +233,7 @@ public sealed partial class MainForm
     private void SelectHomeMod(string modProjectPath)
     {
         _homeActiveModProjectPath = modProjectPath;
+        UpdateToyboxChips();
         RefreshHomeTiles();
     }
 

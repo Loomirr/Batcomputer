@@ -288,6 +288,7 @@ public sealed partial class MainForm : Form
     private void RefreshAllViews()
     {
         SyncProjectFieldsForViews();
+        UpdateToyboxChips();
         PopulateToyboxSlots();
         RefreshInspector();
     }
@@ -330,10 +331,15 @@ public sealed partial class MainForm : Form
     /// <summary>Same ground for the mod-folder field, which cannot be transparent (TextBox).</summary>
     private static readonly Color HeaderMetaGround = HeaderGround;
 
-    /// <summary>The suit name field sits slightly proud of the bar so it reads as editable.</summary>
-    private static readonly Color SuitNameGround = Color.FromArgb(36, 40, 48);
-
     private Label? _suitNamePencil;
+
+    private Label? _headerModCaption;
+
+    private Label? _headerModValue;
+
+    private Label? _headerModDetail;
+
+    private Label? _headerSuitCaption;
 
     private Label? _headerMetaLabel;
 
@@ -351,23 +357,84 @@ public sealed partial class MainForm : Form
             return;
         }
         var hot = _suitNameText.Focused || _suitNameHover;
-        _suitNameText.BackColor = hot ? Color.FromArgb(38, 42, 51) : SuitNameGround;
+        _suitNameText.BackColor = hot ? Color.FromArgb(38, 42, 51) : HeaderGround;
         _suitNamePencil.ForeColor = hot ? Theme.Gold : Theme.OnDarkMuted;
     }
 
-    /// <summary>Slot and pak echo, shown after the editable mod folder in the header meta line.</summary>
+    /// <summary>Refreshes the compact mod, suit, and package context in the command bar.</summary>
     private void RefreshHeaderMeta()
     {
-        if (_headerMetaLabel is null)
+        if (_headerMetaLabel is null || _headerModValue is null || _headerModDetail is null)
         {
             return;
         }
+
+        var (modName, modDetail, hasMod) = ResolveHeaderModContext();
+        _headerModValue.Text = modName;
+        _headerModValue.ForeColor = hasMod ? Theme.Research : Theme.OnDarkMuted;
+        _headerModDetail.Text = modDetail;
+
         var slot = _slotIdText.Text.Trim();
         var pak = CurrentPackageBaseName();
         var parts = new List<string>();
+        if (_currentProject is not null)
+        {
+            var changeCount = Changes.Count;
+            parts.Add(changeCount == 1 ? "1 change" : $"{changeCount} changes");
+        }
         if (slot.Length > 0) { parts.Add("slot " + slot); }
         if (!string.IsNullOrWhiteSpace(pak)) { parts.Add("pak " + pak); }
-        _headerMetaLabel.Text = parts.Count > 0 ? "·  " + string.Join("  ·  ", parts) : "";
+        _headerMetaLabel.Text = string.Join("  ·  ", parts);
+    }
+
+    private (string Name, string Detail, bool HasMod) ResolveHeaderModContext()
+    {
+        try
+        {
+            var summaries = ModService.ListMods();
+            var slotId = _currentProject?.SlotId?.Trim() ?? "";
+            var projectPath = _currentProject is null || string.IsNullOrWhiteSpace(slotId)
+                ? ""
+                : (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).ProjectPathForSlot(slotId);
+
+            var matches = summaries.Where(summary =>
+            {
+                var mod = ModService.LoadMod(summary.Path);
+                return mod?.Suits.Any(entry =>
+                    (!string.IsNullOrWhiteSpace(slotId) && string.Equals(entry.SuitId, slotId, StringComparison.OrdinalIgnoreCase)) ||
+                    (!string.IsNullOrWhiteSpace(projectPath) && string.Equals(
+                        ModService.ResolveSuitProjectPath(entry), projectPath, StringComparison.OrdinalIgnoreCase))) == true;
+            }).ToList();
+
+            var selected = matches.FirstOrDefault(summary =>
+                string.Equals(summary.Path, _homeActiveModProjectPath, StringComparison.OrdinalIgnoreCase))
+                ?? matches.FirstOrDefault();
+            if (selected is not null)
+            {
+                return (selected.DisplayName, $"{selected.SuitCount} suit{(selected.SuitCount == 1 ? "" : "s")} in this mod", true);
+            }
+
+            if (!string.IsNullOrWhiteSpace(_homeActiveModProjectPath))
+            {
+                var active = summaries.FirstOrDefault(summary =>
+                    string.Equals(summary.Path, _homeActiveModProjectPath, StringComparison.OrdinalIgnoreCase));
+                if (active is not null)
+                {
+                    return (active.DisplayName, $"{active.SuitCount} suit{(active.SuitCount == 1 ? "" : "s")} in this mod", true);
+                }
+            }
+        }
+        catch
+        {
+            // The header remains useful even when a partially written project cannot be read yet.
+        }
+
+        if (_currentProject is not null)
+        {
+            return ("No release mod", "Add this suit to a mod from Home", false);
+        }
+
+        return ("No mod selected", "Open a mod or suit to begin", false);
     }
 
     private Button RailButton(string category, string glyph)

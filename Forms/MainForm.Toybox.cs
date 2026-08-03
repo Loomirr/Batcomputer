@@ -16,8 +16,8 @@ public sealed partial class MainForm
     private Control CreateToyboxPanel()
     {
         var outer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
-        // 72px gives the wordmark room and lets the suit block centre properly.
-        outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));
+        // The extra height keeps the workspace labels and suit details readable.
+        outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 80));
         outer.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         Theme.StyleTooltip(_toyboxToolTip); // readable dark tooltips app-wide
 
@@ -259,7 +259,7 @@ public sealed partial class MainForm
             FlowDirection = FlowDirection.RightToLeft,
             BackColor = Color.Transparent,
             WrapContents = false,
-            Padding = new Padding(0, 19, 12, 0),
+            Padding = new Padding(0, 23, 12, 0),
         };
 
         _menuButton.Text = "☰";
@@ -322,11 +322,11 @@ public sealed partial class MainForm
         right.Controls.Add(_toyboxStatusChip);
         header.Controls.Add(right);
 
-        // --- suit identity (fills the middle) ---------------------------------
+        // --- workspace context (fills the middle) -----------------------------
         var suit = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
 
         _suitNameText.BorderStyle = BorderStyle.None;
-        _suitNameText.BackColor = SuitNameGround;
+        _suitNameText.BackColor = HeaderGround;
         _suitNameText.ForeColor = Theme.OnDark;
         _suitNameText.Font = new Font("Segoe UI", 13.5f, FontStyle.Bold);
 
@@ -350,14 +350,46 @@ public sealed partial class MainForm
         _suitNamePencil.MouseEnter += (_, _) => { _suitNameHover = true; RefreshSuitNameState(); };
         _suitNamePencil.MouseLeave += (_, _) => { _suitNameHover = false; RefreshSuitNameState(); };
 
-        // Meta line: the mod folder stays editable, slot and pak are read-only echoes.
-        // TextBox cannot be transparent, so it uses a solid colour sampled from the header
-        // gradient at this height instead.
+        // The backing field still drives package derivation, but the header presents the
+        // actual release mod that contains this suit instead of a raw folder name.
         _modFolderText.BorderStyle = BorderStyle.None;
         _modFolderText.BackColor = HeaderMetaGround;
         _modFolderText.ForeColor = Theme.OnDarkMuted;
         _modFolderText.Font = Theme.Caption;
-        _tipsHeader.SetToolTip(_modFolderText, "Mod folder for this suit");
+        _modFolderText.Visible = false;
+
+        _headerModCaption = new Label
+        {
+            Text = "CURRENT MOD", AutoSize = false, Height = 14,
+            Font = new Font("Segoe UI", 7.5f, FontStyle.Bold), ForeColor = Theme.OnDarkMuted,
+            BackColor = Color.Transparent, TextAlign = ContentAlignment.MiddleLeft,
+        };
+        var modDot = new Label
+        {
+            Text = "●", AutoSize = false, Width = 12, Height = 22,
+            Font = new Font("Segoe UI", 8f, FontStyle.Bold), ForeColor = Theme.Research,
+            BackColor = Color.Transparent, TextAlign = ContentAlignment.MiddleLeft,
+        };
+        _headerModValue = new Label
+        {
+            Text = "No mod selected", AutoSize = false, Height = 22,
+            Font = new Font("Segoe UI", 12f, FontStyle.Bold), ForeColor = Theme.OnDarkMuted,
+            BackColor = Color.Transparent, TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true,
+        };
+        _headerModDetail = new Label
+        {
+            AutoSize = false, Height = 15,
+            Font = Theme.Caption, ForeColor = Theme.OnDarkMuted,
+            BackColor = Color.Transparent, TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true,
+        };
+        _tipsHeader.SetToolTip(_headerModValue, "Current release mod. Manage its suit list from Home.");
+
+        _headerSuitCaption = new Label
+        {
+            Text = "CURRENT SUIT", AutoSize = false, Height = 14,
+            Font = new Font("Segoe UI", 7.5f, FontStyle.Bold), ForeColor = Theme.OnDarkMuted,
+            BackColor = Color.Transparent, TextAlign = ContentAlignment.MiddleLeft,
+        };
 
         _headerMetaLabel = new Label
         {
@@ -367,26 +399,50 @@ public sealed partial class MainForm
             AutoEllipsis = true,
         };
 
+        var contextDivider = new Panel { Width = 1, BackColor = Theme.LineSoft };
+        suit.Controls.Add(_headerModCaption);
+        suit.Controls.Add(modDot);
+        suit.Controls.Add(_headerModValue);
+        suit.Controls.Add(_headerModDetail);
+        suit.Controls.Add(contextDivider);
+        suit.Controls.Add(_headerSuitCaption);
         suit.Controls.Add(_suitNameText);
         suit.Controls.Add(_suitNamePencil);
-        suit.Controls.Add(_modFolderText);
         suit.Controls.Add(_headerMetaLabel);
 
         void LayoutSuit()
         {
-            var mid = suit.Height / 2;
-            _suitNameText.Top = mid - 21;
-            _suitNameText.Left = 18;
-            _suitNameText.Width = Math.Max(90, Math.Min(280, suit.Width - 70));
+            var modWidth = Math.Clamp(suit.Width / 3, 126, 176);
+            var suitLeft = modWidth + 35;
+
+            _headerModCaption.Left = 18;
+            _headerModCaption.Top = 10;
+            _headerModCaption.Width = modWidth - 18;
+            modDot.Left = 18;
+            modDot.Top = 26;
+            _headerModValue.Left = modDot.Right + 2;
+            _headerModValue.Top = 23;
+            _headerModValue.Width = Math.Max(60, modWidth - 14);
+            _headerModDetail.Left = 18;
+            _headerModDetail.Top = 49;
+            _headerModDetail.Width = modWidth;
+
+            contextDivider.Left = modWidth + 16;
+            contextDivider.Top = 12;
+            contextDivider.Height = Math.Max(36, suit.Height - 24);
+
+            _headerSuitCaption.Left = suitLeft;
+            _headerSuitCaption.Top = 10;
+            _headerSuitCaption.Width = Math.Max(70, suit.Width - suitLeft - 12);
+            _suitNameText.Top = 23;
+            _suitNameText.Left = suitLeft;
+            _suitNameText.Width = Math.Max(80, suit.Width - suitLeft - 34);
             _suitNamePencil.Top = _suitNameText.Top + 2;
             _suitNamePencil.Left = _suitNameText.Right + 5;
 
-            _modFolderText.Top = mid + 7;
-            _modFolderText.Left = 18;
-            _modFolderText.Width = 120;
-            _headerMetaLabel.Top = mid + 6;
-            _headerMetaLabel.Left = _modFolderText.Right + 2;
-            _headerMetaLabel.Width = Math.Max(40, suit.Width - _headerMetaLabel.Left - 8);
+            _headerMetaLabel.Top = 49;
+            _headerMetaLabel.Left = suitLeft;
+            _headerMetaLabel.Width = Math.Max(40, suit.Width - suitLeft - 10);
             RefreshSuitNameState();
         }
         suit.Resize += (_, _) => LayoutSuit();
