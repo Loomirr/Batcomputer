@@ -142,6 +142,30 @@ public sealed partial class MainForm : Form
     private readonly YourCharacterControl _yourCharacter = new();
     private TableLayoutPanel? _toyboxBodyLayout;
     private SplitContainer? _toyboxWorkspaceSplit;
+    private WorkflowRailControl? _suitWorkflowRail;
+    private WorkflowRailControl? _homeWorkflowRail;
+    private Panel? _viewerWorkspaceHost;
+    private readonly Dictionary<WorkspaceFolder, Button> _workspaceFolderButtons = new();
+    private readonly Dictionary<HomeWorkspaceSection, Button> _homeWorkspaceButtons = new();
+    private WorkspaceFolder _workspaceFolder = WorkspaceFolder.Home;
+    private HomeWorkspaceSection _homeWorkspaceSection = HomeWorkspaceSection.Mods;
+    private bool _switchingWorkspaceFolder;
+
+    private enum WorkspaceFolder
+    {
+        Home,
+        Suits,
+        Viewer,
+    }
+
+    private enum HomeWorkspaceSection
+    {
+        Mods,
+        Suits,
+        RedBricks,
+        BuildMod,
+        Review,
+    }
 
     private readonly FlowLayoutPanel _toyboxTileFlow = new();
 
@@ -322,7 +346,7 @@ public sealed partial class MainForm : Form
         _diagnostics.Visible = !_diagnosticsCollapsed;
         header.Text = _diagnosticsCollapsed ? "▸  Diagnostics" : "▾  Diagnostics";
         // Row 1 of the root layout holds the log panel; collapsed leaves just the toggle bar.
-        _mainRootLayout.RowStyles[1].Height = _diagnosticsCollapsed ? 32 : 160;
+        _mainRootLayout.RowStyles[1].Height = _diagnosticsCollapsed ? 28 : 80;
     }
 
     /// <summary>The header's flat ground. Everything sitting on the bar clears to this.</summary>
@@ -371,7 +395,7 @@ public sealed partial class MainForm : Form
 
         var (modName, modDetail, hasMod) = ResolveHeaderModContext();
         _headerModValue.Text = modName;
-        _headerModValue.ForeColor = hasMod ? Theme.Research : Theme.OnDarkMuted;
+        _headerModValue.ForeColor = hasMod ? Theme.Mods : Theme.OnDarkMuted;
         _headerModDetail.Text = modDetail;
 
         var slot = _slotIdText.Text.Trim();
@@ -1026,7 +1050,7 @@ public sealed partial class MainForm : Form
         {
             CopyCoverIntoProject(svc, project, dialog.FileName);
             AppendLog($"Set cover image for '{project.DisplayName}'.");
-            RefreshHomeTiles();
+            RefreshToyboxTiles();
         }
         catch (Exception ex)
         {
@@ -1082,7 +1106,7 @@ public sealed partial class MainForm : Form
         project.CoverImagePath = "";
         svc.SaveProject(project);
         AppendLog($"Cleared cover image for '{project.DisplayName}'.");
-        RefreshHomeTiles();
+        RefreshToyboxTiles();
     }
 
     private bool DeleteSavedSuit(SuitProjectService.ProjectSummary summary, bool deleteFromGame, bool deleteFromTool)
@@ -1153,7 +1177,7 @@ public sealed partial class MainForm : Form
             }
 
             AppendLog($"Deleted '{project.DisplayName}' from {target}.");
-            RefreshHomeTiles();
+            RefreshToyboxTiles();
             return true;
         }
         catch (Exception ex)

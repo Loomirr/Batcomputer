@@ -60,6 +60,15 @@ public static class NativeAssetTextPatch
         return true;
     }
 
+    /// <summary>Reads a GameplayTag struct property without changing the asset.</summary>
+    public static string? GetGameplayTag(UAsset asset, string propName)
+    {
+        var ne = FindExportWithProp(asset, propName);
+        var sp = ne?.Data.OfType<StructPropertyData>().FirstOrDefault(p => p.Name.ToString() == propName);
+        var inner = sp?.Value.OfType<NamePropertyData>().FirstOrDefault(p => p.Name.ToString() == "TagName");
+        return inner?.Value.ToString();
+    }
+
     private static NormalExport? FindExportWithProp(UAsset asset, string propName) =>
         asset.Exports.OfType<NormalExport>()
             .FirstOrDefault(e => e.Data.Any(p => p.Name.ToString() == propName));

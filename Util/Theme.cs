@@ -19,6 +19,7 @@ internal static class Theme
     public static readonly Color PanelBg = Color.FromArgb(26, 29, 34);
 
     // Vivid category accents (readable on dark).
+    public static readonly Color Mods = Color.FromArgb(242, 137, 55);      // orange
     public static readonly Color Base = Color.FromArgb(70, 152, 240);      // blue
     public static readonly Color Materials = Color.FromArgb(42, 206, 152); // teal
     public static readonly Color Parts = Color.FromArgb(158, 144, 250);    // purple
@@ -43,6 +44,7 @@ internal static class Theme
 
     public static Color CategoryColor(string category) => category switch
     {
+        "Mods" => Mods,
         "Base" => Base,
         "Materials" => Materials,
         "Parts" => Parts,

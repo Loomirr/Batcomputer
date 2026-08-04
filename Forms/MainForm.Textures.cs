@@ -207,7 +207,7 @@ public sealed partial class MainForm
         {
             CopyCoverIntoProject(svc, project, icon.SourcePng);
             AppendLog($"Used generated UI icon '{icon.DisplayName}' as the cover for '{project.DisplayName}'.");
-            RefreshHomeTiles();
+            RefreshToyboxTiles();
         }
         catch (Exception ex)
         {

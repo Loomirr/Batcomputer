@@ -133,7 +133,7 @@ public sealed partial class MainForm
             });
             modPath = ModService.SaveMod(mod);
             AppendLog($"Created one-suit mod '{mod.DisplayName}' ({mod.ModId}) for this export.");
-            RefreshHomeTiles();
+            RefreshWorkspaceAfterModChange();
         }
         else if (matches.Count == 1)
         {
@@ -234,7 +234,18 @@ public sealed partial class MainForm
     {
         _homeActiveModProjectPath = modProjectPath;
         UpdateToyboxChips();
-        RefreshHomeTiles();
+        RefreshWorkspaceAfterModChange();
+    }
+
+    private void RefreshWorkspaceAfterModChange()
+    {
+        if (_workspaceFolder == WorkspaceFolder.Home &&
+            _homeWorkspaceSection is not HomeWorkspaceSection.BuildMod and not HomeWorkspaceSection.Review)
+        {
+            _homeWorkspaceSection = HomeWorkspaceSection.Mods;
+            UpdateHomeWorkspaceRailSelection();
+        }
+        RefreshToyboxTiles();
     }
 
     /// <summary>Direct rail action for the Home-selected release collection.</summary>
@@ -582,7 +593,7 @@ public sealed partial class MainForm
         var saved = ModService.SaveMod(mod);
         _homeActiveModProjectPath = saved;
         AppendLog($"Created mod '{mod.DisplayName}' ({modId}) with {mod.Suits.Count} suit(s): {saved}");
-        RefreshHomeTiles();
+        RefreshWorkspaceAfterModChange();
     }
 
     private void RenameMod(string modProjectPath)
@@ -594,7 +605,7 @@ public sealed partial class MainForm
         mod.DisplayName = name.Trim();
         ModService.SaveMod(mod);
         AppendLog($"Renamed mod to '{mod.DisplayName}' (ID {mod.ModId} unchanged).");
-        RefreshHomeTiles();
+        RefreshWorkspaceAfterModChange();
     }
 
     private void EditModSuits(string modProjectPath)
@@ -613,7 +624,7 @@ public sealed partial class MainForm
         AddSuitEntries(mod, picked);
         ModService.SaveMod(mod);
         AppendLog($"Mod '{mod.DisplayName}' now has {mod.Suits.Count} suit(s).");
-        RefreshHomeTiles();
+        RefreshWorkspaceAfterModChange();
     }
 
     /// <summary>Rebuilds a mod's suit entries from a set of absolute suit-project paths.</summary>
@@ -652,7 +663,7 @@ public sealed partial class MainForm
             _homeActiveModProjectPath = "";
         }
         AppendLog($"Deleted mod project '{label}' (suits kept).");
-        RefreshHomeTiles();
+        RefreshWorkspaceAfterModChange();
     }
 
     private enum ModInstallStatus { Complete, Partial, Failed }
@@ -1216,7 +1227,7 @@ public sealed partial class MainForm
         }
 
         AppendLog($"=== Update all mods complete: {ok} rebuilt, {failed.Count} failed ===");
-        RefreshHomeTiles();
+        RefreshWorkspaceAfterModChange();
         if (failed.Count == 0)
         {
             Dialog.Success(this, "Update all mods", $"Rebuilt {ok} mod{(ok == 1 ? "" : "s")}.");
@@ -1468,7 +1479,7 @@ public sealed partial class MainForm
             AppendLog($"  {trioBase}.pak / .ucas / .utoc");
             AppendLog($"  {mod.ModId}PawnTags.ini + mod.json also under {outRoot}");
             AppendLog($"  Install: trio → ~mods/Slot, ini → Config/Tags, mod.json → ue4ss/{LotdkExpandedLayout.ModuleId}/Mods/{mod.ModId}/");
-            RefreshHomeTiles();
+            RefreshWorkspaceAfterModChange();
             return true;
         }
         catch (Exception ex)

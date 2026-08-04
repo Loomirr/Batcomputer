@@ -15,9 +15,10 @@ public sealed partial class MainForm
 {
     private Control CreateToyboxPanel()
     {
-        var outer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
+        var outer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
         // The extra height keeps the workspace labels and suit details readable.
         outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 80));
+        outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
         outer.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         Theme.StyleTooltip(_toyboxToolTip); // readable dark tooltips app-wide
 
@@ -26,17 +27,25 @@ public sealed partial class MainForm
         commandBar.HostContent(CreateToyboxHeader());
         outer.Controls.Add(commandBar, 0, 0);
 
+        outer.Controls.Add(CreateWorkspaceFolderTabs(), 0, 1);
+
         var body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Padding = new Padding(6), BackColor = Theme.PanelBg };
         _toyboxBodyLayout = body;
         body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 82));
         body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 340));
         body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        outer.Controls.Add(body, 0, 1);
+        outer.Controls.Add(body, 0, 2);
 
         // Category rail hosted in its designer-editable shell.
         var workflowRail = new WorkflowRailControl { Dock = DockStyle.Fill };
         workflowRail.HostContent(CreateCategoryRail());
+        _suitWorkflowRail = workflowRail;
         body.Controls.Add(workflowRail, 0, 0);
+
+        var homeRail = new WorkflowRailControl { Dock = DockStyle.Fill, Visible = false };
+        homeRail.HostContent(CreateHomeCategoryRail());
+        _homeWorkflowRail = homeRail;
+        body.Controls.Add(homeRail, 0, 0);
 
         // Character panel - the "Your Character" designer-editable control owns the row flow;
         // MainForm wires the drop targets (drag a part/material onto the character).
@@ -82,7 +91,11 @@ public sealed partial class MainForm
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         _toyboxCategoryCombo.DropDownStyle = ComboBoxStyle.DropDownList;
-        var categories = new List<object> { "Home", "Base", "Materials", "Textures", "Parts", "Equipment", "Gliders", "Animations", "3D viewer", "Build mod", "Review" };
+        var categories = new List<object>
+        {
+            "Home", "Base", "Materials", "Textures", "Parts", "Equipment", "Gliders", "Animations",
+            "Build mod", "Review"
+        };
         if (AppSettings.Current.ShowResearchTools)
         {
             categories.Add("Research");
@@ -90,7 +103,7 @@ public sealed partial class MainForm
         _toyboxCategoryCombo.Items.AddRange(categories.ToArray());
         _toyboxCategoryCombo.SelectedIndex = 0;
         _toyboxCategoryCombo.Visible = false;
-        _toyboxCategoryCombo.SelectedIndexChanged += (_, _) => { UpdateCategoryRailSelection(); PopulateToyboxTypes(); UpdatePrimaryAction(); ConfigureToyboxFilters(); SelectInspectorTabForCategory(); RefreshToyboxTiles(); };
+        _toyboxCategoryCombo.SelectedIndexChanged += (_, _) => HandleToyboxCategoryChanged();
         // The type list is now the filter button's "scope" section. This combo stays as the model
         // behind it - it is read and set from ~30 places - but is never shown.
         _toyboxTypeCombo.DropDownStyle = ComboBoxStyle.DropDownList;
@@ -143,10 +156,6 @@ public sealed partial class MainForm
         _toyboxTileGrid.Visible = false;
         toyLayout.Controls.Add(_toyboxTileGrid, 0, 1);
 
-        // The 3D viewer shares the same cell; it is built on first use because listing every
-        // character means scanning the paks.
-        _viewerHostLayout = toyLayout;
-
         _toyboxSelectionLabel.Dock = DockStyle.Fill;
         _toyboxSelectionLabel.TextAlign = ContentAlignment.MiddleLeft;
         _toyboxSelectionLabel.ForeColor = Theme.OnDarkMuted;
@@ -170,6 +179,30 @@ public sealed partial class MainForm
         rightSplit.Panel2.Controls.Add(CreateInspectorTabs());
         body.Controls.Add(rightSplit, 2, 0);
 
+        // The viewer owns a dedicated full-width host. It no longer competes with the character
+        // panel or inspector, and its renderer can be released as soon as the folder is left.
+        var viewerHost = new Panel
+        {
+            Dock = DockStyle.Fill,
+            Margin = new Padding(3),
+            BackColor = Theme.WindowBg,
+            Visible = false,
+        };
+        var viewerLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 1,
+            Padding = new Padding(4),
+        };
+        viewerLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        viewerHost.Controls.Add(viewerLayout);
+        _viewerWorkspaceHost = viewerHost;
+        _viewerHostLayout = viewerLayout;
+        body.Controls.Add(viewerHost, 0, 0);
+        body.SetColumnSpan(viewerHost, 3);
+
+        SelectWorkspaceFolder(WorkspaceFolder.Home, refresh: false);
         PopulateToyboxSlots();
         PopulateToyboxTypes();
         UpdatePrimaryAction();
@@ -240,16 +273,6 @@ public sealed partial class MainForm
             });
         }
         header.Controls.Add(brand);
-
-        var divider = new Panel { Dock = DockStyle.Left, Width = 1, BackColor = Color.Transparent };
-        divider.Paint += (_, e) =>
-        {
-            var dh = Math.Max(2, divider.Height - 26);
-            using var b = new LinearGradientBrush(new Rectangle(0, 0, 1, dh),
-                Color.FromArgb(0, 58, 63, 73), Color.FromArgb(255, 58, 63, 73), LinearGradientMode.Vertical);
-            e.Graphics.FillRectangle(b, 0, 13, 1, dh);
-        };
-        header.Controls.Add(divider);
 
         // --- actions (right) --------------------------------------------------
         var right = new FlowLayoutPanel
@@ -367,7 +390,7 @@ public sealed partial class MainForm
         var modDot = new Label
         {
             Text = "●", AutoSize = false, Width = 12, Height = 22,
-            Font = new Font("Segoe UI", 8f, FontStyle.Bold), ForeColor = Theme.Research,
+            Font = new Font("Segoe UI", 8f, FontStyle.Bold), ForeColor = Theme.Mods,
             BackColor = Color.Transparent, TextAlign = ContentAlignment.MiddleLeft,
         };
         _headerModValue = new Label
@@ -399,12 +422,10 @@ public sealed partial class MainForm
             AutoEllipsis = true,
         };
 
-        var contextDivider = new Panel { Width = 1, BackColor = Theme.LineSoft };
         suit.Controls.Add(_headerModCaption);
         suit.Controls.Add(modDot);
         suit.Controls.Add(_headerModValue);
         suit.Controls.Add(_headerModDetail);
-        suit.Controls.Add(contextDivider);
         suit.Controls.Add(_headerSuitCaption);
         suit.Controls.Add(_suitNameText);
         suit.Controls.Add(_suitNamePencil);
@@ -426,10 +447,6 @@ public sealed partial class MainForm
             _headerModDetail.Left = 18;
             _headerModDetail.Top = 49;
             _headerModDetail.Width = modWidth;
-
-            contextDivider.Left = modWidth + 16;
-            contextDivider.Top = 12;
-            contextDivider.Height = Math.Max(36, suit.Height - 24);
 
             _headerSuitCaption.Left = suitLeft;
             _headerSuitCaption.Top = 10;
@@ -457,7 +474,7 @@ public sealed partial class MainForm
     private Control CreateCategoryRail()
     {
         var rail = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, BackColor = Theme.PanelBg, Padding = new Padding(4, 6, 4, 6) };
-        var cats = new[] { ("Home", "⌂"), ("Base", "◱"), ("Materials", "◈"), ("Textures", "▣"), ("Parts", "◆"), ("Equipment", "★"), ("Gliders", "︾"), ("Animations", "➤"), ("3D viewer", "◐"), ("Build mod", "▰"), ("Review", "✎"), ("Research", "⌕") };
+        var cats = new[] { ("Home", "⌂"), ("Base", "◱"), ("Materials", "◈"), ("Textures", "▣"), ("Parts", "◆"), ("Equipment", "★"), ("Gliders", "︾"), ("Animations", "➤"), ("Research", "⌕") };
 
         // Load PNGs per category instead of requiring every category to have one.
         // Home/Textures can fall back to glyphs without disabling the real bundled
@@ -475,6 +492,281 @@ public sealed partial class MainForm
         }
         UpdateCategoryRailSelection();
         return rail;
+    }
+
+    private Control CreateWorkspaceFolderTabs()
+    {
+        var strip = new Panel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Theme.WindowBg,
+            Padding = new Padding(28, 4, 8, 0),
+        };
+        strip.Paint += (_, e) =>
+        {
+            using var line = new Pen(Theme.LineSoft);
+            e.Graphics.DrawLine(line, 0, strip.ClientSize.Height - 1, strip.ClientSize.Width, strip.ClientSize.Height - 1);
+        };
+        var tabs = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            BackColor = Color.Transparent,
+            Padding = new Padding(0, 0, 0, 1),
+        };
+        strip.Controls.Add(tabs);
+
+        tabs.Controls.Add(CreateWorkspaceFolderButton(WorkspaceFolder.Home, "Home", Theme.Gold, "Home.png"));
+        tabs.Controls.Add(CreateWorkspaceFolderButton(WorkspaceFolder.Suits, "Suits", Theme.Base, "Suits.png"));
+        tabs.Controls.Add(CreateWorkspaceFolderButton(WorkspaceFolder.Viewer, "3D viewer", Theme.Gliders, "3D.gif"));
+
+        var redBricks = new Button
+        {
+            Text = "▦  Red bricks  ·  soon",
+            Width = 160,
+            Height = 38,
+            Margin = new Padding(5, 0, 0, 0),
+            FlatStyle = FlatStyle.Flat,
+            FlatAppearance = { BorderSize = 1, BorderColor = Theme.LineSoft },
+            BackColor = Theme.SlateDark,
+            ForeColor = Theme.OnDarkMuted,
+            TextAlign = ContentAlignment.MiddleCenter,
+            Font = new Font(Font.FontFamily, 8.5f, FontStyle.Regular),
+            Image = LoadNavigationIcon("RedBricks.png", new Size(17, 17)),
+            ImageAlign = ContentAlignment.MiddleLeft,
+            TextImageRelation = TextImageRelation.ImageBeforeText,
+            Padding = new Padding(9, 0, 8, 0),
+            Enabled = false,
+        };
+        tabs.Controls.Add(redBricks);
+        return strip;
+    }
+
+    private Button CreateWorkspaceFolderButton(WorkspaceFolder folder, string text, Color accent, string? iconAsset = null)
+    {
+        var button = new Button
+        {
+            Text = text,
+            Width = folder == WorkspaceFolder.Viewer ? 124 : 92,
+            Height = 38,
+            Margin = new Padding(folder == WorkspaceFolder.Home ? 0 : 5, 0, 0, 0),
+            FlatStyle = FlatStyle.Flat,
+            FlatAppearance = { BorderSize = 1, BorderColor = Theme.LineSoft },
+            BackColor = Theme.SlateDark,
+            ForeColor = Theme.OnDarkMuted,
+            TextAlign = ContentAlignment.MiddleCenter,
+            Font = new Font(Font.FontFamily, 8.5f, FontStyle.Bold),
+            Cursor = Cursors.Hand,
+            Tag = accent,
+            Image = iconAsset is null ? null : LoadNavigationIcon(iconAsset, new Size(17, 17)),
+            ImageAlign = ContentAlignment.MiddleLeft,
+            TextImageRelation = TextImageRelation.ImageBeforeText,
+            Padding = iconAsset is null ? Padding.Empty : new Padding(9, 0, 7, 0),
+        };
+        button.FlatAppearance.MouseOverBackColor = Theme.CardBg;
+        button.Click += (_, _) => SelectWorkspaceFolder(folder);
+        _workspaceFolderButtons[folder] = button;
+        return button;
+    }
+
+    private Control CreateHomeCategoryRail()
+    {
+        var rail = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            BackColor = Theme.PanelBg,
+            Padding = new Padding(4, 6, 4, 6),
+        };
+        AddHomeRailButton(rail, HomeWorkspaceSection.Mods, "Mods", Theme.Mods, "Mods.png");
+        AddHomeRailButton(rail, HomeWorkspaceSection.Suits, "Suits", Theme.Base, "Suits.png");
+        AddHomeRailButton(rail, HomeWorkspaceSection.RedBricks, "Red bricks", Theme.Gold, "RedBricks.png");
+        AddHomeRailButton(rail, HomeWorkspaceSection.BuildMod, "Build mod", Theme.Equipment, "BuildMod.png");
+        AddHomeRailButton(rail, HomeWorkspaceSection.Review, "Review", Theme.Research, "Review.png");
+        UpdateHomeWorkspaceRailSelection();
+        return rail;
+    }
+
+    private void AddHomeRailButton(FlowLayoutPanel rail, HomeWorkspaceSection section, string label, Color accent, string iconAsset)
+    {
+        var button = new Button
+        {
+            Text = label,
+            Width = 74,
+            Height = 52,
+            Margin = new Padding(1, 1, 1, 3),
+            FlatStyle = FlatStyle.Flat,
+            FlatAppearance = { BorderSize = 0 },
+            Font = new Font(Font.FontFamily, 7.5f),
+            TextAlign = ContentAlignment.MiddleCenter,
+            ForeColor = accent,
+            BackColor = Theme.PanelBg,
+            Cursor = Cursors.Hand,
+            Tag = accent,
+            Image = LoadNavigationIcon(iconAsset, new Size(20, 20), section == HomeWorkspaceSection.Mods ? Theme.Mods : null),
+            ImageAlign = ContentAlignment.TopCenter,
+            TextImageRelation = TextImageRelation.ImageAboveText,
+        };
+        button.FlatAppearance.MouseOverBackColor = Theme.Tint(accent);
+        button.Click += (_, _) => SelectHomeWorkspaceSection(section);
+        _homeWorkspaceButtons[section] = button;
+        rail.Controls.Add(button);
+    }
+
+    private static Bitmap? LoadNavigationIcon(string assetName, Size size, Color? tint = null)
+    {
+        using var source = EmbeddedAssets.Load(assetName);
+        if (source is null)
+        {
+            return null;
+        }
+
+        var icon = new Bitmap(size.Width, size.Height);
+        using (var graphics = Graphics.FromImage(icon))
+        {
+            graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+            graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+            graphics.DrawImage(source, new Rectangle(Point.Empty, size));
+        }
+
+        if (tint is not Color color)
+        {
+            return icon;
+        }
+
+        for (var y = 0; y < icon.Height; y++)
+        {
+            for (var x = 0; x < icon.Width; x++)
+            {
+                var pixel = icon.GetPixel(x, y);
+                if (pixel.A > 0)
+                {
+                    icon.SetPixel(x, y, Color.FromArgb(pixel.A, color));
+                }
+            }
+        }
+        return icon;
+    }
+
+    private void SelectHomeWorkspaceSection(HomeWorkspaceSection section)
+    {
+        _homeWorkspaceSection = section;
+        SelectWorkspaceFolder(WorkspaceFolder.Home, refresh: false);
+        UpdateHomeWorkspaceRailSelection();
+        RefreshToyboxTiles();
+    }
+
+    private static string HomeCategoryForSection(HomeWorkspaceSection section) => section switch
+    {
+        HomeWorkspaceSection.BuildMod => "Build mod",
+        HomeWorkspaceSection.Review => "Review",
+        _ => "Home",
+    };
+
+    private static bool IsHomeOnlyCategory(string category) =>
+        category.Equals("Build mod", StringComparison.OrdinalIgnoreCase) ||
+        category.Equals("Review", StringComparison.OrdinalIgnoreCase);
+
+    private void UpdateHomeWorkspaceRailSelection()
+    {
+        foreach (var (section, button) in _homeWorkspaceButtons)
+        {
+            var accent = button.Tag is Color color ? color : Theme.Inspector;
+            button.BackColor = section == _homeWorkspaceSection ? Theme.Tint(accent) : Theme.PanelBg;
+        }
+    }
+
+    private void SelectWorkspaceFolder(WorkspaceFolder folder, bool refresh = true)
+    {
+        if (_toyboxBodyLayout is null || _toyboxWorkspaceSplit is null)
+        {
+            return;
+        }
+
+        _switchingWorkspaceFolder = true;
+        try
+        {
+            _workspaceFolder = folder;
+            var isHome = folder == WorkspaceFolder.Home;
+            var isSuits = folder == WorkspaceFolder.Suits;
+            var isViewer = folder == WorkspaceFolder.Viewer;
+
+            if (_suitWorkflowRail is not null) _suitWorkflowRail.Visible = isSuits;
+            if (_homeWorkflowRail is not null) _homeWorkflowRail.Visible = isHome;
+            _yourCharacter.Visible = isSuits;
+            if (_viewerWorkspaceHost is not null) _viewerWorkspaceHost.Visible = isViewer;
+            _toyboxWorkspaceSplit.Visible = !isViewer;
+
+            if (!isViewer)
+            {
+                _toyboxBodyLayout.SetColumn(_toyboxWorkspaceSplit, isHome ? 1 : 2);
+                _toyboxBodyLayout.SetColumnSpan(_toyboxWorkspaceSplit, isHome ? 2 : 1);
+                _toyboxWorkspaceSplit.Panel2Collapsed = isHome;
+            }
+
+            var selectedCategory = _toyboxCategoryCombo.SelectedItem?.ToString() ?? "Home";
+            if (isHome)
+            {
+                var homeCategory = HomeCategoryForSection(_homeWorkspaceSection);
+                if (!selectedCategory.Equals(homeCategory, StringComparison.OrdinalIgnoreCase))
+                {
+                    SelectComboValue(_toyboxCategoryCombo, homeCategory);
+                }
+            }
+            else if (isSuits && IsHomeOnlyCategory(selectedCategory))
+            {
+                SelectComboValue(_toyboxCategoryCombo, "Home");
+            }
+
+            foreach (var (workspace, button) in _workspaceFolderButtons)
+            {
+                var accent = button.Tag is Color color ? color : Theme.Inspector;
+                var selected = workspace == folder;
+                button.BackColor = selected ? Theme.Tint(accent) : Theme.SlateDark;
+                button.ForeColor = selected ? accent : Theme.OnDarkMuted;
+                button.FlatAppearance.BorderColor = selected ? accent : Theme.LineSoft;
+            }
+            UpdateHomeWorkspaceRailSelection();
+        }
+        finally
+        {
+            _switchingWorkspaceFolder = false;
+        }
+
+        if (folder != WorkspaceFolder.Viewer)
+        {
+            HideViewerPanel();
+        }
+        else
+        {
+            ShowViewerPanel();
+        }
+
+        if (refresh && folder != WorkspaceFolder.Viewer)
+        {
+            RefreshToyboxTiles();
+        }
+    }
+
+    private void HandleToyboxCategoryChanged()
+    {
+        var category = _toyboxCategoryCombo.SelectedItem?.ToString() ?? "Home";
+        if (!_switchingWorkspaceFolder &&
+            _workspaceFolder != WorkspaceFolder.Suits &&
+            !category.Equals("Home", StringComparison.OrdinalIgnoreCase) &&
+            !IsHomeOnlyCategory(category))
+        {
+            SelectWorkspaceFolder(WorkspaceFolder.Suits, refresh: false);
+        }
+
+        UpdateCategoryRailSelection();
+        PopulateToyboxTypes();
+        UpdatePrimaryAction();
+        ConfigureToyboxFilters();
+        SelectInspectorTabForCategory();
+        RefreshToyboxTiles();
     }
 
     private void UpdateToyboxChips()
@@ -1467,8 +1759,161 @@ public sealed partial class MainForm
         }
     }
 
+    private void RefreshHomeWorkspaceTiles()
+    {
+        switch (_homeWorkspaceSection)
+        {
+            case HomeWorkspaceSection.Suits:
+                RefreshHomeSuitLibraryTiles();
+                return;
+            case HomeWorkspaceSection.RedBricks:
+                RefreshHomeRedBrickTiles();
+                return;
+            case HomeWorkspaceSection.BuildMod:
+                RefreshBuildModTiles();
+                return;
+            case HomeWorkspaceSection.Review:
+                RefreshReviewTiles(_toyboxTypeCombo.SelectedItem?.ToString());
+                return;
+            default:
+                RefreshHomeTiles();
+                return;
+        }
+    }
+
+    private void RefreshHomeSuitLibraryTiles()
+    {
+        var service = new SuitProjectService(_projectRootText.Text.Trim());
+        var suits = new List<SuitProjectService.ProjectSummary>();
+        try { suits = service.ListProjects().OrderByDescending(suit => suit.Modified).ToList(); } catch { /* no saved suits yet */ }
+
+        var hero = new VirtualTilePanel.HeroModel
+        {
+            Overline = "YOUR LIBRARY",
+            Title = "Suits",
+            Subtitle = suits.Count == 0
+                ? "Create a suit, then choose its base character and parts."
+                : $"{suits.Count} saved suit{(suits.Count == 1 ? "" : "s")} ready to reopen or add to a mod.",
+            ThumbAccent = Theme.Base,
+            Chips = new List<(string, Color)>
+            {
+                ($"{suits.Count} saved", Theme.Base),
+                (_currentProject is null ? "no suit open" : "current suit open", _currentProject is null ? Theme.OnDarkMuted : Theme.Good),
+            },
+        };
+        var tiles = new List<VirtualTilePanel.Tile>
+        {
+            new()
+            {
+                Section = "SUITS",
+                Title = "＋ New suit",
+                Subtitle = "start a custom character",
+                Accent = Theme.Base,
+                Dashed = true,
+                OnClick = () => StartNewSuit(),
+            },
+            new()
+            {
+                Section = "SUITS",
+                Title = "Open suit",
+                Subtitle = "browse saved projects",
+                Accent = Theme.Base,
+                OnClick = LoadSuit,
+            },
+        };
+        foreach (var suit in suits.Take(20))
+        {
+            var captured = suit;
+            tiles.Add(new VirtualTilePanel.Tile
+            {
+                Section = "YOUR SUITS",
+                Title = TrimMiddle(captured.DisplayName, 26),
+                Subtitle = $"saved · {captured.Modified:MMM d}",
+                Accent = Theme.Base,
+                Image = LoadSuitCoverImage(captured),
+                OnClick = () => OpenRecentProject(captured.Path),
+                MenuFactory = () => BuildSuitTileMenu(captured),
+            });
+        }
+        ShowVirtualTiles(tiles, hero: hero);
+    }
+
+    private void RefreshHomeRedBrickTiles()
+    {
+        var hero = new VirtualTilePanel.HeroModel
+        {
+            Overline = "YOUR LIBRARY",
+            Title = "Red bricks",
+            Subtitle = "Custom red-brick support is the next workspace to come online.",
+            ThumbAccent = Theme.Gold,
+            Chips = new List<(string, Color)> { ("coming soon", Theme.OnDarkMuted) },
+        };
+        var tiles = new List<VirtualTilePanel.Tile>
+        {
+            new()
+            {
+                Section = "RED BRICKS",
+                Title = "Red bricks are coming next",
+                Subtitle = "This library will hold custom unlocks, colors, and mod entries.",
+                Accent = Theme.Gold,
+            },
+        };
+        ShowVirtualTiles(tiles, hero: hero);
+    }
+
+    private void RefreshSuitWorkspaceTiles()
+    {
+        var hasSuit = _currentProject is not null;
+        var hero = new VirtualTilePanel.HeroModel
+        {
+            Overline = "SUIT WORKSPACE",
+            Title = hasSuit ? _currentProject!.DisplayName : "Choose a suit",
+            Subtitle = hasSuit
+                ? "Set the visual base, then customize parts, materials, equipment, gliders, and animation choices."
+                : "Create or open a saved suit to start building a character.",
+            ThumbAccent = Theme.Base,
+            Chips = new List<(string, Color)>
+            {
+                (hasSuit ? "suit open" : "no suit open", hasSuit ? Theme.Good : Theme.OnDarkMuted),
+                (HasCurrentSuitBase() ? "base set" : "base needed", HasCurrentSuitBase() ? Theme.Good : Theme.Warn),
+            },
+        };
+        var tiles = new List<VirtualTilePanel.Tile>
+        {
+            new()
+            {
+                Section = "SUIT",
+                Title = "＋ New suit",
+                Subtitle = "start a custom character",
+                Accent = Theme.Base,
+                Dashed = true,
+                OnClick = () => StartNewSuit(),
+            },
+            new()
+            {
+                Section = "SUIT",
+                Title = "Open suit",
+                Subtitle = "browse saved projects",
+                Accent = Theme.Base,
+                OnClick = LoadSuit,
+            },
+        };
+        if (hasSuit)
+        {
+            tiles.Add(new VirtualTilePanel.Tile
+            {
+                Section = "SUIT",
+                Title = HasCurrentSuitBase() ? "Change visual base" : "Set visual base",
+                Subtitle = HasCurrentSuitBase() ? "visual + gameplay donor" : "choose a character or cutscene",
+                Accent = Theme.Base,
+                OnClick = OpenBaseWizard,
+            });
+        }
+        ShowVirtualTiles(tiles, hero: hero);
+    }
+
     /// <summary>
-    /// Home follows the actual release hierarchy: choose a mod, build its suits,
+    /// The Home/Mods section follows the release hierarchy: choose a mod, build its suits,
     /// then build one mod release. Saved suits remain visible when no mod is active,
     /// but an active workspace only shows the suits that will ship together.
     /// </summary>
@@ -1503,8 +1948,8 @@ public sealed partial class MainForm
 
         var chips = new List<(string, Color)>
         {
-            (hasActiveMod ? "active mod" : "no active mod", hasActiveMod ? Theme.Research : Theme.Warn),
-            ($"{(hasActiveMod ? activeSuitCount : savedSuits.Count)} suit{((hasActiveMod ? activeSuitCount : savedSuits.Count) == 1 ? "" : "s")}", Theme.Parts),
+            (hasActiveMod ? "active mod" : "no active mod", hasActiveMod ? Theme.Mods : Theme.Warn),
+            ($"{(hasActiveMod ? activeSuitCount : savedSuits.Count)} suit{((hasActiveMod ? activeSuitCount : savedSuits.Count) == 1 ? "" : "s")}", Theme.Base),
             (partCount > 0 ? $"{partCount} parts" : "index not built", partCount > 0 ? Theme.Materials : Theme.OnDarkMuted),
         };
 
@@ -1516,7 +1961,7 @@ public sealed partial class MainForm
                 ? $"{activeSuitCount} suit{(activeSuitCount == 1 ? "" : "s")} grouped into one mod release."
                 : "Create or select a mod first, then add the suits that ship together.",
             Badge = "",
-            ThumbAccent = hasActiveMod ? Theme.Research : Theme.Gold,
+            ThumbAccent = hasActiveMod ? Theme.Mods : Theme.Gold,
             Chips = chips,
             Workflow = new[]
             {
@@ -1524,7 +1969,7 @@ public sealed partial class MainForm
                 {
                     Label = "1. MOD",
                     Detail = hasActiveMod ? "mod selected" : "choose a mod",
-                    Accent = Theme.Research,
+                    Accent = Theme.Mods,
                     Complete = hasActiveMod,
                     Current = !hasActiveMod,
                 },
@@ -1574,7 +2019,7 @@ public sealed partial class MainForm
                 Subtitle = isActive
                     ? $"{captured.SuitCount} suit{(captured.SuitCount == 1 ? "" : "s")} · current mod"
                     : $"{captured.SuitCount} suit{(captured.SuitCount == 1 ? "" : "s")} · select workspace",
-                Accent = isActive ? Theme.Research : Theme.OnDarkMuted,
+                Accent = isActive ? Theme.Mods : Theme.OnDarkMuted,
                 OnClick = () => SelectHomeMod(captured.Path),
                 MenuFactory = () => BuildModTileMenu(captured.Path, captured.ModId),
             });
@@ -1587,7 +2032,7 @@ public sealed partial class MainForm
                 Section = SectionSavedSuits,
                 Title = "All suits",
                 Subtitle = $"{savedSuits.Count} saved in the tool",
-                Accent = Theme.Parts,
+                Accent = Theme.Base,
                 OnClick = LoadSuit,
             });
             foreach (var suit in savedSuits.Take(10))
@@ -1598,7 +2043,7 @@ public sealed partial class MainForm
                     Section = SectionSavedSuits,
                     Title = TrimMiddle(captured.DisplayName, 26),
                     Subtitle = $"saved suit · {captured.Modified:MMM d}",
-                    Accent = Theme.Parts,
+                    Accent = Theme.Base,
                     Image = LoadSuitCoverImage(captured),
                     OnClick = () => OpenRecentProject(captured.Path),
                     MenuFactory = () => BuildSuitTileMenu(captured),
@@ -1632,7 +2077,7 @@ public sealed partial class MainForm
             Section = SectionSuits,
             Title = "All suits",
             Subtitle = $"{savedSuits.Count} saved in the tool",
-            Accent = Theme.Parts,
+            Accent = Theme.Base,
             OnClick = LoadSuit,
         });
 
@@ -1646,7 +2091,7 @@ public sealed partial class MainForm
                 Section = SectionSuits,
                 Title = title,
                 Subtitle = capturedSummary is null ? "missing saved suit" : $"reopen · {capturedSummary.Modified:MMM d}",
-                Accent = Theme.Parts,
+                Accent = Theme.Base,
                 Image = capturedSummary is null ? null : LoadSuitCoverImage(capturedSummary),
                 OnClick = capturedSummary is null ? () => EditModSuits(modPath) : () => OpenRecentProject(capturedSummary.Path),
                 MenuFactory = capturedSummary is null ? null : () => BuildSuitTileMenu(capturedSummary),
@@ -1756,29 +2201,29 @@ public sealed partial class MainForm
 
     private void RefreshToyboxTiles()
     {
+        if (_workspaceFolder == WorkspaceFolder.Viewer)
+        {
+            return;
+        }
+
         ClearToyboxTiles();
         UpdateToyboxChips();
         var category = _toyboxCategoryCombo.SelectedItem?.ToString();
         var type = _toyboxTypeCombo.SelectedItem?.ToString();
 
-        if (category == ViewerCategory)
+        if (_workspaceFolder == WorkspaceFolder.Home)
         {
-            SetHomeInspectorCollapsed(false);
-            ShowViewerPanel();
+            SetHomeInspectorCollapsed(true);
+            RefreshHomeWorkspaceTiles();
             return;
         }
+
         HideViewerPanel();
-        SetHomeInspectorCollapsed(category == "Home");
+        SetHomeInspectorCollapsed(false);
 
         if (category == "Home")
         {
-            RefreshHomeTiles();
-            return;
-        }
-
-        if (category == "Build mod")
-        {
-            RefreshBuildModTiles();
+            RefreshSuitWorkspaceTiles();
             return;
         }
 
@@ -1855,12 +2300,6 @@ public sealed partial class MainForm
         if (category == "Animations")
         {
             RefreshAnimationTiles(type);
-            return;
-        }
-
-        if (category == "Review")
-        {
-            RefreshReviewTiles(type);
             return;
         }
 

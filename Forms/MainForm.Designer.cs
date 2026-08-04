@@ -52,7 +52,7 @@ partial class MainForm
         _mainRootLayout.Padding = new Padding(0);
         _mainRootLayout.RowCount = 2;
         _mainRootLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        _mainRootLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 160F));
+        _mainRootLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 80F));
         _mainRootLayout.Size = new Size(1500, 1000);
         _mainRootLayout.TabIndex = 0;
 

@@ -69,6 +69,15 @@ public sealed class GameAssetRefreshService
         "Content/Abilities/",
         "Content/Gameplay/",
         "Content/Global/Collectables/",
+        // Native Red Brick authoring also needs the TtGameProgressDefinitionSet
+        // donor (PROG_RedBricks). Keep the full small GameProgress folder here so
+        // developer proofs never require a manual supplemental extraction.
+        "Content/GameProgress/",
+        // Retoc's broad GameProgress filter can omit nested debug override
+        // packages on this title. Keep the precise folder explicit so the
+        // custom-Red-Brick unlock donor is always available after a developer
+        // research refresh.
+        "Content/GameProgress/Overrides/",
         "Content/UI/",
         "Content/Localization/StringTables/",
         "Content/Plugins/GameFeatures/",

@@ -36,7 +36,7 @@ public sealed partial class MainForm
         var diagHeader = new Button
         {
             Dock = DockStyle.Top,
-            Height = 24,
+            Height = 22,
             Text = "▾  Diagnostics",
             TextAlign = ContentAlignment.MiddleLeft,
             FlatStyle = FlatStyle.Flat,

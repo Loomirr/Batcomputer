@@ -1,7 +1,7 @@
 namespace Batcomputer;
 
 /// <summary>
-/// The "3D viewer" category: pick a character - your own suit, a playable blueprint, or a cutscene
+/// The dedicated 3D workspace: pick a character - your own suit, a playable blueprint, or a cutscene
 /// one - and render it with the game's materials, parts and facial expressions.
 /// </summary>
 public sealed partial class MainForm
@@ -19,9 +19,7 @@ public sealed partial class MainForm
     private int _viewerLoadGeneration;
     private NativeSuitProject? _viewerProject;
 
-    private const string ViewerCategory = "3D viewer";
-
-    /// <summary>Swaps the tile grid for the viewer, building it the first time it is shown.</summary>
+    /// <summary>Builds the viewer once and hosts it in the dedicated full-width workspace.</summary>
     private void ShowViewerPanel()
     {
         if (_viewerHostLayout is null)
@@ -32,7 +30,7 @@ public sealed partial class MainForm
         {
             _viewerPanel = CreateViewerPanel();
             _viewerPanel.Dock = DockStyle.Fill;
-            _viewerHostLayout.Controls.Add(_viewerPanel, 0, 1);
+            _viewerHostLayout.Controls.Add(_viewerPanel, 0, 0);
         }
         _toyboxTileFlow.Visible = false;
         _toyboxTileGrid.Visible = false;
@@ -58,30 +56,12 @@ public sealed partial class MainForm
         SetViewerWorkspaceExpanded(false);
     }
 
-    /// <summary>Lets the viewer use the designer space normally occupied by character + inspector.</summary>
+    /// <summary>Shows or hides the dedicated viewer workspace without reshaping the suit editor.</summary>
     private void SetViewerWorkspaceExpanded(bool expanded)
     {
-        if (_toyboxBodyLayout is null || _toyboxWorkspaceSplit is null || _viewerHostLayout is null)
+        if (_viewerWorkspaceHost is not null)
         {
-            return;
-        }
-
-        _yourCharacter.Visible = !expanded;
-        _toyboxBodyLayout.ColumnStyles[1].Width = expanded ? 0 : 340;
-        _toyboxWorkspaceSplit.Panel2Collapsed = expanded;
-
-        // The viewer has its own source/search controls, so reclaim the browser-only toolbar and
-        // footer row while it is open. The normal toybox restores exactly when another category is
-        // selected.
-        _viewerHostLayout.RowStyles[0].Height = expanded ? 0 : 40;
-        _viewerHostLayout.RowStyles[2].Height = expanded ? 0 : 26;
-        if (_viewerHostLayout.GetControlFromPosition(0, 0) is { } toolbar)
-        {
-            toolbar.Visible = !expanded;
-        }
-        if (_viewerHostLayout.GetControlFromPosition(0, 2) is { } footer)
-        {
-            footer.Visible = !expanded;
+            _viewerWorkspaceHost.Visible = expanded;
         }
     }
 
@@ -436,7 +416,7 @@ public sealed partial class MainForm
     /// <summary>Jumps to the viewer tab and loads the current suit with its saved edits.</summary>
     private void ViewCurrentSuitIn3D()
     {
-        SelectComboValue(_toyboxCategoryCombo, ViewerCategory);
+        SelectWorkspaceFolder(WorkspaceFolder.Viewer);
         if (_currentProject?.PlayableTemplate is null)
         {
             _viewer?.ShowMessage("Pick a base character first, then view the suit in 3D.");
