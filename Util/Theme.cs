@@ -118,7 +118,7 @@ internal static class Theme
         t.BorderStyle = BorderStyle.FixedSingle;
     }
 
-    private static readonly Font TooltipFont = new("Segoe UI", 9f);
+    private static readonly Font TooltipFont = AppFonts.Ui(9f);
 
     /// <summary>Dark, high-contrast tooltip (owner-drawn) so multi-line hints read clearly.</summary>
     public static void StyleTooltip(ToolTip t)
@@ -442,16 +442,14 @@ internal static class Theme
     // Corner radii.
     public const int Radius = 10, RadiusSm = 7, RadiusLg = 14;
 
-    // Type ramp - Segoe UI (system) so it renders crisp at all DPI without a bundled font.
-    private const string UiFamily = "Segoe UI";
     private const string MonoFamily = "Consolas";
-    public static readonly Font Title = new(UiFamily, 14f, FontStyle.Bold);
-    public static readonly Font Heading = new(UiFamily, 11.5f, FontStyle.Bold);
-    public static readonly Font Body = new(UiFamily, 9.75f);
-    public static readonly Font BodyStrong = new(UiFamily, 9.75f, FontStyle.Bold);
-    public static readonly Font Caption = new(UiFamily, 8.5f);
+    public static readonly Font Title = AppFonts.Condensed(15f, FontStyle.Bold);
+    public static readonly Font Heading = AppFonts.Ui(11.5f, FontStyle.Bold);
+    public static readonly Font Body = AppFonts.Ui(9.75f);
+    public static readonly Font BodyStrong = AppFonts.Ui(9.75f, FontStyle.Bold);
+    public static readonly Font Caption = AppFonts.Condensed(9f);
     /// <summary>Uppercase section eyebrow - pair with letter-spacing drawn manually where needed.</summary>
-    public static readonly Font Eyebrow = new(UiFamily, 8.25f, FontStyle.Bold);
+    public static readonly Font Eyebrow = AppFonts.Condensed(8.75f, FontStyle.Bold);
     public static readonly Font Mono = new(MonoFamily, 9f);
 
     /// <summary>Builds a rounded-rectangle path (px radius). radius&lt;=0 yields a plain rectangle.</summary>

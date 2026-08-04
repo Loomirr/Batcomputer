@@ -373,6 +373,32 @@ public sealed partial class MainForm : Form
 
     private readonly ToolTip _tipsHeader = new();
 
+    private Panel? _headerBrand;
+
+    private Image? _headerWordmark;
+
+    private string _headerWordmarkAsset = "";
+
+    private static string CurrentHeaderWordmarkAsset() =>
+        string.Equals(AppSettings.Current.VisualTheme, "Batcompuper", StringComparison.OrdinalIgnoreCase)
+            ? "header2.png"
+            : "Header.png";
+
+    private void RefreshHeaderWordmark()
+    {
+        var asset = CurrentHeaderWordmarkAsset();
+        if (string.Equals(asset, _headerWordmarkAsset, StringComparison.OrdinalIgnoreCase))
+        {
+            _headerBrand?.Invalidate();
+            return;
+        }
+
+        _headerWordmark?.Dispose();
+        _headerWordmark = EmbeddedAssets.Load(asset);
+        _headerWordmarkAsset = asset;
+        _headerBrand?.Invalidate();
+    }
+
     /// <summary>Keeps the suit-name field and its pencil lit together on hover/focus.</summary>
     private void RefreshSuitNameState()
     {
@@ -1889,6 +1915,7 @@ public sealed partial class MainForm : Form
         {
             AppSettings.Current = AppSettings.Load();
             _projectRootText.Text = AppSettings.Current.EffectiveProjectRoot();
+            RefreshHeaderWordmark();
             ApplyResearchToolsVisibility();
             PopulateToyboxSlots(); // picks up a changed "Your Character" panel style immediately
             AppendLog("Settings saved. Tool paths reloaded.");

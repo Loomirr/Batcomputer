@@ -230,48 +230,41 @@ public sealed partial class MainForm
 
         // --- brand -----------------------------------------------------------
         var brand = new Panel { Dock = DockStyle.Left, Width = 196, BackColor = Color.Transparent };
-        var wordmark = EmbeddedAssets.Load("Header.png");
-        if (wordmark is not null)
+        _headerBrand = brand;
+        RefreshHeaderWordmark();
+        brand.Paint += (_, e) =>
         {
-            brand.Paint += (_, e) =>
+            var wordmark = _headerWordmark;
+            if (wordmark is null)
             {
-                var g = e.Graphics;
-                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                const int targetH = 34;
-                var scale = targetH / (float)wordmark.Height;
-                var dw = (int)(wordmark.Width * scale);
-                var dest = new Rectangle(18, (brand.Height - targetH) / 2, dw, targetH);
+                return;
+            }
+
+            var g = e.Graphics;
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            const int targetH = 34;
+            var scale = targetH / (float)wordmark.Height;
+            var dw = (int)(wordmark.Width * scale);
+            var dest = new Rectangle(18, (brand.Height - targetH) / 2, dw, targetH);
                 // Soft shadow: collapse RGB to black and keep a fraction of the alpha. Scaling
                 // alpha alone would just ghost the yellow/red logo and fringe the edges.
-                using (var shadow = new ImageAttributes())
-                {
-                    var black = new ColorMatrix(new[]
-                    {
-                        new float[] { 0, 0, 0, 0, 0 },
-                        new float[] { 0, 0, 0, 0, 0 },
-                        new float[] { 0, 0, 0, 0, 0 },
-                        new float[] { 0, 0, 0, 0.40f, 0 },
-                        new float[] { 0, 0, 0, 0, 1 },
-                    });
-                    shadow.SetColorMatrix(black);
-                    var soft = dest;
-                    soft.Offset(1, 2);
-                    g.DrawImage(wordmark, soft, 0, 0, wordmark.Width, wordmark.Height, GraphicsUnit.Pixel, shadow);
-                }
-                g.DrawImage(wordmark, dest);
-            };
-        }
-        else
-        {
-            // No art: still read as branded.
-            brand.Controls.Add(new Label
+            using (var shadow = new ImageAttributes())
             {
-                Dock = DockStyle.Fill, Text = "BATCOMPUTER", ForeColor = Theme.Gold,
-                Font = new Font("Segoe UI", 15f, FontStyle.Bold | FontStyle.Italic),
-                TextAlign = ContentAlignment.MiddleLeft, BackColor = Color.Transparent,
-                Padding = new Padding(18, 0, 0, 0),
-            });
-        }
+                var black = new ColorMatrix(new[]
+                {
+                    new float[] { 0, 0, 0, 0, 0 },
+                    new float[] { 0, 0, 0, 0, 0 },
+                    new float[] { 0, 0, 0, 0, 0 },
+                    new float[] { 0, 0, 0, 0.40f, 0 },
+                    new float[] { 0, 0, 0, 0, 1 },
+                });
+                shadow.SetColorMatrix(black);
+                var soft = dest;
+                soft.Offset(1, 2);
+                g.DrawImage(wordmark, soft, 0, 0, wordmark.Width, wordmark.Height, GraphicsUnit.Pixel, shadow);
+            }
+            g.DrawImage(wordmark, dest);
+        };
         header.Controls.Add(brand);
 
         // --- actions (right) --------------------------------------------------
@@ -351,7 +344,7 @@ public sealed partial class MainForm
         _suitNameText.BorderStyle = BorderStyle.None;
         _suitNameText.BackColor = HeaderGround;
         _suitNameText.ForeColor = Theme.OnDark;
-        _suitNameText.Font = new Font("Segoe UI", 13.5f, FontStyle.Bold);
+        _suitNameText.Font = Theme.Title;
 
         // The pencil marks the name as editable; both brighten together on hover/focus.
         _suitNamePencil = new Label
@@ -384,19 +377,19 @@ public sealed partial class MainForm
         _headerModCaption = new Label
         {
             Text = "CURRENT MOD", AutoSize = false, Height = 14,
-            Font = new Font("Segoe UI", 7.5f, FontStyle.Bold), ForeColor = Theme.OnDarkMuted,
+            Font = Theme.Eyebrow, ForeColor = Theme.OnDarkMuted,
             BackColor = Color.Transparent, TextAlign = ContentAlignment.MiddleLeft,
         };
         var modDot = new Label
         {
             Text = "●", AutoSize = false, Width = 12, Height = 22,
-            Font = new Font("Segoe UI", 8f, FontStyle.Bold), ForeColor = Theme.Mods,
+            Font = Theme.BodyStrong, ForeColor = Theme.Mods,
             BackColor = Color.Transparent, TextAlign = ContentAlignment.MiddleLeft,
         };
         _headerModValue = new Label
         {
             Text = "No mod selected", AutoSize = false, Height = 22,
-            Font = new Font("Segoe UI", 12f, FontStyle.Bold), ForeColor = Theme.OnDarkMuted,
+            Font = Theme.Heading, ForeColor = Theme.OnDarkMuted,
             BackColor = Color.Transparent, TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true,
         };
         _headerModDetail = new Label
@@ -410,7 +403,7 @@ public sealed partial class MainForm
         _headerSuitCaption = new Label
         {
             Text = "CURRENT SUIT", AutoSize = false, Height = 14,
-            Font = new Font("Segoe UI", 7.5f, FontStyle.Bold), ForeColor = Theme.OnDarkMuted,
+            Font = Theme.Eyebrow, ForeColor = Theme.OnDarkMuted,
             BackColor = Color.Transparent, TextAlign = ContentAlignment.MiddleLeft,
         };
 
@@ -559,15 +552,68 @@ public sealed partial class MainForm
             Font = new Font(Font.FontFamily, 8.5f, FontStyle.Bold),
             Cursor = Cursors.Hand,
             Tag = accent,
-            Image = iconAsset is null ? null : LoadNavigationIcon(iconAsset, new Size(17, 17)),
             ImageAlign = ContentAlignment.MiddleLeft,
             TextImageRelation = TextImageRelation.ImageBeforeText,
             Padding = iconAsset is null ? Padding.Empty : new Padding(9, 0, 7, 0),
         };
+        if (string.Equals(iconAsset, "3D.gif", StringComparison.OrdinalIgnoreCase))
+        {
+            AttachAnimatedNavigationIcon(button, iconAsset!, new Size(17, 17));
+        }
+        else if (iconAsset is not null)
+        {
+            button.Image = LoadNavigationIcon(iconAsset, new Size(17, 17));
+        }
         button.FlatAppearance.MouseOverBackColor = Theme.CardBg;
         button.Click += (_, _) => SelectWorkspaceFolder(folder);
         _workspaceFolderButtons[folder] = button;
         return button;
+    }
+
+    private static void AttachAnimatedNavigationIcon(Button button, string assetName, Size size)
+    {
+        var animation = EmbeddedAssets.LoadAnimated(assetName);
+        if (animation is null)
+        {
+            button.Image = LoadNavigationIcon(assetName, size);
+            return;
+        }
+
+        // A native Button only paints the first GIF frame. Draw the current frame ourselves and
+        // invalidate on each timer tick so the workspace tab keeps moving like the rail icon.
+        button.Padding = new Padding(size.Width + 14, 0, 5, 0);
+        button.Paint += (_, e) =>
+        {
+            ImageAnimator.UpdateFrames(animation);
+            var target = new Rectangle(8, Math.Max(0, (button.Height - size.Height) / 2), size.Width, size.Height);
+            e.Graphics.DrawImage(animation, target);
+        };
+
+        EventHandler? frameChanged = null;
+        frameChanged = (_, _) =>
+        {
+            if (button.IsDisposed || !button.IsHandleCreated)
+            {
+                return;
+            }
+
+            try
+            {
+                button.BeginInvoke((MethodInvoker)(() =>
+                {
+                    if (!button.IsDisposed)
+                    {
+                        button.Invalidate();
+                    }
+                }));
+            }
+            catch (InvalidOperationException)
+            {
+                // The form can close between the animation tick and this dispatch.
+            }
+        };
+        ImageAnimator.Animate(animation, frameChanged);
+        button.Disposed += (_, _) => ImageAnimator.StopAnimate(animation, frameChanged);
     }
 
     private Control CreateHomeCategoryRail()

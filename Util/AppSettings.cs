@@ -72,6 +72,9 @@ public sealed class AppSettings
     // Hover/toggle/tile motion. Off makes every animation resolve instantly (no tweening).
     public bool AnimationsEnabled { get; set; } = true;
 
+    // The visual selector intentionally changes only the header artwork for now.
+    public string VisualTheme { get; set; } = "Classic";
+
     // Loaded once at startup; services consult this for path overrides.
     [JsonIgnore]
     public static AppSettings Current { get; set; } = new();

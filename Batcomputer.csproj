@@ -39,6 +39,7 @@
     <!-- Embed app art in the single-file release. -->
     <EmbeddedResource Include="Assets\**\*.png" />
     <EmbeddedResource Include="Assets\**\*.gif" />
+    <EmbeddedResource Include="Assets\Font\**\*.otf" />
     <!-- Embed the window and taskbar icon. -->
     <EmbeddedResource Include="Assets\Icon.ico" />
     <!-- Offline three.js preview runtime; see licenses/three.js-LICENSE.txt. -->
@@ -57,6 +58,8 @@
     <None Update="README.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="THIRD_PARTY_NOTICES.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="licenses\*.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- D-DIN is bundled under the SIL Open Font License 1.1. -->
+    <None Update="Assets\Font\SIL Open Font License.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <!-- Bundle author-tool source and config, not Unreal build outputs. -->
     <None Update="Tools\README.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="Tools\Build-NativeSuitTemplateIndex.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

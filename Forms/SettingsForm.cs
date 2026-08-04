@@ -29,6 +29,7 @@ public sealed partial class SettingsForm : Form
     // Panels swapped by the left nav.
     private Panel? _pathsPanel;
     private Panel? _generalPanel;
+    private Panel? _visualPanel;
     private readonly List<(Panel item, Label bar)> _navItems = new();
 
     public SettingsForm()
@@ -134,6 +135,7 @@ public sealed partial class SettingsForm : Form
             _settings.AnimationsEnabled = _animationsToggle?.Checked ?? _settings.AnimationsEnabled;
             _settings.KeepPreviousExtracts = _keepExtractsToggle?.Checked ?? _settings.KeepPreviousExtracts;
             _settings.AutoCleanPreviewFiles = _autoCleanPreviewFilesToggle?.Checked ?? _settings.AutoCleanPreviewFiles;
+            _settings.VisualTheme = _themePicker?.SelectedItem?.ToString() ?? _settings.VisualTheme;
             // Apply immediately so the change takes effect without a restart.
             Animator.Enabled = _settings.AnimationsEnabled;
             _settings.Save();
@@ -158,20 +160,28 @@ public sealed partial class SettingsForm : Form
 
         _pathsPanel = BuildPathsPanel(firstRun);
         _generalPanel = BuildGeneralPanel();
+        _visualPanel = BuildVisualPanel();
         _pathsPanel.Dock = DockStyle.Fill;
         _generalPanel.Dock = DockStyle.Fill;
+        _visualPanel.Dock = DockStyle.Fill;
         _generalPanel.Visible = false;
+        _visualPanel.Visible = false;
         host.Controls.Add(_pathsPanel);
         host.Controls.Add(_generalPanel);
+        host.Controls.Add(_visualPanel);
 
         var navPaths = BuildNavItem("Paths", 60);
         var navGeneral = BuildNavItem("General", 104);
+        var navVisual = BuildNavItem("Visual", 148);
         rail.Controls.Add(navPaths.item);
         rail.Controls.Add(navGeneral.item);
+        rail.Controls.Add(navVisual.item);
         navPaths.item.Click += (_, _) => SelectTab(0);
         navGeneral.item.Click += (_, _) => SelectTab(1);
         foreach (Control c in navPaths.item.Controls) c.Click += (_, _) => SelectTab(0);
         foreach (Control c in navGeneral.item.Controls) c.Click += (_, _) => SelectTab(1);
+        navVisual.item.Click += (_, _) => SelectTab(2);
+        foreach (Control c in navVisual.item.Controls) c.Click += (_, _) => SelectTab(2);
 
         // Order matters: Fill first, then Left, then Bottom, so docking carves correctly.
         Controls.Add(host);
@@ -188,6 +198,7 @@ public sealed partial class SettingsForm : Form
     {
         if (_pathsPanel is not null) _pathsPanel.Visible = index == 0;
         if (_generalPanel is not null) _generalPanel.Visible = index == 1;
+        if (_visualPanel is not null) _visualPanel.Visible = index == 2;
         for (var i = 0; i < _navItems.Count; i++)
         {
             var active = i == index;
@@ -316,6 +327,7 @@ public sealed partial class SettingsForm : Form
     private ToggleSwitch? _animationsToggle;
     private ToggleSwitch? _keepExtractsToggle;
     private ToggleSwitch? _autoCleanPreviewFilesToggle;
+    private ThemedDropDown? _themePicker;
 
     private const int RowRightEdge = RowDotX + 14;
 
@@ -390,11 +402,6 @@ public sealed partial class SettingsForm : Form
             _minifigToggle,
             artMissing ? Theme.Warn : null);
 
-        _animationsToggle = new ToggleSwitch { Checked = _settings.AnimationsEnabled };
-        ToggleRow("Enable animations",
-            "Off: hovers, toggles, and tiles change instantly, with no motion.",
-            _animationsToggle);
-
         _keepExtractsToggle = new ToggleSwitch { Checked = _settings.KeepPreviousExtracts };
         ToggleRow("Keep previous asset extracts",
             "Off: a refresh deletes the dump it replaces (each is ~18 GB).",
@@ -425,6 +432,58 @@ public sealed partial class SettingsForm : Form
             }
         };
         ButtonRow(rerun, "Walks through every required path, then offers the full first-time game extraction.");
+
+        return panel;
+    }
+
+    private Panel BuildVisualPanel()
+    {
+        var panel = new Panel { AutoScroll = true, BackColor = Theme.WindowBg, Padding = new Padding(0, 12, 0, 12) };
+        var y = 20;
+
+        panel.Controls.Add(SectionDivider("THEME", y));
+        y += 38;
+        panel.Controls.Add(new Label
+        {
+            Left = RowLabelX, Top = y + 6, Width = 320, Height = 20,
+            Text = "Header style", ForeColor = Theme.OnDark, Font = Theme.Body,
+        });
+        _themePicker = new ThemedDropDown
+        {
+            Left = RowLabelX + 340, Top = y, Width = 260,
+            Placeholder = "Choose a theme",
+        };
+        _themePicker.Items.Add("Classic");
+        _themePicker.Items.Add("Batcompuper");
+        _themePicker.SelectedItem = string.Equals(_settings.VisualTheme, "Batcompuper", StringComparison.OrdinalIgnoreCase)
+            ? "Batcompuper"
+            : "Classic";
+        panel.Controls.Add(_themePicker);
+        panel.Controls.Add(new Label
+        {
+            Left = RowLabelX, Top = y + 42, Width = RowRightEdge - RowLabelX, Height = 34,
+            Text = "Batcompuper uses header2.png. All other colors and controls stay the same.",
+            ForeColor = Theme.OnDarkMuted, Font = Theme.Caption,
+        });
+        y += 94;
+
+        panel.Controls.Add(SectionDivider("MOTION", y));
+        y += 38;
+        _animationsToggle = new ToggleSwitch { Checked = _settings.AnimationsEnabled };
+        panel.Controls.Add(new Label
+        {
+            Left = RowLabelX, Top = y + 2, Width = 320, Height = 20,
+            Text = "Enable animations", ForeColor = Theme.OnDark, Font = Theme.Body,
+        });
+        _animationsToggle.Left = RowLabelX + 340;
+        _animationsToggle.Top = y;
+        panel.Controls.Add(_animationsToggle);
+        panel.Controls.Add(new Label
+        {
+            Left = RowLabelX, Top = y + 28, Width = RowRightEdge - RowLabelX, Height = 34,
+            Text = "Off: hovers, toggles, tiles, and animated UI details stop moving.",
+            ForeColor = Theme.OnDarkMuted, Font = Theme.Caption,
+        });
 
         return panel;
     }
