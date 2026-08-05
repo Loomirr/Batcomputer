@@ -313,6 +313,7 @@ public sealed partial class MainForm
         menu.Items.Add("Copy source PNG path", null, (_, _) => CopyText(texture.SourcePng, $"Copied source PNG path: {texture.SourcePng}"));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("View recipe safety...", null, (_, _) => ShowTextureRecipeSafety(texture));
+        menu.Items.Add("Reimport image", null, (_, _) => ReimportCurrentSuitTexture(texture));
         menu.Items.Add("Change cook profile...", null, (_, _) => ChangeGeneratedTextureCookProfile(texture));
         var restore = menu.Items.Add("Restore latest texture backup", null, (_, _) => RestoreLatestTextureBackup(texture));
         restore.Enabled = FindLatestTextureBackup(texture) is not null;
@@ -323,6 +324,64 @@ public sealed partial class MainForm
         menu.Items.Add("Delete texture from suit", null, (_, _) => DeleteGeneratedTexture(texture, deleteFiles: false));
         menu.Items.Add("Delete texture + generated files", null, (_, _) => DeleteGeneratedTexture(texture, deleteFiles: true));
         return menu;
+    }
+
+    private void ReimportCurrentSuitTexture(GeneratedTextureEntry texture)
+    {
+        EnsureProject();
+        if (_currentProject is null || !ReimportGeneratedTextureSource(texture))
+        {
+            return;
+        }
+
+        (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject);
+        AppendLog($"Reimported texture '{texture.DisplayName}' from its source PNG.");
+        RefreshToyboxTiles();
+    }
+
+    private bool ReimportGeneratedTextureSource(GeneratedTextureEntry texture)
+    {
+        if (string.IsNullOrWhiteSpace(texture.SourcePng) || !File.Exists(texture.SourcePng))
+        {
+            Dialog.Warn(this, "Reimport image", "The saved source PNG is missing. Import a new texture instead.");
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(texture.OutputRoot) || string.IsNullOrWhiteSpace(texture.PackagePath))
+        {
+            Dialog.Warn(this, "Reimport image", "This texture does not have a complete cooked output location.");
+            return false;
+        }
+        if (!Dialog.Confirm(this, $"Reimport {texture.DisplayName}?", "The current PNG will be cooked again in place using its existing profile.", "Reimport"))
+        {
+            return false;
+        }
+
+        var backupPath = CreateTextureBackup(texture, "Before reimporting source image");
+        if (!string.IsNullOrWhiteSpace(backupPath))
+        {
+            AppendLog($"Texture backup created: {backupPath}");
+        }
+
+        var cookedContentRoot = Path.Combine(texture.OutputRoot, "Cooked", "LEGOBatmanLotDK", "Content");
+        var sourceBase = PackagePathToContentPath(cookedContentRoot, texture.PackagePath);
+        var reportPath = sourceBase + ".texture-cook-report.json";
+        try
+        {
+            if (File.Exists(reportPath)) File.Delete(reportPath);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Texture reimport could not clear its previous cook report: {ex.Message}");
+        }
+
+        if (!EnsureGeneratedTextureCooked(texture, cookedContentRoot))
+        {
+            Dialog.Warn(this, "Reimport image", "The texture could not be cooked again. The previous generated files were left in place.");
+            return false;
+        }
+
+        texture.CreatedUtc = DateTime.UtcNow.ToString("O");
+        return true;
     }
 
     private static string TextureObjectPath(GeneratedTextureEntry texture) =>
@@ -725,7 +784,12 @@ public sealed partial class MainForm
             }
         }
 
-        if (textureKind.Contains("normal", StringComparison.OrdinalIgnoreCase))
+        if (IsRedBrickTextureKind(textureKind))
+        {
+            Add("redbrick-2k-dxt5", "2K DXT5 Red Brick icon", dxt5Path, 2048, 2048, "PF_DXT5",
+                TextureProfileSafety.Verified, "Dedicated Red Brick icon route using the proven DXT5 UI donor.");
+        }
+        else if (textureKind.Contains("normal", StringComparison.OrdinalIgnoreCase))
         {
             Add("normal-2k-bc5-legacy", "2K BC5 normal", bc5Path, 2048, 2048, "PF_BC5",
                 TextureProfileSafety.Verified, "Verified on Electric's body normal map in game.");
@@ -779,6 +843,7 @@ public sealed partial class MainForm
         "mask-2k-bgra8" => TextureProfileSafety.Verified,
         "ui-2k-dxt5-legacy" => TextureProfileSafety.Verified,
         "ui-2k-bgra8" => TextureProfileSafety.Verified,
+        "redbrick-2k-dxt5" => TextureProfileSafety.Verified,
         _ => TextureProfileSafety.Experimental,
     };
 
@@ -793,6 +858,7 @@ public sealed partial class MainForm
         "mask-2k-bgra8" => "Verified on Electric's current Red Brick colour mask.",
         "ui-2k-dxt5-legacy" => "Original UI cook route, verified before the BGRA8 UI profile was added.",
         "ui-2k-bgra8" => "Used by the current generated Electric menu art.",
+        "redbrick-2k-dxt5" => "Dedicated Red Brick icon route using the proven DXT5 UI donor.",
         "character-1k-bgra8" => "Lower-resolution character colour; verify visual quality in game.",
         "mask-1k-bgra8" => "Lower-resolution profile; verify the target use in game.",
         "normal-2k-bgra8" => "Deprecated normal-map route. Choose BC5 instead.",
@@ -1172,8 +1238,11 @@ public sealed partial class MainForm
         (textureKind.Contains("ui", StringComparison.OrdinalIgnoreCase) ||
          textureKind.Contains("icon", StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsRedBrickTextureKind(string? textureKind) =>
+        string.Equals(textureKind?.Trim(), "RedBrick", StringComparison.OrdinalIgnoreCase);
+
     private static bool UseNearestNeighborMipsForTextureKind(string? textureKind, string? cookProfile = null) =>
-        !IsUiTextureKind(textureKind) ||
+        (!IsUiTextureKind(textureKind) && !IsRedBrickTextureKind(textureKind)) ||
         string.Equals(cookProfile, "ui-2k-dxt5-legacy", StringComparison.OrdinalIgnoreCase);
 
     private bool AutoAssignGeneratedUiIconSlots(NativeSuitProject project)
@@ -1339,7 +1408,7 @@ public sealed partial class MainForm
     }
 
     private static bool TextureTemplateNeedsSameLengthPath(string templateJson, string? textureKind) =>
-        IsUiTextureKind(textureKind) &&
+        (IsUiTextureKind(textureKind) || IsRedBrickTextureKind(textureKind)) &&
         TextureTemplateIsInlineOnly(templateJson) &&
         !TextureTemplateIsStandaloneUasset(templateJson);
 
@@ -1759,6 +1828,60 @@ public sealed partial class MainForm
 
         WriteGeneratedTextureStageManifest(project, stagedRelativeFiles);
         AppendLog($"Staged {copied} generated texture file(s) into the pack content root.");
+        return true;
+    }
+
+    private bool StageRedBrickTexturesIntoContentRoot(NativeSuitModProject mod, string contentRootToPackage, out string error)
+    {
+        error = "";
+        var referencedPackages = new HashSet<string>(
+            (mod.RedBricks ?? [])
+                .Where(brick => brick.Enabled)
+                .Select(brick => UnrealPathUtil.NormalizePackagePath(brick.IconTexturePackagePath))
+                .Where(package => !string.IsNullOrWhiteSpace(package)),
+            StringComparer.OrdinalIgnoreCase);
+        var textures = (mod.RedBrickTextures ?? [])
+            .Where(texture => IsRedBrickTextureKind(texture.Kind) &&
+                referencedPackages.Contains(UnrealPathUtil.NormalizePackagePath(texture.PackagePath)))
+            .ToList();
+        if (textures.Count == 0)
+        {
+            return true;
+        }
+
+        var expectedPrefix = $"/Game/Mods/{mod.ModId}/Textures/";
+        foreach (var texture in textures)
+        {
+            if (!texture.PackagePath.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                error = $"Red Brick icon '{texture.DisplayName}' must be under {expectedPrefix}.";
+                return false;
+            }
+            if (!TryPrepareGeneratedTextureForStaging(texture, out var textureError))
+            {
+                error = textureError;
+                return false;
+            }
+        }
+
+        var copied = 0;
+        foreach (var texture in textures)
+        {
+            var cookedContentRoot = Path.Combine(texture.OutputRoot, "Cooked", "LEGOBatmanLotDK", "Content");
+            var sourceBase = PackagePathToContentPath(cookedContentRoot, texture.PackagePath);
+            var destinationBase = PackagePathToContentPath(contentRootToPackage, texture.PackagePath);
+            foreach (var extension in GeneratedTextureRequiredExtensions(texture.TemplateJson))
+            {
+                var source = sourceBase + extension;
+                if (!File.Exists(source)) continue;
+                var destination = destinationBase + extension;
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                File.Copy(source, destination, overwrite: true);
+                copied++;
+            }
+        }
+
+        AppendLog($"Staged {copied} Red Brick icon texture file(s) into the pack content root.");
         return true;
     }
 

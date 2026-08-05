@@ -145,10 +145,17 @@ public sealed partial class MainForm : Form
     private WorkflowRailControl? _suitWorkflowRail;
     private WorkflowRailControl? _homeWorkflowRail;
     private Panel? _viewerWorkspaceHost;
+    private Panel? _redBrickWorkspaceHost;
+    private VirtualTilePanel? _redBrickTileGrid;
+    private Label? _redBrickWorkspaceSubtitle;
+    private Label? _redBrickWorkspaceTitle;
+    private Button? _redBrickPrimaryActionButton;
     private readonly Dictionary<WorkspaceFolder, Button> _workspaceFolderButtons = new();
     private readonly Dictionary<HomeWorkspaceSection, Button> _homeWorkspaceButtons = new();
+    private readonly Dictionary<RedBrickWorkspaceSection, Button> _redBrickWorkspaceButtons = new();
     private WorkspaceFolder _workspaceFolder = WorkspaceFolder.Home;
     private HomeWorkspaceSection _homeWorkspaceSection = HomeWorkspaceSection.Mods;
+    private RedBrickWorkspaceSection _redBrickWorkspaceSection = RedBrickWorkspaceSection.ThisMod;
     private bool _switchingWorkspaceFolder;
 
     private enum WorkspaceFolder
@@ -156,6 +163,7 @@ public sealed partial class MainForm : Form
         Home,
         Suits,
         Viewer,
+        RedBricks,
     }
 
     private enum HomeWorkspaceSection
@@ -165,6 +173,14 @@ public sealed partial class MainForm : Form
         RedBricks,
         BuildMod,
         Review,
+    }
+
+    private enum RedBrickWorkspaceSection
+    {
+        ThisMod,
+        BaseGame,
+        Library,
+        Icons,
     }
 
     private readonly FlowLayoutPanel _toyboxTileFlow = new();
@@ -495,11 +511,11 @@ public sealed partial class MainForm : Form
             // Glyph above the label; smaller font so long labels ("Animations") fit
             // on one line instead of wrapping and indenting.
             Text = glyph + "\n" + category,
-            Width = 74,
-            Height = 52,
+            Width = 88,
+            Height = 56,
             Margin = new Padding(1, 1, 1, 3),
             FlatStyle = FlatStyle.Flat,
-            Font = new Font(Font.FontFamily, 7.5f),
+            Font = Theme.Caption,
             TextAlign = ContentAlignment.MiddleCenter,
             ForeColor = color,
             BackColor = Theme.PanelBg,
@@ -1399,7 +1415,10 @@ public sealed partial class MainForm : Form
         }
     }
 
-    private (string Name, string Kind, TextureCookPreset Preset)? PromptForTextureImportSettings(string suggestedName, string projectRoot)
+    private (string Name, string Kind, TextureCookPreset Preset)? PromptForTextureImportSettings(
+        string suggestedName,
+        string projectRoot,
+        string? lockedKind = null)
     {
         const int Width = 560;
         const int Padding = 18;
@@ -1448,15 +1467,24 @@ public sealed partial class MainForm : Form
         AddTextureDialogField(fields, "TEXTURE NAME", input, 14);
 
         var kind = new ThemedDropDown { Height = 34 };
-        foreach (var textureKind in new[] { "Character texture", "Color mask", "UI icon", "Normal map", "Roughness/spec mask", "Other texture" })
+        if (!string.IsNullOrWhiteSpace(lockedKind))
         {
-            kind.Items.Add(textureKind);
-        }
-        var guessedKind = GuessTextureImportKind(suggestedName);
-        kind.SelectedItem = guessedKind;
-        if (kind.SelectedIndex < 0)
-        {
+            kind.Items.Add(lockedKind);
             kind.SelectedIndex = 0;
+            kind.Enabled = false;
+        }
+        else
+        {
+            foreach (var textureKind in new[] { "Character texture", "Color mask", "UI icon", "Normal map", "Roughness/spec mask", "Other texture" })
+            {
+                kind.Items.Add(textureKind);
+            }
+            var guessedKind = GuessTextureImportKind(suggestedName);
+            kind.SelectedItem = guessedKind;
+            if (kind.SelectedIndex < 0)
+            {
+                kind.SelectedIndex = 0;
+            }
         }
         AddTextureDialogField(fields, "USE", kind, 74);
 

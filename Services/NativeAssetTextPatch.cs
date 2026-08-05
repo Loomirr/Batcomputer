@@ -69,6 +69,31 @@ public static class NativeAssetTextPatch
         return inner?.Value.ToString();
     }
 
+    /// <summary>Repoints a top-level soft object property to a cooked game asset.</summary>
+    public static bool SetSoftObject(UAsset asset, string propName, string packagePath)
+    {
+        var normalized = UnrealPathUtil.NormalizePackagePath(packagePath);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return false;
+        }
+
+        var export = FindExportWithProp(asset, propName);
+        var property = export?.Data.OfType<SoftObjectPropertyData>()
+            .FirstOrDefault(item => item.Name.ToString() == propName);
+        if (property is null)
+        {
+            return false;
+        }
+
+        property.Value = new FSoftObjectPath(
+            new FTopLevelAssetPath(
+                FName.FromString(asset, normalized),
+                FName.FromString(asset, UnrealPathUtil.AssetName(normalized))),
+            new FString(string.Empty));
+        return true;
+    }
+
     private static NormalExport? FindExportWithProp(UAsset asset, string propName) =>
         asset.Exports.OfType<NormalExport>()
             .FirstOrDefault(e => e.Data.Any(p => p.Name.ToString() == propName));

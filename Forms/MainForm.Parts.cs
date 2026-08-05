@@ -696,8 +696,8 @@ public sealed partial class MainForm
     {
         var row = new RoundedPanel { Width = 206, Height = 42, Margin = new Padding(2, 2, 2, 2), BackColor = Theme.CardBg, CornerRadius = Theme.RadiusSm, Cursor = Cursors.Hand, Tag = (label, component, slot), AllowDrop = true };
         var dot = new StatusDot { Name = "dot", Width = 10, Height = 10, Left = 8, Top = 16, DotColor = Theme.DefaultDot };
-        var name = new Label { Text = label, Left = 24, Top = 4, Width = 150, Height = 16, AutoSize = false, BackColor = Color.Transparent, ForeColor = Theme.OnDark, Font = new Font(Font.FontFamily, 9f, FontStyle.Bold) };
-        var sub = new Label { Text = $"{component} · slot {slot}", Left = 24, Top = 21, Width = 155, Height = 14, AutoSize = false, BackColor = Color.Transparent, ForeColor = Theme.OnDarkMuted, Font = new Font(Font.FontFamily, 7.5f) };
+        var name = new Label { Text = label, Left = 24, Top = 4, Width = 150, Height = 16, AutoSize = false, BackColor = Color.Transparent, ForeColor = Theme.OnDark, Font = AppFonts.Condensed(9f, FontStyle.Bold) };
+        var sub = new Label { Text = $"{component} · slot {slot}", Left = 24, Top = 21, Width = 155, Height = 14, AutoSize = false, BackColor = Color.Transparent, ForeColor = Theme.OnDarkMuted, Font = AppFonts.Condensed(7.5f, FontStyle.Bold) };
         var menu = new Button { Text = "⋯", Left = 176, Top = 8, Width = 26, Height = 26, FlatStyle = FlatStyle.Flat, BackColor = Color.Transparent, ForeColor = Theme.OnDarkMuted };
         menu.FlatAppearance.BorderSize = 0;
         var ctx = BuildSlotContextMenu(label, component, slot);

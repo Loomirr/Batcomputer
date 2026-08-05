@@ -94,7 +94,7 @@ public static class Dialog
         {
             Left = Pad + 12, Top = y, Width = W - Pad * 2 - 12, Height = 22,
             Text = model.Title,
-            Font = new Font("Segoe UI", 12f, FontStyle.Bold),
+            Font = AppFonts.Condensed(12f, FontStyle.Bold),
             ForeColor = Theme.OnDark,
             AutoEllipsis = true,
         };

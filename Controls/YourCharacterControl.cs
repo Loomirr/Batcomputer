@@ -23,7 +23,7 @@ public partial class YourCharacterControl : UserControl
         _viewIn3dButton.FlatAppearance.BorderColor = Theme.Research;
         _viewIn3dButton.FlatAppearance.MouseOverBackColor = Theme.Tint(Theme.Research);
         _viewIn3dButton.ForeColor = Theme.Research;
-        _viewIn3dButton.Font = new Font(_viewIn3dButton.Font, FontStyle.Bold);
+        _viewIn3dButton.Font = Theme.Caption;
         _viewIn3dButton.Click += (_, _) => ViewIn3DRequested?.Invoke(this, EventArgs.Empty);
         _viewIn3dIcon.Click += (_, _) => _viewIn3dButton.PerformClick();
         if (EmbeddedAssets.LoadAnimated("3D.gif") is { } animatedIcon)
@@ -31,6 +31,8 @@ public partial class YourCharacterControl : UserControl
             _viewIn3dIcon.Image = animatedIcon;
         }
         _minifigActions.BringToFront();
+        SizeChanged += (_, _) => LayoutMinifigActions();
+        LayoutMinifigActions();
     }
 
     /// <summary>The vertical flow of character-component rows (added/removed by PopulateToyboxSlots).</summary>
@@ -52,5 +54,11 @@ public partial class YourCharacterControl : UserControl
         _slotFlow.Visible = !useMinifig;
         _minifigActions.Visible = useMinifig;
         _minifigActions.BringToFront();
+    }
+
+    private void LayoutMinifigActions()
+    {
+        _minifigActions.Left = Math.Max(Padding.Left, ClientSize.Width - _minifigActions.Width - Padding.Right);
+        _minifigActions.Top = 2;
     }
 }

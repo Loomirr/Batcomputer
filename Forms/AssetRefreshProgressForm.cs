@@ -34,7 +34,7 @@ public sealed class AssetRefreshProgressForm : Form
             var title = new Label
             {
                 Left = 18, Top = 36, Width = 584, Height = 24,
-                Text = "First-time game asset extraction", Font = new Font("Segoe UI", 13f, FontStyle.Bold), ForeColor = Theme.OnDark,
+                Text = "First-time game asset extraction", Font = AppFonts.Condensed(13f, FontStyle.Bold), ForeColor = Theme.OnDark,
             };
             var intro = new Label
             {
@@ -50,7 +50,7 @@ public sealed class AssetRefreshProgressForm : Form
         _phase.Top = 16 + offset;
         _phase.Width = 584;
         _phase.Height = 20;
-        _phase.Font = new Font("Segoe UI", 10f, FontStyle.Bold);
+        _phase.Font = AppFonts.Condensed(10f, FontStyle.Bold);
         _phase.ForeColor = Theme.Gold;
         _phase.Text = "Preparing";
 

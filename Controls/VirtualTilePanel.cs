@@ -129,7 +129,7 @@ public sealed class VirtualTilePanel : Panel
         Invalidate();
     }
 
-    private static readonly Font NoteFont = new(FontFamily.GenericSansSerif, 8f);
+    private static readonly Font NoteFont = AppFonts.Condensed(8f, FontStyle.Bold);
 
     /// <summary>
     /// Positions are precomputed rather than derived from a row/column formula, because tiles may be
@@ -312,14 +312,14 @@ public sealed class VirtualTilePanel : Panel
         }
     }
 
-    // Cached hero fonts.
-    private static readonly Font HeroTitleFont = new("Segoe UI", 13f, FontStyle.Bold);
-    private static readonly Font HeroSubFont = new("Segoe UI", 8.75f);
-    private static readonly Font HeroChipFont = new("Segoe UI", 8.25f, FontStyle.Bold);
-    private static readonly Font HeroBadgeFont = new("Segoe UI", 8f, FontStyle.Bold);
-    private static readonly Font HeroOverlineFont = new("Segoe UI", 7.5f, FontStyle.Bold);
-    private static readonly Font HeroWorkflowLabelFont = new("Segoe UI", 7.5f, FontStyle.Bold);
-    private static readonly Font HeroWorkflowDetailFont = new("Segoe UI", 7f);
+    // Cached condensed fonts for the owner-drawn workspace surface.
+    private static readonly Font HeroTitleFont = AppFonts.Condensed(13f, FontStyle.Bold);
+    private static readonly Font HeroSubFont = AppFonts.Condensed(8.75f, FontStyle.Bold);
+    private static readonly Font HeroChipFont = AppFonts.Condensed(8.25f, FontStyle.Bold);
+    private static readonly Font HeroBadgeFont = AppFonts.Condensed(8f, FontStyle.Bold);
+    private static readonly Font HeroOverlineFont = AppFonts.Condensed(7.5f, FontStyle.Bold);
+    private static readonly Font HeroWorkflowLabelFont = AppFonts.Condensed(7.5f, FontStyle.Bold);
+    private static readonly Font HeroWorkflowDetailFont = AppFonts.Condensed(7f, FontStyle.Bold);
 
     /// <summary>Paints the adaptive hero card + stat chips at content-space top <paramref name="top"/>.</summary>
     private void DrawHero(Graphics g, int top)
@@ -471,10 +471,10 @@ public sealed class VirtualTilePanel : Panel
         x += w;
     }
 
-    // Modern type ramp for tiles (Segoe UI, cached - no per-paint allocation).
-    private static readonly Font SectionFont = new("Segoe UI", 8.5f, FontStyle.Bold);
-    private static readonly Font TileTitleFont = new("Segoe UI", 9.5f, FontStyle.Bold);
-    private static readonly Font TileSubFont = new("Segoe UI", 8f);
+    // Cached type ramp for tiles - no per-paint allocation.
+    private static readonly Font SectionFont = AppFonts.Condensed(8.5f, FontStyle.Bold);
+    private static readonly Font TileTitleFont = AppFonts.Condensed(10f, FontStyle.Bold);
+    private static readonly Font TileSubFont = AppFonts.Condensed(8f, FontStyle.Bold);
 
     private static readonly StringFormat TileTextFormat = new(StringFormatFlags.LineLimit)
     {

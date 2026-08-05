@@ -117,7 +117,7 @@ public sealed class InspectorControl : UserControl
 
         _suitLabel.AutoSize = false;
         _suitLabel.Left = 12; _suitLabel.Top = 7; _suitLabel.Height = 20;
-        _suitLabel.Font = new Font("Segoe UI", 11f, FontStyle.Bold);
+        _suitLabel.Font = AppFonts.Condensed(11f, FontStyle.Bold);
         _suitLabel.ForeColor = Theme.OnDark;
         _suitLabel.BackColor = Color.Transparent;
         _suitLabel.AutoEllipsis = true;

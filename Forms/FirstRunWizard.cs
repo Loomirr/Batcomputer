@@ -193,7 +193,7 @@ public sealed class FirstRunWizard : Form
         _stepCount.ForeColor = Theme.Gold;
 
         _title.SetBounds(Pad, 42, w, 30);
-        _title.Font = new Font("Segoe UI", 15f, FontStyle.Bold);
+        _title.Font = AppFonts.Condensed(15f, FontStyle.Bold);
         _title.ForeColor = Theme.OnDark;
 
         _blurb.SetBounds(Pad, 76, w, 60);

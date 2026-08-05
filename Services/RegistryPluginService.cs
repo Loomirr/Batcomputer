@@ -20,11 +20,9 @@ public sealed class RegistryPluginService
     private const string WriterProbePackage = "/Game/Mods/BatcomputerWriterProbe/Characters/DA_DCMD_BatcomputerWriterProbe_Playable";
 
     /// <summary>
-    /// One homogeneous primary-asset row. Suit callers can continue to provide
-    /// only <paramref name="PackagePath"/>; other native asset systems may opt
-    /// into a different type/class pair. A single generated plugin intentionally
-    /// accepts one type/class pair because the UE writer's multi-row protocol
-    /// shares those two fields across every row.
+    /// One primary-asset row. Suit callers can continue to provide only
+    /// <paramref name="PackagePath"/>; a mod can also include other native asset
+    /// systems in the same cooked plugin registry.
     /// </summary>
     public sealed record RegistryRow(
         string PackagePath,
@@ -81,9 +79,9 @@ public sealed class RegistryPluginService
         public string Fingerprint { get; set; } = "";
     }
 
-    public static PluginLayout CreateLayout(string buildRoot, string modId)
+    public static PluginLayout CreateLayout(string buildRoot, string modId, bool containsRedBricks = false)
     {
-        var pluginName = $"{modId}Registry";
+        var pluginName = containsRedBricks ? $"{modId}RedBricksRegistry" : $"{modId}Registry";
         var directory = Path.Combine(buildRoot, "Engine", "Plugins", "Mods", pluginName);
         return new PluginLayout(
             pluginName,
@@ -220,7 +218,8 @@ public sealed class RegistryPluginService
         string modId,
         string modDisplayName,
         IEnumerable<RegistryRow> candidateRows,
-        Action<string> log)
+        Action<string> log,
+        bool containsRedBricks = false)
     {
         var rows = candidateRows
             .Select(row => row with { PackagePath = UnrealPathUtil.NormalizePackagePath(row.PackagePath) })
@@ -229,20 +228,6 @@ public sealed class RegistryPluginService
         if (errors.Count > 0)
         {
             return new BuildResult { Error = string.Join(" ", errors), Rows = rows };
-        }
-
-        var primaryTypes = rows.Select(row => row.EffectivePrimaryAssetType)
-            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        var classes = rows.Select(row => row.EffectiveAssetClass)
-            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        if (primaryTypes.Length != 1 || classes.Length != 1)
-        {
-            return new BuildResult
-            {
-                Error = "One registry plugin build must contain rows with one shared primary-asset type and asset class. " +
-                        "Build separate registry plugins for separate native asset systems.",
-                Rows = rows,
-            };
         }
 
         if (!TryGetWriterToolchain(out var toolchain, out var toolchainError))
@@ -260,9 +245,16 @@ public sealed class RegistryPluginService
             return new BuildResult { Error = ensured.Error, Rows = rows };
         }
 
-        var layout = CreateLayout(buildRoot, modId);
+        var layout = CreateLayout(buildRoot, modId, containsRedBricks);
         try
         {
+            var alternateLayout = CreateLayout(buildRoot, modId, !containsRedBricks);
+            if (!string.Equals(alternateLayout.PluginDirectory, layout.PluginDirectory, StringComparison.OrdinalIgnoreCase) &&
+                Directory.Exists(alternateLayout.PluginDirectory))
+            {
+                Directory.Delete(alternateLayout.PluginDirectory, recursive: true);
+                log($"Removed stale registry plugin '{alternateLayout.PluginName}'.");
+            }
             Directory.CreateDirectory(layout.PluginDirectory);
             File.WriteAllText(layout.DescriptorPath, BuildDescriptorJson(layout.PluginName, modDisplayName));
             // This registry plugin has no configuration of its own. Clear an old copy
@@ -282,7 +274,8 @@ public sealed class RegistryPluginService
                 File.Delete(layout.RegistryPath);
             }
 
-            log($"Writing and verifying {rows.Count} {primaryTypes[0]} registry row(s)...");
+            var types = string.Join(", ", rows.Select(row => row.EffectivePrimaryAssetType).Distinct(StringComparer.OrdinalIgnoreCase));
+            log($"Writing and verifying {rows.Count} registry row(s): {types}.");
             var writerRun = await RunWriterAsync(toolchain, layout.RegistryPath, rows, layout.PluginName, log);
             if (writerRun.ExitCode != 0 && ensured.UsedCache)
             {
@@ -421,7 +414,8 @@ public sealed class RegistryPluginService
         };
         if (rows.Count > 1)
         {
-            arguments.Add("-AdditionalRows=" + string.Join(";", rows.Skip(1).Select(row => $"{row.PackagePath}|{row.AssetName}")));
+            arguments.Add("-AdditionalRows=" + string.Join(";", rows.Skip(1).Select(row =>
+                $"{row.PackagePath}|{row.AssetName}|{row.EffectivePrimaryAssetType}|{row.EffectiveAssetClass}")));
         }
         arguments.Add($"-SentinelPackage={ProofSentinelRoot}/{pluginName}Sentinel");
         arguments.AddRange(new[] { "-Unattended", "-NoSplash", "-NoSourceControl", "-UTF8Output" });

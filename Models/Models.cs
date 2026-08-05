@@ -264,7 +264,7 @@ public sealed class SuitBaseProfile
 ///
 /// Everything keys off <see cref="ModId"/>: the pak trio name, the
 /// <c>/Game/Mods/&lt;ModId&gt;</c> content root, the <c>ST_&lt;ModId&gt;</c> StringTable,
-/// the <c>&lt;ModId&gt;PawnTags.ini</c>, the runtime manifest folder, and install
+/// the <c>&lt;ModId&gt;Tags.ini</c>, the runtime manifest folder, and install
 /// tracking. It is IMMUTABLE after first release (changing it orphans installed files).
 /// </summary>
 public sealed class NativeSuitModProject
@@ -289,6 +289,10 @@ public sealed class NativeSuitModProject
     public string StringTablePackage { get; set; } = "";
 
     public List<ModSuitEntry> Suits { get; set; } = new();
+    // Red Bricks are mod-owned release entries, just like suit references.
+    public List<ModRedBrickEntry> RedBricks { get; set; } = new();
+    // Red Brick icon textures are release-owned instead of belonging to a suit.
+    public List<GeneratedTextureEntry> RedBrickTextures { get; set; } = new();
 }
 
 /// <summary>
@@ -305,6 +309,30 @@ public sealed class ModSuitEntry
     public string SuitId { get; set; } = "";
     public bool Enabled { get; set; } = true;
     // Menu ordering hint within the mod (lower = earlier).
+    public int MenuOrder { get; set; } = 100;
+}
+
+/// <summary>One authored Red Brick contributed by a mod release.</summary>
+public sealed class ModRedBrickEntry
+{
+    // Immutable after the brick is first packaged; it participates in native tags and paths.
+    public string BrickId { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public string Description { get; set; } = "";
+    // Source image remains local until the next build cooks it into the mod's /Game path.
+    public string IconSourcePng { get; set; } = "";
+    // Optional cooked UI texture already contributed by a suit in this same mod.
+    // Its package must exist in the shared release stage before the collectable is written.
+    public string IconTexturePackagePath { get; set; } = "";
+    // Final icon object used by the staged collectable. This is either the generated
+    // Red Brick texture or IconTexturePackagePath when reusing a cooked UI texture.
+    public string IconPackagePath { get; set; } = "";
+    public string PrimaryColourRow { get; set; } = "BrightRed";
+    public string SecondaryColourRow { get; set; } = "MediumBlue";
+    public string TertiaryColourRow { get; set; } = "BrightYellow";
+    public string EffectPreset { get; set; } = "TintOnly";
+    public bool Enabled { get; set; } = true;
+    public bool UnlockedByDefault { get; set; } = true;
     public int MenuOrder { get; set; } = 100;
 }
 

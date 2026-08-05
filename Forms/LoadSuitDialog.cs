@@ -57,7 +57,7 @@ public sealed partial class LoadSuitDialog : Form
         var title = new Label
         {
             Left = 14, Top = 15, Width = 410, Height = 28,
-            Text = "All suits", Font = new Font("Segoe UI", 14f, FontStyle.Bold), ForeColor = Theme.OnDark,
+            Text = "All suits", Font = AppFonts.Condensed(14f, FontStyle.Bold), ForeColor = Theme.OnDark,
         };
         var subtitle = new Label
         {

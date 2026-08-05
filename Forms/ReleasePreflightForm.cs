@@ -72,7 +72,7 @@ public sealed class ReleasePreflightForm : Form
             Width = WidthPx - 50,
             Height = 24,
             Text = passed ? "Release preflight passed" : "Release preflight blocked",
-            Font = new Font("Segoe UI", 12f, FontStyle.Bold),
+            Font = AppFonts.Condensed(12f, FontStyle.Bold),
             ForeColor = Theme.OnDark,
         });
         header.Controls.Add(new Label

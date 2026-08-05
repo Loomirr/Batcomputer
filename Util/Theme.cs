@@ -26,6 +26,7 @@ internal static class Theme
     public static readonly Color Equipment = Color.FromArgb(244, 176, 62); // amber
     public static readonly Color Animations = Color.FromArgb(236, 110, 173); // pink
     public static readonly Color Faces = Color.FromArgb(240, 138, 96);     // coral
+    public static readonly Color RedBricks = Color.FromArgb(240, 86, 86); // red
     public static readonly Color Gliders = Color.FromArgb(96, 200, 226);   // sky
     public static readonly Color Textures = Color.FromArgb(100, 230, 245); // cyan
     public static readonly Color Research = Color.FromArgb(188, 160, 255); // lavender
@@ -53,6 +54,7 @@ internal static class Theme
         "Faces" => Faces,
         "Gliders" => Gliders,
         "Textures" => Textures,
+        "Red bricks" => RedBricks,
         "Build mod" => Gold,
         "Research" => Research,
         _ => Inspector
@@ -118,7 +120,7 @@ internal static class Theme
         t.BorderStyle = BorderStyle.FixedSingle;
     }
 
-    private static readonly Font TooltipFont = AppFonts.Ui(9f);
+    private static readonly Font TooltipFont = AppFonts.Condensed(9f, FontStyle.Bold);
 
     /// <summary>Dark, high-contrast tooltip (owner-drawn) so multi-line hints read clearly.</summary>
     public static void StyleTooltip(ToolTip t)
@@ -430,6 +432,7 @@ internal static class Theme
     public static readonly Color Surface = Color.FromArgb(30, 33, 39);   // = SlateDark, semantic alias
     public static readonly Color CardHi = Color.FromArgb(52, 57, 67);    // card hover
     public static readonly Color LineSoft = Color.FromArgb(42, 46, 53);  // hairline separators
+    public static readonly Color FrameLine = Color.FromArgb(74, 81, 93); // workspace and section boundaries
 
     // Semantic status colors (kept separate from the gold accent + category hues).
     public static readonly Color Good = Color.FromArgb(42, 206, 152);
@@ -444,10 +447,10 @@ internal static class Theme
 
     private const string MonoFamily = "Consolas";
     public static readonly Font Title = AppFonts.Condensed(15f, FontStyle.Bold);
-    public static readonly Font Heading = AppFonts.Ui(11.5f, FontStyle.Bold);
-    public static readonly Font Body = AppFonts.Ui(9.75f);
-    public static readonly Font BodyStrong = AppFonts.Ui(9.75f, FontStyle.Bold);
-    public static readonly Font Caption = AppFonts.Condensed(9f);
+    public static readonly Font Heading = AppFonts.Condensed(12f, FontStyle.Bold);
+    public static readonly Font Body = AppFonts.Condensed(10f, FontStyle.Bold);
+    public static readonly Font BodyStrong = AppFonts.Condensed(10f, FontStyle.Bold);
+    public static readonly Font Caption = AppFonts.Condensed(9f, FontStyle.Bold);
     /// <summary>Uppercase section eyebrow - pair with letter-spacing drawn manually where needed.</summary>
     public static readonly Font Eyebrow = AppFonts.Condensed(8.75f, FontStyle.Bold);
     public static readonly Font Mono = new(MonoFamily, 9f);

@@ -29,7 +29,7 @@ public sealed class RegistryWriterProgressForm : Form
         var title = new Label
         {
             Left = 18, Top = 40, Width = 584, Height = 26,
-            Text = "Preparing the Asset Registry writer", Font = new Font("Segoe UI", 13f, FontStyle.Bold), ForeColor = Theme.OnDark,
+            Text = "Preparing the Asset Registry writer", Font = AppFonts.Condensed(13f, FontStyle.Bold), ForeColor = Theme.OnDark,
         };
         var intro = new Label
         {

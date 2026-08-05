@@ -40,9 +40,10 @@ public sealed class ModReleaseValidationService
         ValidateModIdentity(mod, result);
 
         var enabled = inputs.Where(input => input.Entry.Enabled).ToList();
-        if (enabled.Count == 0)
+        var enabledBricks = (mod.RedBricks ?? []).Where(brick => brick.Enabled).ToList();
+        if (enabled.Count == 0 && enabledBricks.Count == 0)
         {
-            result.AddError("mod", "The mod has no enabled suits.");
+            result.AddError("mod", "The mod has no enabled suits or Red Bricks.");
             return result;
         }
 
@@ -86,6 +87,9 @@ public sealed class ModReleaseValidationService
             ValidateMaterialAssignments(suit, exportContentRoot, generatedRoot, result, suitId);
         }
 
+        var redBrickTexturePackages = ValidateRedBrickTextures(mod, enabledBricks, packageOwners, result);
+        ValidateRedBricks(mod, enabledBricks, redBrickTexturePackages, packageOwners, registryRows, result);
+
         foreach (var error in RegistryPluginService.ValidateRows(registryRows))
         {
             result.AddError("Asset Registry", error);
@@ -93,6 +97,143 @@ public sealed class ModReleaseValidationService
 
         ValidateInstalledCollisions(installedContentPacksRoot, mod.ModId, suitIds, pawnTags, packageOwners, result);
         return result;
+    }
+
+    private static void ValidateRedBricks(
+        NativeSuitModProject mod,
+        IReadOnlyList<ModRedBrickEntry> bricks,
+        IReadOnlySet<string> redBrickTexturePackages,
+        Dictionary<string, string> packageOwners,
+        List<RegistryPluginService.RegistryRow> registryRows,
+        Result result)
+    {
+        if (bricks.Count == 0) return;
+
+        var ids = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var modId = (mod.ModId ?? "").Trim();
+        var payloadPackage = $"/Game/Mods/{modId}/RedBricks/DA_RedBrickData_{modId}";
+        AddUnique(packageOwners, payloadPackage, "Red Bricks", "Red Brick package path", result, "Red Bricks");
+        registryRows.Add(new RegistryPluginService.RegistryRow(
+            payloadPackage, "RedBrickMetaDataAsset", "/Script/Dinner.RedBrickMetaDataAsset"));
+
+        foreach (var brick in bricks)
+        {
+            var id = (brick.BrickId ?? "").Trim();
+            var label = string.IsNullOrWhiteSpace(brick.DisplayName) ? "Red Brick" : brick.DisplayName.Trim();
+            if (string.IsNullOrWhiteSpace(id) || !string.Equals(id, ModProjectService.DeriveModId(id), StringComparison.Ordinal))
+            {
+                result.AddError("Red Brick", $"'{label}' needs a package-safe Brick ID.", label);
+                continue;
+            }
+            if (string.IsNullOrWhiteSpace(brick.DisplayName))
+            {
+                result.AddError("Red Brick", $"'{id}' needs a display name.", id);
+            }
+            AddUnique(ids, id, label, "Red Brick ID", result, id);
+            if (!string.Equals(brick.EffectPreset, "TintOnly", StringComparison.OrdinalIgnoreCase))
+            {
+                result.AddError("Red Brick", $"'{label}' uses an unsupported effect preset.", id);
+            }
+            foreach (var row in new[] { brick.PrimaryColourRow, brick.SecondaryColourRow, brick.TertiaryColourRow })
+            {
+                if (!RedBrickPalette.Contains(row))
+                {
+                    result.AddError("Red Brick", $"'{label}' has an unknown LEGO colour row '{row}'.", id);
+                }
+            }
+            var usesCookedIcon = !string.IsNullOrWhiteSpace(brick.IconTexturePackagePath);
+            if (!usesCookedIcon && string.IsNullOrWhiteSpace(brick.IconSourcePng))
+            {
+                result.AddError("Red Brick", $"'{label}' needs a 512x512 PNG menu icon or a cooked UI texture from this mod.", id);
+            }
+            else if (!usesCookedIcon && (!File.Exists(brick.IconSourcePng) || !Path.GetExtension(brick.IconSourcePng).Equals(".png", StringComparison.OrdinalIgnoreCase)))
+            {
+                result.AddError("Red Brick", $"'{label}' icon must point at a readable PNG.", id);
+            }
+            else if (!usesCookedIcon)
+            {
+                try
+                {
+                    using var icon = System.Drawing.Image.FromFile(brick.IconSourcePng);
+                    if (icon.Width != 512 || icon.Height != 512)
+                    {
+                        result.AddError("Red Brick", $"'{label}' icon must be exactly 512x512 pixels.", id);
+                    }
+                }
+                catch
+                {
+                    result.AddError("Red Brick", $"'{label}' icon could not be opened as a PNG.", id);
+                }
+            }
+            else if (!redBrickTexturePackages.Contains(UnrealPathUtil.NormalizePackagePath(brick.IconTexturePackagePath)))
+            {
+                result.AddError("Red Brick", $"'{label}' must use a cooked Red Brick icon owned by this mod. Open Red Bricks > Icons to cook one.", id);
+            }
+
+            var paths = new[]
+            {
+                (Package: $"/Game/Mods/{modId}/RedBricks/DA_RedBrickEffectDefinition_{id}", Type: "RedBrickEffectDefinition", Class: "/Script/Dinner.RedBrickEffectDefinition"),
+                (Package: $"/Game/Mods/{modId}/RedBricks/DA_Collectable_RedBrick_{id}", Type: "TtCollectablesMetaData", Class: "/Script/TtCollectables.TtCollectablesMetaData"),
+                (Package: $"/Game/Mods/{modId}/Progress/PROG_RedBricks_{id}", Type: "TtGameProgressDefinitionSet", Class: "/Script/TtGameProgress.TtGameProgressDefinitionSet"),
+            };
+            foreach (var item in paths)
+            {
+                AddUnique(packageOwners, item.Package, id, "Red Brick package path", result, id);
+                registryRows.Add(new RegistryPluginService.RegistryRow(item.Package, item.Type, item.Class));
+            }
+        }
+    }
+
+    private static HashSet<string> ValidateRedBrickTextures(
+        NativeSuitModProject mod,
+        IReadOnlyList<ModRedBrickEntry> bricks,
+        Dictionary<string, string> packageOwners,
+        Result result)
+    {
+        var packages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var referencedPackages = new HashSet<string>(
+            bricks
+                .Select(brick => UnrealPathUtil.NormalizePackagePath(brick.IconTexturePackagePath))
+                .Where(package => !string.IsNullOrWhiteSpace(package)),
+            StringComparer.OrdinalIgnoreCase);
+        if (referencedPackages.Count == 0)
+        {
+            return packages;
+        }
+
+        var modId = (mod.ModId ?? "").Trim();
+        var expectedPrefix = $"/Game/Mods/{modId}/Textures/";
+        foreach (var texture in mod.RedBrickTextures ?? Enumerable.Empty<GeneratedTextureEntry>())
+        {
+            var package = UnrealPathUtil.NormalizePackagePath(texture.PackagePath);
+            if (!referencedPackages.Contains(package))
+            {
+                continue;
+            }
+
+            var label = string.IsNullOrWhiteSpace(texture.DisplayName) ? "unnamed Red Brick icon" : texture.DisplayName;
+            if (!string.Equals(texture.Kind?.Trim(), "RedBrick", StringComparison.OrdinalIgnoreCase))
+            {
+                result.AddError("Red Brick icons", $"'{label}' is not marked as a RedBrick texture.");
+                continue;
+            }
+            if (string.IsNullOrWhiteSpace(package) || !package.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                result.AddError("Red Brick icons", $"'{label}' must live under {expectedPrefix}.");
+                continue;
+            }
+            if (string.IsNullOrWhiteSpace(texture.CookProfile))
+            {
+                result.AddError("Red Brick icons", $"'{label}' has no selected cook profile.");
+            }
+            if (string.IsNullOrWhiteSpace(texture.SourcePng) || !File.Exists(texture.SourcePng))
+            {
+                result.AddWarning("Red Brick icons", $"'{label}' has no readable source PNG. Its already-cooked output can still build, but it cannot be re-cooked.");
+            }
+            packages.Add(package);
+            AddUnique(packageOwners, package, label, "Red Brick icon package", result, "Red Brick icons");
+        }
+        return packages;
     }
 
     private static void ValidateModIdentity(NativeSuitModProject mod, Result result)

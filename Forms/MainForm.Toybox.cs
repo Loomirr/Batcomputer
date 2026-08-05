@@ -29,20 +29,20 @@ public sealed partial class MainForm
 
         outer.Controls.Add(CreateWorkspaceFolderTabs(), 0, 1);
 
-        var body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Padding = new Padding(6), BackColor = Theme.PanelBg };
+        var body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Padding = new Padding(8, 6, 8, 8), BackColor = Theme.PanelBg };
         _toyboxBodyLayout = body;
-        body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 82));
+        body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 98));
         body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 340));
         body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         outer.Controls.Add(body, 0, 2);
 
         // Category rail hosted in its designer-editable shell.
-        var workflowRail = new WorkflowRailControl { Dock = DockStyle.Fill };
+        var workflowRail = new WorkflowRailControl { Dock = DockStyle.Fill, BackColor = Theme.FrameLine, Padding = new Padding(0, 0, 1, 0) };
         workflowRail.HostContent(CreateCategoryRail());
         _suitWorkflowRail = workflowRail;
         body.Controls.Add(workflowRail, 0, 0);
 
-        var homeRail = new WorkflowRailControl { Dock = DockStyle.Fill, Visible = false };
+        var homeRail = new WorkflowRailControl { Dock = DockStyle.Fill, Visible = false, BackColor = Theme.FrameLine, Padding = new Padding(0, 0, 1, 0) };
         homeRail.HostContent(CreateHomeCategoryRail());
         _homeWorkflowRail = homeRail;
         body.Controls.Add(homeRail, 0, 0);
@@ -161,7 +161,15 @@ public sealed partial class MainForm
         _toyboxSelectionLabel.ForeColor = Theme.OnDarkMuted;
         toyLayout.Controls.Add(_toyboxSelectionLabel, 0, 2);
 
-        var rightSplit = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Vertical, Margin = new Padding(3) };
+        var rightSplit = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            Orientation = Orientation.Vertical,
+            Margin = new Padding(3),
+            BackColor = Theme.FrameLine,
+        };
+        rightSplit.Panel1.Padding = new Padding(1);
+        rightSplit.Panel2.Padding = new Padding(1);
         _toyboxWorkspaceSplit = rightSplit;
         var rightSplitSet = false;
         rightSplit.SizeChanged += (_, _) =>
@@ -201,6 +209,20 @@ public sealed partial class MainForm
         _viewerHostLayout = viewerLayout;
         body.Controls.Add(viewerHost, 0, 0);
         body.SetColumnSpan(viewerHost, 3);
+
+        // Red Bricks have their own full-width authoring surface. Keeping it out of the
+        // Home layout avoids the old clipped nested-workspace behavior.
+        var redBrickHost = new Panel
+        {
+            Dock = DockStyle.Fill,
+            Margin = new Padding(3),
+            BackColor = Theme.WindowBg,
+            Visible = false,
+        };
+        _redBrickWorkspaceHost = redBrickHost;
+        redBrickHost.Controls.Add(CreateRedBrickWorkspace());
+        body.Controls.Add(redBrickHost, 0, 0);
+        body.SetColumnSpan(redBrickHost, 3);
 
         SelectWorkspaceFolder(WorkspaceFolder.Home, refresh: false);
         PopulateToyboxSlots();
@@ -513,26 +535,7 @@ public sealed partial class MainForm
         tabs.Controls.Add(CreateWorkspaceFolderButton(WorkspaceFolder.Home, "Home", Theme.Gold, "Home.png"));
         tabs.Controls.Add(CreateWorkspaceFolderButton(WorkspaceFolder.Suits, "Suits", Theme.Base, "Suits.png"));
         tabs.Controls.Add(CreateWorkspaceFolderButton(WorkspaceFolder.Viewer, "3D viewer", Theme.Gliders, "3D.gif"));
-
-        var redBricks = new Button
-        {
-            Text = "▦  Red bricks  ·  soon",
-            Width = 160,
-            Height = 38,
-            Margin = new Padding(5, 0, 0, 0),
-            FlatStyle = FlatStyle.Flat,
-            FlatAppearance = { BorderSize = 1, BorderColor = Theme.LineSoft },
-            BackColor = Theme.SlateDark,
-            ForeColor = Theme.OnDarkMuted,
-            TextAlign = ContentAlignment.MiddleCenter,
-            Font = new Font(Font.FontFamily, 8.5f, FontStyle.Regular),
-            Image = LoadNavigationIcon("RedBricks.png", new Size(17, 17)),
-            ImageAlign = ContentAlignment.MiddleLeft,
-            TextImageRelation = TextImageRelation.ImageBeforeText,
-            Padding = new Padding(9, 0, 8, 0),
-            Enabled = false,
-        };
-        tabs.Controls.Add(redBricks);
+        tabs.Controls.Add(CreateWorkspaceFolderButton(WorkspaceFolder.RedBricks, "Red bricks", Theme.RedBricks, "RedBricks.png"));
         return strip;
     }
 
@@ -541,15 +544,22 @@ public sealed partial class MainForm
         var button = new Button
         {
             Text = text,
-            Width = folder == WorkspaceFolder.Viewer ? 124 : 92,
+              Width = folder switch
+              {
+                  WorkspaceFolder.Home => 112,
+                  WorkspaceFolder.Suits => 110,
+                  WorkspaceFolder.Viewer => 124,
+                  WorkspaceFolder.RedBricks => 138,
+                  _ => 100,
+            },
             Height = 38,
             Margin = new Padding(folder == WorkspaceFolder.Home ? 0 : 5, 0, 0, 0),
             FlatStyle = FlatStyle.Flat,
             FlatAppearance = { BorderSize = 1, BorderColor = Theme.LineSoft },
-            BackColor = Theme.SlateDark,
+            BackColor = Theme.Slate,
             ForeColor = Theme.OnDarkMuted,
             TextAlign = ContentAlignment.MiddleCenter,
-            Font = new Font(Font.FontFamily, 8.5f, FontStyle.Bold),
+            Font = Theme.BodyStrong,
             Cursor = Cursors.Hand,
             Tag = accent,
             ImageAlign = ContentAlignment.MiddleLeft,
@@ -579,41 +589,25 @@ public sealed partial class MainForm
             return;
         }
 
-        // A native Button only paints the first GIF frame. Draw the current frame ourselves and
-        // invalidate on each timer tick so the workspace tab keeps moving like the rail icon.
-        button.Padding = new Padding(size.Width + 14, 0, 5, 0);
-        button.Paint += (_, e) =>
+        // PictureBox owns GIF playback; Button.Image only paints the first frame.
+        button.TextAlign = ContentAlignment.MiddleCenter;
+        button.Padding = new Padding(size.Width + 16, 0, 4, 0);
+        var picture = new PictureBox
         {
-            ImageAnimator.UpdateFrames(animation);
-            var target = new Rectangle(8, Math.Max(0, (button.Height - size.Height) / 2), size.Width, size.Height);
-            e.Graphics.DrawImage(animation, target);
+            Image = animation,
+            BackColor = Color.Transparent,
+            SizeMode = PictureBoxSizeMode.Zoom,
+            Size = size,
+            TabStop = false,
         };
-
-        EventHandler? frameChanged = null;
-        frameChanged = (_, _) =>
+        void PlaceAnimation()
         {
-            if (button.IsDisposed || !button.IsHandleCreated)
-            {
-                return;
-            }
-
-            try
-            {
-                button.BeginInvoke((MethodInvoker)(() =>
-                {
-                    if (!button.IsDisposed)
-                    {
-                        button.Invalidate();
-                    }
-                }));
-            }
-            catch (InvalidOperationException)
-            {
-                // The form can close between the animation tick and this dispatch.
-            }
-        };
-        ImageAnimator.Animate(animation, frameChanged);
-        button.Disposed += (_, _) => ImageAnimator.StopAnimate(animation, frameChanged);
+            picture.Location = new Point(8, Math.Max(0, (button.ClientSize.Height - picture.Height) / 2));
+        }
+        PlaceAnimation();
+        button.Resize += (_, _) => PlaceAnimation();
+        picture.Click += (_, _) => button.PerformClick();
+        button.Controls.Add(picture);
     }
 
     private Control CreateHomeCategoryRail()
@@ -628,7 +622,7 @@ public sealed partial class MainForm
         };
         AddHomeRailButton(rail, HomeWorkspaceSection.Mods, "Mods", Theme.Mods, "Mods.png");
         AddHomeRailButton(rail, HomeWorkspaceSection.Suits, "Suits", Theme.Base, "Suits.png");
-        AddHomeRailButton(rail, HomeWorkspaceSection.RedBricks, "Red bricks", Theme.Gold, "RedBricks.png");
+        AddHomeRailButton(rail, HomeWorkspaceSection.RedBricks, "Red bricks", Theme.RedBricks, "RedBricks.png");
         AddHomeRailButton(rail, HomeWorkspaceSection.BuildMod, "Build mod", Theme.Equipment, "BuildMod.png");
         AddHomeRailButton(rail, HomeWorkspaceSection.Review, "Review", Theme.Research, "Review.png");
         UpdateHomeWorkspaceRailSelection();
@@ -640,18 +634,19 @@ public sealed partial class MainForm
         var button = new Button
         {
             Text = label,
-            Width = 74,
-            Height = 52,
+            Width = 88,
+            Height = 56,
             Margin = new Padding(1, 1, 1, 3),
+            Padding = new Padding(0, 3, 0, 3),
             FlatStyle = FlatStyle.Flat,
-            FlatAppearance = { BorderSize = 0 },
-            Font = new Font(Font.FontFamily, 7.5f),
-            TextAlign = ContentAlignment.MiddleCenter,
+            FlatAppearance = { BorderSize = 1, BorderColor = Theme.FrameLine },
+            Font = Theme.Caption,
+            TextAlign = ContentAlignment.BottomCenter,
             ForeColor = accent,
             BackColor = Theme.PanelBg,
             Cursor = Cursors.Hand,
             Tag = accent,
-            Image = LoadNavigationIcon(iconAsset, new Size(20, 20), section == HomeWorkspaceSection.Mods ? Theme.Mods : null),
+            Image = LoadNavigationIcon(iconAsset, new Size(20, 20)),
             ImageAlign = ContentAlignment.TopCenter,
             TextImageRelation = TextImageRelation.ImageAboveText,
         };
@@ -661,7 +656,7 @@ public sealed partial class MainForm
         rail.Controls.Add(button);
     }
 
-    private static Bitmap? LoadNavigationIcon(string assetName, Size size, Color? tint = null)
+    private static Bitmap? LoadNavigationIcon(string assetName, Size size)
     {
         using var source = EmbeddedAssets.Load(assetName);
         if (source is null)
@@ -672,27 +667,14 @@ public sealed partial class MainForm
         var icon = new Bitmap(size.Width, size.Height);
         using (var graphics = Graphics.FromImage(icon))
         {
+            // Bitmap's backing store starts black. Clear it explicitly so transparent PNG padding
+            // stays transparent instead of becoming a little black tile behind the navigation art.
+            graphics.Clear(Color.Transparent);
             graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
             graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
             graphics.DrawImage(source, new Rectangle(Point.Empty, size));
         }
 
-        if (tint is not Color color)
-        {
-            return icon;
-        }
-
-        for (var y = 0; y < icon.Height; y++)
-        {
-            for (var x = 0; x < icon.Width; x++)
-            {
-                var pixel = icon.GetPixel(x, y);
-                if (pixel.A > 0)
-                {
-                    icon.SetPixel(x, y, Color.FromArgb(pixel.A, color));
-                }
-            }
-        }
         return icon;
     }
 
@@ -720,7 +702,10 @@ public sealed partial class MainForm
         foreach (var (section, button) in _homeWorkspaceButtons)
         {
             var accent = button.Tag is Color color ? color : Theme.Inspector;
-            button.BackColor = section == _homeWorkspaceSection ? Theme.Tint(accent) : Theme.PanelBg;
+            var selected = section == _homeWorkspaceSection;
+            button.BackColor = selected ? Theme.Tint(accent) : Theme.PanelBg;
+            button.FlatAppearance.BorderSize = selected ? 1 : 0;
+            button.FlatAppearance.BorderColor = accent;
         }
     }
 
@@ -732,25 +717,28 @@ public sealed partial class MainForm
         }
 
         _switchingWorkspaceFolder = true;
+        _toyboxBodyLayout.SuspendLayout();
         try
         {
             _workspaceFolder = folder;
             var isHome = folder == WorkspaceFolder.Home;
             var isSuits = folder == WorkspaceFolder.Suits;
             var isViewer = folder == WorkspaceFolder.Viewer;
+            var isRedBricks = folder == WorkspaceFolder.RedBricks;
+            var isDedicatedWorkspace = isViewer || isRedBricks;
 
             if (_suitWorkflowRail is not null) _suitWorkflowRail.Visible = isSuits;
             if (_homeWorkflowRail is not null) _homeWorkflowRail.Visible = isHome;
             _yourCharacter.Visible = isSuits;
             if (_viewerWorkspaceHost is not null) _viewerWorkspaceHost.Visible = isViewer;
-            _toyboxWorkspaceSplit.Visible = !isViewer;
+            if (_redBrickWorkspaceHost is not null) _redBrickWorkspaceHost.Visible = isRedBricks;
+            _toyboxWorkspaceSplit.Visible = !isDedicatedWorkspace;
 
-            if (!isViewer)
-            {
-                _toyboxBodyLayout.SetColumn(_toyboxWorkspaceSplit, isHome ? 1 : 2);
-                _toyboxBodyLayout.SetColumnSpan(_toyboxWorkspaceSplit, isHome ? 2 : 1);
-                _toyboxWorkspaceSplit.Panel2Collapsed = isHome;
-            }
+            // Reset every layout fact on every switch. Incremental span changes were the source
+            // of Home progressively shrinking after selecting its subcategories.
+            _toyboxBodyLayout.SetColumn(_toyboxWorkspaceSplit, isHome ? 1 : 2);
+            _toyboxBodyLayout.SetColumnSpan(_toyboxWorkspaceSplit, isHome ? 2 : 1);
+            _toyboxWorkspaceSplit.Panel2Collapsed = isHome;
 
             var selectedCategory = _toyboxCategoryCombo.SelectedItem?.ToString() ?? "Home";
             if (isHome)
@@ -770,7 +758,7 @@ public sealed partial class MainForm
             {
                 var accent = button.Tag is Color color ? color : Theme.Inspector;
                 var selected = workspace == folder;
-                button.BackColor = selected ? Theme.Tint(accent) : Theme.SlateDark;
+                button.BackColor = selected ? Theme.Tint(accent) : Theme.Slate;
                 button.ForeColor = selected ? accent : Theme.OnDarkMuted;
                 button.FlatAppearance.BorderColor = selected ? accent : Theme.LineSoft;
             }
@@ -779,6 +767,8 @@ public sealed partial class MainForm
         finally
         {
             _switchingWorkspaceFolder = false;
+            _toyboxBodyLayout.ResumeLayout(performLayout: true);
+            _toyboxBodyLayout.PerformLayout();
         }
 
         if (folder != WorkspaceFolder.Viewer)
@@ -790,7 +780,12 @@ public sealed partial class MainForm
             ShowViewerPanel();
         }
 
-        if (refresh && folder != WorkspaceFolder.Viewer)
+        if (folder == WorkspaceFolder.RedBricks)
+        {
+            RefreshRedBrickWorkspace();
+        }
+
+        if (refresh && folder is not WorkspaceFolder.Viewer and not WorkspaceFolder.RedBricks)
         {
             RefreshToyboxTiles();
         }
@@ -801,6 +796,7 @@ public sealed partial class MainForm
         var category = _toyboxCategoryCombo.SelectedItem?.ToString() ?? "Home";
         if (!_switchingWorkspaceFolder &&
             _workspaceFolder != WorkspaceFolder.Suits &&
+            _workspaceFolder != WorkspaceFolder.RedBricks &&
             !category.Equals("Home", StringComparison.OrdinalIgnoreCase) &&
             !IsHomeOnlyCategory(category))
         {
@@ -1884,29 +1880,6 @@ public sealed partial class MainForm
         ShowVirtualTiles(tiles, hero: hero);
     }
 
-    private void RefreshHomeRedBrickTiles()
-    {
-        var hero = new VirtualTilePanel.HeroModel
-        {
-            Overline = "YOUR LIBRARY",
-            Title = "Red bricks",
-            Subtitle = "Custom red-brick support is the next workspace to come online.",
-            ThumbAccent = Theme.Gold,
-            Chips = new List<(string, Color)> { ("coming soon", Theme.OnDarkMuted) },
-        };
-        var tiles = new List<VirtualTilePanel.Tile>
-        {
-            new()
-            {
-                Section = "RED BRICKS",
-                Title = "Red bricks are coming next",
-                Subtitle = "This library will hold custom unlocks, colors, and mod entries.",
-                Accent = Theme.Gold,
-            },
-        };
-        ShowVirtualTiles(tiles, hero: hero);
-    }
-
     private void RefreshSuitWorkspaceTiles()
     {
         var hasSuit = _currentProject is not null;
@@ -1955,6 +1928,24 @@ public sealed partial class MainForm
                 OnClick = OpenBaseWizard,
             });
         }
+
+        var suitService = new SuitProjectService(_projectRootText.Text.Trim());
+        var savedSuits = new List<SuitProjectService.ProjectSummary>();
+        try { savedSuits = suitService.ListProjects().OrderByDescending(suit => suit.Modified).ToList(); } catch { /* no saved suits yet */ }
+        foreach (var suit in savedSuits.Take(12))
+        {
+            var captured = suit;
+            tiles.Add(new VirtualTilePanel.Tile
+            {
+                Section = "YOUR SUITS",
+                Title = TrimMiddle(captured.DisplayName, 26),
+                Subtitle = $"saved · {captured.Modified:MMM d}",
+                Accent = Theme.Base,
+                Image = LoadSuitCoverImage(captured),
+                OnClick = () => OpenRecentProject(captured.Path),
+                MenuFactory = () => BuildSuitTileMenu(captured),
+            });
+        }
         ShowVirtualTiles(tiles, hero: hero);
     }
 
@@ -1985,9 +1976,16 @@ public sealed partial class MainForm
                 string.Equals(candidate.SlotId, entry.SuitId, StringComparison.OrdinalIgnoreCase));
             return (Entry: entry, Summary: summary);
         }).ToList();
+        var activeBricks = activeMod?.RedBricks
+            .Where(brick => brick.Enabled)
+            .OrderBy(brick => brick.MenuOrder)
+            .ThenBy(brick => brick.DisplayName)
+            .ToList() ?? new List<ModRedBrickEntry>();
 
         var hasActiveMod = activeSummary is not null && activeMod is not null;
         var activeSuitCount = activeEntries.Count;
+        var activeBrickCount = activeBricks.Count;
+        var activeContentCount = activeSuitCount + activeBrickCount;
         var currentSlot = _slotIdText.Text.Trim();
         var currentSuitIsInActiveMod = hasActiveMod && activeEntries.Any(entry =>
             string.Equals(entry.SuitId, currentSlot, StringComparison.OrdinalIgnoreCase));
@@ -1996,6 +1994,7 @@ public sealed partial class MainForm
         {
             (hasActiveMod ? "active mod" : "no active mod", hasActiveMod ? Theme.Mods : Theme.Warn),
             ($"{(hasActiveMod ? activeSuitCount : savedSuits.Count)} suit{((hasActiveMod ? activeSuitCount : savedSuits.Count) == 1 ? "" : "s")}", Theme.Base),
+            ($"{(hasActiveMod ? activeBrickCount : 0)} red brick{((hasActiveMod ? activeBrickCount : 0) == 1 ? "" : "s")}", Theme.RedBricks),
             (partCount > 0 ? $"{partCount} parts" : "index not built", partCount > 0 ? Theme.Materials : Theme.OnDarkMuted),
         };
 
@@ -2004,8 +2003,8 @@ public sealed partial class MainForm
             Overline = "MOD WORKSPACE",
             Title = hasActiveMod ? activeSummary!.DisplayName : "Start your first mod",
             Subtitle = hasActiveMod
-                ? $"{activeSuitCount} suit{(activeSuitCount == 1 ? "" : "s")} grouped into one mod release."
-                : "Create or select a mod first, then add the suits that ship together.",
+                ? $"{activeSuitCount} suit{(activeSuitCount == 1 ? "" : "s")} and {activeBrickCount} Red Brick{(activeBrickCount == 1 ? "" : "s")} grouped into one mod release."
+                : "Create or select a mod first, then add the suits and Red Bricks that ship together.",
             Badge = "",
             ThumbAccent = hasActiveMod ? Theme.Mods : Theme.Gold,
             Chips = chips,
@@ -2021,25 +2020,26 @@ public sealed partial class MainForm
                 },
                 new VirtualTilePanel.HeroModel.WorkflowStep
                 {
-                    Label = "2. SUITS",
+                    Label = "2. CONTENT",
                     Detail = hasActiveMod
-                        ? (activeSuitCount > 0 ? "add or edit" : "next: add a suit")
+                        ? (activeContentCount > 0 ? "suits and Red Bricks" : "add content")
                         : "select a mod first",
                     Accent = Theme.Base,
-                    Current = hasActiveMod && activeSuitCount == 0,
+                    Current = hasActiveMod && activeContentCount == 0,
                 },
                 new VirtualTilePanel.HeroModel.WorkflowStep
                 {
                     Label = "3. BUILD",
-                    Detail = activeSuitCount > 0 ? "release when ready" : "add a suit first",
+                    Detail = activeContentCount > 0 ? "release when ready" : "add content first",
                     Accent = Theme.Gold,
-                    Current = hasActiveMod && activeSuitCount > 0,
+                    Current = hasActiveMod && activeContentCount > 0,
                 },
             },
         };
 
         const string SectionMod = "MODS";
         const string SectionSuits = "2. SUITS";
+        const string SectionRedBricks = "2. RED BRICKS";
         const string SectionBuild = "3. BUILD MOD";
         const string SectionSavedSuits = "SAVED SUITS";
         var tiles = new List<VirtualTilePanel.Tile>();
@@ -2144,13 +2144,44 @@ public sealed partial class MainForm
             });
         }
 
-        if (activeSuitCount == 0)
+        tiles.Add(new VirtualTilePanel.Tile
+        {
+            Section = SectionRedBricks,
+            Title = "＋ Add Red Brick",
+            Subtitle = "create or reuse in this mod",
+            Accent = Theme.RedBricks,
+            Dashed = true,
+            OnClick = () => OpenRedBrickWorkspaceForMod(modPath),
+        });
+        tiles.Add(new VirtualTilePanel.Tile
+        {
+            Section = SectionRedBricks,
+            Title = "Manage Red Bricks",
+            Subtitle = $"{activeBrickCount} in this mod",
+            Accent = Theme.RedBricks,
+            OnClick = () => OpenRedBrickWorkspaceForMod(modPath),
+        });
+        foreach (var brick in activeBricks.Take(10))
+        {
+            var captured = brick;
+            tiles.Add(new VirtualTilePanel.Tile
+            {
+                Section = SectionRedBricks,
+                Title = TrimMiddle(captured.DisplayName, 26),
+                Subtitle = $"{captured.PrimaryColourRow} · {captured.SecondaryColourRow} · {captured.TertiaryColourRow}",
+                Accent = Theme.RedBricks,
+                Image = LoadRedBrickIconPreview(captured),
+                OnClick = () => OpenRedBrickWorkspaceForMod(modPath),
+            });
+        }
+
+        if (activeContentCount == 0)
         {
             tiles.Add(new VirtualTilePanel.Tile
             {
                 Section = SectionBuild,
-                Title = "Add a suit first",
-                Subtitle = $"{modName} needs a suit before it can build",
+                Title = "Add content first",
+                Subtitle = $"{modName} needs a suit or Red Brick before it can build",
                 Accent = Theme.Gold,
                 Dashed = true,
                 OnClick = () => StartNewSuitInMod(modPath),

@@ -86,7 +86,7 @@ public sealed partial class MainForm
             Height = 20,
             Margin = new Padding(2, 8, 2, 2),
             ForeColor = Theme.Gold,
-            Font = new Font(Font.FontFamily, 7.5f, FontStyle.Bold),
+            Font = AppFonts.Condensed(7.5f, FontStyle.Bold),
             TextAlign = ContentAlignment.MiddleLeft,
             Padding = new Padding(6, 0, 0, 0)
         };
@@ -103,10 +103,10 @@ public sealed partial class MainForm
     {
         var row = new RoundedPanel { Width = 206, Height = 42, Margin = new Padding(2, 2, 2, 2), BackColor = Theme.CardBg, CornerRadius = Theme.RadiusSm, Cursor = Cursors.Hand };
         var dot = new StatusDot { Width = 10, Height = 10, Left = 8, Top = 16, DotColor = accent };
-        var name = new Label { Text = label, Left = 24, Top = 4, Width = 174, Height = 16, AutoSize = false, BackColor = Color.Transparent, ForeColor = Theme.OnDark, Font = new Font(Font.FontFamily, 9f, FontStyle.Bold) };
+        var name = new Label { Text = label, Left = 24, Top = 4, Width = 174, Height = 16, AutoSize = false, BackColor = Color.Transparent, ForeColor = Theme.OnDark, Font = AppFonts.Condensed(9f, FontStyle.Bold) };
         // AutoEllipsis + generous height keeps a long, unbreakable material token on a
         // single line (truncated with "…") instead of wrapping off the visible row.
-        var sub = new Label { Text = subtitle, Left = 24, Top = 21, Width = 178, Height = 16, AutoSize = false, AutoEllipsis = true, BackColor = Color.Transparent, ForeColor = Theme.OnDarkMuted, Font = new Font(Font.FontFamily, 7.5f) };
+        var sub = new Label { Text = subtitle, Left = 24, Top = 21, Width = 178, Height = 16, AutoSize = false, AutoEllipsis = true, BackColor = Color.Transparent, ForeColor = Theme.OnDarkMuted, Font = AppFonts.Condensed(7.5f, FontStyle.Bold) };
         _toyboxToolTip.SetToolTip(sub, subtitle);
 
         void Click(object? s, EventArgs e) => onClick();
@@ -1237,7 +1237,7 @@ public sealed partial class MainForm
             Dock = DockStyle.Top,
             Height = 52,
             Padding = new Padding(14, 12, 14, 0),
-            Font = new Font(Font.FontFamily, 13f, FontStyle.Bold),
+            Font = AppFonts.Condensed(13f, FontStyle.Bold),
             ForeColor = Theme.Gold,
             Text = $"✓ {manifest.DisplayName} packaged",
         };

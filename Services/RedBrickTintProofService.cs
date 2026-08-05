@@ -26,9 +26,7 @@ public sealed class RedBrickTintProofService
     private const string PayloadDonor = "/Game/Global/Collectables/MetaData/RedBrickEffects/DA_RedBrickData_Main";
     // RedBrickWorldSubsystem uses this as the shared lookup bucket for character
     // tint rows. It is not a per-brick identity: the individual entry is keyed
-    // by its RedBrickEffectTag. Custom payloads must therefore retain the native
-    // bucket while owning unique effect and progress tags of their own.
-    private const string NativeTintPayloadRoutingTag = "Collectables.RedBrickTaggedAssets.MetaData.Default";
+    // Each mod owns a separate payload route so Red Brick packs can coexist.
     private const string EffectDonor = "/Game/Global/Collectables/MetaData/RedBrickEffects/DA_RedBrickEffectDefinition_Police";
     private const string CollectableDonor = "/Game/Global/Collectables/MetaData/RedBricks/DA_Collectable_RedBrick_Police";
     private const string ProgressDonor = "/Game/GameProgress/PROG_RedBricks";
@@ -143,6 +141,32 @@ public sealed class RedBrickTintProofService
         public List<string> Log { get; } = [];
     }
 
+    /// <summary>
+    /// Inputs for the normal Batcomputer mod build. This only stages the native
+    /// Red Brick asset group; the caller owns the shared StringTable, tag file,
+    /// registry plugin, IoStore trio, and installation.
+    /// </summary>
+    public sealed class ReleaseStageRequest
+    {
+        public string ExtractedContentRoot { get; init; } = "";
+        public string UsmapPath { get; init; } = "";
+        public string StageContentRoot { get; init; } = "";
+        public string ProjectRoot { get; init; } = "";
+        public string ModId { get; init; } = "";
+        public string StringTableObjectPath { get; init; } = "";
+        public IReadOnlyList<ModRedBrickEntry> Bricks { get; init; } = Array.Empty<ModRedBrickEntry>();
+    }
+
+    public sealed class ReleaseStageResult
+    {
+        public bool Succeeded { get; set; }
+        public string Error { get; set; } = "";
+        public string PayloadPackage { get; set; } = "";
+        public List<RegistryPluginService.RegistryRow> RegistryRows { get; } = [];
+        public List<PawnTagConfigService.TagRow> TagRows { get; } = [];
+        public List<string> Log { get; } = [];
+    }
+
     private static readonly JsonSerializerOptions ReportJson = new()
     {
         WriteIndented = true,
@@ -162,6 +186,170 @@ public sealed class RedBrickTintProofService
         string TargetPackage,
         string PrimaryAssetType,
         string AssetClass);
+
+    /// <summary>
+    /// Creates the production-shaped Red Brick packages for a single mod. Each
+    /// mod gets one private metadata payload; every enabled brick gets its own
+    /// effect, collectable, and progress-definition package.
+    /// </summary>
+    public ReleaseStageResult StageRelease(ReleaseStageRequest request, Action<string>? log = null)
+    {
+        var result = new ReleaseStageResult();
+        void Note(string line)
+        {
+            result.Log.Add(line);
+            log?.Invoke(line);
+        }
+
+        try
+        {
+            var modId = (request.ModId ?? "").Trim();
+            if (!IsSafeId(modId)) throw new InvalidOperationException("Red Brick mod ID must contain only letters, digits, and underscores.");
+            if (string.IsNullOrWhiteSpace(request.StringTableObjectPath)) throw new InvalidOperationException("The mod StringTable object path is missing.");
+
+            var bricks = request.Bricks.Where(brick => brick.Enabled).ToList();
+            if (bricks.Count == 0)
+            {
+                result.Succeeded = true;
+                return result;
+            }
+            var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var brick in bricks)
+            {
+                if (!IsSafeId(brick.BrickId)) throw new InvalidOperationException($"Red Brick '{brick.DisplayName}' has an invalid Brick ID.");
+                if (!ids.Add(brick.BrickId)) throw new InvalidOperationException($"Red Brick ID '{brick.BrickId}' appears more than once in this mod.");
+                if (!RedBrickPalette.Contains(brick.PrimaryColourRow) || !RedBrickPalette.Contains(brick.SecondaryColourRow) || !RedBrickPalette.Contains(brick.TertiaryColourRow))
+                    throw new InvalidOperationException($"Red Brick '{brick.DisplayName}' uses a colour row that is not available in the current LEGO palette.");
+                var usesSourcePng = !string.IsNullOrWhiteSpace(brick.IconSourcePng);
+                var usesCookedTexture = !string.IsNullOrWhiteSpace(brick.IconTexturePackagePath);
+                if (!usesSourcePng && !usesCookedTexture)
+                    throw new InvalidOperationException($"Red Brick '{brick.DisplayName}' needs either a 512x512 PNG icon or a cooked Red Brick texture from this mod.");
+                if (usesSourcePng && (!File.Exists(brick.IconSourcePng) ||
+                    !Path.GetExtension(brick.IconSourcePng).Equals(".png", StringComparison.OrdinalIgnoreCase)))
+                    throw new InvalidOperationException($"Red Brick '{brick.DisplayName}' needs a readable 512x512 PNG icon.");
+                if (usesSourcePng)
+                {
+                    using var icon = System.Drawing.Image.FromFile(brick.IconSourcePng);
+                    if (icon.Width != 512 || icon.Height != 512)
+                    {
+                        throw new InvalidOperationException($"Red Brick '{brick.DisplayName}' icon must be exactly 512x512 pixels.");
+                    }
+                }
+            }
+
+            var contentRoot = AppSettings.NormalizeContentRoot(request.ExtractedContentRoot);
+            if (!Directory.Exists(contentRoot)) throw new InvalidOperationException($"Extracted Content root was not found: {contentRoot}");
+            if (string.IsNullOrWhiteSpace(request.UsmapPath) || !File.Exists(request.UsmapPath)) throw new InvalidOperationException("A valid .usmap path is required for Red Brick authoring.");
+            if (string.IsNullOrWhiteSpace(request.StageContentRoot)) throw new InvalidOperationException("The release stage Content folder is missing.");
+
+            foreach (var donor in new[] { PayloadDonor, EffectDonor, CollectableDonor, ProgressDonor })
+            {
+                var donorBase = PackageToBase(contentRoot, donor);
+                if (!File.Exists(donorBase + ".uasset") || !File.Exists(donorBase + ".uexp"))
+                    throw new InvalidOperationException($"Required native Red Brick donor is missing: {donorBase}.uasset/.uexp");
+            }
+
+            Directory.CreateDirectory(request.StageContentRoot);
+            var mappings = MappingsCache.Load(request.UsmapPath);
+            var assetTag = $"Collectables.RedBrickTaggedAssets.MetaData.Mods.{modId}";
+            var payloadPackage = $"/Game/Mods/{modId}/RedBricks/DA_RedBrickData_{modId}";
+
+            var payload = CloneAsset(contentRoot, request.StageContentRoot, mappings,
+                new AssetSpec("Red Brick tint payload", PayloadDonor, payloadPackage, PayloadType, PayloadClass), []);
+            ReplaceTintPayloadRows(payload.Asset, bricks, modId);
+            WriteAndValidate(payload, mappings, "AssetTag", assetTag, []);
+            result.RegistryRows.Add(new RegistryPluginService.RegistryRow(payloadPackage, PayloadType, PayloadClass));
+            result.TagRows.Add(new PawnTagConfigService.TagRow(assetTag, $"{modId}: Red Brick metadata"));
+            Note($"  Red Brick payload: {payloadPackage}");
+
+            var iconTemplate = TextureCookTemplateService.TemplateJsonPath(request.ProjectRoot, "TextureStandaloneTemplate_BatclawLogo_DXT5");
+            foreach (var brick in bricks)
+            {
+                var id = brick.BrickId;
+                var effectTag = $"Collectables.RedBricks.EffectDefinitions.Mods.{modId}.{id}";
+                var progressTag = $"GameProgress.Definitions.RedBricks.Mods.{modId}.{id}";
+                var effectPackage = $"/Game/Mods/{modId}/RedBricks/DA_RedBrickEffectDefinition_{id}";
+                var collectablePackage = $"/Game/Mods/{modId}/RedBricks/DA_Collectable_RedBrick_{id}";
+                var progressPackage = $"/Game/Mods/{modId}/Progress/PROG_RedBricks_{id}";
+                var nameKey = $"RedBrick.{id}.Name";
+                var typeKey = $"RedBrick.{id}.Type";
+
+                var effect = CloneAsset(contentRoot, request.StageContentRoot, mappings,
+                    new AssetSpec($"Red Brick effect {id}", EffectDonor, effectPackage, EffectType, EffectClass), []);
+                Require(NativeAssetTextPatch.SetGameplayTag(effect.Asset, "AssetGameplayTag", effectTag), "The Red Brick effect donor did not expose AssetGameplayTag.");
+                Require(NativeAssetTextPatch.SetGameplayTag(effect.Asset, "RedBrickTag", progressTag), "The Red Brick effect donor did not expose RedBrickTag.");
+                effect.Asset.Write(effect.TargetBase + ".uasset");
+                ValidatePackage(effect, mappings);
+
+                var progress = CloneAsset(contentRoot, request.StageContentRoot, mappings,
+                    new AssetSpec($"Red Brick progress {id}", ProgressDonor, progressPackage, ProgressType, ProgressClass), []);
+                var progressTags = PatchProgressDefinitionsViaNameMap(progress.Asset, $"{modId}.{id}", progressTag);
+                progress.Asset.Write(progress.TargetBase + ".uasset");
+                ValidateProgressPackage(progress, mappings, progressTag, progressTags, false);
+
+                var collectable = CloneAsset(contentRoot, request.StageContentRoot, mappings,
+                    new AssetSpec($"Red Brick collectable {id}", CollectableDonor, collectablePackage, CollectableType, CollectableClass), []);
+                Require(NativeAssetTextPatch.SetGameplayTag(collectable.Asset, "IdentifyingTag", progressTag), "The Red Brick collectable donor did not expose IdentifyingTag.");
+                Require(NativeAssetTextPatch.SetStringTableText(collectable.Asset, "DisplayName", request.StringTableObjectPath, nameKey), "The Red Brick collectable donor did not expose DisplayName.");
+                Require(NativeAssetTextPatch.SetStringTableText(collectable.Asset, "DisplayType", request.StringTableObjectPath, typeKey), "The Red Brick collectable donor did not expose DisplayType.");
+
+                if (!string.IsNullOrWhiteSpace(brick.IconSourcePng))
+                {
+                    if (!TextureCookTemplateService.IsTemplateReady(iconTemplate))
+                        throw new InvalidOperationException("The verified UI texture template is unavailable. Refresh game assets before building a Red Brick with a custom icon.");
+                    var iconPackage = $"/Game/Mods/{modId}/Textures/T_RedBrick_{id}_Icon";
+                    var cooked = new TextureCookService(request.ProjectRoot).Cook(new TextureCookService.Request
+                    {
+                        SourceImagePath = brick.IconSourcePng,
+                        TemplateJsonPath = iconTemplate,
+                        OutputContentRoot = request.StageContentRoot,
+                        OutputPackagePath = iconPackage,
+                        NearestNeighborMips = false,
+                    });
+                    if (!string.Equals(cooked.Status, "ok", StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException($"Could not cook Red Brick icon '{brick.IconSourcePng}': {cooked.Error}");
+                    Require(NativeAssetTextPatch.SetSoftObject(collectable.Asset, "Icon", iconPackage), "The Red Brick collectable donor did not expose Icon.");
+                    brick.IconPackagePath = iconPackage;
+                    Note($"  Red Brick icon: {iconPackage} ({cooked.Width}x{cooked.Height} {cooked.PixelFormat})");
+                }
+                else
+                {
+                    var sourcePackage = UnrealPathUtil.NormalizePackagePath(brick.IconTexturePackagePath);
+                    var sourceBase = PackageToBase(request.StageContentRoot, sourcePackage);
+                    if (!File.Exists(sourceBase + ".uasset"))
+                    {
+                        throw new InvalidOperationException(
+                            $"Red Brick '{brick.DisplayName}' references '{sourcePackage}', but that cooked Red Brick texture is not owned by this mod.");
+                    }
+                    Require(NativeAssetTextPatch.SetSoftObject(collectable.Asset, "Icon", sourcePackage), "The Red Brick collectable donor did not expose Icon.");
+                    brick.IconPackagePath = sourcePackage;
+                    Note($"  Red Brick icon: reusing staged Red Brick texture {sourcePackage}");
+                }
+                collectable.Asset.Write(collectable.TargetBase + ".uasset");
+                ValidatePackage(collectable, mappings);
+
+                result.RegistryRows.AddRange(
+                [
+                    new RegistryPluginService.RegistryRow(effectPackage, EffectType, EffectClass),
+                    new RegistryPluginService.RegistryRow(collectablePackage, CollectableType, CollectableClass),
+                    new RegistryPluginService.RegistryRow(progressPackage, ProgressType, ProgressClass),
+                ]);
+                result.TagRows.Add(new PawnTagConfigService.TagRow(effectTag, $"{modId}: {brick.DisplayName} Red Brick effect"));
+                result.TagRows.AddRange(progressTags.Select(tag => new PawnTagConfigService.TagRow(tag, $"{modId}: {brick.DisplayName} Red Brick progress")));
+                Note($"  Red Brick '{brick.DisplayName}': effect + menu + progress staged.");
+            }
+
+            result.Succeeded = true;
+            result.PayloadPackage = payloadPackage;
+            return result;
+        }
+        catch (Exception ex)
+        {
+            Note("  Red Brick stage failed: " + ex.Message);
+            result.Error = ex.Message;
+            return result;
+        }
+    }
 
     public async Task<Result> CreateAsync(Request request, Action<string>? log = null)
     {
@@ -233,7 +421,7 @@ public sealed class RedBrickTintProofService
                 }
             }
 
-            result.AssetTag = NativeTintPayloadRoutingTag;
+            result.AssetTag = $"Collectables.RedBrickTaggedAssets.MetaData.Mods.{request.ModId}";
             result.EffectTag = $"Collectables.RedBricks.EffectDefinitions.Mods.{request.ModId}";
             result.ProgressTag = usesBorrowedNinjaProgress
                 ? NinjaProgressTag
@@ -267,7 +455,7 @@ public sealed class RedBrickTintProofService
                 new AssetSpec("tint payload", PayloadDonor, result.PayloadPackage, PayloadType, PayloadClass), result.Repointed);
             PatchTintPayload(payload.Asset, result.EffectTag, request.PrimaryColourRow, request.SecondaryColourRow, request.TertiaryColourRow);
             WriteAndValidate(payload, mappings, "AssetTag", result.AssetTag, result.Repointed);
-            Note($"Created cosmetic tint payload in native routing bucket '{NativeTintPayloadRoutingTag}': {result.PayloadPackage}");
+            Note($"Created mod-owned proof payload in '{result.AssetTag}': {result.PayloadPackage}");
 
             var effect = CloneAsset(contentRoot, result.OutputContentRoot, mappings,
                 new AssetSpec("effect identity", EffectDonor, result.EffectPackage, EffectType, EffectClass), result.Repointed);
@@ -341,11 +529,11 @@ public sealed class RedBrickTintProofService
             ValidatePackage(collectable, mappings);
             Note($"Created native-style menu metadata: {result.CollectablePackage}");
 
-            var pluginRequests = new List<(string Suffix, string Description, AssetSpec Spec)>
+            var registryRows = new List<RegistryPluginService.RegistryRow>
             {
-                ("TintPayload", "Red Brick tint payload", payload.Spec),
-                ("TintEffect", "Red Brick tint identity", effect.Spec),
-                ("TintCollectable", "Red Brick menu metadata", collectable.Spec),
+                new(payload.Spec.TargetPackage, payload.Spec.PrimaryAssetType, payload.Spec.AssetClass),
+                new(effect.Spec.TargetPackage, effect.Spec.PrimaryAssetType, effect.Spec.AssetClass),
+                new(collectable.Spec.TargetPackage, collectable.Spec.PrimaryAssetType, collectable.Spec.AssetClass),
             };
             // A custom collectable is filtered through its Game Progress
             // definition. The last visible proof had this row; omitting it
@@ -357,7 +545,7 @@ public sealed class RedBrickTintProofService
             // package is resolved directly by the mounted IoStore trio.
             if (progress is not null && !request.UseEarlyLiveEntryOverride)
             {
-                pluginRequests.Add(("TintProgress", "Red Brick progress definition", progress.Spec));
+                registryRows.Add(new(progress.Spec.TargetPackage, progress.Spec.PrimaryAssetType, progress.Spec.AssetClass));
             }
             // An override collection is only useful when the native Game
             // Progress system can resolve its soft object path.  Publish it as
@@ -366,44 +554,32 @@ public sealed class RedBrickTintProofService
             // PatchProgressUnlockOverride narrows it to this mod's unique tag.
             if (progressUnlockOverride is not null)
             {
-                pluginRequests.Add(("TintProgressUnlock", "Red Brick unlock override", progressUnlockOverride.Spec));
+                registryRows.Add(new(progressUnlockOverride.Spec.TargetPackage, progressUnlockOverride.Spec.PrimaryAssetType, progressUnlockOverride.Spec.AssetClass));
             }
-            foreach (var item in pluginRequests)
+            var registry = await new RegistryPluginService().BuildAsync(
+                result.OutputRoot,
+                request.ModId,
+                string.IsNullOrWhiteSpace(request.DisplayName) ? "Red Brick proof" : request.DisplayName.Trim(),
+                registryRows,
+                Note,
+                containsRedBricks: true);
+            if (!registry.Succeeded || registry.Layout is null)
             {
-                var registry = await new RegistryPluginService().BuildAsync(
-                    result.OutputRoot,
-                    request.ModId + item.Item1,
-                    item.Item2,
-                    [new RegistryPluginService.RegistryRow(item.Item3.TargetPackage, item.Item3.PrimaryAssetType, item.Item3.AssetClass)],
-                    Note);
-                if (!registry.Succeeded || registry.Layout is null)
-                {
-                    return Finish(result, "registry-failed", registry.Error);
-                }
-                var installDirectory = Path.Combine(result.InstallRoot, "Binaries", "Win64", "ue4ss", "LOTDKExpanded", "RegistryPlugins", registry.Layout.PluginName);
-                result.RegistryPlugins.Add(new RegistryPluginResult
-                {
-                    Purpose = item.Item2,
-                    PluginName = registry.Layout.PluginName,
-                    PluginDirectory = registry.Layout.PluginDirectory,
-                    InstallDirectory = installDirectory,
-                    RegistryPath = registry.Layout.RegistryPath,
-                });
+                return Finish(result, "registry-failed", registry.Error);
             }
+            var installDirectory = Path.Combine(result.InstallRoot, "Binaries", "Win64", "ue4ss", "LOTDKExpanded", "RegistryPlugins", registry.Layout.PluginName);
+            result.RegistryPlugins.Add(new RegistryPluginResult
+            {
+                Purpose = "Red Brick assets",
+                PluginName = registry.Layout.PluginName,
+                PluginDirectory = registry.Layout.PluginDirectory,
+                InstallDirectory = installDirectory,
+                RegistryPath = registry.Layout.RegistryPath,
+            });
 
-            // One enabled registry plugin owns the config contract for the custom
-            // payload, effect, and menu metadata. The early-init proof deliberately
-            // leaves GameProgress discovery alone: it overrides the already-native
-            // base package before normal initialization instead.
+            // One enabled registry plugin owns both the mixed asset registry and
+            // the tag/scan configuration for this mod's payload.
             var configPlugin = result.RegistryPlugins[0];
-            result.AssetManagerConfigPath = Path.Combine(configPlugin.PluginDirectory, "Config", "Game.ini");
-            Directory.CreateDirectory(Path.GetDirectoryName(result.AssetManagerConfigPath)!);
-            File.WriteAllText(
-                result.AssetManagerConfigPath,
-                BuildAssetManagerConfig(
-                    !request.UseEarlyLiveEntryOverride && !usesBorrowedNinjaProgress,
-                    includeProgressOverrideMods: usesUniqueProgressUnlockOverride),
-                new UTF8Encoding(false));
 
             // TtGameProgressSettings owns the game's native startup shortcut
             // mechanism.  Keep the three shipped shortcuts intact and append
@@ -422,14 +598,21 @@ public sealed class RedBrickTintProofService
             }
             result.TagsConfigPath = Path.Combine(configPlugin.PluginDirectory, "Config", "Tags", request.ModId + "Tags.ini");
             Directory.CreateDirectory(Path.GetDirectoryName(result.TagsConfigPath)!);
+            var tagRows = new List<PawnTagConfigService.TagRow>
+            {
+                new(result.AssetTag, "Batcomputer Red Brick payload route"),
+                new(result.EffectTag, "Batcomputer Red Brick effect identity"),
+            };
+            if (!usesBorrowedNinjaProgress)
+            {
+                tagRows.AddRange(result.ProgressDefinitionTags.Select(tag =>
+                    new PawnTagConfigService.TagRow(tag, "Batcomputer Red Brick progress definition")));
+            }
             File.WriteAllText(
                 result.TagsConfigPath,
-                BuildTagConfig(
-                    result.EffectTag,
-                    usesBorrowedNinjaProgress
-                        ? Array.Empty<string>()
-                        : result.ProgressDefinitionTags),
+                PawnTagConfigService.Render(tagRows),
                 new UTF8Encoding(false));
+            result.AssetManagerConfigPath = result.TagsConfigPath;
 
             // Unlike ordinary gameplay tags, a new Red Brick progress tag must
             // be visible to the game's startup-time TtGameProgressLiveData
@@ -557,15 +740,49 @@ public sealed class RedBrickTintProofService
         var metadata = payloadExport.Data.OfType<ArrayPropertyData>().First(property => property.Name.ToString() == "MetaData");
         var donorEntry = metadata.Value.OfType<StructPropertyData>().FirstOrDefault()
             ?? throw new InvalidOperationException("The Red Brick payload donor has an empty MetaData array.");
+        var entry = CreateTintPayloadEntry(asset, donorEntry, effectTag, primary, secondary, tertiary);
+        // This diagnostic clone keeps the donor's native rows and appends the
+        // requested mod-owned effect row for the isolated proof package.
+        metadata.Value = [.. metadata.Value, entry];
+    }
+
+    private static void ReplaceTintPayloadRows(UAsset asset, IReadOnlyList<ModRedBrickEntry> bricks, string modId)
+    {
+        var payloadExport = asset.Exports.OfType<NormalExport>().FirstOrDefault(export =>
+            export.Data.OfType<ArrayPropertyData>().Any(property => property.Name.ToString() == "MetaData"))
+            ?? throw new InvalidOperationException("The Red Brick payload donor has no MetaData array.");
+        var metadata = payloadExport.Data.OfType<ArrayPropertyData>().First(property => property.Name.ToString() == "MetaData");
+        var donorEntry = metadata.Value.OfType<StructPropertyData>().FirstOrDefault()
+            ?? throw new InvalidOperationException("The Red Brick payload donor has an empty MetaData array.");
+
+        // Mod payloads deliberately contain no copied native rows. The routing tag
+        // is private to the mod, so this is safe alongside any number of other packs.
+        metadata.Value = bricks
+            .Select(brick => (PropertyData)CreateTintPayloadEntry(
+                asset,
+                donorEntry,
+                $"Collectables.RedBricks.EffectDefinitions.Mods.{modId}.{brick.BrickId}",
+                brick.PrimaryColourRow,
+                brick.SecondaryColourRow,
+                brick.TertiaryColourRow))
+            .ToArray();
+    }
+
+    private static StructPropertyData CreateTintPayloadEntry(
+        UAsset asset,
+        StructPropertyData donorEntry,
+        string effectTag,
+        string primary,
+        string secondary,
+        string tertiary)
+    {
         var entry = (StructPropertyData)ClonePropertyTree(donorEntry);
         Require(SetNestedGameplayTag(asset, entry, "RedBrickEffectTag", effectTag),
             "The Red Brick payload entry did not expose RedBrickEffectTag.");
         Require(SetTintRows(asset, entry, primary, secondary, tertiary),
             "The Red Brick payload entry did not expose all CharacterTintData colour handles.");
         ClearSoftReferences(asset, entry);
-        // AssetTag=...Default is a shared routing bucket. Keep every native row
-        // and append this mod-owned effect row so native previews keep working.
-        metadata.Value = [.. metadata.Value, entry];
+        return entry;
     }
 
     private static PropertyData ClonePropertyTree(PropertyData source)
@@ -826,12 +1043,6 @@ public sealed class RedBrickTintProofService
         }
     }
 
-    private static string BuildTagConfig(string effectTag, IEnumerable<string> progressTags) =>
-        "[/Script/GameplayTags.GameplayTagsList]\r\n" +
-        $"GameplayTagList=(Tag=\"{effectTag}\",DevComment=\"Batcomputer cosmetic-only Red Brick identity\")\r\n" +
-        string.Concat(progressTags.Select(tag =>
-            $"GameplayTagList=(Tag=\"{tag}\",DevComment=\"Batcomputer Red Brick tint-proof progress definition\")\r\n"));
-
     private static string BuildLooseGameProgressTagConfig(string progressTag) =>
         "[/Script/GameplayTags.GameplayTagsList]\r\n" +
         $"GameplayTagList=(Tag=\"{progressTag}\",DevComment=\"LOTDK Expanded custom Red Brick progress entry\")\r\n";
@@ -845,38 +1056,6 @@ public sealed class RedBrickTintProofService
         "(\"StoryComplete\", \"/Game/GameProgress/Overrides/Debug/PROGO_CompleteStory.PROGO_CompleteStory\")," +
         "(\"CollectCharsAndFriends\", \"/Game/GameProgress/Overrides/Debug/PROGO_CollectCharactersAndUpgrades.PROGO_CollectCharactersAndUpgrades\")," +
         $"(\"{command}\", \"{overridePackage}.{Path.GetFileName(overridePackage)}\"))\r\n";
-
-    private static string BuildAssetManagerConfig(bool includeProgressMods, bool includeProgressOverrideMods) =>
-        "[/Script/Engine.AssetManagerSettings]\r\n" +
-        ScanRule("TtGameProgressDefinitionSet", "/Script/TtGameProgress.TtGameProgressDefinitionSet", "((Path=\"/Game/GameProgress\"),(Path=\"/Game/Developers\"),(Path=\"/TtMissions\"),(Path=\"/DinnerRandomCrimes/FunctionalTests\"),(Path=\"/TtObjectiveTasks\"),(Path=\"/Game/Levels/MechTest\"),(Path=\"/TtGameProgress\"),(Path=\"/Game/FunctionalTests\"),(Path=\"/TtMissionMarkers/FunctionalTests\"),(Path=\"/TtGameFlowIntegrations/FunctionalTests/MissionScenario\"),(Path=\"/DinnerObjectiveTasks\"),(Path=\"/Game/AdditionalContent\"),(Path=\"/DinnerFeatureTemplates/Templates/DLC/Content/GameProgress\"))", "-1", "-1", "Unknown", false, false) +
-        (includeProgressMods
-            ? ScanRule("TtGameProgressDefinitionSet", "/Script/TtGameProgress.TtGameProgressDefinitionSet", "((Path=\"/Game/GameProgress\"),(Path=\"/Game/Developers\"),(Path=\"/TtMissions\"),(Path=\"/DinnerRandomCrimes/FunctionalTests\"),(Path=\"/TtObjectiveTasks\"),(Path=\"/Game/Levels/MechTest\"),(Path=\"/TtGameProgress\"),(Path=\"/Game/FunctionalTests\"),(Path=\"/TtMissionMarkers/FunctionalTests\"),(Path=\"/TtGameFlowIntegrations/FunctionalTests/MissionScenario\"),(Path=\"/DinnerObjectiveTasks\"),(Path=\"/Game/AdditionalContent\"),(Path=\"/DinnerFeatureTemplates/Templates/DLC/Content/GameProgress\"),(Path=\"/Game/Mods\"))", "-1", "-1", "Unknown", true, true)
-            : "") +
-        (includeProgressOverrideMods
-            ? ScanRule("TtGameProgressOverrideCollection", "/Script/TtGameProgress.TtGameProgressOverrideCollection", "((Path=\"/Game/GameProgress/Overrides\"))", "100", "0", "Unknown", true, false) +
-              ScanRule("TtGameProgressOverrideCollection", "/Script/TtGameProgress.TtGameProgressOverrideCollection", "((Path=\"/Game/GameProgress/Overrides\"),(Path=\"/Game/Mods\"))", "100", "0", "Unknown", true, true)
-            : "") +
-        ScanRule("TtCollectablesMetaData", "/Script/TtCollectables.TtCollectablesMetaData", "((Path=\"/Game/Global/Collectables/MetaData\"),(Path=\"/Game/AdditionalContent/VillainMode/Collectables/Metadata\"))", "-1", "-1", "Unknown", false, false) +
-        ScanRule("TtCollectablesMetaData", "/Script/TtCollectables.TtCollectablesMetaData", "((Path=\"/Game/Global/Collectables/MetaData\"),(Path=\"/Game/AdditionalContent/VillainMode/Collectables/Metadata\"),(Path=\"/Game/Mods\"))", "-1", "-1", "Unknown", true, true) +
-        RedBrickScanRule("RedBrickEffectDefinition", "/Script/Dinner.RedBrickEffectDefinition", false) +
-        RedBrickScanRule("RedBrickEffectDefinition", "/Script/Dinner.RedBrickEffectDefinition", true) +
-        RedBrickScanRule("RedBrickCharacterMetaDataAsset", "/Script/Dinner.RedBrickCharacterMetaDataAsset", false) +
-        RedBrickScanRule("RedBrickCharacterMetaDataAsset", "/Script/Dinner.RedBrickCharacterMetaDataAsset", true) +
-        RedBrickScanRule("RedBrickVehicleMetaDataAsset", "/Script/Dinner.RedBrickVehicleMetaDataAsset", false) +
-        RedBrickScanRule("RedBrickVehicleMetaDataAsset", "/Script/Dinner.RedBrickVehicleMetaDataAsset", true) +
-        RedBrickScanRule("RedBrickMetaDataAsset", "/Script/Dinner.RedBrickMetaDataAsset", false) +
-        RedBrickScanRule("RedBrickMetaDataAsset", "/Script/Dinner.RedBrickMetaDataAsset", true);
-
-    private static string RedBrickScanRule(string type, string assetClass, bool includeMods) =>
-        ScanRule(type, assetClass,
-            includeMods
-                ? "((Path=\"/Game/Global/Collectables/MetaData/RedBrickEffects\"),(Path=\"/Game/Mods\"))"
-                : "((Path=\"/Game/Global/Collectables/MetaData/RedBrickEffects\"))",
-            "100", "0", "AlwaysCook", true, includeMods);
-
-    private static string ScanRule(string type, string assetClass, string directories, string priority, string chunkId, string cookRule, bool recursive, bool plus) =>
-        (plus ? "+" : "-") +
-        $"PrimaryAssetTypesToScan=(PrimaryAssetType=\"{type}\",AssetBaseClass=\"{assetClass}\",bHasBlueprintClasses=False,bIsEditorOnly=False,Directories={directories},SpecificAssets=,Rules=(Priority={priority},ChunkId={chunkId},bApplyRecursively={(recursive ? "True" : "False")},CookRule={cookRule}))\r\n";
 
     private static async Task<int> PackAsync(string stageRoot, string outputUtoc, Action<string> log)
     {

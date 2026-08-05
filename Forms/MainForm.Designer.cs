@@ -88,7 +88,7 @@ partial class MainForm
         // _designerTitleLabel
         _designerTitleLabel.AutoSize = true;
         _designerTitleLabel.Dock = DockStyle.Fill;
-        _designerTitleLabel.Font = new Font("Segoe UI", 16F, FontStyle.Bold);
+        _designerTitleLabel.Font = AppFonts.Condensed(16F, FontStyle.Bold);
         _designerTitleLabel.ForeColor = Color.FromArgb(240, 194, 48);
         _designerTitleLabel.Location = new Point(21, 18);
         _designerTitleLabel.Name = "_designerTitleLabel";
@@ -111,7 +111,7 @@ partial class MainForm
         // _designerWorkspaceLabel
         _designerWorkspaceLabel.BorderStyle = BorderStyle.FixedSingle;
         _designerWorkspaceLabel.Dock = DockStyle.Fill;
-        _designerWorkspaceLabel.Font = new Font("Segoe UI", 10F, FontStyle.Italic);
+        _designerWorkspaceLabel.Font = AppFonts.Condensed(10F, FontStyle.Bold);
         _designerWorkspaceLabel.ForeColor = Color.FromArgb(236, 238, 242);
         _designerWorkspaceLabel.Location = new Point(21, 84);
         _designerWorkspaceLabel.Name = "_designerWorkspaceLabel";

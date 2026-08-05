@@ -35,7 +35,7 @@ public sealed class ProgressDialog : Form
         _stepLabel.Height = 30;
         _stepLabel.Padding = new Padding(16, 14, 16, 0);
         _stepLabel.ForeColor = Theme.Gold;
-        _stepLabel.Font = new Font(Font.FontFamily, 10f, FontStyle.Bold);
+        _stepLabel.Font = AppFonts.Condensed(10f, FontStyle.Bold);
         _stepLabel.Text = title;
 
         _detailLabel.Dock = DockStyle.Top;

@@ -183,7 +183,8 @@ public sealed class RedBrickPayloadProbeService
                 request.ModId,
                 "Red Brick payload discovery proof",
                 [new RegistryPluginService.RegistryRow(targetPackage, PrimaryAssetType, AssetClass)],
-                Note);
+                Note,
+                containsRedBricks: true);
             if (!registry.Succeeded || registry.Layout is null)
             {
                 return Finish(result, "registry-failed", registry.Error);
@@ -192,13 +193,14 @@ public sealed class RedBrickPayloadProbeService
             result.RegistryPluginSource = registry.Layout.PluginDirectory;
             result.RegistryPluginInstallPath = Path.Combine(
                 result.InstallRoot, "Binaries", "Win64", "ue4ss", "LOTDKExpanded", "RegistryPlugins", registry.Layout.PluginName);
-            result.AssetManagerConfigPath = Path.Combine(registry.Layout.PluginDirectory, "Config", "Game.ini");
-            Directory.CreateDirectory(Path.GetDirectoryName(result.AssetManagerConfigPath)!);
-            File.WriteAllText(result.AssetManagerConfigPath, BuildAssetManagerConfig(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
             result.TagConfigPath = Path.Combine(registry.Layout.PluginDirectory, "Config", "Tags", request.ModId + "Tags.ini");
             Directory.CreateDirectory(Path.GetDirectoryName(result.TagConfigPath)!);
-            File.WriteAllText(result.TagConfigPath, BuildTagConfig(assetTag), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-            Note($"Created independent {PrimaryAssetType} registry row, Asset Manager /Game/Mods scan config, and AssetTag config.");
+            File.WriteAllText(
+                result.TagConfigPath,
+                PawnTagConfigService.Render([new PawnTagConfigService.TagRow(assetTag, "Batcomputer independent Red Brick payload discovery proof")]),
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            result.AssetManagerConfigPath = result.TagConfigPath;
+            Note($"Created one mod-owned Red Brick registry plugin with its /Game/Mods scan and AssetTag config.");
 
             result.RetocExitCode = await PackAsync(result.StageRoot, result.TrioBasePath + ".utoc", Note);
             if (result.RetocExitCode != 0)
@@ -255,15 +257,6 @@ public sealed class RedBrickPayloadProbeService
             // The return status is more useful than masking the original error with a report-write error.
         }
     }
-
-    private static string BuildTagConfig(string assetTag) =>
-        "[/Script/GameplayTags.GameplayTagsList]\r\n" +
-        $"GameplayTagList=(Tag=\"{assetTag}\",DevComment=\"Batcomputer independent Red Brick payload discovery proof\")\r\n";
-
-    private static string BuildAssetManagerConfig() =>
-        "[/Script/Engine.AssetManagerSettings]\r\n" +
-        "-PrimaryAssetTypesToScan=(PrimaryAssetType=\"RedBrickMetaDataAsset\",AssetBaseClass=\"/Script/Dinner.RedBrickMetaDataAsset\",bHasBlueprintClasses=False,bIsEditorOnly=False,Directories=((Path=\"/Game/Global/Collectables/MetaData/RedBrickEffects\")),SpecificAssets=,Rules=(Priority=100,ChunkId=0,bApplyRecursively=True,CookRule=AlwaysCook))\r\n" +
-        "+PrimaryAssetTypesToScan=(PrimaryAssetType=\"RedBrickMetaDataAsset\",AssetBaseClass=\"/Script/Dinner.RedBrickMetaDataAsset\",bHasBlueprintClasses=False,bIsEditorOnly=False,Directories=((Path=\"/Game/Global/Collectables/MetaData/RedBrickEffects\"),(Path=\"/Game/Mods\")),SpecificAssets=,Rules=(Priority=100,ChunkId=0,bApplyRecursively=True,CookRule=AlwaysCook))\r\n";
 
     private static async Task<int> PackAsync(string stageRoot, string outputUtoc, Action<string> log)
     {

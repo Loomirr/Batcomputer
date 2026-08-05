@@ -50,7 +50,7 @@ public sealed class ModDetailsDialog : Form
         {
             Left = 14, Top = 8, Width = w - 24, Height = 24,
             Text = string.IsNullOrWhiteSpace(mod.DisplayName) ? mod.ModId : mod.DisplayName,
-            Font = new Font("Segoe UI", 13f, FontStyle.Bold),
+            Font = AppFonts.Condensed(13f, FontStyle.Bold),
             ForeColor = Theme.OnDark, BackColor = Color.Transparent, AutoEllipsis = true,
         });
         card.Controls.Add(new Label

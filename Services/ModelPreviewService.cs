@@ -29,6 +29,28 @@ public static class ModelPreviewService
 {
     /// <summary>Mount key for LotDK's unencrypted paks.</summary>
     private const string ZeroAes = "0x0000000000000000000000000000000000000000000000000000000000000000";
+    private static readonly AsyncLocal<Action<string>?> PreviewDiagnosticSink = new();
+
+    private sealed class PreviewDiagnosticScope(Action<string>? sink) : IDisposable
+    {
+        private readonly Action<string>? _previous = PreviewDiagnosticSink.Value;
+
+        public void Dispose()
+        {
+            PreviewDiagnosticSink.Value = _previous;
+        }
+
+        public void Start()
+        {
+            PreviewDiagnosticSink.Value = sink;
+        }
+    }
+
+    private static void PreviewTrace(string message)
+    {
+        Console.WriteLine(message);
+        PreviewDiagnosticSink.Value?.Invoke(message);
+    }
 
     private const string GameContentFilePrefix = "LEGOBatmanLotDK/Content/";
 
@@ -142,7 +164,16 @@ public static class ModelPreviewService
         public string? ViewerLayoutProjectRoot { get; init; }
         public string? StagedPlayablePath { get; init; }
         public bool AllowPartMover { get; init; } = true;
+        public IReadOnlyCollection<PreviewRedBrickTint> RedBrickTints { get; init; } = Array.Empty<PreviewRedBrickTint>();
     }
+
+    /// <summary>One mod-owned Red Brick palette available to the local preview.</summary>
+    public sealed record PreviewRedBrickTint(
+        string DisplayName,
+        string PrimaryColourRow,
+        string SecondaryColourRow,
+        string TertiaryColourRow,
+        bool IsBaseGame);
 
     /// <summary>A component added by a saved part graft, without needing to mount the staged package.</summary>
     public sealed record PreviewAdditionalPart(
@@ -790,8 +821,12 @@ public static class ModelPreviewService
         string paksDir,
         string usmapPath,
         NativeSuitProject project,
-        string projectRoot)
+        string projectRoot,
+        IReadOnlyCollection<PreviewRedBrickTint>? redBrickTints = null,
+        Action<string>? diagnostics = null)
     {
+        using var diagnosticScope = new PreviewDiagnosticScope(diagnostics);
+        diagnosticScope.Start();
         var previewContentRoots = PreviewSuitContentRoots(project, projectRoot);
         var basePath = MountedObjectPath(project.PlayableTemplate?.Uasset);
         var stagedBasePath = MountedObjectPath(project.TargetPackages.Playable);
@@ -945,6 +980,7 @@ public static class ModelPreviewService
             ViewerLayoutProjectRoot = projectRoot,
             StagedPlayablePath = HasLoosePackage(previewContentRoots, stagedBasePath) ? stagedBasePath : null,
             AllowPartMover = true,
+            RedBrickTints = redBrickTints ?? Array.Empty<PreviewRedBrickTint>(),
         }, looseContentRoots: previewContentRoots);
     }
 
@@ -1095,7 +1131,10 @@ public static class ModelPreviewService
         var textures = info.TextureParams
             .Where(texture => texture.ObjectPath.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
             .GroupBy(texture => texture.Name, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.Last().ObjectPath, StringComparer.OrdinalIgnoreCase);
+            .ToDictionary(
+                group => group.Key,
+                group => UnrealPathUtil.ObjectPath(group.Last().ObjectPath),
+                StringComparer.OrdinalIgnoreCase);
         var sources = info.TextureParams
             .Where(texture => !string.IsNullOrWhiteSpace(texture.ObjectPath))
             .Select(texture => new
@@ -1119,9 +1158,9 @@ public static class ModelPreviewService
                     (int)Math.Clamp(group.Last().G * 255f + 0.5f, 0, 255),
                     (int)Math.Clamp(group.Last().B * 255f + 0.5f, 0, 255)),
                 StringComparer.OrdinalIgnoreCase);
-        Console.WriteLine($"  preview material: {Path.GetFileNameWithoutExtension(diskPath)} -> "
-                          + $"{info.ParentMaterialPath} ({textures.Count} texture, {sources.Count} source, "
-                          + $"{colours.Count} colour override(s))");
+        PreviewTrace($"Preview material: {Path.GetFileNameWithoutExtension(diskPath)} -> "
+                     + $"{info.ParentMaterialPath} ({textures.Count} cooked texture, {sources.Count} source, "
+                     + $"{colours.Count} colour override(s)).");
         return new PreviewMaterialFallback(info.ParentMaterialPath, textures, sources, colours);
     }
 
@@ -1503,7 +1542,7 @@ public static class ModelPreviewService
             };
         }
 
-        return BuildPreviewCore(provider, parts, options.AllowPartMover, viewerLayoutKey);
+        return BuildPreviewCore(provider, parts, options.AllowPartMover, viewerLayoutKey, options.RedBrickTints);
     }
 
     /// <summary>Exports each mesh to glTF and writes the viewer that loads them into one scene.</summary>
@@ -1515,7 +1554,8 @@ public static class ModelPreviewService
         DefaultFileProvider provider,
         IReadOnlyList<PreviewPart> parts,
         bool allowPartMover = false,
-        string? viewerLayoutKey = null)
+        string? viewerLayoutKey = null,
+        IReadOnlyCollection<PreviewRedBrickTint>? redBrickTints = null)
     {
         _faceMaterial = null;
         _faceBaseline = null;
@@ -1720,7 +1760,7 @@ public static class ModelPreviewService
         {
             placed = PrepareFaceFeatures(provider, previewDir, placed);
         }
-        WriteViewerAssets(previewDir, placed, allowPartMover, viewerLayoutKey);
+        WriteViewerAssets(previewDir, placed, allowPartMover, viewerLayoutKey, redBrickTints);
         return previewDir;
     }
 
@@ -3118,7 +3158,7 @@ public static class ModelPreviewService
     private sealed record SlotShading(
         string? Texture, string? Normal, string? Mmr, Color? Colour, string? Alpha = null,
         bool Hidden = false, bool Cutout = false, string? Nrm2 = null, string? Ao = null,
-        float? Roughness = null, float? Metalness = null);
+        float? Roughness = null, float? Metalness = null, string? ColourMask = null);
 
     /// <summary>
     /// Material-slot indices whose LOD0 render sections the game itself never draws. Cape meshes
@@ -3295,20 +3335,21 @@ public static class ModelPreviewService
                      ?? ExportSlot(material, "DNRM_Pristine", previewDir, isNormal: true)
                      ?? ExportSlot(material, "DNRM", previewDir, isNormal: true)
                      ?? ExportSlot(material, "HeadLowerUnder NML", previewDir, isNormal: true);
-        // No atlas normal: the part's base "NRM" (UV0) becomes the normal map, with the game's
-        // micro-surface noise overlay baked in (Blender cowl graph). When there IS an atlas normal
-        // (the body's DNRM on uv2), the noised base normal rides along separately - the viewer
-        // blends the two UV spaces in the shader.
-        string? nrm2 = null;
+        // The DNRM parameter is the material's authored normal map. Only fall back to the baked
+        // base normal when it is absent; combining both UV spaces in the preview changes the
+        // lighting on atlas materials such as Electric's body.
         if (normal is null)
         {
             normal = BakeNoisedNrm(provider, material, previewDir);
         }
-        else
-        {
-            nrm2 = BakeNoisedNrm(provider, material, previewDir);
-        }
-        var mmr = ExportFallbackMmrSlot(provider, fallback, previewDir) ?? ExportMmrSlot(material, previewDir);
+        var mmr = ExportMmrSlot(material, previewDir)
+                  ?? ExportFallbackMmrSlot(provider, fallback, previewDir);
+        // Prefer the material's explicit colour-mask parameters. CT remains a legacy fallback for
+        // older materials that expose their Red Brick channels under that name.
+        var colourMask = ExportFallbackSourceTexture(fallback, ["ColourMask", "ColorMask", "CT"], previewDir)
+                         ?? ExportSlot(material, "ColourMask", previewDir)
+                         ?? ExportSlot(material, "ColorMask", previewDir)
+                         ?? ExportSlot(material, "CT", previewDir);
 
         // No texture anywhere: the material states its colour directly (capes do this). Keep the
         // tint when a texture exists as well; body TPAGEs usually leave it at white.
@@ -3319,7 +3360,12 @@ public static class ModelPreviewService
         {
             Console.WriteLine($"      flat colour #{colour.Value.R:X2}{colour.Value.G:X2}{colour.Value.B:X2}");
         }
-        return new SlotShading(tex, normal, mmr, fallbackColour ?? colour, Nrm2: nrm2);
+        return new SlotShading(
+            tex,
+            normal,
+            mmr,
+            fallbackColour ?? colour,
+            ColourMask: colourMask);
     }
 
     private static Color? FindFallbackColour(PreviewMaterialFallback? fallback, params string[] names)
@@ -3370,16 +3416,19 @@ public static class ModelPreviewService
 
             try
             {
-                var loaded = provider.LoadPackageObject(path);
+                var objectPath = UnrealPathUtil.ObjectPath(path);
+                PreviewTrace($"Preview texture lookup: {name} -> {objectPath}.");
+                var loaded = provider.LoadPackageObject(objectPath);
                 if (loaded is UTexture2D texture)
                 {
+                    PreviewTrace($"Preview texture loaded: {name} -> {texture.Name} ({texture.Format}).");
                     return texture;
                 }
-                Console.WriteLine($"    generated texture ignored: {path} ({loaded.ExportType})");
+                PreviewTrace($"Preview texture ignored: {name} -> {objectPath} ({loaded.ExportType}).");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"    generated texture unavailable: {path} ({ex.Message.Split('\n')[0]})");
+                PreviewTrace($"Preview texture unavailable: {name} -> {path} ({ex.Message.Split('\n')[0]}).");
             }
         }
 
@@ -3446,21 +3495,23 @@ public static class ModelPreviewService
                      ?? ExportTexture(FindFallbackTexture(provider, fallback, "DNRM_Pristine", "DNRM", "NRM"), previewDir, isNormal: true)
                      ?? ExportSlot(material, "DNRM_Pristine", previewDir, isNormal: true)
                      ?? ExportSlot(material, "DNRM", previewDir, isNormal: true);
-        string? nrm2 = null;
         if (normal is null)
         {
             normal = BakeNoisedNrm(provider, material, previewDir);
         }
-        else
-        {
-            nrm2 = BakeNoisedNrm(provider, material, previewDir);
-        }
-        var mmr = ExportFallbackMmrSlot(provider, fallback, previewDir) ?? ExportMmrSlot(material, previewDir);
+        var mmr = ExportMmrSlot(material, previewDir)
+                  ?? ExportFallbackMmrSlot(provider, fallback, previewDir);
         var ao = ExportRaoAoSlot(material, previewDir);
         Console.WriteLine($"    solid Base Color: #{colour.Value.R:X2}{colour.Value.G:X2}{colour.Value.B:X2}"
                           + (ao is null ? " (no RAO)" : " + RAO.G AO")
                           + " (CT ignored)");
-        return new SlotShading(null, normal, mmr, colour, Nrm2: nrm2, Ao: ao, Roughness: 0.36f);
+        return new SlotShading(
+            null,
+            normal,
+            mmr,
+            colour,
+            Ao: ao,
+            Roughness: 0.36f);
     }
 
     /// <summary>
@@ -3631,7 +3682,12 @@ public static class ModelPreviewService
     private static string? ExportMmrSlot(UObject? material, string previewDir)
     {
         var t = FindTextureParam(material, "MMR_Pristine", 0) ?? FindTextureParam(material, "MMR", 0);
-        return ExportMmrTexture(t, previewDir);
+        var exported = ExportMmrTexture(t, previewDir);
+        if (exported is not null)
+        {
+            Console.WriteLine("    MMR source: resolved material parameter.");
+        }
+        return exported;
     }
 
     private static string? ExportFallbackMmrSlot(
@@ -3639,36 +3695,56 @@ public static class ModelPreviewService
         PreviewMaterialFallback? fallback,
         string previewDir)
     {
+        var metadataTexture = ExportMmrTexture(
+            FindFallbackTexture(provider, fallback, "MMR_Pristine", "MMR"),
+            previewDir);
+        if (metadataTexture is not null)
+        {
+            PreviewTrace("Preview MMR: using the cooked generated material texture.");
+            return metadataTexture;
+        }
+
         if (fallback is not null)
         {
-            foreach (var name in new[] { "MMR_Pristine", "MMR" })
+            foreach (var parameter in new[] { "MMR_Pristine", "MMR" })
             {
-                if (fallback.SourceTextureOverrides.TryGetValue(name, out var source) && File.Exists(source))
+                if (!fallback.SourceTextureOverrides.TryGetValue(parameter, out var source) || !File.Exists(source))
                 {
-                    var rel = "textures/" + MakeSafeName(Path.GetFileNameWithoutExtension(source)) + "_source_orm.png";
-                    var dest = Path.Combine(previewDir, rel.Replace('/', Path.DirectorySeparatorChar));
-                    if (File.Exists(dest) || TextureDecodeService.TryConvertMmrPngToOrm(source, dest))
-                    {
-                        Console.WriteLine($"    generated source MMR: {Path.GetFileName(source)} ({name})");
-                        return rel;
-                    }
+                    continue;
+                }
+
+                var rel = "textures/" + MakeSafeName(Path.GetFileNameWithoutExtension(source)) + "_source_orm.png";
+                var destination = Path.Combine(previewDir, rel.Replace('/', Path.DirectorySeparatorChar));
+                if (File.Exists(destination) || TextureDecodeService.TryConvertMmrPngToOrm(source, destination))
+                {
+                    PreviewTrace($"Preview MMR: source map converted to ORM after cooked decode failed ({Path.GetFileName(source)}).");
+                    return rel;
                 }
             }
         }
-        return ExportMmrTexture(FindFallbackTexture(provider, fallback, "MMR_Pristine", "MMR"), previewDir);
+
+        PreviewTrace("Preview MMR: no usable MMR texture was resolved.");
+        return null;
     }
 
     private static string? ExportMmrTexture(UTexture2D? t, string previewDir)
     {
-        if (t is null) return null;
+        if (t is null)
+        {
+            PreviewTrace("Preview MMR: material did not expose an MMR parameter.");
+            return null;
+        }
         var safe = string.Concat(t.Name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
         var rel = "textures/" + safe + "_orm.png";
         var dest = Path.Combine(previewDir, rel.Replace('/', Path.DirectorySeparatorChar));
+        var mip = t.GetFirstMip();
+        PreviewTrace($"Preview MMR decode: {t.Name} ({t.Format}, {mip?.SizeX ?? 0}x{mip?.SizeY ?? 0}, {mip?.BulkData?.Data?.Length ?? 0} bytes).");
         if (File.Exists(dest) || TextureDecodeService.TryExportMmrAsOrm(t, dest))
         {
-            Console.WriteLine($"    MMR->ORM: {t.Name} ({t.Format})");
+            PreviewTrace($"Preview MMR decoded: {t.Name} -> {Path.GetFileName(dest)}.");
             return rel;
         }
+        PreviewTrace($"Preview MMR decode failed: {t.Name} ({t.Format}).");
         return null;
     }
 
@@ -3918,7 +3994,8 @@ public static class ModelPreviewService
         string dir,
         IReadOnlyList<PlacedModel> models,
         bool allowPartMover,
-        string? viewerLayoutKey = null)
+        string? viewerLayoutKey = null,
+        IReadOnlyCollection<PreviewRedBrickTint>? redBrickTints = null)
     {
         foreach (var js in new[] { "three.min.js", "GLTFLoader.js", "OrbitControls.js" })
         {
@@ -3935,6 +4012,7 @@ public static class ModelPreviewService
                 $"\"hide\":{(sl.Hidden ? "true" : "false")},\"cut\":{(sl.Cutout ? "true" : "false")},\"nrm2\":{Q(sl.Nrm2)}," +
                 $"\"ao\":{Q(sl.Ao)},\"rough\":{(sl.Roughness is null ? "null" : sl.Roughness.Value.ToString(System.Globalization.CultureInfo.InvariantCulture))}," +
                 $"\"metal\":{(sl.Metalness is null ? "null" : sl.Metalness.Value.ToString(System.Globalization.CultureInfo.InvariantCulture))}," +
+                $"\"mask\":{Q(sl.ColourMask)}," +
                 $"\"col\":{(sl.Colour is null ? "null" : $"\"#{sl.Colour.Value.R:X2}{sl.Colour.Value.G:X2}{sl.Colour.Value.B:X2}\"")}" +
                 "}"));
             // Extract every UV channel so the viewer's switcher can bind sets three.js drops on import.
@@ -4025,9 +4103,23 @@ public static class ModelPreviewService
             return sb.Append('}').ToString();
         }
 
+        var bodyHasColourMask = models
+            .Where(model => IsBodyMeshParent(model.ComponentName))
+            .SelectMany(model => model.Slots)
+            .Any(slot => !string.IsNullOrWhiteSpace(slot.ColourMask));
+        var tintJson = JsonSerializer.Serialize((redBrickTints ?? Array.Empty<PreviewRedBrickTint>())
+            .Select(tint => new
+            {
+                name = tint.DisplayName,
+                primary = RedBrickPalette.PreviewHex(tint.PrimaryColourRow),
+                secondary = RedBrickPalette.PreviewHex(tint.SecondaryColourRow),
+                tertiary = RedBrickPalette.PreviewHex(tint.TertiaryColourRow),
+                source = tint.IsBaseGame ? "base" : "modded",
+            }));
         File.WriteAllText(Path.Combine(dir, "models.js"),
             $"window.PREVIEW_MODELS={jsonList};window.PREVIEW_CAN_SAVE_PLACEMENTS={(allowPartMover ? "true" : "false")};" +
-            $"window.PREVIEW_LAYOUT_KEY={JsonSerializer.Serialize(viewerLayoutKey ?? string.Empty)};");
+            $"window.PREVIEW_LAYOUT_KEY={JsonSerializer.Serialize(viewerLayoutKey ?? string.Empty)};" +
+            $"window.PREVIEW_RED_BRICKS={tintJson};window.PREVIEW_REDBRICK_BODY_MASK={(bodyHasColourMask ? "true" : "false")};");
         File.WriteAllText(Path.Combine(dir, "index.html"), ViewerHtml);
         Console.WriteLine("  viewer assets written");
     }
@@ -4046,18 +4138,25 @@ public static class ModelPreviewService
   #exprwrap label{color:#f0c230;margin-right:4px}
   #expr{background:#22262c;color:#e6e9ee;border:1px solid #3a4048;border-radius:5px;padding:3px 6px;
     font-family:inherit;font-size:13px;outline:none}
-  #partmove,#meshmove{position:absolute;right:14px;top:12px;width:214px;color:#dfe4ea;font-size:12px;
+  #partmove,#meshmove,#redbrick,#matedit{position:absolute;right:14px;top:12px;width:214px;color:#dfe4ea;font-size:12px;
     background:rgba(26,29,34,.9);padding:9px 10px;border:1px solid #333a44;border-radius:6px}
-  #partmove label,#meshmove label{display:block;color:#f0c230;margin-bottom:5px}
-  #partmove select,#meshmove select{box-sizing:border-box;width:100%;margin-bottom:7px;background:#22262c;color:#e6e9ee;
+  #redbrick{top:auto;bottom:14px}
+  #matedit{right:244px;max-height:calc(100vh - 28px);overflow:auto}
+  #partmove label,#meshmove label,#redbrick label,#matedit label{display:block;color:#f0c230;margin-bottom:5px}
+  #partmove select,#meshmove select,#redbrick select,#matedit select{box-sizing:border-box;width:100%;margin-bottom:7px;background:#22262c;color:#e6e9ee;
     border:1px solid #3a4048;border-radius:4px;padding:4px;font:inherit}
   #partmove .axis,#meshmove .axis{display:grid;grid-template-columns:38px 1fr;align-items:center;gap:5px;margin:3px 0;color:#9ea6b2}
   #partmove input,#meshmove input{box-sizing:border-box;width:100%;background:#171a1f;color:#e6e9ee;border:1px solid #3a4048;
     border-radius:4px;padding:3px 5px;font:12px Consolas,monospace}
   #partmove .actions,#meshmove .actions{display:flex;gap:6px;margin-top:8px}
-  #partmove button,#meshmove button{border:1px solid #3a4048;border-radius:4px;background:#232833;color:#dfe4ea;padding:4px 7px;cursor:pointer;font:inherit}
+  #partmove button,#meshmove button,#redbrick button,#matedit button{border:1px solid #3a4048;border-radius:4px;background:#232833;color:#dfe4ea;padding:4px 7px;cursor:pointer;font:inherit}
   #partmove button.save,#meshmove button.save{border-color:#aa8b1b;color:#f0c230}
   #partmove button:disabled,#meshmove button:disabled{opacity:.45;cursor:default}
+  #matedit .maptoggle{display:flex;align-items:center;justify-content:space-between;border-top:1px solid #303640;padding:5px 0;color:#cbd1d9}
+  #matedit .maptoggle input{width:15px;height:15px;accent-color:#f0c230}
+  #matedit .summary{margin:0 0 7px;color:#9ea6b2;line-height:1.35}
+  #matedit .actions{display:flex;gap:6px;margin-top:8px}
+  #matedit .actions button{border-color:#aa8b1b;color:#f0c230}
   #err{position:absolute;left:12px;bottom:12px;color:#f0c230;font-size:12px;line-height:1.5;font-family:Consolas,monospace}
   canvas{display:block}
 </style></head><body>
@@ -4102,6 +4201,96 @@ const texLoader=new THREE.TextureLoader();
 const diag=[];
 function say(s){diag.push(s);document.getElementById('err').innerHTML=diag.join('<br>');}
 const partStates=new Map();
+const redBrickMaskMaterials=[];
+const materialEditorEntries=[];
+function setRedBrickPalette(palette){
+  redBrickMaskMaterials.forEach(state=>{
+    state.palette=palette;
+    if(!state.uniforms)return;
+    state.uniforms.redBrickEnabled.value=palette?1:0;
+    if(palette){
+      state.uniforms.redBrickPrimary.value.set(palette.primary).convertSRGBToLinear();
+      state.uniforms.redBrickSecondary.value.set(palette.secondary).convertSRGBToLinear();
+      state.uniforms.redBrickTertiary.value.set(palette.tertiary).convertSRGBToLinear();
+    }
+  });
+}
+function buildRedBrickTintUi(){
+  const presets=window.PREVIEW_RED_BRICKS||[];
+  if(!presets.length)return;
+  if(!window.PREVIEW_REDBRICK_BODY_MASK||!redBrickMaskMaterials.length){
+    say('Red Brick preview unavailable: CharacterMesh0 needs a compatible CT colour mask.');
+    return;
+  }
+  const panel=document.createElement('div');panel.id='redbrick';
+  const label=document.createElement('label');label.textContent='Red Brick preview';panel.appendChild(label);
+  const filter=document.createElement('select');
+  [['all','All Red Bricks'],['base','Base game'],['modded','Modded']].forEach(([value,text])=>{const option=document.createElement('option');option.value=value;option.textContent=text;filter.appendChild(option);});
+  panel.appendChild(filter);
+  const select=document.createElement('select');
+  function redraw(){
+    select.replaceChildren();
+    const off=document.createElement('option');off.value='';off.textContent='No Red Brick';select.appendChild(off);
+    presets.forEach((preset,index)=>{if(filter.value!=='all'&&preset.source!==filter.value)return;const option=document.createElement('option');option.value=String(index);
+      option.textContent=preset.name;select.appendChild(option);});
+    setRedBrickPalette(null);
+  }
+  filter.onchange=redraw;
+  redraw();
+  select.onchange=()=>setRedBrickPalette(select.value===''?null:presets[Number(select.value)]);
+  panel.appendChild(select);document.body.appendChild(panel);
+}
+function buildMaterialEditor(){
+  if(!materialEditorEntries.length)return;
+  const panel=document.createElement('div');panel.id='matedit';panel.title='Viewer-only map switches. These never change the suit or cooked files.';
+  const label=document.createElement('label');label.textContent='Material editor';panel.appendChild(label);
+  const summary=document.createElement('div');summary.className='summary';summary.textContent='Toggle live maps to isolate preview shading.';panel.appendChild(summary);
+  const select=document.createElement('select');
+  materialEditorEntries.forEach((entry,index)=>{const option=document.createElement('option');option.value=String(index);
+    option.textContent=entry.label;select.appendChild(option);});
+  panel.appendChild(select);
+  const toggles=[];
+  const addToggle=(label,key)=>{
+    const row=document.createElement('label');row.className='maptoggle';
+    const text=document.createElement('span');text.textContent=label;row.appendChild(text);
+    const input=document.createElement('input');input.type='checkbox';input.checked=true;
+    input.onchange=()=>{const entry=materialEditorEntries[Number(select.value)];if(!entry)return;
+      entry.enabled[key]=input.checked;applyMaterialEditorEntry(entry);};
+    row.appendChild(input);panel.appendChild(row);toggles.push([key,input]);
+  };
+  addToggle('Base colour map','base');
+  addToggle('Normal map','normal');
+  addToggle('MMR maps','mmr');
+  addToggle('Ambient occlusion','ao');
+  addToggle('Red Brick tint','tint');
+  const actions=document.createElement('div');actions.className='actions';
+  const reset=document.createElement('button');reset.type='button';reset.textContent='Reset material';
+  reset.onclick=()=>{const entry=materialEditorEntries[Number(select.value)];if(!entry)return;
+    Object.keys(entry.enabled).forEach(key=>entry.enabled[key]=true);applyMaterialEditorEntry(entry);sync();};
+  actions.appendChild(reset);panel.appendChild(actions);
+  function sync(){const entry=materialEditorEntries[Number(select.value)];if(!entry)return;
+    summary.textContent=entry.label+' - viewer only';
+    toggles.forEach(([key,input])=>{input.checked=entry.available[key]&&!!entry.enabled[key];
+      input.disabled=!entry.available[key];});
+  }
+  select.onchange=sync;sync();document.body.appendChild(panel);
+}
+function applyMaterialEditorEntry(entry){
+  const m=entry.material,original=entry.original,enabled=entry.enabled;
+  m.map=enabled.base?original.map:null;
+  m.normalMap=enabled.normal?original.normalMap:null;
+  m.roughnessMap=enabled.mmr?original.roughnessMap:null;
+  m.metalnessMap=enabled.mmr?original.metalnessMap:null;
+  m.roughness=enabled.mmr?original.roughness:0.5;
+  m.metalness=enabled.mmr?original.metalness:0;
+  m.aoMap=enabled.ao?original.aoMap:null;
+  if(entry.tintState&&entry.tintState.uniforms){
+    entry.tintState.uniforms.redBrickEnabled.value=enabled.tint&&entry.tintState.palette?1:0;
+  }
+  m.needsUpdate=true;
+  const disabled=Object.entries(enabled).filter(([,on])=>!on).map(([key])=>key+' off').join(', ');
+  say('material editor: '+entry.label+' - '+(disabled||'all maps on'));
+}
 function postToHost(message){
   if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage(message);
 }
@@ -4464,43 +4653,62 @@ function dress(g,info){
         m.color=s.col?(s.cut?new THREE.Color(s.col).convertSRGBToLinear():new THREE.Color(s.col)):new THREE.Color(0xffffff);applied++;}
       else if(s.col){m.map=null;m.color=new THREE.Color(s.col);applied++;}
       else if(!m.map){m.color=new THREE.Color(0x9aa0a8);}
-      const n=tex(s.nrm,false); if(n)m.normalMap=n;
+      const n=tex(s.nrm,false); if(n)m.normalMap=n;else m.normalMap=null;
       // RAO.G is the EoM ambient-occlusion channel. three.js aoMap samples UV2, so give static
       // attachments their structural UV0 there; body meshes preserve the same UV as aUv0.
       const ao=tex(s.ao,false);
       if(ao){const auv=o.geometry.attributes.aUv0||o.geometry.attributes.uv;
         if(auv)o.geometry.setAttribute('uv2',auv);
         m.aoMap=ao;m.aoMapIntensity=0.65;}
-      // Body: blend the uv0-space plastic base normal (LEGOfig seams + micro noise, baked in C#)
-      // under the uv2-space DNRM sculpt. three.js samples every normal map with one UV set, so the
-      // second map needs a small shader patch reading the preserved aUv0 attribute.
-      if(s.nrm2&&n){
-        const bn=tex(s.nrm2,false);bn.wrapS=bn.wrapT=THREE.RepeatWrapping;
+      else{m.aoMap=null;}
+      const cm=s.mask?tex(s.mask,false):null;
+      let tintState=null;
+      if(cm){
+        tintState={uniforms:null,palette:null};
+        if(tintState)redBrickMaskMaterials.push(tintState);
         m.onBeforeCompile=sh=>{
-          sh.uniforms.baseNormalMap={value:bn};
+          let vertexCommon='#include <common>';
+          if(cm)vertexCommon+='\nvarying vec2 vColourMaskUv;';
+          // The colour mask belongs to the same material layer as its base colour and DNRM.
+          // vUv therefore preserves the selected UV channel for body atlases and attachments.
+          const vertexTail=cm?'\nvColourMaskUv=vUv;':'';
           sh.vertexShader=sh.vertexShader
-            .replace('#include <common>','#include <common>\nattribute vec2 aUv0;varying vec2 vBaseUv;')
-            .replace('#include <uv_vertex>','#include <uv_vertex>\nvBaseUv=aUv0;');
-          // onBeforeCompile sees the template BEFORE #include expansion, so the mapN line cannot be
-          // patched directly - expand the chunk ourselves, patch inside it, and splice it back.
-          sh.fragmentShader=sh.fragmentShader
-            .replace('#include <common>','#include <common>\nuniform sampler2D baseNormalMap;varying vec2 vBaseUv;')
-            .replace('#include <normal_fragment_maps>',
-              THREE.ShaderChunk.normal_fragment_maps.replace(
-                'vec3 mapN = texture2D( normalMap, vUv ).xyz * 2.0 - 1.0;',
-                'vec3 mapN = texture2D( normalMap, vUv ).xyz * 2.0 - 1.0;\n'+
-                'vec3 baseN = texture2D( baseNormalMap, vBaseUv ).xyz * 2.0 - 1.0;\n'+
-                'mapN = normalize( vec3( mapN.xy + baseN.xy, mapN.z * baseN.z ) );'));
+            .replace('#include <common>',vertexCommon)
+            .replace('#include <uv_vertex>','#include <uv_vertex>'+vertexTail);
+
+          let fragmentCommon='#include <common>';
+          if(tintState){
+            sh.uniforms.redBrickMaskMap={value:cm};
+            sh.uniforms.redBrickEnabled={value:0};
+            sh.uniforms.redBrickPrimary={value:new THREE.Color('#ffffff')};
+            sh.uniforms.redBrickSecondary={value:new THREE.Color('#ffffff')};
+            sh.uniforms.redBrickTertiary={value:new THREE.Color('#ffffff')};
+            tintState.uniforms=sh.uniforms;
+            if(tintState.palette)setRedBrickPalette(tintState.palette);
+            fragmentCommon+='\nuniform sampler2D redBrickMaskMap;varying vec2 vColourMaskUv;uniform float redBrickEnabled;uniform vec3 redBrickPrimary;uniform vec3 redBrickSecondary;uniform vec3 redBrickTertiary;';
+          }
+          sh.fragmentShader=sh.fragmentShader.replace('#include <common>',fragmentCommon);
+          if(tintState){
+            sh.fragmentShader=sh.fragmentShader.replace('#include <map_fragment>',
+              '#include <map_fragment>\n'+
+              'vec3 redBrickMask=texture2D(redBrickMaskMap,vColourMaskUv).rgb;\n'+
+              'float redBrickTotal=redBrickMask.r+redBrickMask.g+redBrickMask.b;\n'+
+              'float redBrickWeight=clamp(max(redBrickMask.r,max(redBrickMask.g,redBrickMask.b)),0.0,1.0);\n'+
+              'vec3 redBrickColour=(redBrickMask.r*redBrickPrimary+redBrickMask.g*redBrickSecondary+redBrickMask.b*redBrickTertiary)/max(redBrickTotal,0.0001);\n'+
+              'diffuseColor.rgb=mix(diffuseColor.rgb,redBrickColour,redBrickEnabled*redBrickWeight);');
+          }
         };
-        m.customProgramCacheKey=function(){return 'baseNormal';};
+        m.customProgramCacheKey=function(){return 'redBrick:'+Boolean(cm);};
       }
       // MMR is exported repacked into ORM order (roughness->green, metalness->blue) so one texture
       // drives both maps the way three.js samples them. The scene has an environment map, so the
       // metallic belt/buckle now reflects it instead of rendering black (which is why metalness used
       // to be forced to 0). Plastic areas have metalness 0 in the map and stay diffuse.
       const r=tex(s.mmr,false);
-      if(r){m.roughnessMap=r;m.metalnessMap=r;m.roughness=1;m.metalness=1;}
-      else{m.roughness=(s.rough===null||s.rough===undefined)?0.55:s.rough;
+      if(r){m.roughnessMap=r;m.metalnessMap=r;m.roughness=1;m.metalness=1;
+        say('  '+(info.file||'')+': MMR '+s.mmr.split('/').pop());}
+      else{m.roughnessMap=null;m.metalnessMap=null;
+        m.roughness=(s.rough===null||s.rough===undefined)?0.55:s.rough;
         m.metalness=(s.metal===null||s.metal===undefined)?0:s.metal;}
       m.envMapIntensity=0.5;
       // LEGO packs masks into alpha - it is not opacity.
@@ -4521,6 +4729,18 @@ function dress(g,info){
       if(m.vertexColors){m.vertexColors=false;say('  '+(info.file||'')+': disabled vertexColors');}
       // Same opt-in as above: any material we build or rebind on a skinned mesh must carry it.
       if(o.isSkinnedMesh&&!m.skinning)m.skinning=true;
+      // Keep the live maps around for the viewer-only material editor. This is deliberately
+      // separate from suit state: it helps diagnose a material without rewriting anything.
+      if(!info.isface){
+        const part=info.part||info.base||info.file||'Part';
+        materialEditorEntries.push({
+          label:part+' - material '+(li+1),material:m,tintState:tintState,
+          enabled:{base:true,normal:true,mmr:true,ao:true,tint:true},
+          available:{base:!!m.map,normal:!!m.normalMap,mmr:!!(m.roughnessMap||m.metalnessMap),ao:!!m.aoMap,tint:!!tintState},
+          original:{map:m.map,normalMap:m.normalMap,roughnessMap:m.roughnessMap,metalnessMap:m.metalnessMap,
+            aoMap:m.aoMap,roughness:m.roughness,metalness:m.metalness}
+        });
+      }
       m.needsUpdate=true;});
     // Face feature split: the cooked face mesh is ONE section; C# reordered its index buffer into
     // [base][mouth][hidden] runs so the mouth shell can wear its own print (black stern mouth) and
@@ -4849,6 +5069,8 @@ Promise.all(models.map(load)).then(loaded=>{
   frameAll();
   buildPartMover();
   buildCustomMeshMover();
+  buildRedBrickTintUi();
+  buildMaterialEditor();
 });
 // Calibration aid: arrows move the face piece in 0.004 steps and report the total, so the right
 // permanent offset can be read straight off the HUD instead of guessed.

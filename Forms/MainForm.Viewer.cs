@@ -294,10 +294,29 @@ public sealed partial class MainForm
             var settings = AppSettings.Current;
             var paks = settings.GamePaksRoot ?? string.Empty;
             var usmap = settings.EffectiveUsmapPath() ?? string.Empty;
+            var redBrickTints = ViewerRedBrickTints(project);
+            var previewDiagnostics = new System.Collections.Concurrent.ConcurrentQueue<string>();
+            void FlushPreviewDiagnostics()
+            {
+                while (previewDiagnostics.TryDequeue(out var message))
+                {
+                    AppendLog("Viewer: " + message);
+                }
+            }
             var folder = await Task.Run(() =>
                 project is null
-                    ? ModelPreviewService.BuildPreviewCharacter(paks, usmap, objectPath)
-                    : ModelPreviewService.BuildPreviewSuit(paks, usmap, project, settings.EffectiveProjectRoot()));
+                    ? ModelPreviewService.BuildPreviewCharacter(paks, usmap, objectPath, previewOptions: new ModelPreviewService.CharacterPreviewOptions
+                    {
+                        RedBrickTints = redBrickTints,
+                    })
+                    : ModelPreviewService.BuildPreviewSuit(
+                        paks,
+                        usmap,
+                        project,
+                        settings.EffectiveProjectRoot(),
+                        redBrickTints,
+                        previewDiagnostics.Enqueue));
+            FlushPreviewDiagnostics();
             if (loadGeneration != _viewerLoadGeneration || _viewerPanel?.Visible != true)
             {
                 return;
@@ -327,6 +346,42 @@ public sealed partial class MainForm
                 viewer.TrimInactiveMemory();
             }
         }
+    }
+
+    private IReadOnlyCollection<ModelPreviewService.PreviewRedBrickTint> ViewerRedBrickTints(NativeSuitProject? project)
+    {
+        NativeSuitModProject? mod = null;
+        if (project is not null)
+        {
+            var projectRoot = AppSettings.Current.EffectiveProjectRoot();
+            var suitPath = new SuitProjectService(projectRoot).ProjectPathForSlot(project.SlotId);
+            mod = ModService.ListMods()
+                .Select(summary => ModService.LoadMod(summary.Path))
+                .FirstOrDefault(candidate => candidate?.Suits.Any(entry =>
+                    string.Equals(ModService.ResolveSuitProjectPath(entry), suitPath, StringComparison.OrdinalIgnoreCase)) == true);
+        }
+        mod ??= ResolveHomeActiveMod(ModService.ListMods().ToList()).Project;
+        // Keep the preview list tied to the extracted native definitions rather than a hand-maintained palette.
+        var nativePresets = BaseGameRedBrickCatalogService.LoadCurrent().Definitions
+            .Select(definition => new ModelPreviewService.PreviewRedBrickTint(
+                "Base game: " + definition.DisplayName,
+                definition.PrimaryColourRow,
+                definition.SecondaryColourRow,
+                definition.TertiaryColourRow,
+                IsBaseGame: true));
+        var modPresets = mod?.RedBricks
+            .Where(brick => brick.Enabled)
+            .OrderBy(brick => brick.MenuOrder)
+            .ThenBy(brick => brick.DisplayName)
+            .Select(brick => new ModelPreviewService.PreviewRedBrickTint(
+                "This mod: " + brick.DisplayName,
+                brick.PrimaryColourRow,
+                brick.SecondaryColourRow,
+                brick.TertiaryColourRow,
+                IsBaseGame: false))
+            .ToArray()
+            ?? Array.Empty<ModelPreviewService.PreviewRedBrickTint>();
+        return nativePresets.Concat(modPresets).ToArray();
     }
 
     private void SaveViewerPlacement(PreviewPlacementSaveRequestedEventArgs args)

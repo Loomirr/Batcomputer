@@ -3,20 +3,18 @@ using System.Text;
 namespace Batcomputer;
 
 /// <summary>
-/// Generates the loose Gameplay Tag source that makes a mod's custom pawn tags valid
+/// Generates the loose Gameplay Tag source that makes a mod's custom gameplay tags valid
 /// in Unreal's tag tree. Proven working via an independently-named file under
 /// <c>Config/Tags</c> -
 /// the game's own <c>PawnTags.ini</c> is never edited.
 ///
-/// One file per mod, one row per suit tag:
+/// One file per mod, with rows for suits, Red Bricks, and other mod-owned assets:
 /// <code>
 /// [/Script/GameplayTags.GameplayTagsList]
 /// GameplayTagList=(Tag="Pawns.Playable.Batman.Electric",DevComment="MyBatmanPack: Electric Suit")
 /// </code>
 ///
-/// The same generator serves a standalone suit build (one tag, named after the suit)
-/// and a mod build (all tags, named after the ModId) - only the file name and the
-/// set of rows differ.
+/// The same generator serves a standalone suit build and a combined mod release.
 /// </summary>
 public sealed class PawnTagConfigService
 {
@@ -32,7 +30,7 @@ public sealed class PawnTagConfigService
 
     /// <summary>Loose-file install location under the merge-ready game folder.</summary>
     public static string RelativeConfigPath(string modOrSuitId) =>
-        $"LEGOBatmanLotDK/Config/Tags/{modOrSuitId}PawnTags.ini";
+        $"LEGOBatmanLotDK/Config/Tags/{modOrSuitId}Tags.ini";
 
     /// <summary>
     /// Renders the ini text deterministically: rows sorted by tag, duplicates rejected.
@@ -47,11 +45,11 @@ public sealed class PawnTagConfigService
             var tag = (row.PawnTag ?? "").Trim();
             if (tag.Length == 0)
             {
-                throw new InvalidOperationException("A suit has an empty PawnTag; every suit needs a unique pawn tag before packaging.");
+                throw new InvalidOperationException("A generated gameplay tag is empty; every release tag must be unique before packaging.");
             }
             if (!seen.Add(tag))
             {
-                throw new InvalidOperationException($"Duplicate PawnTag '{tag}' in this build; pawn tags must be globally unique.");
+                throw new InvalidOperationException($"Duplicate gameplay tag '{tag}' in this build; release tags must be globally unique.");
             }
             ordered.Add(new TagRow(tag, row.DevComment ?? ""));
         }
@@ -68,7 +66,28 @@ public sealed class PawnTagConfigService
               .Append(EscapeDevComment(row.DevComment))
               .Append("\")\r\n");
         }
+
+        if (ordered.Any(IsRedBrickTag))
+        {
+            AppendRedBrickScanRules(sb);
+        }
         return sb.ToString();
+    }
+
+    private static bool IsRedBrickTag(TagRow row) =>
+        row.PawnTag.StartsWith("Collectables.RedBrickTaggedAssets.MetaData.Mods.", StringComparison.OrdinalIgnoreCase) ||
+        row.PawnTag.StartsWith("Collectables.RedBricks.EffectDefinitions.Mods.", StringComparison.OrdinalIgnoreCase) ||
+        row.PawnTag.StartsWith("GameProgress.Definitions.RedBricks.Mods.", StringComparison.OrdinalIgnoreCase);
+
+    // The game discovers these primary assets during startup. Keep the rules in the mod's
+    // own tag file so Red Brick releases do not modify the game's shared Game.ini.
+    private static void AppendRedBrickScanRules(StringBuilder sb)
+    {
+        sb.Append("\r\n[/Script/Engine.AssetManagerSettings]\r\n");
+        sb.Append("+PrimaryAssetTypesToScan=(PrimaryAssetType=\"TtGameProgressDefinitionSet\",AssetBaseClass=\"/Script/TtGameProgress.TtGameProgressDefinitionSet\",bHasBlueprintClasses=False,bIsEditorOnly=False,Directories=((Path=\"/Game/Mods\")),SpecificAssets=(),Rules=(Priority=-1,ChunkId=-1,bApplyRecursively=True,CookRule=Unknown))\r\n");
+        sb.Append("+PrimaryAssetTypesToScan=(PrimaryAssetType=\"TtCollectablesMetaData\",AssetBaseClass=\"/Script/TtCollectables.TtCollectablesMetaData\",bHasBlueprintClasses=False,bIsEditorOnly=False,Directories=((Path=\"/Game/Mods\")),SpecificAssets=(),Rules=(Priority=-1,ChunkId=-1,bApplyRecursively=True,CookRule=Unknown))\r\n");
+        sb.Append("+PrimaryAssetTypesToScan=(PrimaryAssetType=\"RedBrickEffectDefinition\",AssetBaseClass=\"/Script/Dinner.RedBrickEffectDefinition\",bHasBlueprintClasses=False,bIsEditorOnly=False,Directories=((Path=\"/Game/Mods\")),SpecificAssets=(),Rules=(Priority=100,ChunkId=0,bApplyRecursively=True,CookRule=AlwaysCook))\r\n");
+        sb.Append("+PrimaryAssetTypesToScan=(PrimaryAssetType=\"RedBrickMetaDataAsset\",AssetBaseClass=\"/Script/Dinner.RedBrickMetaDataAsset\",bHasBlueprintClasses=False,bIsEditorOnly=False,Directories=((Path=\"/Game/Mods\")),SpecificAssets=(),Rules=(Priority=100,ChunkId=0,bApplyRecursively=True,CookRule=AlwaysCook))\r\n");
     }
 
     /// <summary>Writes the ini into a staged LooseFiles tree; returns the file path.</summary>

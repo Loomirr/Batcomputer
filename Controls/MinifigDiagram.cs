@@ -442,7 +442,7 @@ public sealed class MinifigDiagram : Control
     }
 
     // ---- badges -------------------------------------------------------------
-    private static readonly Font BadgeFont = new("Segoe UI", 7.5f, FontStyle.Bold);
+    private static readonly Font BadgeFont = AppFonts.Condensed(7.5f, FontStyle.Bold);
 
     /// <summary>
     /// Small material-slot-count badges on the figure. These replace the old callout labels - the

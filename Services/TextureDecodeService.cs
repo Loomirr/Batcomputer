@@ -204,7 +204,8 @@ internal static class TextureDecodeService
     /// three.js MeshStandardMaterial reads roughness from the GREEN channel and metalness from BLUE, so
     /// binding MMR straight makes it sample the empty green and render the whole body mirror-glossy.
     /// Rewrite to R = AO(255), G = roughness (src B), B = metalness (src R) so both read correctly from
-    /// one texture bound as roughnessMap + metalnessMap.
+    /// one texture bound as roughnessMap + metalnessMap. This is the direct path for TPAGE-style
+    /// materials; controller atlases use their own material-specific preview response instead.
     /// </summary>
     public static bool TryExportMmrAsOrm(UTexture2D mmr, string destPath)
     {
@@ -227,9 +228,7 @@ internal static class TextureDecodeService
                     {
                         var c = d.Pixels[y * d.Width + x];
                         var o = x * 4;
-                        // Roughness floor 0.146 from the recreated M_TPAGE graph's colour ramp
-                        // (0 -> 0.146, 1 -> 1): even the shiniest plastic keeps a slight matte.
-                        var rough = (byte)Math.Clamp(37 + c.b * (255 - 37) / 255, 0, 255);
+                        var rough = PackMmrRoughness(c.b);
                         row[o + 0] = c.r;   // Blue  <- metalness (three.js metalnessMap reads .b)
                         row[o + 1] = rough; // Green <- roughness (three.js roughnessMap reads .g)
                         row[o + 2] = 255;   // Red   <- AO none
@@ -303,55 +302,62 @@ internal static class TextureDecodeService
         }
     }
 
-    /// <summary>Repacks a source PNG using the same MMR-to-ORM mapping as cooked textures.</summary>
+    /// <summary>Converts a source MMR map into the ORM channel layout used by the preview.</summary>
     public static bool TryConvertMmrPngToOrm(string sourcePath, string destPath)
     {
         try
         {
             using var source = new Bitmap(sourcePath);
-            using var input = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppArgb);
-            using (var g = Graphics.FromImage(input))
-            {
-                g.DrawImageUnscaled(source, 0, 0);
-            }
-            using var output = new Bitmap(input.Width, input.Height, PixelFormat.Format32bppArgb);
-            var rect = new Rectangle(0, 0, input.Width, input.Height);
-            var inputBits = input.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-            var outputBits = output.LockBits(rect, ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+            using var output = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppArgb);
+            var inputBits = source.LockBits(
+                new Rectangle(0, 0, source.Width, source.Height),
+                ImageLockMode.ReadOnly,
+                PixelFormat.Format32bppArgb);
+            var outputBits = output.LockBits(
+                new Rectangle(0, 0, output.Width, output.Height),
+                ImageLockMode.WriteOnly,
+                PixelFormat.Format32bppArgb);
             try
             {
-                var inputRow = new byte[input.Width * 4];
-                var outputRow = new byte[output.Width * 4];
-                for (var y = 0; y < input.Height; y++)
+                var sourceRow = new byte[source.Width * 4];
+                var targetRow = new byte[output.Width * 4];
+                for (var y = 0; y < source.Height; y++)
                 {
-                    System.Runtime.InteropServices.Marshal.Copy(inputBits.Scan0 + y * inputBits.Stride, inputRow, 0, inputRow.Length);
-                    for (var x = 0; x < input.Width; x++)
+                    System.Runtime.InteropServices.Marshal.Copy(
+                        inputBits.Scan0 + y * inputBits.Stride, sourceRow, 0, sourceRow.Length);
+                    for (var x = 0; x < source.Width; x++)
                     {
                         var o = x * 4;
-                        var metalness = inputRow[o + 2];
-                        var roughness = inputRow[o];
-                        outputRow[o] = metalness;
-                        outputRow[o + 1] = (byte)Math.Clamp(37 + roughness * (255 - 37) / 255, 0, 255);
-                        outputRow[o + 2] = 255;
-                        outputRow[o + 3] = 255;
+                        // BGRA memory: source R is metalness, source B is roughness.
+                        targetRow[o + 0] = sourceRow[o + 2];
+                        targetRow[o + 1] = PackMmrRoughness(sourceRow[o + 0]);
+                        targetRow[o + 2] = 255;
+                        targetRow[o + 3] = 255;
                     }
-                    System.Runtime.InteropServices.Marshal.Copy(outputRow, 0, outputBits.Scan0 + y * outputBits.Stride, outputRow.Length);
+                    System.Runtime.InteropServices.Marshal.Copy(
+                        targetRow, 0, outputBits.Scan0 + y * outputBits.Stride, targetRow.Length);
                 }
             }
             finally
             {
-                input.UnlockBits(inputBits);
+                source.UnlockBits(inputBits);
                 output.UnlockBits(outputBits);
             }
+
             Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
             output.Save(destPath, ImageFormat.Png);
             return true;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"    source MMR repack failed for {Path.GetFileName(sourcePath)}: {ex.Message.Split('\n')[0]}");
+            Console.WriteLine($"    MMR source conversion failed for {Path.GetFileName(sourcePath)}: {ex.Message.Split('\n')[0]}");
             return false;
         }
+    }
+
+    private static byte PackMmrRoughness(byte sourceBlue)
+    {
+        return (byte)Math.Clamp(37 + sourceBlue * (255 - 37) / 255, 0, 255);
     }
 
     /// <summary>

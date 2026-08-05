@@ -9,7 +9,7 @@ namespace Batcomputer;
 
 /// <summary>
 /// Home-screen "Mods" section and the mod build. A mod bundles several suit projects
-/// into one release: one pak, one <c>&lt;ModId&gt;PawnTags.ini</c>, one <c>ST_&lt;ModId&gt;</c>
+/// into one release: one pak, one <c>&lt;ModId&gt;Tags.ini</c>, one <c>ST_&lt;ModId&gt;</c>
 /// StringTable, one <c>mod.json</c>, and one plugin-local cooked AssetRegistry.bin.
 /// This partial owns the UI + orchestration; the asset work lives in focused services.
 /// </summary>
@@ -260,9 +260,9 @@ public sealed partial class MainForm
         }
 
         var mod = ModService.LoadMod(summary.Path);
-        if (mod?.Suits.Any(entry => entry.Enabled) != true)
+        if (mod?.Suits.Any(entry => entry.Enabled) != true && mod?.RedBricks.Any(entry => entry.Enabled) != true)
         {
-            Dialog.Info(this, "Build mod", "Add at least one enabled suit to the active mod before building it.");
+            Dialog.Info(this, "Build mod", "Add at least one enabled suit or Red Brick to the active mod before building it.");
             return;
         }
 
@@ -275,6 +275,8 @@ public sealed partial class MainForm
         var mods = ModService.ListMods().ToList();
         var (activeSummary, activeMod) = ResolveHomeActiveMod(mods);
         var activeSuitCount = activeMod?.Suits.Count(entry => entry.Enabled) ?? 0;
+        var activeBrickCount = activeMod?.RedBricks.Count(entry => entry.Enabled) ?? 0;
+        var activeContentCount = activeSuitCount + activeBrickCount;
         var hasActiveMod = activeSummary is not null && activeMod is not null;
         var hasBuild = hasActiveMod && File.Exists(Path.Combine(ModBuildRoot(activeSummary!.ModId), activeMod!.PackageBaseName + ".utoc"));
         var hasInstalledRelease = hasBuild && File.Exists(Path.Combine(
@@ -286,20 +288,21 @@ public sealed partial class MainForm
             Overline = "MOD RELEASE",
             Title = hasActiveMod ? activeSummary!.DisplayName : "Choose a mod to build",
             Subtitle = hasActiveMod
-                ? $"{activeSuitCount} enabled suit{(activeSuitCount == 1 ? "" : "s")} will build and install as one game release."
+                ? $"{activeSuitCount} enabled suit{(activeSuitCount == 1 ? "" : "s")} and {activeBrickCount} Red Brick{(activeBrickCount == 1 ? "" : "s")} will build and install as one game release."
                 : "Select a saved mod or create one, then build and install it from here.",
             ThumbAccent = Theme.Gold,
             Chips = new List<(string, Color)>
             {
                 (hasActiveMod ? "mod selected" : "no mod selected", hasActiveMod ? Theme.Research : Theme.Warn),
                 ($"{activeSuitCount} enabled suit{(activeSuitCount == 1 ? "" : "s")}", activeSuitCount > 0 ? Theme.Parts : Theme.OnDarkMuted),
+                ($"{activeBrickCount} Red Brick{(activeBrickCount == 1 ? "" : "s")}", activeBrickCount > 0 ? Theme.RedBricks : Theme.OnDarkMuted),
                 (hasInstalledRelease ? "installed" : hasBuild ? "built; not installed" : "not built", hasInstalledRelease ? Theme.Good : hasBuild ? Theme.Warn : Theme.Warn),
             },
             Workflow = new[]
             {
                 new VirtualTilePanel.HeroModel.WorkflowStep { Label = "MOD", Detail = hasActiveMod ? "selected" : "choose one", Accent = Theme.Research, Complete = hasActiveMod, Current = !hasActiveMod },
-                new VirtualTilePanel.HeroModel.WorkflowStep { Label = "SUITS", Detail = activeSuitCount > 0 ? $"{activeSuitCount} enabled" : "add a suit", Accent = Theme.Base, Complete = activeSuitCount > 0, Current = hasActiveMod && activeSuitCount == 0 },
-                new VirtualTilePanel.HeroModel.WorkflowStep { Label = "RELEASE", Detail = hasInstalledRelease ? "built + installed" : hasBuild ? "built; install next" : "build + install", Accent = Theme.Gold, Complete = hasInstalledRelease, Current = hasActiveMod && activeSuitCount > 0 && !hasInstalledRelease },
+                new VirtualTilePanel.HeroModel.WorkflowStep { Label = "CONTENT", Detail = activeContentCount > 0 ? $"{activeContentCount} enabled" : "add content", Accent = Theme.Base, Complete = activeContentCount > 0, Current = hasActiveMod && activeContentCount == 0 },
+                new VirtualTilePanel.HeroModel.WorkflowStep { Label = "RELEASE", Detail = hasInstalledRelease ? "built + installed" : hasBuild ? "built; install next" : "build + install", Accent = Theme.Gold, Complete = hasInstalledRelease, Current = hasActiveMod && activeContentCount > 0 && !hasInstalledRelease },
             },
         };
 
@@ -310,13 +313,13 @@ public sealed partial class MainForm
         {
             var modPath = activeSummary!.Path;
             var modId = activeSummary.ModId;
-            if (activeSuitCount > 0)
+            if (activeContentCount > 0)
             {
                 tiles.Add(new VirtualTilePanel.Tile
                 {
                     Section = SectionRelease,
                     Title = $"Build {TrimMiddle(activeSummary.DisplayName, 20)}",
-                    Subtitle = "build and install your mod/suits to your game",
+                    Subtitle = "build and install your mod content to your game",
                     Accent = Theme.Gold,
                     OnClick = () => BuildMod(modPath),
                 });
@@ -334,8 +337,8 @@ public sealed partial class MainForm
                 tiles.Add(new VirtualTilePanel.Tile
                 {
                     Section = SectionRelease,
-                    Title = "Add a suit first",
-                    Subtitle = "this mod has no enabled suits to build",
+                    Title = "Add content first",
+                    Subtitle = "this mod has no enabled suits or Red Bricks to build",
                     Accent = Theme.Base,
                     Dashed = true,
                     OnClick = () => EditModSuits(modPath),
@@ -757,22 +760,22 @@ public sealed partial class MainForm
                 AppendLog($"Install mod '{mod.DisplayName}': {installed} trio file(s) only.");
                 result.Status = ModInstallStatus.Partial;
                 result.FilesCopied = installed;
-                result.Detail = "The release trio was copied, but Batcomputer could not locate the game root to install PawnTags.ini and mod.json.";
+                result.Detail = "The release trio was copied, but Batcomputer could not locate the game root to install the gameplay tag file and mod.json.";
                 return result;
             }
 
-            // 2) <ModId>PawnTags.ini → Config/Tags
-            var iniSrc = Path.Combine(outRoot, "LooseFiles", "LEGOBatmanLotDK", "Config", "Tags", $"{mod.ModId}PawnTags.ini");
+            // 2) one mod-owned gameplay tag file -> Config/Tags
+            var iniSrc = Path.Combine(outRoot, "LooseFiles", "LEGOBatmanLotDK", "Config", "Tags", $"{mod.ModId}Tags.ini");
             result.TagsDestination = Path.Combine(gameRoot, "Config", "Tags");
-            ModReleaseStep("Installing the PawnTags configuration…");
+            ModReleaseStep("Installing the gameplay tag configuration…");
             if (File.Exists(iniSrc))
             {
                 var tagsDest = result.TagsDestination;
                 Directory.CreateDirectory(tagsDest);
-                File.Copy(iniSrc, Path.Combine(tagsDest, $"{mod.ModId}PawnTags.ini"), overwrite: true);
+                File.Copy(iniSrc, Path.Combine(tagsDest, $"{mod.ModId}Tags.ini"), overwrite: true);
                 installed++;
                 tagsInstalled = true;
-                AppendLog($"  {mod.ModId}PawnTags.ini → {tagsDest}");
+                AppendLog($"  {mod.ModId}Tags.ini → {tagsDest}");
             }
 
             // 3) mod.json → ue4ss/LOTDKExpanded/Mods/<ModId>/
@@ -790,12 +793,20 @@ public sealed partial class MainForm
             }
 
             AppendLog($"Installed mod '{mod.DisplayName}' — {installed} file(s). Restart the game to load it.");
-            var plugin = RegistryPluginService.CreateLayout(outRoot, mod.ModId);
+            var plugin = RegistryPluginService.CreateLayout(outRoot, mod.ModId, mod.RedBricks.Any(brick => brick.Enabled));
             result.AssetRegistryDestination = LotdkExpandedLayout.RegistryPluginDirectory(gameRoot, plugin.PluginName);
             ModReleaseStep("Installing the Asset Registry plugin...");
             if (File.Exists(plugin.DescriptorPath) && File.Exists(plugin.RegistryPath) &&
                 !string.IsNullOrWhiteSpace(result.AssetRegistryDestination))
             {
+                var alternatePlugin = RegistryPluginService.CreateLayout(outRoot, mod.ModId, !mod.RedBricks.Any(brick => brick.Enabled));
+                var alternateDestination = LotdkExpandedLayout.RegistryPluginDirectory(gameRoot, alternatePlugin.PluginName);
+                if (!string.Equals(alternateDestination, result.AssetRegistryDestination, StringComparison.OrdinalIgnoreCase) &&
+                    Directory.Exists(alternateDestination))
+                {
+                    Directory.Delete(alternateDestination, recursive: true);
+                    AppendLog($"  removed stale registry plugin {alternatePlugin.PluginName}");
+                }
                 CopyDirectoryContents(plugin.PluginDirectory, result.AssetRegistryDestination, overwrite: true);
                 installed += Directory.EnumerateFiles(plugin.PluginDirectory, "*", SearchOption.AllDirectories).Count();
                 assetRegistryInstalled = true;
@@ -868,7 +879,7 @@ public sealed partial class MainForm
 
         var outRoot = ModBuildRoot(mod.ModId);
         var trioBase = Path.Combine(outRoot, mod.PackageBaseName);
-        var plugin = RegistryPluginService.CreateLayout(outRoot, mod.ModId);
+        var plugin = RegistryPluginService.CreateLayout(outRoot, mod.ModId, mod.RedBricks.Any(brick => brick.Enabled));
         var files = new List<(string Source, string ArchivePath)>();
         const string ArchiveRoot = "LEGO Batman - Legacy of the Dark Knight";
 
@@ -890,8 +901,8 @@ public sealed partial class MainForm
             }
 
             AddRequired(
-                Path.Combine(outRoot, "LooseFiles", "LEGOBatmanLotDK", "Config", "Tags", $"{mod.ModId}PawnTags.ini"),
-                $"{ArchiveRoot}/LEGOBatmanLotDK/Config/Tags/{mod.ModId}PawnTags.ini");
+                Path.Combine(outRoot, "LooseFiles", "LEGOBatmanLotDK", "Config", "Tags", $"{mod.ModId}Tags.ini"),
+                $"{ArchiveRoot}/LEGOBatmanLotDK/Config/Tags/{mod.ModId}Tags.ini");
             AddRequired(
                 Path.Combine(outRoot, "mod.json"),
                 $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/Mods/{mod.ModId}/mod.json");
@@ -1169,7 +1180,7 @@ public sealed partial class MainForm
         model.Chips.Add(($"{result.FilesCopied} file{(result.FilesCopied == 1 ? "" : "s")} copied", isComplete ? Theme.Good : Theme.Warn));
         if (!string.IsNullOrWhiteSpace(result.BuildOutput)) model.Fields.Add(("Build output", result.BuildOutput));
         if (!string.IsNullOrWhiteSpace(result.TrioDestination)) model.Fields.Add(("Pak files", result.TrioDestination));
-        if (!string.IsNullOrWhiteSpace(result.TagsDestination)) model.Fields.Add(("PawnTags", result.TagsDestination));
+        if (!string.IsNullOrWhiteSpace(result.TagsDestination)) model.Fields.Add(("Gameplay tags", result.TagsDestination));
         if (!string.IsNullOrWhiteSpace(result.RegistryDestination)) model.Fields.Add(("Suit manifest", result.RegistryDestination));
         if (!string.IsNullOrWhiteSpace(result.AssetRegistryDestination)) model.Fields.Add(("Asset Registry", result.AssetRegistryDestination));
         Dialog.Show(this, model);
@@ -1247,7 +1258,12 @@ public sealed partial class MainForm
         ModReleaseStep("Checking enabled suits and gameplay tags…");
 
         var enabled = mod.Suits.Where(s => s.Enabled).ToList();
-        if (enabled.Count == 0) { AppendLog("Build mod: no enabled suits."); return false; }
+        var enabledBricks = (mod.RedBricks ?? []).Where(brick => brick.Enabled).ToList();
+        if (enabled.Count == 0 && enabledBricks.Count == 0)
+        {
+            AppendLog("Build mod: no enabled suits or Red Bricks.");
+            return false;
+        }
 
         var preflight = ValidateModReleaseAuthoring(mod, enabled);
         if (!preflight.Result.Passed)
@@ -1265,6 +1281,7 @@ public sealed partial class MainForm
         var tagRows = new List<PawnTagConfigService.TagRow>();
         var stEntries = new Dictionary<string, string>(StringComparer.Ordinal);
         var manifestSuits = new List<ModManifestSuit>();
+        var manifestRedBricks = new List<ModManifestRedBrick>();
 
         foreach (var entry in enabled)
         {
@@ -1305,25 +1322,20 @@ public sealed partial class MainForm
             });
         }
 
-        if (tagRows.Count == 0) { AppendLog("Build mod: nothing to build."); return false; }
+        foreach (var brick in enabledBricks)
+        {
+            stEntries[$"RedBrick.{brick.BrickId}.Name"] = brick.DisplayName ?? "";
+            stEntries[$"RedBrick.{brick.BrickId}.Type"] = "COLOR";
+        }
+
+        if (tagRows.Count == 0 && enabledBricks.Count == 0) { AppendLog("Build mod: nothing to build."); return false; }
 
         // Fresh stage each build so a removed suit's assets don't linger in the trio.
         var stageRoot = Path.Combine(outRoot, "Stage");
         try { if (Directory.Exists(stageRoot)) Directory.Delete(stageRoot, recursive: true); }
         catch (Exception ex) { AppendLog($"Build mod: could not clear old stage: {ex.Message}"); }
 
-        // 1) PawnTags.ini (deterministic; throws on empty/duplicate tags).
-        try
-        {
-            ModReleaseStep("Generating PawnTags configuration…");
-            var looseRoot = Path.Combine(outRoot, "LooseFiles");
-            var ini = new PawnTagConfigService().Generate(looseRoot, mod.ModId, tagRows);
-            if (ini.Status != "created") { AppendLog($"Build mod: PawnTags.ini failed: {ini.Error}"); return false; }
-            AppendLog($"  PawnTags.ini: {ini.RowCount} tag(s) -> {ini.OutputPath}");
-        }
-        catch (Exception ex) { AppendLog($"Build mod ABORTED: {ex.Message}"); return false; }
-
-        // 2) StringTable ST_<ModId>.
+        // 1) StringTable ST_<ModId>.
         ModReleaseStep("Generating the mod StringTable…");
         var stBase = Path.Combine(outRoot, "Stage", "LEGOBatmanLotDK", "Content", "Mods", mod.ModId, "Localization", $"ST_{mod.ModId}");
         var st = new StringTableGenService(_projectRootText.Text.Trim()).Generate(stBase, mod.ModId, stEntries);
@@ -1334,21 +1346,9 @@ public sealed partial class MainForm
         }
         AppendLog($"  StringTable: {st.EntryCount} entries (namespace {st.TableNamespace}) -> {st.OutputUasset}");
 
-        // 3) Build the schema-3 aggregate index. It is written only after the merged
-        // stage validates, so a failed build never claims assets that were not packaged.
-        var manifest = new ModManifest
-        {
-            mod_id = mod.ModId,
-            display_name = mod.DisplayName,
-            package_base_name = mod.PackageBaseName,
-            content_root = mod.ContentRoot,
-            string_table = StringTableGenService.ObjectPathFor(mod.ModId),
-            build_id = $"{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}",
-            suits = manifestSuits,
-        };
         var modJsonPath = Path.Combine(outRoot, "mod.json");
 
-        // 4) Combined IoStore trio: prepare each suit's current authoring stage,
+        // 2) Combined IoStore trio: prepare each suit's current authoring stage,
         //    merge it with the mod StringTable (no rebasing - distinct /Game roots),
         //    re-patch each suit's DCMD/UIMD text to the mod table, retoc to-zen ONCE.
         try
@@ -1398,6 +1398,94 @@ public sealed partial class MainForm
                 AppendLog($"  bundled suit '{suit.DisplayName}' ({entry.SuitId}) → {suit.TargetPackages!.Dcmd}");
             }
 
+            var redBrickRows = new List<RegistryPluginService.RegistryRow>();
+            var tagConfigPath = string.Empty;
+            if (enabledBricks.Count > 0)
+            {
+                if (!StageRedBrickTexturesIntoContentRoot(mod, stageContent, out var redBrickTextureError))
+                {
+                    preflight.Result.AddError("Red Brick icons", redBrickTextureError);
+                    _lastModReleaseFailure = new ModReleaseFailure(mod.DisplayName, preflight.Result);
+                    AppendLog("Build mod ABORTED: Red Brick icon staging failed: " + redBrickTextureError);
+                    return false;
+                }
+                ModReleaseStep("Staging Red Brick metadata and effects…");
+                var redBrickStage = new RedBrickTintProofService().StageRelease(new RedBrickTintProofService.ReleaseStageRequest
+                {
+                    ExtractedContentRoot = AppSettings.Current.EffectiveExportContentRoot(),
+                    UsmapPath = AppSettings.Current.EffectiveUsmapPath() ?? "",
+                    StageContentRoot = stageContent,
+                    ProjectRoot = projectRoot,
+                    ModId = mod.ModId,
+                    StringTableObjectPath = stObjectPath,
+                    Bricks = enabledBricks,
+                }, line => AppendLog(line));
+                if (!redBrickStage.Succeeded)
+                {
+                    preflight.Result.AddError("Red Bricks", redBrickStage.Error);
+                    _lastModReleaseFailure = new ModReleaseFailure(mod.DisplayName, preflight.Result);
+                    AppendLog("Build mod ABORTED: Red Brick staging failed.");
+                    return false;
+                }
+
+                tagRows.AddRange(redBrickStage.TagRows);
+                redBrickRows.AddRange(redBrickStage.RegistryRows);
+                foreach (var brick in enabledBricks)
+                {
+                    var id = brick.BrickId;
+                    manifestRedBricks.Add(new ModManifestRedBrick
+                    {
+                        brick_id = id,
+                        enabled = true,
+                        menu_order = brick.MenuOrder,
+                        display_name_key = $"RedBrick.{id}.Name",
+                        display_type_key = $"RedBrick.{id}.Type",
+                        description = brick.Description,
+                        payload_tag = $"Collectables.RedBrickTaggedAssets.MetaData.Mods.{mod.ModId}",
+                        effect_tag = $"Collectables.RedBricks.EffectDefinitions.Mods.{mod.ModId}.{id}",
+                        progress_tag = $"GameProgress.Definitions.RedBricks.Mods.{mod.ModId}.{id}",
+                        payload = redBrickStage.PayloadPackage,
+                        effect = $"/Game/Mods/{mod.ModId}/RedBricks/DA_RedBrickEffectDefinition_{id}",
+                        collectable = $"/Game/Mods/{mod.ModId}/RedBricks/DA_Collectable_RedBrick_{id}",
+                        progress = $"/Game/Mods/{mod.ModId}/Progress/PROG_RedBricks_{id}",
+                        icon = brick.IconPackagePath,
+                        unlocked_by_default = brick.UnlockedByDefault,
+                    });
+                }
+                ModService.SaveMod(mod);
+            }
+
+            try
+            {
+                ModReleaseStep("Generating the mod gameplay tags…");
+                var looseRoot = Path.Combine(outRoot, "LooseFiles");
+                var ini = new PawnTagConfigService().Generate(looseRoot, mod.ModId, tagRows);
+                if (ini.Status != "created")
+                {
+                    AppendLog($"Build mod: tag file failed: {ini.Error}");
+                    return false;
+                }
+                tagConfigPath = ini.OutputPath;
+                AppendLog($"  {Path.GetFileName(ini.OutputPath)}: {ini.RowCount} tag(s) -> {ini.OutputPath}");
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"Build mod ABORTED: {ex.Message}");
+                return false;
+            }
+
+            var manifest = new ModManifest
+            {
+                mod_id = mod.ModId,
+                display_name = mod.DisplayName,
+                package_base_name = mod.PackageBaseName,
+                content_root = mod.ContentRoot,
+                string_table = stObjectPath,
+                build_id = $"{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}",
+                suits = manifestSuits,
+                red_bricks = manifestRedBricks,
+            };
+
             ModReleaseStep("Validating the combined release…");
             var validationErrors = ValidateModReleaseStage(mod, manifest, stageContent);
             try
@@ -1437,12 +1525,17 @@ public sealed partial class MainForm
             // Do this before retoc so a bad primary-asset row never produces a
             // misleadingly successful package.
             ModReleaseStep("Verifying the mod Asset Registry plugin...");
+            var registryRows = manifestSuits
+                .Select(suit => new RegistryPluginService.RegistryRow(suit.dcmd))
+                .Concat(redBrickRows)
+                .ToList();
             var registry = await new RegistryPluginService().BuildAsync(
                 outRoot,
                 mod.ModId,
                 mod.DisplayName,
-                manifestSuits.Select(suit => new RegistryPluginService.RegistryRow(suit.dcmd)),
-                line => AppendLog("  registry: " + line));
+                registryRows,
+                line => AppendLog("  registry: " + line),
+                containsRedBricks: manifestRedBricks.Count > 0);
             if (!registry.Succeeded || registry.Layout is null)
             {
                 preflight.Result.AddError("Asset Registry", registry.Error);
@@ -1458,12 +1551,19 @@ public sealed partial class MainForm
                 }
                 return false;
             }
-            preflight.Result.AddInfo("Asset Registry", $"Verified {registry.Rows.Count} PawnMetaData row(s).");
-            AppendLog($"  Asset Registry: {registry.Rows.Count} PawnMetaData row(s) -> {registry.Layout.RegistryPath}");
+            preflight.Result.AddInfo("Asset Registry", $"Verified {registry.Rows.Count} primary-asset row(s).");
+            if (manifestRedBricks.Count > 0)
+            {
+                var pluginTagPath = Path.Combine(registry.Layout.PluginDirectory, "Config", "Tags", $"{mod.ModId}Tags.ini");
+                Directory.CreateDirectory(Path.GetDirectoryName(pluginTagPath)!);
+                File.Copy(tagConfigPath, pluginTagPath, overwrite: true);
+                AppendLog($"  registry tag config: {pluginTagPath}");
+            }
+            AppendLog($"  Asset Registry: {registry.Rows.Count} primary-asset row(s) -> {registry.Layout.RegistryPath}");
             AppendLog("  registry verification: " + registry.VerificationLine);
 
             File.WriteAllText(modJsonPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
-            AppendLog($"  mod.json: {manifestSuits.Count} suit(s) -> {modJsonPath}");
+            AppendLog($"  mod.json: {manifestSuits.Count} suit(s), {manifestRedBricks.Count} Red Brick(s) -> {modJsonPath}");
 
             var trioBase = Path.Combine(outRoot, mod.PackageBaseName);
             ModReleaseStep($"Packing {mod.PackageBaseName} into an IoStore trio…");
@@ -1475,9 +1575,9 @@ public sealed partial class MainForm
                 return false;
             }
 
-            AppendLog($"Build mod '{mod.DisplayName}' COMPLETE — installable trio for {mergedSuits} suit(s):");
+            AppendLog($"Build mod '{mod.DisplayName}' COMPLETE — installable trio for {mergedSuits} suit(s), {manifestRedBricks.Count} Red Brick(s):");
             AppendLog($"  {trioBase}.pak / .ucas / .utoc");
-            AppendLog($"  {mod.ModId}PawnTags.ini + mod.json also under {outRoot}");
+            AppendLog($"  {mod.ModId}Tags.ini + mod.json also under {outRoot}");
             AppendLog($"  Install: trio → ~mods/Slot, ini → Config/Tags, mod.json → ue4ss/{LotdkExpandedLayout.ModuleId}/Mods/{mod.ModId}/");
             RefreshWorkspaceAfterModChange();
             return true;
@@ -1649,6 +1749,47 @@ public sealed partial class MainForm
                     errors.Add($"{suit.suit_id} {required.Role} is missing its .uasset or .uexp: '{normalized}'.");
             }
         }
+
+        var brickIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var expectedPayloadTag = $"Collectables.RedBrickTaggedAssets.MetaData.Mods.{mod.ModId}";
+        foreach (var brick in manifest.red_bricks)
+        {
+            if (string.IsNullOrWhiteSpace(brick.brick_id) || !brickIds.Add(brick.brick_id))
+            {
+                errors.Add($"missing or duplicate Red Brick ID '{brick.brick_id}'.");
+                continue;
+            }
+            if (!string.Equals(brick.payload_tag, expectedPayloadTag, StringComparison.Ordinal))
+                errors.Add($"Red Brick '{brick.brick_id}' must use '{expectedPayloadTag}', not a shared or default payload tag.");
+            if (brick.payload_tag.Equals("Collectables.RedBrickTaggedAssets.MetaData.Default", StringComparison.OrdinalIgnoreCase))
+                errors.Add($"Red Brick '{brick.brick_id}' illegally targets the native Default payload tag.");
+            if (!string.Equals(brick.display_name_key, $"RedBrick.{brick.brick_id}.Name", StringComparison.Ordinal) ||
+                !string.Equals(brick.display_type_key, $"RedBrick.{brick.brick_id}.Type", StringComparison.Ordinal))
+                errors.Add($"StringTable keys are incomplete or do not match Red Brick '{brick.brick_id}'.");
+            if (string.IsNullOrWhiteSpace(brick.effect_tag) || string.IsNullOrWhiteSpace(brick.progress_tag))
+                errors.Add($"Red Brick '{brick.brick_id}' is missing its effect or progress tag.");
+
+            foreach (var required in new[]
+            {
+                (Role: "payload", Package: brick.payload),
+                (Role: "effect", Package: brick.effect),
+                (Role: "collectable", Package: brick.collectable),
+                (Role: "progress", Package: brick.progress),
+            })
+            {
+                var normalized = UnrealPathUtil.NormalizePackagePath(required.Package);
+                if (string.IsNullOrWhiteSpace(required.Package) || !string.Equals(required.Package, normalized, StringComparison.Ordinal) ||
+                    !normalized.StartsWith($"/Game/Mods/{mod.ModId}/", StringComparison.OrdinalIgnoreCase))
+                {
+                    errors.Add($"Red Brick '{brick.brick_id}' {required.Role} must be a clean package below /Game/Mods/{mod.ModId}/.");
+                    continue;
+                }
+                if (!HasCookedPackagePair(contentRoot, normalized))
+                    errors.Add($"Red Brick '{brick.brick_id}' {required.Role} is missing its .uasset or .uexp: '{normalized}'.");
+            }
+            if (!string.IsNullOrWhiteSpace(brick.icon) && !HasCookedPackagePair(contentRoot, brick.icon))
+                errors.Add($"Red Brick '{brick.brick_id}' custom icon is missing its .uasset or .uexp: '{brick.icon}'.");
+        }
         return errors;
     }
 
@@ -1797,10 +1938,10 @@ public sealed partial class MainForm
         return p.ExitCode;
     }
 
-    // --- mod.json (schema 3) serialization shapes ---
+    // --- mod.json serialization shapes ---
     private sealed class ModManifest
     {
-        public int schema_version { get; set; } = 3;
+        public int schema_version { get; set; } = 4;
         public string format { get; set; } = "native_suit_mod";
         public string mod_id { get; set; } = "";
         public string display_name { get; set; } = "";
@@ -1809,6 +1950,7 @@ public sealed partial class MainForm
         public string string_table { get; set; } = "";
         public string build_id { get; set; } = "";
         public List<ModManifestSuit> suits { get; set; } = new();
+        public List<ModManifestRedBrick> red_bricks { get; set; } = new();
     }
 
     private sealed class ModManifestSuit
@@ -1825,5 +1967,24 @@ public sealed partial class MainForm
         public string cutscene { get; set; } = "";
         public string dcmd { get; set; } = "";
         public string uimd { get; set; } = "";
+    }
+
+    private sealed class ModManifestRedBrick
+    {
+        public string brick_id { get; set; } = "";
+        public bool enabled { get; set; } = true;
+        public int menu_order { get; set; }
+        public string display_name_key { get; set; } = "";
+        public string display_type_key { get; set; } = "";
+        public string description { get; set; } = "";
+        public string payload_tag { get; set; } = "";
+        public string effect_tag { get; set; } = "";
+        public string progress_tag { get; set; } = "";
+        public string payload { get; set; } = "";
+        public string effect { get; set; } = "";
+        public string collectable { get; set; } = "";
+        public string progress { get; set; } = "";
+        public string icon { get; set; } = "";
+        public bool unlocked_by_default { get; set; }
     }
 }

@@ -45,7 +45,7 @@ partial class CharacterResearchInspectorControl
         // _titleLabel
         //
         _titleLabel.Dock = DockStyle.Fill;
-        _titleLabel.Font = new Font(FontFamily.GenericSansSerif, 8f, FontStyle.Bold);
+        _titleLabel.Font = Theme.Eyebrow;
         _titleLabel.Text = "RESEARCH INSPECTOR";
         //
         // _infoLabel

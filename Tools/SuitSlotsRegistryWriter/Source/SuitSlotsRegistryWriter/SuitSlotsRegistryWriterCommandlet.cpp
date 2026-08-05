@@ -14,6 +14,15 @@ DEFINE_LOG_CATEGORY_STATIC(LogSuitSlotsRegistryWriter, Log, All);
 
 namespace
 {
+struct FAdditionalRegistryRow
+{
+    FString PackageName;
+    FString PrimaryAssetName;
+    FString PrimaryAssetType;
+    FString ClassPathText;
+    FTopLevelAssetPath AssetClassPath;
+};
+
 bool ReadRequiredValue(
     const FString& Params,
     const TCHAR* Key,
@@ -100,67 +109,6 @@ int32 USuitSlotsRegistryWriterCommandlet::Main(const FString& Params)
         return 3;
     }
 
-    // Optional multi-suit rows use:
-    //   -AdditionalRows="/Game/Path/Asset|PrimaryAssetName;/Game/Other/Asset|OtherName"
-    // The class and PrimaryAssetType are shared with the required first row.
-    // This keeps the original one-row command line compatible while allowing a
-    // packaged suit mod to contribute every DCMD before runtime systems cache
-    // PawnMetaData.
-    TArray<TPair<FString, FString>> AdditionalRows;
-    if (FParse::Value(
-            *Params,
-            TEXT("AdditionalRows="),
-            AdditionalRowsText))
-    {
-        AdditionalRowsText.TrimQuotesInline();
-        AdditionalRowsText.TrimStartAndEndInline();
-
-        TArray<FString> RowTexts;
-        AdditionalRowsText.ParseIntoArray(
-            RowTexts,
-            TEXT(";"),
-            true);
-        for (FString RowText : RowTexts)
-        {
-            RowText.TrimStartAndEndInline();
-            FString AdditionalPackage;
-            FString AdditionalPrimaryAssetName;
-            if (!RowText.Split(
-                    TEXT("|"),
-                    &AdditionalPackage,
-                    &AdditionalPrimaryAssetName,
-                    ESearchCase::CaseSensitive,
-                    ESearchDir::FromStart))
-            {
-                UE_LOG(
-                    LogSuitSlotsRegistryWriter,
-                    Error,
-                    TEXT("Invalid AdditionalRows entry (expected Package|PrimaryAssetName): %s"),
-                    *RowText);
-                return 10;
-            }
-
-            AdditionalPackage.TrimStartAndEndInline();
-            AdditionalPrimaryAssetName.TrimStartAndEndInline();
-            if (!FPackageName::IsValidLongPackageName(
-                    AdditionalPackage) ||
-                AdditionalPrimaryAssetName.IsEmpty())
-            {
-                UE_LOG(
-                    LogSuitSlotsRegistryWriter,
-                    Error,
-                    TEXT("Invalid AdditionalRows entry package=%s primary_asset_name=%s"),
-                    *AdditionalPackage,
-                    *AdditionalPrimaryAssetName);
-                return 10;
-            }
-
-            AdditionalRows.Emplace(
-                MoveTemp(AdditionalPackage),
-                MoveTemp(AdditionalPrimaryAssetName));
-        }
-    }
-
     FString ClassPackageName;
     FString ClassAssetName;
     if (!ClassPathText.Split(
@@ -186,13 +134,63 @@ int32 USuitSlotsRegistryWriterCommandlet::Main(const FString& Params)
         FName(*ClassPackageName),
         FName(*ClassAssetName)};
 
+    // AdditionalRows keeps the original compact suit format while also accepting
+    // Package|PrimaryName|PrimaryType|Class for mixed native systems such as
+    // Red Bricks. A single plugin registry can therefore advertise all assets in
+    // one mod release without auxiliary plugins.
+    TArray<FAdditionalRegistryRow> AdditionalRows;
+    if (FParse::Value(*Params, TEXT("AdditionalRows="), AdditionalRowsText))
+    {
+        AdditionalRowsText.TrimQuotesInline();
+        AdditionalRowsText.TrimStartAndEndInline();
+        TArray<FString> RowTexts;
+        AdditionalRowsText.ParseIntoArray(RowTexts, TEXT(";"), true);
+        for (FString RowText : RowTexts)
+        {
+            TArray<FString> Fields;
+            RowText.ParseIntoArray(Fields, TEXT("|"), false);
+            if (Fields.Num() != 2 && Fields.Num() != 4)
+            {
+                UE_LOG(LogSuitSlotsRegistryWriter, Error,
+                    TEXT("Invalid AdditionalRows entry (expected Package|PrimaryAssetName or Package|PrimaryAssetName|PrimaryAssetType|Class): %s"),
+                    *RowText);
+                return 10;
+            }
+            for (FString& Field : Fields)
+            {
+                Field.TrimStartAndEndInline();
+            }
+
+            FAdditionalRegistryRow Row;
+            Row.PackageName = Fields[0];
+            Row.PrimaryAssetName = Fields[1];
+            Row.PrimaryAssetType = Fields.Num() == 4 ? Fields[2] : PrimaryAssetType;
+            Row.ClassPathText = Fields.Num() == 4 ? Fields[3] : ClassPathText;
+            FString RowClassPackage;
+            FString RowClassAsset;
+            if (!FPackageName::IsValidLongPackageName(Row.PackageName) ||
+                Row.PrimaryAssetName.IsEmpty() ||
+                Row.PrimaryAssetType.IsEmpty() ||
+                !Row.ClassPathText.Split(TEXT("."), &RowClassPackage, &RowClassAsset, ESearchCase::CaseSensitive, ESearchDir::FromEnd) ||
+                RowClassPackage.IsEmpty() || RowClassAsset.IsEmpty())
+            {
+                UE_LOG(LogSuitSlotsRegistryWriter, Error,
+                    TEXT("Invalid AdditionalRows entry: %s"), *RowText);
+                return 10;
+            }
+            Row.AssetClassPath = FTopLevelAssetPath(FName(*RowClassPackage), FName(*RowClassAsset));
+            AdditionalRows.Add(MoveTemp(Row));
+        }
+    }
+
     const TArray<int32> ChunkIds;
 
     FAssetRegistryState State;
     const auto AddPrimaryAssetRow =
         [&](const FString& InPackageName,
             const FString& InPrimaryAssetType,
-            const FString& InPrimaryAssetName)
+            const FString& InPrimaryAssetName,
+            const FTopLevelAssetPath& InAssetClassPath)
         {
             const FString InPackagePath =
                 FPackageName::GetLongPackagePath(InPackageName);
@@ -212,19 +210,20 @@ int32 USuitSlotsRegistryWriterCommandlet::Main(const FString& Params)
                     FName(*InPackageName),
                     FName(*InPackagePath),
                     FName(*InAssetName),
-                    AssetClassPath,
+                    InAssetClassPath,
                     MoveTemp(Tags),
                     ChunkIds,
                     0));
         };
 
-    AddPrimaryAssetRow(PackageName, PrimaryAssetType, PrimaryAssetName);
+    AddPrimaryAssetRow(PackageName, PrimaryAssetType, PrimaryAssetName, AssetClassPath);
     for (const auto& AdditionalRow : AdditionalRows)
     {
         AddPrimaryAssetRow(
-            AdditionalRow.Key,
-            PrimaryAssetType,
-            AdditionalRow.Value);
+            AdditionalRow.PackageName,
+            AdditionalRow.PrimaryAssetType,
+            AdditionalRow.PrimaryAssetName,
+            AdditionalRow.AssetClassPath);
     }
 
     // Optional, deliberately unbacked control row for the loose-plugin proof.
@@ -242,7 +241,8 @@ int32 USuitSlotsRegistryWriterCommandlet::Main(const FString& Params)
         AddPrimaryAssetRow(
             SentinelPackageName,
             SentinelPrimaryAssetType,
-            SentinelPrimaryAssetName);
+            SentinelPrimaryAssetName,
+            AssetClassPath);
     }
 
     // Plugin registries do not need dependency or package-data tables for this
@@ -325,19 +325,24 @@ int32 USuitSlotsRegistryWriterCommandlet::Main(const FString& Params)
     bool bFoundExactPrimaryId = false;
     TArray<FString> ExpectedObjectPaths;
     TArray<FString> ExpectedPrimaryAssetNames;
+    TArray<FString> ExpectedPrimaryAssetTypes;
+    TArray<FTopLevelAssetPath> ExpectedAssetClassPaths;
     ExpectedObjectPaths.Reserve(1 + AdditionalRows.Num());
     ExpectedPrimaryAssetNames.Reserve(1 + AdditionalRows.Num());
     ExpectedObjectPaths.Add(ObjectPath);
     ExpectedPrimaryAssetNames.Add(PrimaryAssetName);
+    ExpectedPrimaryAssetTypes.Add(PrimaryAssetType);
+    ExpectedAssetClassPaths.Add(AssetClassPath);
     for (const auto& AdditionalRow : AdditionalRows)
     {
-        const FString AdditionalAssetName =
-            FPackageName::GetShortName(AdditionalRow.Key);
+        const FString AdditionalAssetName = FPackageName::GetShortName(AdditionalRow.PackageName);
         ExpectedObjectPaths.Add(
-            AdditionalRow.Key +
+            AdditionalRow.PackageName +
             TEXT(".") +
             AdditionalAssetName);
-        ExpectedPrimaryAssetNames.Add(AdditionalRow.Value);
+        ExpectedPrimaryAssetNames.Add(AdditionalRow.PrimaryAssetName);
+        ExpectedPrimaryAssetTypes.Add(AdditionalRow.PrimaryAssetType);
+        ExpectedAssetClassPaths.Add(AdditionalRow.AssetClassPath);
     }
     TArray<uint8> FoundExpectedRows;
     TArray<uint8> FoundExpectedPrimaryIds;
@@ -368,14 +373,13 @@ int32 USuitSlotsRegistryWriterCommandlet::Main(const FString& Params)
 
                 bMatchedExpectedPrimaryRow = true;
                 FoundExpectedRows[ExpectedIndex] =
-                    AssetData.AssetClassPath == AssetClassPath
+                    AssetData.AssetClassPath == ExpectedAssetClassPaths[ExpectedIndex]
                         ? 1
                         : 0;
                 const FPrimaryAssetId Id =
                     AssetData.GetPrimaryAssetId();
                 FoundExpectedPrimaryIds[ExpectedIndex] =
-                    Id.PrimaryAssetType ==
-                            FName(*PrimaryAssetType) &&
+                    Id.PrimaryAssetType == FName(*ExpectedPrimaryAssetTypes[ExpectedIndex]) &&
                         Id.PrimaryAssetName ==
                             FName(
                                 *ExpectedPrimaryAssetNames[

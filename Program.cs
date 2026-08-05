@@ -833,9 +833,8 @@ internal static class Program
 
         ApplicationConfiguration.Initialize();
 
-        // UI redesign (2026-07): app-wide modern type. Segoe UI 9 matches the WinForms default
-        // SIZE (so fixed designer layouts don't clip) while making the face explicit/consistent.
-        try { Application.SetDefaultFont(new Font("Segoe UI", 9f)); } catch { /* pre-window only */ }
+        // Keep the bundled typeface as the default for controls without an explicit font.
+        try { Application.SetDefaultFont(AppFonts.Condensed(10f, FontStyle.Bold)); } catch { /* pre-window only */ }
         ThemedMenuRenderer.Apply(); // dark context menus app-wide
         Theme.ApplyDarkTitleBarsAppWide();
         Animator.Enabled = AppSettings.Current.AnimationsEnabled;
