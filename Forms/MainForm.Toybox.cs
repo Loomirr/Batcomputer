@@ -210,20 +210,6 @@ public sealed partial class MainForm
         body.Controls.Add(viewerHost, 0, 0);
         body.SetColumnSpan(viewerHost, 3);
 
-        // Red Bricks have their own full-width authoring surface. Keeping it out of the
-        // Home layout avoids the old clipped nested-workspace behavior.
-        var redBrickHost = new Panel
-        {
-            Dock = DockStyle.Fill,
-            Margin = new Padding(3),
-            BackColor = Theme.WindowBg,
-            Visible = false,
-        };
-        _redBrickWorkspaceHost = redBrickHost;
-        redBrickHost.Controls.Add(CreateRedBrickWorkspace());
-        body.Controls.Add(redBrickHost, 0, 0);
-        body.SetColumnSpan(redBrickHost, 3);
-
         SelectWorkspaceFolder(WorkspaceFolder.Home, refresh: false);
         PopulateToyboxSlots();
         PopulateToyboxTypes();
@@ -535,7 +521,6 @@ public sealed partial class MainForm
         tabs.Controls.Add(CreateWorkspaceFolderButton(WorkspaceFolder.Home, "Home", Theme.Gold, "Home.png"));
         tabs.Controls.Add(CreateWorkspaceFolderButton(WorkspaceFolder.Suits, "Suits", Theme.Base, "Suits.png"));
         tabs.Controls.Add(CreateWorkspaceFolderButton(WorkspaceFolder.Viewer, "3D viewer", Theme.Gliders, "3D.gif"));
-        tabs.Controls.Add(CreateWorkspaceFolderButton(WorkspaceFolder.RedBricks, "Red bricks", Theme.RedBricks, "RedBricks.png"));
         return strip;
     }
 
@@ -549,7 +534,6 @@ public sealed partial class MainForm
                   WorkspaceFolder.Home => 112,
                   WorkspaceFolder.Suits => 110,
                   WorkspaceFolder.Viewer => 124,
-                  WorkspaceFolder.RedBricks => 138,
                   _ => 100,
             },
             Height = 38,
@@ -622,7 +606,6 @@ public sealed partial class MainForm
         };
         AddHomeRailButton(rail, HomeWorkspaceSection.Mods, "Mods", Theme.Mods, "Mods.png");
         AddHomeRailButton(rail, HomeWorkspaceSection.Suits, "Suits", Theme.Base, "Suits.png");
-        AddHomeRailButton(rail, HomeWorkspaceSection.RedBricks, "Red bricks", Theme.RedBricks, "RedBricks.png");
         AddHomeRailButton(rail, HomeWorkspaceSection.BuildMod, "Build mod", Theme.Equipment, "BuildMod.png");
         AddHomeRailButton(rail, HomeWorkspaceSection.Review, "Review", Theme.Research, "Review.png");
         UpdateHomeWorkspaceRailSelection();
@@ -724,14 +707,12 @@ public sealed partial class MainForm
             var isHome = folder == WorkspaceFolder.Home;
             var isSuits = folder == WorkspaceFolder.Suits;
             var isViewer = folder == WorkspaceFolder.Viewer;
-            var isRedBricks = folder == WorkspaceFolder.RedBricks;
-            var isDedicatedWorkspace = isViewer || isRedBricks;
+            var isDedicatedWorkspace = isViewer;
 
             if (_suitWorkflowRail is not null) _suitWorkflowRail.Visible = isSuits;
             if (_homeWorkflowRail is not null) _homeWorkflowRail.Visible = isHome;
             _yourCharacter.Visible = isSuits;
             if (_viewerWorkspaceHost is not null) _viewerWorkspaceHost.Visible = isViewer;
-            if (_redBrickWorkspaceHost is not null) _redBrickWorkspaceHost.Visible = isRedBricks;
             _toyboxWorkspaceSplit.Visible = !isDedicatedWorkspace;
 
             // Reset every layout fact on every switch. Incremental span changes were the source
@@ -780,12 +761,7 @@ public sealed partial class MainForm
             ShowViewerPanel();
         }
 
-        if (folder == WorkspaceFolder.RedBricks)
-        {
-            RefreshRedBrickWorkspace();
-        }
-
-        if (refresh && folder is not WorkspaceFolder.Viewer and not WorkspaceFolder.RedBricks)
+        if (refresh && folder != WorkspaceFolder.Viewer)
         {
             RefreshToyboxTiles();
         }
@@ -796,7 +772,6 @@ public sealed partial class MainForm
         var category = _toyboxCategoryCombo.SelectedItem?.ToString() ?? "Home";
         if (!_switchingWorkspaceFolder &&
             _workspaceFolder != WorkspaceFolder.Suits &&
-            _workspaceFolder != WorkspaceFolder.RedBricks &&
             !category.Equals("Home", StringComparison.OrdinalIgnoreCase) &&
             !IsHomeOnlyCategory(category))
         {
@@ -1808,9 +1783,6 @@ public sealed partial class MainForm
             case HomeWorkspaceSection.Suits:
                 RefreshHomeSuitLibraryTiles();
                 return;
-            case HomeWorkspaceSection.RedBricks:
-                RefreshHomeRedBrickTiles();
-                return;
             case HomeWorkspaceSection.BuildMod:
                 RefreshBuildModTiles();
                 return;
@@ -1976,16 +1948,9 @@ public sealed partial class MainForm
                 string.Equals(candidate.SlotId, entry.SuitId, StringComparison.OrdinalIgnoreCase));
             return (Entry: entry, Summary: summary);
         }).ToList();
-        var activeBricks = activeMod?.RedBricks
-            .Where(brick => brick.Enabled)
-            .OrderBy(brick => brick.MenuOrder)
-            .ThenBy(brick => brick.DisplayName)
-            .ToList() ?? new List<ModRedBrickEntry>();
-
         var hasActiveMod = activeSummary is not null && activeMod is not null;
         var activeSuitCount = activeEntries.Count;
-        var activeBrickCount = activeBricks.Count;
-        var activeContentCount = activeSuitCount + activeBrickCount;
+        var activeContentCount = activeSuitCount;
         var currentSlot = _slotIdText.Text.Trim();
         var currentSuitIsInActiveMod = hasActiveMod && activeEntries.Any(entry =>
             string.Equals(entry.SuitId, currentSlot, StringComparison.OrdinalIgnoreCase));
@@ -1994,7 +1959,6 @@ public sealed partial class MainForm
         {
             (hasActiveMod ? "active mod" : "no active mod", hasActiveMod ? Theme.Mods : Theme.Warn),
             ($"{(hasActiveMod ? activeSuitCount : savedSuits.Count)} suit{((hasActiveMod ? activeSuitCount : savedSuits.Count) == 1 ? "" : "s")}", Theme.Base),
-            ($"{(hasActiveMod ? activeBrickCount : 0)} red brick{((hasActiveMod ? activeBrickCount : 0) == 1 ? "" : "s")}", Theme.RedBricks),
             (partCount > 0 ? $"{partCount} parts" : "index not built", partCount > 0 ? Theme.Materials : Theme.OnDarkMuted),
         };
 
@@ -2003,8 +1967,8 @@ public sealed partial class MainForm
             Overline = "MOD WORKSPACE",
             Title = hasActiveMod ? activeSummary!.DisplayName : "Start your first mod",
             Subtitle = hasActiveMod
-                ? $"{activeSuitCount} suit{(activeSuitCount == 1 ? "" : "s")} and {activeBrickCount} Red Brick{(activeBrickCount == 1 ? "" : "s")} grouped into one mod release."
-                : "Create or select a mod first, then add the suits and Red Bricks that ship together.",
+                ? $"{activeSuitCount} suit{(activeSuitCount == 1 ? "" : "s")} grouped into one mod release."
+                : "Create or select a mod first, then add the suits that ship together.",
             Badge = "",
             ThumbAccent = hasActiveMod ? Theme.Mods : Theme.Gold,
             Chips = chips,
@@ -2022,7 +1986,7 @@ public sealed partial class MainForm
                 {
                     Label = "2. CONTENT",
                     Detail = hasActiveMod
-                        ? (activeContentCount > 0 ? "suits and Red Bricks" : "add content")
+                        ? (activeContentCount > 0 ? "suits" : "add content")
                         : "select a mod first",
                     Accent = Theme.Base,
                     Current = hasActiveMod && activeContentCount == 0,
@@ -2039,7 +2003,6 @@ public sealed partial class MainForm
 
         const string SectionMod = "MODS";
         const string SectionSuits = "2. SUITS";
-        const string SectionRedBricks = "2. RED BRICKS";
         const string SectionBuild = "3. BUILD MOD";
         const string SectionSavedSuits = "SAVED SUITS";
         var tiles = new List<VirtualTilePanel.Tile>();
@@ -2144,44 +2107,13 @@ public sealed partial class MainForm
             });
         }
 
-        tiles.Add(new VirtualTilePanel.Tile
-        {
-            Section = SectionRedBricks,
-            Title = "＋ Add Red Brick",
-            Subtitle = "create or reuse in this mod",
-            Accent = Theme.RedBricks,
-            Dashed = true,
-            OnClick = () => OpenRedBrickWorkspaceForMod(modPath),
-        });
-        tiles.Add(new VirtualTilePanel.Tile
-        {
-            Section = SectionRedBricks,
-            Title = "Manage Red Bricks",
-            Subtitle = $"{activeBrickCount} in this mod",
-            Accent = Theme.RedBricks,
-            OnClick = () => OpenRedBrickWorkspaceForMod(modPath),
-        });
-        foreach (var brick in activeBricks.Take(10))
-        {
-            var captured = brick;
-            tiles.Add(new VirtualTilePanel.Tile
-            {
-                Section = SectionRedBricks,
-                Title = TrimMiddle(captured.DisplayName, 26),
-                Subtitle = $"{captured.PrimaryColourRow} · {captured.SecondaryColourRow} · {captured.TertiaryColourRow}",
-                Accent = Theme.RedBricks,
-                Image = LoadRedBrickIconPreview(captured),
-                OnClick = () => OpenRedBrickWorkspaceForMod(modPath),
-            });
-        }
-
         if (activeContentCount == 0)
         {
             tiles.Add(new VirtualTilePanel.Tile
             {
                 Section = SectionBuild,
                 Title = "Add content first",
-                Subtitle = $"{modName} needs a suit or Red Brick before it can build",
+                Subtitle = $"{modName} needs a suit before it can build",
                 Accent = Theme.Gold,
                 Dashed = true,
                 OnClick = () => StartNewSuitInMod(modPath),

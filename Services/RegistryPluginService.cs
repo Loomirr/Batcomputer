@@ -16,6 +16,7 @@ public sealed class RegistryPluginService
     public const string PrimaryAssetType = "PawnMetaData";
     public const string PawnMetadataClass = "/Script/DinnerPawnMetaData.DinnerCharacterMetaData";
     public const string WriterResultMarker = "SUIT_SLOTS_REGISTRY_WRITER_RESULT";
+    public const string CorePluginName = LotdkExpandedLayout.CoreRegistryPluginName;
     private const string ProofSentinelRoot = "/Game/Developers/NstDevScan";
     private const string WriterProbePackage = "/Game/Mods/BatcomputerWriterProbe/Characters/DA_DCMD_BatcomputerWriterProbe_Playable";
 
@@ -79,9 +80,9 @@ public sealed class RegistryPluginService
         public string Fingerprint { get; set; } = "";
     }
 
-    public static PluginLayout CreateLayout(string buildRoot, string modId, bool containsRedBricks = false)
+    public static PluginLayout CreateLayout(string buildRoot, string modId)
     {
-        var pluginName = containsRedBricks ? $"{modId}RedBricksRegistry" : $"{modId}Registry";
+        var pluginName = $"{modId}Registry";
         var directory = Path.Combine(buildRoot, "Engine", "Plugins", "Mods", pluginName);
         return new PluginLayout(
             pluginName,
@@ -89,6 +90,35 @@ public sealed class RegistryPluginService
             Path.Combine(directory, pluginName + ".uplugin"),
             Path.Combine(directory, "AssetRegistry.bin"));
     }
+
+    /// <summary>
+    /// The core plugin owns the one global Asset Manager scan extension. Per-mod
+    /// plugins carry only their own registry rows and gameplay tags.
+    /// </summary>
+    public static PluginLayout EnsureCorePlugin(string buildRoot)
+    {
+        var directory = Path.Combine(buildRoot, "Engine", "Plugins", "Mods", CorePluginName);
+        var layout = new PluginLayout(
+            CorePluginName,
+            directory,
+            Path.Combine(directory, CorePluginName + ".uplugin"),
+            Path.Combine(directory, "AssetRegistry.bin"));
+
+        Directory.CreateDirectory(Path.Combine(directory, "Config"));
+        File.WriteAllText(layout.DescriptorPath, BuildDescriptorJson(CorePluginName, "LOTDK Expanded Core"));
+        File.WriteAllText(CoreGameIniPath(layout), RenderCoreAssetManagerConfig(), new UTF8Encoding(false));
+        return layout;
+    }
+
+    public static string CoreGameIniPath(PluginLayout layout) =>
+        Path.Combine(layout.PluginDirectory, "Config", "Game.ini");
+
+    public static string RenderCoreAssetManagerConfig() => string.Join("\r\n", [
+        "[/Script/Engine.AssetManagerSettings]",
+        "-PrimaryAssetTypesToScan=(PrimaryAssetType=\"PawnMetaData\",AssetBaseClass=\"/Script/TtPawnMetaData.TtPawnMetaData\",bHasBlueprintClasses=False,bIsEditorOnly=False,Directories=((Path=\"/Game/Characters\"),(Path=\"/Game/PlaceHolder/Characters\"),(Path=\"/Game/Developers\"),(Path=\"/Game/Vehicles\"),(Path=\"/Game/AdditionalContent\")),SpecificAssets=,Rules=(Priority=-1,ChunkId=-1,bApplyRecursively=True,CookRule=AlwaysCook))",
+        "+PrimaryAssetTypesToScan=(PrimaryAssetType=\"PawnMetaData\",AssetBaseClass=\"/Script/TtPawnMetaData.TtPawnMetaData\",bHasBlueprintClasses=False,bIsEditorOnly=False,Directories=((Path=\"/Game/Characters\"),(Path=\"/Game/PlaceHolder/Characters\"),(Path=\"/Game/Developers\"),(Path=\"/Game/Vehicles\"),(Path=\"/Game/AdditionalContent\"),(Path=\"/Game/Mods\")),SpecificAssets=,Rules=(Priority=-1,ChunkId=-1,bApplyRecursively=True,CookRule=AlwaysCook))",
+        ""
+    ]);
 
     public static bool NeedsWriterPreparation()
     {
@@ -116,7 +146,8 @@ public sealed class RegistryPluginService
         log("Verifying the UE 5.6 Asset Registry writer...");
         var rows = new[] { new RegistryRow(WriterProbePackage) };
         var run = await RunWriterAsync(toolchain, probeOutput, rows, "BatcomputerWriterProbe", log);
-        if (run.ExitCode != 0 && ensured.UsedCache)
+        var verifiedOutput = File.Exists(probeOutput) && VerificationMatches(FindVerificationLine(run.Output), rows);
+        if (run.ExitCode != 0 && !verifiedOutput && ensured.UsedCache)
         {
             log("The cached registry writer did not load; rebuilding it once...");
             ensured = await EnsureWriterAsync(toolchain, log, forceBuild: true);
@@ -125,10 +156,11 @@ public sealed class RegistryPluginService
                 return new WriterPreparationResult { Error = ensured.Error };
             }
             run = await RunWriterAsync(toolchain, probeOutput, rows, "BatcomputerWriterProbe", log);
+            verifiedOutput = File.Exists(probeOutput) && VerificationMatches(FindVerificationLine(run.Output), rows);
         }
 
         var verification = FindVerificationLine(run.Output);
-        if (run.ExitCode != 0 || !File.Exists(probeOutput) || !VerificationMatches(verification, rows.Length))
+        if ((!verifiedOutput && run.ExitCode != 0) || !File.Exists(probeOutput) || !VerificationMatches(verification, rows))
         {
             return new WriterPreparationResult
             {
@@ -218,8 +250,7 @@ public sealed class RegistryPluginService
         string modId,
         string modDisplayName,
         IEnumerable<RegistryRow> candidateRows,
-        Action<string> log,
-        bool containsRedBricks = false)
+        Action<string> log)
     {
         var rows = candidateRows
             .Select(row => row with { PackagePath = UnrealPathUtil.NormalizePackagePath(row.PackagePath) })
@@ -245,30 +276,12 @@ public sealed class RegistryPluginService
             return new BuildResult { Error = ensured.Error, Rows = rows };
         }
 
-        var layout = CreateLayout(buildRoot, modId, containsRedBricks);
+        var layout = CreateLayout(buildRoot, modId);
         try
         {
-            var alternateLayout = CreateLayout(buildRoot, modId, !containsRedBricks);
-            if (!string.Equals(alternateLayout.PluginDirectory, layout.PluginDirectory, StringComparison.OrdinalIgnoreCase) &&
-                Directory.Exists(alternateLayout.PluginDirectory))
-            {
-                Directory.Delete(alternateLayout.PluginDirectory, recursive: true);
-                log($"Removed stale registry plugin '{alternateLayout.PluginName}'.");
-            }
+            EnsureCorePlugin(buildRoot);
             Directory.CreateDirectory(layout.PluginDirectory);
             File.WriteAllText(layout.DescriptorPath, BuildDescriptorJson(layout.PluginName, modDisplayName));
-            // This registry plugin has no configuration of its own. Clear an old copy
-            // so a rebuilt release cannot accidentally ship unrelated settings.
-            var staleGameIni = Path.Combine(layout.PluginDirectory, "Config", "Game.ini");
-            if (File.Exists(staleGameIni))
-            {
-                File.Delete(staleGameIni);
-            }
-            var staleConfigDirectory = Path.GetDirectoryName(staleGameIni)!;
-            if (Directory.Exists(staleConfigDirectory) && !Directory.EnumerateFileSystemEntries(staleConfigDirectory).Any())
-            {
-                Directory.Delete(staleConfigDirectory);
-            }
             if (File.Exists(layout.RegistryPath))
             {
                 File.Delete(layout.RegistryPath);
@@ -277,7 +290,9 @@ public sealed class RegistryPluginService
             var types = string.Join(", ", rows.Select(row => row.EffectivePrimaryAssetType).Distinct(StringComparer.OrdinalIgnoreCase));
             log($"Writing and verifying {rows.Count} registry row(s): {types}.");
             var writerRun = await RunWriterAsync(toolchain, layout.RegistryPath, rows, layout.PluginName, log);
-            if (writerRun.ExitCode != 0 && ensured.UsedCache)
+            var writerVerifiedOutput = File.Exists(layout.RegistryPath) &&
+                VerificationMatches(FindVerificationLine(writerRun.Output), rows);
+            if (writerRun.ExitCode != 0 && !writerVerifiedOutput && ensured.UsedCache)
             {
                 log("The cached registry writer did not load; rebuilding it once...");
                 ensured = await EnsureWriterAsync(toolchain, log, forceBuild: true);
@@ -286,9 +301,11 @@ public sealed class RegistryPluginService
                     return new BuildResult { Error = ensured.Error, Layout = layout, Rows = rows };
                 }
                 writerRun = await RunWriterAsync(toolchain, layout.RegistryPath, rows, layout.PluginName, log);
+                writerVerifiedOutput = File.Exists(layout.RegistryPath) &&
+                    VerificationMatches(FindVerificationLine(writerRun.Output), rows);
             }
             var verification = FindVerificationLine(writerRun.Output);
-            if (writerRun.ExitCode != 0 || !File.Exists(layout.RegistryPath))
+            if ((!writerVerifiedOutput && writerRun.ExitCode != 0) || !File.Exists(layout.RegistryPath))
             {
                 return new BuildResult
                 {
@@ -300,7 +317,7 @@ public sealed class RegistryPluginService
                     VerificationLine = verification,
                 };
             }
-            if (!VerificationMatches(verification, rows.Count))
+            if (!VerificationMatches(verification, rows))
             {
                 return new BuildResult
                 {
@@ -325,12 +342,15 @@ public sealed class RegistryPluginService
         }
     }
 
-    public static bool VerificationMatches(string verificationLine, int expectedRows) =>
+    public static bool VerificationMatches(string verificationLine, IReadOnlyList<RegistryRow> rows) =>
         verificationLine.Contains(WriterResultMarker, StringComparison.Ordinal) &&
         verificationLine.Contains("cooked_header=yes", StringComparison.OrdinalIgnoreCase) &&
-        verificationLine.Contains($"expected_primary_rows={expectedRows}", StringComparison.OrdinalIgnoreCase) &&
-        verificationLine.Contains($"exact_primary_rows={expectedRows}", StringComparison.OrdinalIgnoreCase) &&
-        verificationLine.Contains($"exact_primary_ids={expectedRows}", StringComparison.OrdinalIgnoreCase) &&
+        verificationLine.Contains($"expected_primary_rows={rows.Count}", StringComparison.OrdinalIgnoreCase) &&
+        verificationLine.Contains($"exact_primary_rows={rows.Count}", StringComparison.OrdinalIgnoreCase) &&
+        verificationLine.Contains($"exact_primary_ids={rows.Count}", StringComparison.OrdinalIgnoreCase) &&
+        rows.All(row => verificationLine.Contains(
+            $"{row.EffectivePrimaryAssetType}:{row.AssetName}",
+            StringComparison.Ordinal)) &&
         verificationLine.Contains("all_expected_rows=yes", StringComparison.OrdinalIgnoreCase) &&
         verificationLine.Contains("all_expected_primary_ids=yes", StringComparison.OrdinalIgnoreCase) &&
         verificationLine.Contains("sentinel_enabled=yes", StringComparison.OrdinalIgnoreCase) &&
@@ -406,6 +426,10 @@ public sealed class RegistryPluginService
         {
             toolchain.WriterProject,
             "-run=SuitSlotsRegistryWriter",
+            // The registry writer does not need a persistent UE Derived Data Cache.
+            // This makes a headless write reliable on machines where the global
+            // Zen/DDC location is unavailable or intentionally read-only.
+            "-DDC-ForceMemoryCache",
             $"-Output={outputPath}",
             $"-Package={first.PackagePath}",
             $"-Class={first.EffectiveAssetClass}",

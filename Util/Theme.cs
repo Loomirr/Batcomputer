@@ -26,7 +26,6 @@ internal static class Theme
     public static readonly Color Equipment = Color.FromArgb(244, 176, 62); // amber
     public static readonly Color Animations = Color.FromArgb(236, 110, 173); // pink
     public static readonly Color Faces = Color.FromArgb(240, 138, 96);     // coral
-    public static readonly Color RedBricks = Color.FromArgb(240, 86, 86); // red
     public static readonly Color Gliders = Color.FromArgb(96, 200, 226);   // sky
     public static readonly Color Textures = Color.FromArgb(100, 230, 245); // cyan
     public static readonly Color Research = Color.FromArgb(188, 160, 255); // lavender
@@ -54,7 +53,6 @@ internal static class Theme
         "Faces" => Faces,
         "Gliders" => Gliders,
         "Textures" => Textures,
-        "Red bricks" => RedBricks,
         "Build mod" => Gold,
         "Research" => Research,
         _ => Inspector

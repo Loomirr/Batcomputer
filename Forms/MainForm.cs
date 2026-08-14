@@ -145,17 +145,10 @@ public sealed partial class MainForm : Form
     private WorkflowRailControl? _suitWorkflowRail;
     private WorkflowRailControl? _homeWorkflowRail;
     private Panel? _viewerWorkspaceHost;
-    private Panel? _redBrickWorkspaceHost;
-    private VirtualTilePanel? _redBrickTileGrid;
-    private Label? _redBrickWorkspaceSubtitle;
-    private Label? _redBrickWorkspaceTitle;
-    private Button? _redBrickPrimaryActionButton;
     private readonly Dictionary<WorkspaceFolder, Button> _workspaceFolderButtons = new();
     private readonly Dictionary<HomeWorkspaceSection, Button> _homeWorkspaceButtons = new();
-    private readonly Dictionary<RedBrickWorkspaceSection, Button> _redBrickWorkspaceButtons = new();
     private WorkspaceFolder _workspaceFolder = WorkspaceFolder.Home;
     private HomeWorkspaceSection _homeWorkspaceSection = HomeWorkspaceSection.Mods;
-    private RedBrickWorkspaceSection _redBrickWorkspaceSection = RedBrickWorkspaceSection.ThisMod;
     private bool _switchingWorkspaceFolder;
 
     private enum WorkspaceFolder
@@ -163,24 +156,14 @@ public sealed partial class MainForm : Form
         Home,
         Suits,
         Viewer,
-        RedBricks,
     }
 
     private enum HomeWorkspaceSection
     {
         Mods,
         Suits,
-        RedBricks,
         BuildMod,
         Review,
-    }
-
-    private enum RedBrickWorkspaceSection
-    {
-        ThisMod,
-        BaseGame,
-        Library,
-        Icons,
     }
 
     private readonly FlowLayoutPanel _toyboxTileFlow = new();
@@ -362,7 +345,7 @@ public sealed partial class MainForm : Form
         _diagnostics.Visible = !_diagnosticsCollapsed;
         header.Text = _diagnosticsCollapsed ? "▸  Diagnostics" : "▾  Diagnostics";
         // Row 1 of the root layout holds the log panel; collapsed leaves just the toggle bar.
-        _mainRootLayout.RowStyles[1].Height = _diagnosticsCollapsed ? 28 : 80;
+        _mainRootLayout.RowStyles[1].Height = _diagnosticsCollapsed ? 34 : 180;
     }
 
     /// <summary>The header's flat ground. Everything sitting on the bar clears to this.</summary>

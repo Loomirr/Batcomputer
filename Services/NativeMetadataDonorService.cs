@@ -31,15 +31,24 @@ public static class NativeMetadataDonorService
         TemplateRecord? playableTemplate = null,
         TemplateRecord? cutsceneTemplate = null)
     {
-        if (dcmdTemplate is null || string.IsNullOrWhiteSpace(dcmdTemplate.Uasset) ||
-            !File.Exists(dcmdTemplate.Uasset))
+        if (dcmdTemplate is null || string.IsNullOrWhiteSpace(dcmdTemplate.PackagePath))
+        {
+            return null;
+        }
+
+        // Projects keep the donor package path, but a game refresh can replace the
+        // extracted directory that originally supplied the file. Prefer the saved
+        // path when it remains valid and otherwise resolve the same package from
+        // the active extracted dump.
+        var dcmdUasset = ResolveTemplateUasset(dcmdTemplate);
+        if (string.IsNullOrWhiteSpace(dcmdUasset) || !File.Exists(dcmdUasset))
         {
             return null;
         }
 
         try
         {
-            var dcmd = Load(dcmdTemplate.Uasset);
+            var dcmd = Load(dcmdUasset);
             var uimdPackage = FindPackage(dcmd, "DA_UIMD_");
             if (string.IsNullOrWhiteSpace(uimdPackage))
             {
@@ -50,7 +59,7 @@ public static class NativeMetadataDonorService
             var icons = File.Exists(uimdUasset) ? ReadIcons(Load(uimdUasset)) : Icons.Empty;
             return new Donor(
                 UnrealPathUtil.NormalizePackagePath(dcmdTemplate.PackagePath),
-                dcmdTemplate.Uasset,
+                dcmdUasset,
                 UnrealPathUtil.NormalizePackagePath(playableTemplate?.PackagePath ?? ""),
                 UnrealPathUtil.NormalizePackagePath(cutsceneTemplate?.PackagePath ?? ""),
                 uimdPackage,
@@ -63,6 +72,16 @@ public static class NativeMetadataDonorService
         {
             return null;
         }
+    }
+
+    private static string ResolveTemplateUasset(TemplateRecord template)
+    {
+        if (!string.IsNullOrWhiteSpace(template.Uasset) && File.Exists(template.Uasset))
+        {
+            return template.Uasset;
+        }
+
+        return PackageToUasset(template.PackagePath);
     }
 
     private static UAsset Load(string path)

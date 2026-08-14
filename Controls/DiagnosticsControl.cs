@@ -19,6 +19,8 @@ public partial class DiagnosticsControl : UserControl
         _logText.ForeColor = Theme.Materials;
         _logText.Font = Theme.Mono; // redesign: monospaced log so timestamps/values align
         _logText.BorderStyle = BorderStyle.None;
+        _logText.WordWrap = true;
+        _logText.ScrollBars = ScrollBars.Vertical;
     }
 
     /// <summary>
@@ -42,6 +44,8 @@ public partial class DiagnosticsControl : UserControl
             builder.Append('[').Append(DateTime.Now.ToString("HH:mm:ss")).Append("] ").AppendLine(line);
         }
         _logText.AppendText(builder.ToString());
+        _logText.SelectionStart = _logText.TextLength;
+        _logText.ScrollToCaret();
     }
 
     /// <summary>Clears the diagnostics surface.</summary>
@@ -49,4 +53,25 @@ public partial class DiagnosticsControl : UserControl
 
     /// <summary>The full log text (for Copy all / Save report actions).</summary>
     public string LogText => _logText.Text;
+
+    /// <summary>Copies every currently retained diagnostics line to the Windows clipboard.</summary>
+    public bool TryCopyLogToClipboard()
+    {
+        if (string.IsNullOrWhiteSpace(_logText.Text))
+        {
+            return false;
+        }
+
+        try
+        {
+            Clipboard.SetText(_logText.Text);
+            return true;
+        }
+        catch (Exception)
+        {
+            // Clipboard can be temporarily held by another Windows app. Keep
+            // the failure local to the caller instead of disrupting a build.
+            return false;
+        }
+    }
 }

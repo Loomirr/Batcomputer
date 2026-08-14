@@ -134,10 +134,8 @@ int32 USuitSlotsRegistryWriterCommandlet::Main(const FString& Params)
         FName(*ClassPackageName),
         FName(*ClassAssetName)};
 
-    // AdditionalRows keeps the original compact suit format while also accepting
-    // Package|PrimaryName|PrimaryType|Class for mixed native systems such as
-    // Red Bricks. A single plugin registry can therefore advertise all assets in
-    // one mod release without auxiliary plugins.
+    // Legacy suit rows may omit the last two fields. New rows always carry
+    // their own type and class so one registry can advertise mixed asset types.
     TArray<FAdditionalRegistryRow> AdditionalRows;
     if (FParse::Value(*Params, TEXT("AdditionalRows="), AdditionalRowsText))
     {
@@ -327,12 +325,14 @@ int32 USuitSlotsRegistryWriterCommandlet::Main(const FString& Params)
     TArray<FString> ExpectedPrimaryAssetNames;
     TArray<FString> ExpectedPrimaryAssetTypes;
     TArray<FTopLevelAssetPath> ExpectedAssetClassPaths;
+    TArray<FString> ExpectedPrimaryAssetIds;
     ExpectedObjectPaths.Reserve(1 + AdditionalRows.Num());
     ExpectedPrimaryAssetNames.Reserve(1 + AdditionalRows.Num());
     ExpectedObjectPaths.Add(ObjectPath);
     ExpectedPrimaryAssetNames.Add(PrimaryAssetName);
     ExpectedPrimaryAssetTypes.Add(PrimaryAssetType);
     ExpectedAssetClassPaths.Add(AssetClassPath);
+    ExpectedPrimaryAssetIds.Add(PrimaryAssetType + TEXT(":") + PrimaryAssetName);
     for (const auto& AdditionalRow : AdditionalRows)
     {
         const FString AdditionalAssetName = FPackageName::GetShortName(AdditionalRow.PackageName);
@@ -343,6 +343,8 @@ int32 USuitSlotsRegistryWriterCommandlet::Main(const FString& Params)
         ExpectedPrimaryAssetNames.Add(AdditionalRow.PrimaryAssetName);
         ExpectedPrimaryAssetTypes.Add(AdditionalRow.PrimaryAssetType);
         ExpectedAssetClassPaths.Add(AdditionalRow.AssetClassPath);
+        ExpectedPrimaryAssetIds.Add(
+            AdditionalRow.PrimaryAssetType + TEXT(":") + AdditionalRow.PrimaryAssetName);
     }
     TArray<uint8> FoundExpectedRows;
     TArray<uint8> FoundExpectedPrimaryIds;
@@ -424,11 +426,13 @@ int32 USuitSlotsRegistryWriterCommandlet::Main(const FString& Params)
         ExactPrimaryRows == ExpectedObjectPaths.Num();
     const bool bFoundAllExpectedPrimaryIds =
         ExactPrimaryIds == ExpectedObjectPaths.Num();
+    const FString ExpectedPrimaryAssetIdsText =
+        FString::Join(ExpectedPrimaryAssetIds, TEXT("|"));
 
     UE_LOG(
         LogSuitSlotsRegistryWriter,
         Display,
-        TEXT("SUIT_SLOTS_REGISTRY_WRITER_RESULT output=%s bytes=%lld cooked_header=%s assets=%d expected_primary_rows=%d exact_primary_rows=%d exact_primary_ids=%d package=%s object=%s class=%s primary_id=%s:%s exact_row=%s exact_primary_id=%s additional_rows=%d all_expected_rows=%s all_expected_primary_ids=%s sentinel_enabled=%s sentinel_object=%s sentinel_primary_id=%s:%s sentinel_exact_row=%s sentinel_exact_primary_id=%s"),
+        TEXT("SUIT_SLOTS_REGISTRY_WRITER_RESULT output=%s bytes=%lld cooked_header=%s assets=%d expected_primary_rows=%d exact_primary_rows=%d exact_primary_ids=%d expected_primary_asset_ids=%s package=%s object=%s class=%s primary_id=%s:%s exact_row=%s exact_primary_id=%s additional_rows=%d all_expected_rows=%s all_expected_primary_ids=%s sentinel_enabled=%s sentinel_object=%s sentinel_primary_id=%s:%s sentinel_exact_row=%s sentinel_exact_primary_id=%s"),
         *OutputPath,
         static_cast<long long>(Serialized.Num()),
         bHasCookedHeader ? TEXT("yes") : TEXT("no"),
@@ -436,6 +440,7 @@ int32 USuitSlotsRegistryWriterCommandlet::Main(const FString& Params)
         ExpectedObjectPaths.Num(),
         ExactPrimaryRows,
         ExactPrimaryIds,
+        *ExpectedPrimaryAssetIdsText,
         *PackageName,
         *ObjectPath,
         *ClassPathText,

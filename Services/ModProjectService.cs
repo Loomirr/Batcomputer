@@ -19,6 +19,11 @@ public sealed class ModProjectService
     };
 
     public sealed record ModSummary(string ModId, string DisplayName, string Path, DateTime Modified, string CoverImagePath, int SuitCount);
+    public sealed record ModIdChangeResult(
+        string PreviousModId,
+        string ModId,
+        string ProjectPath,
+        string ArchivedBuildPath);
 
     public string ProjectRoot { get; }
     public string ModOutputRoot => Path.Combine(AppSettings.GeneratedRootFor(ProjectRoot), "NativeSuitModProjects");
@@ -108,9 +113,10 @@ public sealed class ModProjectService
 
     public NativeSuitModProject? LoadMod(string path)
     {
-        return File.Exists(path)
-            ? JsonSerializer.Deserialize<NativeSuitModProject>(File.ReadAllText(path), JsonOptions)
-            : null;
+        if (!File.Exists(path)) return null;
+        var mod = JsonSerializer.Deserialize<NativeSuitModProject>(File.ReadAllText(path), JsonOptions);
+        if (mod is not null) ApplyDerivedFields(mod);
+        return mod;
     }
 
     public string SaveMod(NativeSuitModProject mod)
@@ -125,6 +131,140 @@ public sealed class ModProjectService
         var path = Path.Combine(ModOutputRoot, $"{safe}.native-suit-mod-project.json");
         File.WriteAllText(path, JsonSerializer.Serialize(mod, JsonOptions));
         return path;
+    }
+
+    /// <summary>
+    /// Changes a mod's technical ID as one authoring transaction. The project
+    /// filename and every derived identity field move to the new ID. Existing
+    /// build output is deliberately archived, not renamed: cooked StringTable,
+    /// registry and package internals still contain the old ID and must be rebuilt.
+    /// Suit-owned package roots are references and are intentionally unchanged.
+    /// </summary>
+    public ModIdChangeResult ChangeModId(string currentProjectPath, string requestedModId)
+    {
+        var sourcePath = Path.GetFullPath(currentProjectPath);
+        var projectRoot = Path.GetFullPath(ModOutputRoot);
+        var projectRootPrefix = projectRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!sourcePath.StartsWith(projectRootPrefix, StringComparison.OrdinalIgnoreCase) ||
+            !sourcePath.EndsWith(".native-suit-mod-project.json", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("The selected file is not a saved Batcomputer mod project.");
+        }
+
+        var mod = LoadMod(sourcePath)
+            ?? throw new InvalidOperationException("The selected mod project could not be loaded.");
+        var previousModId = mod.ModId?.Trim() ?? "";
+        var newModId = DeriveModId(requestedModId);
+        if (string.IsNullOrWhiteSpace(newModId))
+        {
+            throw new InvalidOperationException("The new Mod ID is empty or has no valid characters.");
+        }
+        if (string.Equals(previousModId, newModId, StringComparison.Ordinal))
+        {
+            return new ModIdChangeResult(previousModId, newModId, sourcePath, "");
+        }
+
+        var destinationPath = Path.Combine(projectRoot, $"{newModId}.native-suit-mod-project.json");
+        var destinationIsSource = string.Equals(sourcePath, destinationPath, StringComparison.OrdinalIgnoreCase);
+        if (!destinationIsSource && File.Exists(destinationPath))
+        {
+            throw new InvalidOperationException($"A saved mod project already uses the ID '{newModId}'.");
+        }
+        if (ListMods().Any(summary =>
+                !string.Equals(summary.Path, sourcePath, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(summary.ModId, newModId, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException($"Another saved mod already uses the ID '{newModId}'.");
+        }
+
+        mod.PreviousModIds ??= new List<string>();
+        if (!string.IsNullOrWhiteSpace(previousModId) &&
+            !mod.PreviousModIds.Contains(previousModId, StringComparer.OrdinalIgnoreCase))
+        {
+            mod.PreviousModIds.Add(previousModId);
+        }
+        mod.PreviousModIds = mod.PreviousModIds
+            .Where(id => !string.IsNullOrWhiteSpace(id) &&
+                         !string.Equals(id, newModId, StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        mod.ModId = newModId;
+        ApplyDerivedFields(mod);
+
+        Directory.CreateDirectory(projectRoot);
+        var temporaryPath = Path.Combine(projectRoot, $".{newModId}.{Guid.NewGuid():N}.tmp");
+        File.WriteAllText(temporaryPath, JsonSerializer.Serialize(mod, JsonOptions));
+
+        string archivedBuildPath = "";
+        var destinationCreated = false;
+        var buildsRoot = Path.Combine(AppSettings.GeneratedRootFor(ProjectRoot), "NativeSuitModBuilds");
+        var oldBuildPath = Path.Combine(buildsRoot, previousModId);
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(previousModId) &&
+                !string.Equals(previousModId, newModId, StringComparison.OrdinalIgnoreCase) &&
+                Directory.Exists(oldBuildPath))
+            {
+                var archiveRoot = Path.Combine(buildsRoot, "_ModIdBackups");
+                Directory.CreateDirectory(archiveRoot);
+                archivedBuildPath = Path.Combine(
+                    archiveRoot,
+                    $"{previousModId}_to_{newModId}_{DateTime.UtcNow:yyyyMMdd_HHmmss}");
+                var suffix = 1;
+                while (Directory.Exists(archivedBuildPath))
+                {
+                    archivedBuildPath = Path.Combine(
+                        archiveRoot,
+                        $"{previousModId}_to_{newModId}_{DateTime.UtcNow:yyyyMMdd_HHmmss}_{suffix++}");
+                }
+                Directory.Move(oldBuildPath, archivedBuildPath);
+            }
+
+            if (destinationIsSource)
+            {
+                var intermediatePath = sourcePath + ".id-change";
+                File.Move(sourcePath, intermediatePath, overwrite: true);
+                try
+                {
+                    File.Move(temporaryPath, destinationPath, overwrite: true);
+                    File.Delete(intermediatePath);
+                }
+                catch
+                {
+                    if (File.Exists(intermediatePath) && !File.Exists(sourcePath))
+                    {
+                        File.Move(intermediatePath, sourcePath);
+                    }
+                    throw;
+                }
+            }
+            else
+            {
+                File.Move(temporaryPath, destinationPath);
+                destinationCreated = true;
+                File.Delete(sourcePath);
+            }
+
+            return new ModIdChangeResult(previousModId, newModId, destinationPath, archivedBuildPath);
+        }
+        catch
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+            if (!destinationIsSource && destinationCreated &&
+                File.Exists(sourcePath) && File.Exists(destinationPath))
+            {
+                // The new JSON was written but the old one could not be removed.
+                // Keep the original project as the source of truth and remove the
+                // duplicate new-ID project before reporting the failed migration.
+                File.Delete(destinationPath);
+            }
+            if (!string.IsNullOrWhiteSpace(archivedBuildPath) &&
+                Directory.Exists(archivedBuildPath) && !Directory.Exists(oldBuildPath))
+            {
+                Directory.Move(archivedBuildPath, oldBuildPath);
+            }
+            throw;
+        }
     }
 
     /// <summary>Deletes the mod project JSON only. Never touches referenced suit projects.</summary>

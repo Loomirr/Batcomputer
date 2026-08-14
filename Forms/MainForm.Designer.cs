@@ -52,7 +52,7 @@ partial class MainForm
         _mainRootLayout.Padding = new Padding(0);
         _mainRootLayout.RowCount = 2;
         _mainRootLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        _mainRootLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 80F));
+        _mainRootLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 180F));
         _mainRootLayout.Size = new Size(1500, 1000);
         _mainRootLayout.TabIndex = 0;
 
@@ -127,7 +127,7 @@ partial class MainForm
         _mainLogGroupBox.ForeColor = Color.FromArgb(158, 166, 178);
         _mainLogGroupBox.Location = new Point(3, 843);
         _mainLogGroupBox.Name = "_mainLogGroupBox";
-        _mainLogGroupBox.Padding = new Padding(6, 2, 6, 4);
+        _mainLogGroupBox.Padding = Padding.Empty;
         _mainLogGroupBox.Size = new Size(1494, 154);
         _mainLogGroupBox.TabIndex = 1;
 

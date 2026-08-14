@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Batcomputer;
 
@@ -8,7 +9,7 @@ namespace Batcomputer;
 /// <c>Config/Tags</c> -
 /// the game's own <c>PawnTags.ini</c> is never edited.
 ///
-/// One file per mod, with rows for suits, Red Bricks, and other mod-owned assets:
+/// One file per mod, with rows for suits and other mod-owned assets:
 /// <code>
 /// [/Script/GameplayTags.GameplayTagsList]
 /// GameplayTagList=(Tag="Pawns.Playable.Batman.Electric",DevComment="MyBatmanPack: Electric Suit")
@@ -38,23 +39,7 @@ public sealed class PawnTagConfigService
     /// </summary>
     public static string Render(IEnumerable<TagRow> rows)
     {
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        var ordered = new List<TagRow>();
-        foreach (var row in rows)
-        {
-            var tag = (row.PawnTag ?? "").Trim();
-            if (tag.Length == 0)
-            {
-                throw new InvalidOperationException("A generated gameplay tag is empty; every release tag must be unique before packaging.");
-            }
-            if (!seen.Add(tag))
-            {
-                throw new InvalidOperationException($"Duplicate gameplay tag '{tag}' in this build; release tags must be globally unique.");
-            }
-            ordered.Add(new TagRow(tag, row.DevComment ?? ""));
-        }
-
-        ordered.Sort((a, b) => string.CompareOrdinal(a.PawnTag, b.PawnTag));
+        var ordered = NormalizeRows(rows);
 
         var sb = new StringBuilder();
         sb.Append("[/Script/GameplayTags.GameplayTagsList]\r\n");
@@ -67,27 +52,17 @@ public sealed class PawnTagConfigService
               .Append("\")\r\n");
         }
 
-        if (ordered.Any(IsRedBrickTag))
-        {
-            AppendRedBrickScanRules(sb);
-        }
         return sb.ToString();
     }
 
-    private static bool IsRedBrickTag(TagRow row) =>
-        row.PawnTag.StartsWith("Collectables.RedBrickTaggedAssets.MetaData.Mods.", StringComparison.OrdinalIgnoreCase) ||
-        row.PawnTag.StartsWith("Collectables.RedBricks.EffectDefinitions.Mods.", StringComparison.OrdinalIgnoreCase) ||
-        row.PawnTag.StartsWith("GameProgress.Definitions.RedBricks.Mods.", StringComparison.OrdinalIgnoreCase);
-
-    // The game discovers these primary assets during startup. Keep the rules in the mod's
-    // own tag file so Red Brick releases do not modify the game's shared Game.ini.
-    private static void AppendRedBrickScanRules(StringBuilder sb)
+    /// <summary>Returns generated tags that are absent from an installed loose tag file.</summary>
+    public static IReadOnlyList<string> FindMissingTags(string path, IEnumerable<TagRow> rows)
     {
-        sb.Append("\r\n[/Script/Engine.AssetManagerSettings]\r\n");
-        sb.Append("+PrimaryAssetTypesToScan=(PrimaryAssetType=\"TtGameProgressDefinitionSet\",AssetBaseClass=\"/Script/TtGameProgress.TtGameProgressDefinitionSet\",bHasBlueprintClasses=False,bIsEditorOnly=False,Directories=((Path=\"/Game/Mods\")),SpecificAssets=(),Rules=(Priority=-1,ChunkId=-1,bApplyRecursively=True,CookRule=Unknown))\r\n");
-        sb.Append("+PrimaryAssetTypesToScan=(PrimaryAssetType=\"TtCollectablesMetaData\",AssetBaseClass=\"/Script/TtCollectables.TtCollectablesMetaData\",bHasBlueprintClasses=False,bIsEditorOnly=False,Directories=((Path=\"/Game/Mods\")),SpecificAssets=(),Rules=(Priority=-1,ChunkId=-1,bApplyRecursively=True,CookRule=Unknown))\r\n");
-        sb.Append("+PrimaryAssetTypesToScan=(PrimaryAssetType=\"RedBrickEffectDefinition\",AssetBaseClass=\"/Script/Dinner.RedBrickEffectDefinition\",bHasBlueprintClasses=False,bIsEditorOnly=False,Directories=((Path=\"/Game/Mods\")),SpecificAssets=(),Rules=(Priority=100,ChunkId=0,bApplyRecursively=True,CookRule=AlwaysCook))\r\n");
-        sb.Append("+PrimaryAssetTypesToScan=(PrimaryAssetType=\"RedBrickMetaDataAsset\",AssetBaseClass=\"/Script/Dinner.RedBrickMetaDataAsset\",bHasBlueprintClasses=False,bIsEditorOnly=False,Directories=((Path=\"/Game/Mods\")),SpecificAssets=(),Rules=(Priority=100,ChunkId=0,bApplyRecursively=True,CookRule=AlwaysCook))\r\n");
+        var present = File.Exists(path) ? ReadTagNames(File.ReadAllText(path)) : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        return NormalizeRows(rows)
+            .Select(row => row.PawnTag)
+            .Where(tag => !present.Contains(tag))
+            .ToArray();
     }
 
     /// <summary>Writes the ini into a staged LooseFiles tree; returns the file path.</summary>
@@ -113,6 +88,39 @@ public sealed class PawnTagConfigService
             result.Error = ex.ToString();
         }
         return result;
+    }
+
+    private static List<TagRow> NormalizeRows(IEnumerable<TagRow> rows)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var ordered = new List<TagRow>();
+        foreach (var row in rows)
+        {
+            var tag = (row.PawnTag ?? "").Trim();
+            if (tag.Length == 0)
+            {
+                throw new InvalidOperationException("A generated gameplay tag is empty; every release tag must be unique before packaging.");
+            }
+            if (!seen.Add(tag))
+            {
+                throw new InvalidOperationException($"Duplicate gameplay tag '{tag}' in this build; release tags must be globally unique.");
+            }
+            ordered.Add(new TagRow(tag, row.DevComment ?? ""));
+        }
+
+        ordered.Sort((a, b) => string.CompareOrdinal(a.PawnTag, b.PawnTag));
+        return ordered;
+    }
+
+    private static HashSet<string> ReadTagNames(string text)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Match match in Regex.Matches(text, "Tag\\s*=\\s*\\\"(?<tag>[^\\\"]+)\\\"", RegexOptions.CultureInvariant))
+        {
+            var tag = match.Groups["tag"].Value.Trim();
+            if (tag.Length > 0) names.Add(tag);
+        }
+        return names;
     }
 
     // DevComment is a quoted ini value; keep it single-line and un-quote-broken.

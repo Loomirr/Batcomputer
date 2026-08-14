@@ -4,6 +4,7 @@ namespace Batcomputer;
 internal static class LotdkExpandedLayout
 {
     public const string ModuleId = "LOTDKExpanded";
+    public const string CoreRegistryPluginName = "LOTDKExpandedCoreRegistry";
 
     public static string Ue4ssRoot(string gameRoot) =>
         Path.Combine(gameRoot, "Binaries", "Win64", "ue4ss");
@@ -17,11 +18,17 @@ internal static class LotdkExpandedLayout
     public static string ContentPackDirectory(string gameRoot, string packId) =>
         Path.Combine(ContentPacksRoot(gameRoot), RequireLeafName(packId, "pack ID"));
 
+    public static string ExpandedPaksRoot(string gameRoot) =>
+        Path.Combine(gameRoot, "Content", "Paks", "~mods", "Expanded");
+
     public static string RegistryPluginsRoot(string gameRoot) =>
         Path.Combine(DataRoot(gameRoot), "RegistryPlugins");
 
     public static string RegistryPluginDirectory(string gameRoot, string pluginName) =>
         Path.Combine(RegistryPluginsRoot(gameRoot), RequireLeafName(pluginName, "plugin name"));
+
+    public static string CoreRegistryPluginDirectory(string gameRoot) =>
+        RegistryPluginDirectory(gameRoot, CoreRegistryPluginName);
 
     public static string? TryFindGameRoot(string? paksFolder)
     {

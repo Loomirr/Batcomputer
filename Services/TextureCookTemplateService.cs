@@ -4,6 +4,12 @@ namespace Batcomputer;
 
 internal static class TextureCookTemplateService
 {
+    // The native UI donor keeps a 16-byte serialized separator between its
+    // inline BC7 mip payloads. Its OffsetInFile values point at each
+    // FByteBulkData record; the BC7 bytes begin 0x11 bytes later. The cooker
+    // applies that shared prefix while preserving the inter-record separators.
+    private const int InlineMipInterRecordBytes = 0x10;
+
     private sealed record Definition(
         string Folder,
         string JsonFile,
@@ -13,7 +19,11 @@ internal static class TextureCookTemplateService
         int Height,
         string PixelFormat,
         int BytesPerPixel,
-        int MipCount);
+        int MipCount,
+        int FirstMipWidth = 0,
+        int FirstMipHeight = 0,
+        int FirstMipOffset = 0,
+        bool InlineMips = false);
 
     private sealed record TemplateDocument(
         string Name,
@@ -64,8 +74,8 @@ internal static class TextureCookTemplateService
         .Select(definition => "Content/" + definition.ContentRelativePath)
         .ToArray();
 
+    /// <summary>Returns true only when every template required by the supported texture workflows is present.</summary>
     public static bool HasCoreTemplates(string projectRoot) => Definitions
-        .Take(2)
         .All(definition => IsTemplateReady(TemplateJsonPath(projectRoot, definition.Folder)));
 
     public static string TemplateJsonPath(string projectRoot, string folder) =>
@@ -84,9 +94,11 @@ internal static class TextureCookTemplateService
         var assetBase = Path.Combine(
             Path.GetDirectoryName(templateJsonPath)!,
             Path.GetFileNameWithoutExtension(templateJsonPath));
+        // TextureCookService determines from the JSON whether this particular
+        // template needs an external .ubulk. UI texture donors keep their mips
+        // inline, so requiring a .ubulk here would incorrectly reject them.
         return File.Exists(assetBase + ".uasset") &&
-            File.Exists(assetBase + ".uexp") &&
-            File.Exists(assetBase + ".ubulk");
+            File.Exists(assetBase + ".uexp");
     }
 
     public static Result PrepareFromContentRoot(string projectRoot, string contentRoot)
@@ -97,7 +109,7 @@ internal static class TextureCookTemplateService
             var sourceBase = Path.Combine(
                 contentRoot,
                 definition.ContentRelativePath.Replace('/', Path.DirectorySeparatorChar));
-            var required = new[] { ".uasset", ".uexp", ".ubulk" };
+            var required = new[] { ".uasset", ".uexp" };
             var missing = required
                 .Select(extension => sourceBase + extension)
                 .Where(path => !File.Exists(path))
@@ -110,9 +122,38 @@ internal static class TextureCookTemplateService
 
             var destination = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), definition.Folder);
             Directory.CreateDirectory(destination);
-            foreach (var extension in required)
+            foreach (var extension in required.Append(".ubulk"))
             {
-                File.Copy(sourceBase + extension, Path.Combine(destination, Path.GetFileName(sourceBase) + extension), overwrite: true);
+                var source = sourceBase + extension;
+                if (File.Exists(source))
+                {
+                    // The source already ends with the extension. Appending it a
+                    // second time would create unusable files such as *.uasset.uasset.
+                    var target = Path.Combine(destination, Path.GetFileName(source));
+                    File.Copy(source, target, overwrite: true);
+
+                    // Clean up the short-lived bad names left by the original
+                    // implementation.  This is safe: the correctly named copy
+                    // above is the only file the cook pipeline can consume.
+                    var legacyDuplicateExtension = target + extension;
+                    try
+                    {
+                        if (File.Exists(legacyDuplicateExtension))
+                        {
+                            File.Delete(legacyDuplicateExtension);
+                        }
+                    }
+                    catch (IOException)
+                    {
+                        // The correct file has already been written. A locked,
+                        // obsolete duplicate can be cleaned on the next refresh.
+                    }
+                    catch (UnauthorizedAccessException)
+                    {
+                        // The correct file has already been written. A locked,
+                        // obsolete duplicate can be cleaned on the next refresh.
+                    }
+                }
             }
 
             var json = new TemplateDocument(
@@ -126,7 +167,7 @@ internal static class TextureCookTemplateService
                 Path.Combine(destination, definition.JsonFile),
                 JsonSerializer.Serialize(json, new JsonSerializerOptions { WriteIndented = true }));
             result.Prepared++;
-            result.Logs.Add($"Texture template ready: {definition.PixelFormat} {definition.Width}x{definition.Height}");
+            result.Logs.Add($"Texture template ready: {definition.Folder} ({definition.PixelFormat} {definition.Width}x{definition.Height})");
         }
 
         return result;
@@ -135,21 +176,49 @@ internal static class TextureCookTemplateService
     private static IReadOnlyList<TemplateMip> BuildMips(Definition definition)
     {
         var mips = new List<TemplateMip>(definition.MipCount);
-        var width = definition.Width;
-        var height = definition.Height;
-        var offset = 0;
+        var width = definition.FirstMipWidth > 0 ? definition.FirstMipWidth : definition.Width;
+        var height = definition.FirstMipHeight > 0 ? definition.FirstMipHeight : definition.Height;
+        var offset = definition.FirstMipOffset;
         for (var i = 0; i < definition.MipCount; i++)
         {
-            var size = checked(width * height * definition.BytesPerPixel);
+            var size = CalculateMipSize(definition, width, height);
             mips.Add(new TemplateMip(
                 width,
                 height,
-                new TemplateBulkData(size, size, offset, "PayloadInSeperateFile")));
-            offset = checked(offset + size);
+                new TemplateBulkData(
+                    size,
+                    size,
+                    offset,
+                    definition.InlineMips
+                        ? "BULKDATA_SingleUse | BULKDATA_ForceInlinePayload"
+                        : "PayloadInSeperateFile")));
+            // The 512px UI donor keeps its platform-data records inline in the
+            // .uexp. Each following bulk-data record begins after the previous
+            // compressed payload plus a native 16-byte gap. Treating the
+            // payloads as one contiguous stream overwrites those records,
+            // causing FModel to report PF_Unknown and the game to crash when
+            // UMG resolves the texture.
+            offset = checked(offset + size + (definition.InlineMips ? InlineMipInterRecordBytes : 0));
             width = Math.Max(1, width / 2);
             height = Math.Max(1, height / 2);
         }
 
         return mips;
+    }
+
+    private static int CalculateMipSize(Definition definition, int width, int height)
+    {
+        if (definition.PixelFormat.Equals("PF_DXT5", StringComparison.OrdinalIgnoreCase) ||
+            definition.PixelFormat.Equals("PF_BC7", StringComparison.OrdinalIgnoreCase))
+        {
+            return checked(Math.Max(1, (width + 3) / 4) * Math.Max(1, (height + 3) / 4) * 16);
+        }
+
+        if (definition.PixelFormat.Equals("PF_BC5", StringComparison.OrdinalIgnoreCase))
+        {
+            return checked(Math.Max(1, (width + 3) / 4) * Math.Max(1, (height + 3) / 4) * 16);
+        }
+
+        return checked(width * height * definition.BytesPerPixel);
     }
 }

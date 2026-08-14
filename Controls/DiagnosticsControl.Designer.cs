@@ -29,8 +29,10 @@ partial class DiagnosticsControl
         _logText.Name = "_logText";
         _logText.ReadOnly = true;
         _logText.ScrollBars = ScrollBars.Vertical;
+        _logText.ShortcutsEnabled = true;
         _logText.Size = new Size(1500, 200);
         _logText.TabIndex = 0;
+        _logText.WordWrap = true;
         //
         // DiagnosticsControl
         //
@@ -40,6 +42,5 @@ partial class DiagnosticsControl
         Name = "DiagnosticsControl";
         Size = new Size(1500, 200);
         ResumeLayout(false);
-        PerformLayout();
     }
 }

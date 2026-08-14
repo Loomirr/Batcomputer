@@ -49,7 +49,7 @@ public sealed class GameAssetRefreshService
     //   StringTables - ST_TagNames/ST_UI are the donors StringTableGenService clones for a suit's
     //                  display name and description. Without them a packaged suit has no text.
     //   Animation    - MAS_Char/LAS_Char sets, needed by the equipment/custom-archetype anim graft.
-    // Together they add ~0.3 GB to an ~18 GB extract, which is worth it to avoid a half-usable dump.
+    // Together they add a small amount to an ~18 GB extract, which is worth it to avoid a half-usable dump.
     public static IReadOnlyList<string> AllCharacterFilters { get; } = new[]
     {
         "Content/Characters/",
@@ -68,16 +68,6 @@ public sealed class GameAssetRefreshService
         "Content/Equipment/",
         "Content/Abilities/",
         "Content/Gameplay/",
-        "Content/Global/Collectables/",
-        // Native Red Brick authoring also needs the TtGameProgressDefinitionSet
-        // donor (PROG_RedBricks). Keep the full small GameProgress folder here so
-        // developer proofs never require a manual supplemental extraction.
-        "Content/GameProgress/",
-        // Retoc's broad GameProgress filter can omit nested debug override
-        // packages on this title. Keep the precise folder explicit so the
-        // custom-Red-Brick unlock donor is always available after a developer
-        // research refresh.
-        "Content/GameProgress/Overrides/",
         "Content/UI/",
         "Content/Localization/StringTables/",
         "Content/Plugins/GameFeatures/",
@@ -173,7 +163,7 @@ public sealed class GameAssetRefreshService
             result.Warnings.AddRange(prepared.Warnings);
             if (!TextureCookTemplateService.HasCoreTemplates(_projectRoot))
             {
-                throw new InvalidDataException("The required BGRA8 and BC5 texture templates were not prepared.");
+                throw new InvalidDataException("The required world and UI texture templates were not prepared.");
             }
 
             progress?.Report(new Progress(90, "Preparing textures", "Texture cook templates are ready."));

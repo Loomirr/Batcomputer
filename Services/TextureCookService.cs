@@ -233,6 +233,17 @@ public sealed class TextureCookService
                 try
                 {
                     RewriteTextureIdentityWithUAssetApi(result.OutputUasset, template, outputPackagePath, result);
+                    // A name-map rewrite may grow the .uasset header. UAssetAPI
+                    // needs the paired export loaded to update that header, but
+                    // this deliberately raw Texture2D path keeps the cooked
+                    // inline mip bytes authored above. Restore those exact bytes
+                    // after the header write instead of accepting a serializer-
+                    // generated split payload.
+                    if (uexpBytes is not null)
+                    {
+                        File.WriteAllBytes(result.OutputUexp, uexpBytes);
+                        result.Log.Add("restored cooked split export payload after UAssetAPI header rewrite");
+                    }
                 }
                 catch (Exception ex) when (CanSameLengthIdentityPatch(template, outputPackagePath) && !RequiresNameMapTextureFormatRewrite(template))
                 {
@@ -384,7 +395,13 @@ public sealed class TextureCookService
             .ToDictionary(pair => pair.Key, pair => pair.Value);
 
         var mappings = LoadDefaultMappings();
-        var asset = new UAsset(uassetPath, EngineVersion.VER_UE5_6, mappings, NameMapOnlyPatchFlags);
+        // This asset has its Texture2D export in a companion .uexp. Loading only
+        // the header lets UAssetAPI grow the name map without rebasing the split
+        // export table, which makes FModel discard platform data as PF_Unknown.
+        // Load the pair so the rewritten header remains consistent with the
+        // separate export; the caller restores its intentionally raw cooked
+        // mip payload after this narrow name-map operation.
+        var asset = new UAsset(uassetPath, true, EngineVersion.VER_UE5_6, mappings, NameMapOnlyPatchFlags);
         var beforeFolder = asset.FolderName.ToString();
         if (!beforeFolder.Equals(outputPackagePath, StringComparison.Ordinal))
         {
@@ -1055,15 +1072,18 @@ public sealed class TextureCookService
             return;
         }
 
-        var useSplitUexpInlinePayloadOffset = payloadLabel.Equals(".uexp", StringComparison.OrdinalIgnoreCase);
         var last = inline[^1];
         var footerLength = SplitExportFooterLength(uassetBytes, payloadLabel);
         var writableLength = uassetBytes.Length - footerLength;
-        var inlineBase = useSplitUexpInlinePayloadOffset
-            // FModel's OffsetInFile for split inline Texture2D mips points to the
-            // start of the serialized bulk-data record, not the first compressed
-            // block in the extracted .uexp. In this game's UE5.6 cooked icon
-            // textures, the inline payload begins 0x11 bytes after that marker.
+        // For this game's split .uexp UI donor, OffsetInFile points at the
+        // serialized FByteBulkData record, not the first byte of the BC7
+        // payload. The first record's 0x7F value is followed by its 0x11-byte
+        // header, so its pixels begin at 0x90. Writing at 0x7F overwrites the
+        // serialized PF_BC7/platform-data fields and FModel consequently
+        // reports PF_Unknown. Every inline UI mip uses that same +0x11 base;
+        // the native inter-record bytes remain untouched between payloads.
+        // A non-split .uasset still derives its local base from the final mip.
+        var inlineBase = payloadLabel.Equals(".uexp", StringComparison.OrdinalIgnoreCase)
             ? 0x11
             : uassetBytes.Length - (last.OffsetInFile + last.SizeOnDisk);
         if (inlineBase < 0)

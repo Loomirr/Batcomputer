@@ -32,22 +32,53 @@ public sealed partial class MainForm
         _mainWorkspaceHost.Controls.Add(assembly);
 
         // Collapsible diagnostics drawer: a click-to-toggle header bar over the log.
+        // The host used to retain a 2/4px padding while collapsed, leaving less
+        // vertical room than the header itself and clipping both captions.
         _mainLogGroupBox.Text = "";
-        var diagHeader = new Button
+        _mainLogGroupBox.Padding = Padding.Empty;
+        var diagnosticsHeader = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 22,
+            Height = 34,
+            Padding = new Padding(6, 3, 6, 3),
+            BackColor = Theme.CardBg,
+            ColumnCount = 2,
+            RowCount = 1,
+        };
+        diagnosticsHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        diagnosticsHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92f));
+        diagnosticsHeader.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+        var diagHeader = new Button
+        {
+            Dock = DockStyle.Fill,
             Text = "▾  Diagnostics",
             TextAlign = ContentAlignment.MiddleLeft,
             FlatStyle = FlatStyle.Flat,
             Padding = new Padding(6, 0, 0, 0),
             Cursor = Cursors.Hand,
+            Margin = Padding.Empty,
         };
         Theme.StyleSmallDarkButton(diagHeader);
         diagHeader.Click += (_, _) => ToggleDiagnostics(diagHeader);
+        var copyLog = new Button
+        {
+            Dock = DockStyle.Fill,
+            Text = "Copy log",
+            FlatStyle = FlatStyle.Flat,
+            TextAlign = ContentAlignment.MiddleCenter,
+            Margin = Padding.Empty,
+        };
+        Theme.StyleSmallDarkButton(copyLog);
+        copyLog.Click += (_, _) =>
+        {
+            copyLog.Text = _diagnostics.TryCopyLogToClipboard() ? "Copied" : "Copy failed";
+        };
+        diagnosticsHeader.Controls.Add(diagHeader, 0, 0);
+        diagnosticsHeader.Controls.Add(copyLog, 1, 0);
         _diagnostics.Dock = DockStyle.Fill;
         _mainLogGroupBox.Controls.Add(_diagnostics);
-        _mainLogGroupBox.Controls.Add(diagHeader);
+        _mainLogGroupBox.Controls.Add(diagnosticsHeader);
+        diagnosticsHeader.BringToFront();
         ResumeLayout(true);
     }
 
@@ -276,6 +307,17 @@ public sealed partial class MainForm
         menu.Items.Add("Refresh Batman donor assets", null, (_, _) =>
         {
             _ = RefreshGameAssetsAsync(GameAssetRefreshService.RefreshProfile.BatmanDonors);
+        });
+        menu.Items.Add("Repair texture cook templates", null, async (_, _) =>
+        {
+            var projectRoot = _projectRootText.Text.Trim();
+            if (string.IsNullOrWhiteSpace(projectRoot) || !Directory.Exists(projectRoot))
+            {
+                AppendLog("Texture-template repair cannot start: project root is missing. Open Setup first.");
+                return;
+            }
+
+            await EnsureTextureCookTemplatesAsync(projectRoot);
         });
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Full refresh", null, (_, _) =>
@@ -997,23 +1039,25 @@ public sealed partial class MainForm
             project.CutsceneTemplate);
         if (metadataDonor is null)
         {
-            AppendLog("Skipping native metadata generation - the selected donor DCMD/UIMD could not be read.");
-            return;
+            AppendLog("Native metadata donor could not be read; generating the required DCMD/UIMD from the base Batman metadata.");
         }
 
         var pawnTag = DerivePawnTag(project);
         var icons = new Dictionary<string, string>(StringComparer.Ordinal);
-        AddIconOverride(metadataDonor.IconPaths.Menu, project.IconMenu);
-        AddIconOverride(metadataDonor.IconPaths.Suit, project.IconSuit);
-        AddIconOverride(metadataDonor.IconPaths.Left, project.IconLeft);
-        AddIconOverride(metadataDonor.IconPaths.Right, project.IconRight);
+        AddIconOverride(metadataDonor?.IconPaths.Menu ?? UimdGenService.SrcMenuIcon, project.IconMenu);
+        AddIconOverride(metadataDonor?.IconPaths.Suit ?? UimdGenService.SrcSuitIcon, project.IconSuit);
+        AddIconOverride(metadataDonor?.IconPaths.Left ?? UimdGenService.SrcLeftIcon, project.IconLeft);
+        AddIconOverride(metadataDonor?.IconPaths.Right ?? UimdGenService.SrcRightIcon, project.IconRight);
         var uimdResult = new UimdGenService(_projectRootText.Text.Trim()).Generate(
             uimdOutputBase,
             uimdPkg,
             icons.Count > 0 ? icons : null,
             pawnTag: pawnTag,
             donor: metadataDonor);
-        AppendLog($"UIMD generate: {uimdResult.Status}{(icons.Count > 0 ? $" ({icons.Count} changed icon(s))" : $" (from {UnrealPathUtil.AssetName(metadataDonor.UimdPackagePath)})")}");
+        var uimdSource = metadataDonor is null
+            ? "from base Batman metadata"
+            : $"from {UnrealPathUtil.AssetName(metadataDonor.UimdPackagePath)}";
+        AppendLog($"UIMD generate: {uimdResult.Status}{(icons.Count > 0 ? $" ({icons.Count} changed icon(s))" : $" ({uimdSource})")}");
         if (!string.IsNullOrWhiteSpace(uimdResult.Error))
         {
             AppendLog("  " + uimdResult.Error);

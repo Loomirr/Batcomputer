@@ -69,7 +69,10 @@ character, animation, and localisation assets and needs about 18 GB of free spac
 
 The native runtime is installed separately. Batcomputer installs each mod's `mod.json` under
 `ue4ss\LOTDKExpanded\Mods` and its registry plugin under
-`ue4ss\LOTDKExpanded\RegistryPlugins`; it does not modify the runtime DLL or `mods.txt`.
+`ue4ss\LOTDKExpanded\RegistryPlugins`. It also installs one shared
+`LOTDKExpandedCoreRegistry` plugin which keeps the Asset Manager scanning `/Game/Mods` for
+custom suits. Per-mod plugins contain only that mod's registry rows and gameplay
+tags. Batcomputer does not modify the runtime DLL or `mods.txt`.
 
 ## Building a Suit
 

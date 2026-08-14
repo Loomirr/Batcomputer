@@ -9,7 +9,7 @@ namespace Batcomputer;
 /// </summary>
 public sealed class ModDetailsDialog : Form
 {
-    public enum ModAction { None, EditSuits, Rename, Build, Install, OpenOutput, Delete }
+    public enum ModAction { None, EditSuits, Rename, ChangeId, Build, Install, OpenOutput, Delete }
 
     /// <summary>What the user picked. <see cref="ModAction.None"/> when they just closed it.</summary>
     public ModAction Chosen { get; private set; } = ModAction.None;
@@ -150,13 +150,15 @@ public sealed class ModDetailsDialog : Form
         };
 
         // Row 1: the things you do while building the mod.
-        AddAction(footer, "Edit suits", pad, 14, 118, ModAction.EditSuits, false,
+        AddAction(footer, "Edit suits", pad, 14, 94, ModAction.EditSuits, false,
             "Add or remove suits from this mod");
-        AddAction(footer, "Rename", pad + 126, 14, 96, ModAction.Rename, false,
+        AddAction(footer, "Rename", pad + 102, 14, 76, ModAction.Rename, false,
             "Change the display name");
-        AddAction(footer, "Open output", pad + 230, 14, 118, ModAction.OpenOutput, false,
+        AddAction(footer, "Change ID", pad + 186, 14, 86, ModAction.ChangeId, false,
+            "Change the technical pak / registry / StringTable identity before release");
+        AddAction(footer, "Output", pad + 280, 14, 94, ModAction.OpenOutput, false,
             "Open the build folder in Explorer");
-        AddAction(footer, "Delete", ClientSize.Width - pad - 92, 14, 92, ModAction.Delete, false,
+        AddAction(footer, "Delete", ClientSize.Width - pad - 74, 14, 74, ModAction.Delete, false,
             "Delete the mod project. The suits it references are kept.", Theme.Crit);
 
         // Row 2: the primary flow.

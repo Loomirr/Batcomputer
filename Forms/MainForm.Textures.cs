@@ -784,12 +784,7 @@ public sealed partial class MainForm
             }
         }
 
-        if (IsRedBrickTextureKind(textureKind))
-        {
-            Add("redbrick-2k-dxt5", "2K DXT5 Red Brick icon", dxt5Path, 2048, 2048, "PF_DXT5",
-                TextureProfileSafety.Verified, "Dedicated Red Brick icon route using the proven DXT5 UI donor.");
-        }
-        else if (textureKind.Contains("normal", StringComparison.OrdinalIgnoreCase))
+        if (textureKind.Contains("normal", StringComparison.OrdinalIgnoreCase))
         {
             Add("normal-2k-bc5-legacy", "2K BC5 normal", bc5Path, 2048, 2048, "PF_BC5",
                 TextureProfileSafety.Verified, "Verified on Electric's body normal map in game.");
@@ -797,9 +792,9 @@ public sealed partial class MainForm
         else if (IsColorMaskTextureKind(textureKind))
         {
             Add("mask-2k-bgra8", "2K BGRA8 mask", bgraPath, 2048, 2048, "PF_B8G8R8A8",
-                TextureProfileSafety.Verified, "Verified on Electric's current Red Brick colour mask.");
+                TextureProfileSafety.Verified, "Verified on Electric's current colour mask.");
             Add("mask-1k-bgra8", "1K BGRA8 mask", bgra1kPath, 1024, 1024, "PF_B8G8R8A8",
-                TextureProfileSafety.Experimental, "Lower-resolution mask; verify the intended character and Red Brick route.");
+                TextureProfileSafety.Experimental, "Lower-resolution mask; verify the intended character material.");
             Add("mask-1k-dxt1-legacy", "1K DXT1 colour mask", dxt1Path, 1024, 1024, "PF_DXT1",
                 TextureProfileSafety.Experimental, "Legacy Electric-compatible donor. Test this exact texture role in game first.");
         }
@@ -843,7 +838,6 @@ public sealed partial class MainForm
         "mask-2k-bgra8" => TextureProfileSafety.Verified,
         "ui-2k-dxt5-legacy" => TextureProfileSafety.Verified,
         "ui-2k-bgra8" => TextureProfileSafety.Verified,
-        "redbrick-2k-dxt5" => TextureProfileSafety.Verified,
         _ => TextureProfileSafety.Experimental,
     };
 
@@ -855,16 +849,15 @@ public sealed partial class MainForm
     {
         "normal-2k-bc5-legacy" => "Verified on Electric's body normal map in game.",
         "character-2k-bgra8" => "Verified on Electric's base-colour maps in game.",
-        "mask-2k-bgra8" => "Verified on Electric's current Red Brick colour mask.",
+        "mask-2k-bgra8" => "Verified on Electric's current colour mask.",
         "ui-2k-dxt5-legacy" => "Original UI cook route, verified before the BGRA8 UI profile was added.",
         "ui-2k-bgra8" => "Used by the current generated Electric menu art.",
-        "redbrick-2k-dxt5" => "Dedicated Red Brick icon route using the proven DXT5 UI donor.",
         "character-1k-bgra8" => "Lower-resolution character colour; verify visual quality in game.",
         "mask-1k-bgra8" => "Lower-resolution profile; verify the target use in game.",
         "normal-2k-bgra8" => "Deprecated normal-map route. Choose BC5 instead.",
         "character-2k-dxt5-legacy" => "Legacy donor. Test the target texture role in game first.",
         "packed-2k-dxt5-legacy" => "Legacy donor. Test the target material response in game first.",
-        "mask-1k-dxt1-legacy" => "Legacy colour-mask donor. Test the target Red Brick route in game first.",
+        "mask-1k-dxt1-legacy" => "Legacy colour-mask donor. Test the target material in game first.",
         _ => "This saved recipe has not been classified yet. Preserve it unless you are deliberately testing a new profile.",
     };
 
@@ -1238,11 +1231,8 @@ public sealed partial class MainForm
         (textureKind.Contains("ui", StringComparison.OrdinalIgnoreCase) ||
          textureKind.Contains("icon", StringComparison.OrdinalIgnoreCase));
 
-    private static bool IsRedBrickTextureKind(string? textureKind) =>
-        string.Equals(textureKind?.Trim(), "RedBrick", StringComparison.OrdinalIgnoreCase);
-
     private static bool UseNearestNeighborMipsForTextureKind(string? textureKind, string? cookProfile = null) =>
-        (!IsUiTextureKind(textureKind) && !IsRedBrickTextureKind(textureKind)) ||
+        !IsUiTextureKind(textureKind) ||
         string.Equals(cookProfile, "ui-2k-dxt5-legacy", StringComparison.OrdinalIgnoreCase);
 
     private bool AutoAssignGeneratedUiIconSlots(NativeSuitProject project)
@@ -1408,7 +1398,7 @@ public sealed partial class MainForm
     }
 
     private static bool TextureTemplateNeedsSameLengthPath(string templateJson, string? textureKind) =>
-        (IsUiTextureKind(textureKind) || IsRedBrickTextureKind(textureKind)) &&
+        IsUiTextureKind(textureKind) &&
         TextureTemplateIsInlineOnly(templateJson) &&
         !TextureTemplateIsStandaloneUasset(templateJson);
 
@@ -1831,60 +1821,6 @@ public sealed partial class MainForm
         return true;
     }
 
-    private bool StageRedBrickTexturesIntoContentRoot(NativeSuitModProject mod, string contentRootToPackage, out string error)
-    {
-        error = "";
-        var referencedPackages = new HashSet<string>(
-            (mod.RedBricks ?? [])
-                .Where(brick => brick.Enabled)
-                .Select(brick => UnrealPathUtil.NormalizePackagePath(brick.IconTexturePackagePath))
-                .Where(package => !string.IsNullOrWhiteSpace(package)),
-            StringComparer.OrdinalIgnoreCase);
-        var textures = (mod.RedBrickTextures ?? [])
-            .Where(texture => IsRedBrickTextureKind(texture.Kind) &&
-                referencedPackages.Contains(UnrealPathUtil.NormalizePackagePath(texture.PackagePath)))
-            .ToList();
-        if (textures.Count == 0)
-        {
-            return true;
-        }
-
-        var expectedPrefix = $"/Game/Mods/{mod.ModId}/Textures/";
-        foreach (var texture in textures)
-        {
-            if (!texture.PackagePath.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase))
-            {
-                error = $"Red Brick icon '{texture.DisplayName}' must be under {expectedPrefix}.";
-                return false;
-            }
-            if (!TryPrepareGeneratedTextureForStaging(texture, out var textureError))
-            {
-                error = textureError;
-                return false;
-            }
-        }
-
-        var copied = 0;
-        foreach (var texture in textures)
-        {
-            var cookedContentRoot = Path.Combine(texture.OutputRoot, "Cooked", "LEGOBatmanLotDK", "Content");
-            var sourceBase = PackagePathToContentPath(cookedContentRoot, texture.PackagePath);
-            var destinationBase = PackagePathToContentPath(contentRootToPackage, texture.PackagePath);
-            foreach (var extension in GeneratedTextureRequiredExtensions(texture.TemplateJson))
-            {
-                var source = sourceBase + extension;
-                if (!File.Exists(source)) continue;
-                var destination = destinationBase + extension;
-                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                File.Copy(source, destination, overwrite: true);
-                copied++;
-            }
-        }
-
-        AppendLog($"Staged {copied} Red Brick icon texture file(s) into the pack content root.");
-        return true;
-    }
-
     private bool TryPrepareGeneratedTextureForStaging(GeneratedTextureEntry texture, out string error)
     {
         var label = string.IsNullOrWhiteSpace(texture.DisplayName) ? "unnamed texture" : texture.DisplayName;
@@ -1975,7 +1911,7 @@ public sealed partial class MainForm
             NearestNeighborMips = nearestMips,
             // Native EoM ColorMask templates contain both external and inline
             // mips. Rewrite the inline tail too; otherwise the lower mips remain
-            // the donor image and Red Brick sampling can fall back to stale data.
+            // the donor image and the game's material sampling can fall back to stale data.
             WriteInlineMips = IsColorMaskTextureKind(texture.Kind)
         });
 

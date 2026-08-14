@@ -260,9 +260,9 @@ public sealed partial class MainForm
         }
 
         var mod = ModService.LoadMod(summary.Path);
-        if (mod?.Suits.Any(entry => entry.Enabled) != true && mod?.RedBricks.Any(entry => entry.Enabled) != true)
+        if (mod?.Suits.Any(entry => entry.Enabled) != true)
         {
-            Dialog.Info(this, "Build mod", "Add at least one enabled suit or Red Brick to the active mod before building it.");
+            Dialog.Info(this, "Build mod", "Add at least one enabled suit to the active mod before building it.");
             return;
         }
 
@@ -275,8 +275,7 @@ public sealed partial class MainForm
         var mods = ModService.ListMods().ToList();
         var (activeSummary, activeMod) = ResolveHomeActiveMod(mods);
         var activeSuitCount = activeMod?.Suits.Count(entry => entry.Enabled) ?? 0;
-        var activeBrickCount = activeMod?.RedBricks.Count(entry => entry.Enabled) ?? 0;
-        var activeContentCount = activeSuitCount + activeBrickCount;
+        var activeContentCount = activeSuitCount;
         var hasActiveMod = activeSummary is not null && activeMod is not null;
         var hasBuild = hasActiveMod && File.Exists(Path.Combine(ModBuildRoot(activeSummary!.ModId), activeMod!.PackageBaseName + ".utoc"));
         var hasInstalledRelease = hasBuild && File.Exists(Path.Combine(
@@ -288,14 +287,13 @@ public sealed partial class MainForm
             Overline = "MOD RELEASE",
             Title = hasActiveMod ? activeSummary!.DisplayName : "Choose a mod to build",
             Subtitle = hasActiveMod
-                ? $"{activeSuitCount} enabled suit{(activeSuitCount == 1 ? "" : "s")} and {activeBrickCount} Red Brick{(activeBrickCount == 1 ? "" : "s")} will build and install as one game release."
+                ? $"{activeSuitCount} enabled suit{(activeSuitCount == 1 ? "" : "s")} will build and install as one game release."
                 : "Select a saved mod or create one, then build and install it from here.",
             ThumbAccent = Theme.Gold,
             Chips = new List<(string, Color)>
             {
                 (hasActiveMod ? "mod selected" : "no mod selected", hasActiveMod ? Theme.Research : Theme.Warn),
                 ($"{activeSuitCount} enabled suit{(activeSuitCount == 1 ? "" : "s")}", activeSuitCount > 0 ? Theme.Parts : Theme.OnDarkMuted),
-                ($"{activeBrickCount} Red Brick{(activeBrickCount == 1 ? "" : "s")}", activeBrickCount > 0 ? Theme.RedBricks : Theme.OnDarkMuted),
                 (hasInstalledRelease ? "installed" : hasBuild ? "built; not installed" : "not built", hasInstalledRelease ? Theme.Good : hasBuild ? Theme.Warn : Theme.Warn),
             },
             Workflow = new[]
@@ -338,7 +336,7 @@ public sealed partial class MainForm
                 {
                     Section = SectionRelease,
                     Title = "Add content first",
-                    Subtitle = "this mod has no enabled suits or Red Bricks to build",
+                    Subtitle = "this mod has no enabled suits to build",
                     Accent = Theme.Base,
                     Dashed = true,
                     OnClick = () => EditModSuits(modPath),
@@ -534,6 +532,7 @@ public sealed partial class MainForm
         {
             case ModDetailsDialog.ModAction.EditSuits: EditModSuits(modProjectPath); break;
             case ModDetailsDialog.ModAction.Rename: RenameMod(modProjectPath); break;
+            case ModDetailsDialog.ModAction.ChangeId: ChangeModId(modProjectPath); break;
             case ModDetailsDialog.ModAction.Build: BuildMod(modProjectPath); break;
             case ModDetailsDialog.ModAction.Install: InstallMod(modProjectPath); break;
             case ModDetailsDialog.ModAction.OpenOutput: OpenModBuildOutput(modId); break;
@@ -546,6 +545,7 @@ public sealed partial class MainForm
         var menu = new System.Windows.Forms.ContextMenuStrip();
         menu.Items.Add("Edit suits (add / remove)...", null, (_, _) => EditModSuits(modProjectPath));
         menu.Items.Add("Rename mod...", null, (_, _) => RenameMod(modProjectPath));
+        menu.Items.Add("Change Mod ID...", null, (_, _) => ChangeModId(modProjectPath));
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         menu.Items.Add("Build mod (trio + config + StringTable)", null, (_, _) => BuildMod(modProjectPath));
         menu.Items.Add("Install mod to game", null, (_, _) => InstallMod(modProjectPath));
@@ -609,6 +609,72 @@ public sealed partial class MainForm
         ModService.SaveMod(mod);
         AppendLog($"Renamed mod to '{mod.DisplayName}' (ID {mod.ModId} unchanged).");
         RefreshWorkspaceAfterModChange();
+    }
+
+    private void ChangeModId(string modProjectPath)
+    {
+        var mod = ModService.LoadMod(modProjectPath);
+        if (mod is null)
+        {
+            AppendLog("Change Mod ID: could not load project.");
+            return;
+        }
+
+        var requested = PromptForText(
+            "Change Mod ID",
+            "Technical ID used by the pak, mod folder, registry plugin, tags and StringTable:",
+            mod.ModId,
+            confirmText: "Review");
+        if (string.IsNullOrWhiteSpace(requested)) return;
+
+        var newModId = ModProjectService.DeriveModId(requested);
+        if (string.IsNullOrWhiteSpace(newModId))
+        {
+            Dialog.Warn(this, "Invalid Mod ID", "Use at least one letter or number. Batcomputer removes spaces and punctuation.");
+            return;
+        }
+        if (string.Equals(mod.ModId, newModId, StringComparison.Ordinal))
+        {
+            Dialog.Info(this, "Mod ID unchanged", $"The technical Mod ID is already '{mod.ModId}'.");
+            return;
+        }
+
+        if (!Dialog.Confirm(this,
+                $"Change Mod ID to '{newModId}'?",
+                $"This changes the technical identity from '{mod.ModId}' to '{newModId}'.\n\n" +
+                $"Batcomputer will rename the project JSON and regenerate these on the next build:\n" +
+                $"  {newModId}_P.pak / .ucas / .utoc\n" +
+                $"  /Game/Mods/{newModId}/Localization/ST_{newModId}\n" +
+                $"  {newModId}Registry and {newModId}Tags.ini\n" +
+                "  the runtime mod folder and mod.json identity\n\n" +
+                "Suit-owned cooked asset paths are intentionally preserved. Old build output is archived because renaming cooked files would leave invalid internal paths. " +
+                "The next successful Install removes this project's exact previous-ID files from your local game.\n\n" +
+                "Do not change a Mod ID after publishing unless you intend to release it as a breaking replacement.",
+                confirmText: "Change ID",
+                severity: Dialog.Level.Warn))
+        {
+            return;
+        }
+
+        try
+        {
+            var result = ModService.ChangeModId(modProjectPath, newModId);
+            _homeActiveModProjectPath = result.ProjectPath;
+            AppendLog($"Changed Mod ID: {result.PreviousModId} -> {result.ModId}.");
+            AppendLog($"  project: {result.ProjectPath}");
+            AppendLog($"  next build: {result.ModId}_P trio, {result.ModId}Registry, {result.ModId}Tags.ini, ST_{result.ModId}");
+            if (!string.IsNullOrWhiteSpace(result.ArchivedBuildPath))
+            {
+                AppendLog($"  archived stale old-ID build: {result.ArchivedBuildPath}");
+            }
+            AppendLog("  Rebuild and install this mod before the next in-game test.");
+            RefreshWorkspaceAfterModChange();
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Change Mod ID failed: {ex.Message}");
+            Dialog.Error(this, "Could not change Mod ID", ex.Message);
+        }
     }
 
     private void EditModSuits(string modProjectPath)
@@ -680,6 +746,7 @@ public sealed partial class MainForm
         public string TagsDestination = "";
         public string RegistryDestination = "";
         public string AssetRegistryDestination = "";
+        public string CoreRegistryDestination = "";
         public int FilesCopied;
         public string Detail = "";
     }
@@ -734,10 +801,14 @@ public sealed partial class MainForm
         var tagsInstalled = false;
         var registryInstalled = false;
         var assetRegistryInstalled = false;
+        var coreRegistryInstalled = false;
         try
         {
 
-            // 1) trio → ~mods/Slot
+            // 1) trio -> ~mods/Expanded
+            var gameRoot = GameLegoRoot()
+                ?? throw new InvalidOperationException("Batcomputer could not locate the game's LEGOBatmanLotDK folder from settings.");
+            result.TrioDestination = LotdkExpandedLayout.ExpandedPaksRoot(gameRoot);
             var slotDest = result.TrioDestination;
             ModReleaseStep("Copying the IoStore release files…");
             Directory.CreateDirectory(slotDest);
@@ -753,32 +824,7 @@ public sealed partial class MainForm
             }
             AppendLog($"  trio → {slotDest}");
 
-            var gameRoot = GameLegoRoot();
-            if (gameRoot is null)
-            {
-                AppendLog("  ⚠ could not locate the game's LEGOBatmanLotDK folder from settings — trio copied, but ini + mod.json were NOT installed. Set the game paks path in Setup.");
-                AppendLog($"Install mod '{mod.DisplayName}': {installed} trio file(s) only.");
-                result.Status = ModInstallStatus.Partial;
-                result.FilesCopied = installed;
-                result.Detail = "The release trio was copied, but Batcomputer could not locate the game root to install the gameplay tag file and mod.json.";
-                return result;
-            }
-
-            // 2) one mod-owned gameplay tag file -> Config/Tags
-            var iniSrc = Path.Combine(outRoot, "LooseFiles", "LEGOBatmanLotDK", "Config", "Tags", $"{mod.ModId}Tags.ini");
-            result.TagsDestination = Path.Combine(gameRoot, "Config", "Tags");
-            ModReleaseStep("Installing the gameplay tag configuration…");
-            if (File.Exists(iniSrc))
-            {
-                var tagsDest = result.TagsDestination;
-                Directory.CreateDirectory(tagsDest);
-                File.Copy(iniSrc, Path.Combine(tagsDest, $"{mod.ModId}Tags.ini"), overwrite: true);
-                installed++;
-                tagsInstalled = true;
-                AppendLog($"  {mod.ModId}Tags.ini → {tagsDest}");
-            }
-
-            // 3) mod.json → ue4ss/LOTDKExpanded/Mods/<ModId>/
+            // 2) mod.json -> ue4ss/LOTDKExpanded/Mods/<ModId>/
             var modJsonSrc = Path.Combine(outRoot, "mod.json");
             result.RegistryDestination = LotdkExpandedLayout.ContentPackDirectory(gameRoot, mod.ModId);
             ModReleaseStep("Installing the mod registry entry…");
@@ -792,34 +838,68 @@ public sealed partial class MainForm
                 AppendLog($"  mod.json → {packDestination}");
             }
 
-            AppendLog($"Installed mod '{mod.DisplayName}' — {installed} file(s). Restart the game to load it.");
-            var plugin = RegistryPluginService.CreateLayout(outRoot, mod.ModId, mod.RedBricks.Any(brick => brick.Enabled));
+            var corePlugin = RegistryPluginService.EnsureCorePlugin(outRoot);
+            result.CoreRegistryDestination = LotdkExpandedLayout.CoreRegistryPluginDirectory(gameRoot);
+            ModReleaseStep("Installing the shared Asset Manager scan configuration...");
+            if (File.Exists(corePlugin.DescriptorPath) && File.Exists(RegistryPluginService.CoreGameIniPath(corePlugin)))
+            {
+                CopyDirectoryContents(corePlugin.PluginDirectory, result.CoreRegistryDestination, overwrite: true);
+                installed += Directory.EnumerateFiles(corePlugin.PluginDirectory, "*", SearchOption.AllDirectories).Count();
+                coreRegistryInstalled = true;
+                AppendLog($"  {corePlugin.PluginName} -> {result.CoreRegistryDestination}");
+            }
+
+            var plugin = RegistryPluginService.CreateLayout(outRoot, mod.ModId);
             result.AssetRegistryDestination = LotdkExpandedLayout.RegistryPluginDirectory(gameRoot, plugin.PluginName);
             ModReleaseStep("Installing the Asset Registry plugin...");
             if (File.Exists(plugin.DescriptorPath) && File.Exists(plugin.RegistryPath) &&
                 !string.IsNullOrWhiteSpace(result.AssetRegistryDestination))
             {
-                var alternatePlugin = RegistryPluginService.CreateLayout(outRoot, mod.ModId, !mod.RedBricks.Any(brick => brick.Enabled));
-                var alternateDestination = LotdkExpandedLayout.RegistryPluginDirectory(gameRoot, alternatePlugin.PluginName);
-                if (!string.Equals(alternateDestination, result.AssetRegistryDestination, StringComparison.OrdinalIgnoreCase) &&
-                    Directory.Exists(alternateDestination))
-                {
-                    Directory.Delete(alternateDestination, recursive: true);
-                    AppendLog($"  removed stale registry plugin {alternatePlugin.PluginName}");
-                }
                 CopyDirectoryContents(plugin.PluginDirectory, result.AssetRegistryDestination, overwrite: true);
                 installed += Directory.EnumerateFiles(plugin.PluginDirectory, "*", SearchOption.AllDirectories).Count();
                 assetRegistryInstalled = true;
+                var installedTagPath = Path.Combine(result.AssetRegistryDestination, "Config", "Tags", $"{mod.ModId}Tags.ini");
+                tagsInstalled = File.Exists(installedTagPath);
+                result.TagsDestination = Path.GetDirectoryName(installedTagPath) ?? result.AssetRegistryDestination;
                 AppendLog($"  {plugin.PluginName} -> {result.AssetRegistryDestination}");
             }
 
-            result.Status = trioFilesCopied == 3 && tagsInstalled && registryInstalled && assetRegistryInstalled
+            result.Status = trioFilesCopied == 3 && tagsInstalled && registryInstalled && coreRegistryInstalled && assetRegistryInstalled
                 ? ModInstallStatus.Complete
                 : ModInstallStatus.Partial;
+            string previousIdCleanupError = "";
+            if (result.Status == ModInstallStatus.Complete && mod.PreviousModIds is { Count: > 0 })
+            {
+                try
+                {
+                    var removed = CleanupInstalledPreviousModIds(gameRoot, mod.ModId, mod.PreviousModIds);
+                    if (removed > 0)
+                    {
+                        AppendLog($"  removed {removed} stale installed item(s) from previous Mod ID(s): " +
+                                  string.Join(", ", mod.PreviousModIds.Distinct(StringComparer.OrdinalIgnoreCase)));
+                    }
+
+                    // Previous IDs are a one-shot local migration aid. Persisting
+                    // them would make every later install keep targeting those old
+                    // names, which could eventually belong to a different mod.
+                    mod.PreviousModIds.Clear();
+                    ModService.SaveMod(mod);
+                    AppendLog("  previous Mod ID migration cleanup is complete.");
+                }
+                catch (Exception cleanupEx)
+                {
+                    previousIdCleanupError = cleanupEx.Message;
+                    result.Status = ModInstallStatus.Partial;
+                    AppendLog($"  previous-ID cleanup failed: {cleanupEx.Message}");
+                }
+            }
             result.FilesCopied = installed;
             result.Detail = result.Status == ModInstallStatus.Complete
                 ? "The release is installed. Restart the game before testing the mod."
-                : "Some expected release files were missing, so this install may be incomplete. Check Diagnostics before testing.";
+                : !string.IsNullOrWhiteSpace(previousIdCleanupError)
+                    ? "The new release was installed, but Batcomputer could not remove every previous-ID file. Close the game and install again.\n\n" + previousIdCleanupError
+                    : "Some expected release files were missing, so this install may be incomplete. Check Diagnostics before testing.";
+            AppendLog($"Installed mod '{mod.DisplayName}' - {installed} file(s). Restart the game to load it.");
             return result;
         }
         catch (Exception ex)
@@ -848,6 +928,63 @@ public sealed partial class MainForm
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
             File.Copy(source, destination, overwrite);
         }
+    }
+
+    /// <summary>
+    /// Removes only the deterministic files owned by this authoring project's old
+    /// technical IDs. The shared LOTDKExpandedCoreRegistry is never touched.
+    /// </summary>
+    private static int CleanupInstalledPreviousModIds(
+        string gameRoot,
+        string currentModId,
+        IEnumerable<string> previousModIds)
+    {
+        var removed = 0;
+        foreach (var previous in previousModIds
+                     .Where(id => !string.IsNullOrWhiteSpace(id))
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var oldModId = ModProjectService.DeriveModId(previous);
+            if (string.IsNullOrWhiteSpace(oldModId) ||
+                !string.Equals(oldModId, previous, StringComparison.Ordinal) ||
+                string.Equals(oldModId, currentModId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var paksRoot = LotdkExpandedLayout.ExpandedPaksRoot(gameRoot);
+            foreach (var extension in new[] { ".pak", ".ucas", ".utoc" })
+            {
+                var path = Path.Combine(paksRoot, $"{oldModId}_P{extension}");
+                if (!File.Exists(path)) continue;
+                File.Delete(path);
+                removed++;
+            }
+
+            removed += DeleteInstalledDirectory(
+                LotdkExpandedLayout.ContentPacksRoot(gameRoot),
+                LotdkExpandedLayout.ContentPackDirectory(gameRoot, oldModId));
+            removed += DeleteInstalledDirectory(
+                LotdkExpandedLayout.RegistryPluginsRoot(gameRoot),
+                LotdkExpandedLayout.RegistryPluginDirectory(gameRoot, $"{oldModId}Registry"));
+        }
+        return removed;
+    }
+
+    private static int DeleteInstalledDirectory(string allowedRoot, string target)
+    {
+        if (!Directory.Exists(target)) return 0;
+
+        var root = Path.GetFullPath(allowedRoot)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var fullTarget = Path.GetFullPath(target);
+        if (!fullTarget.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Refusing to remove a path outside the LOTDK Expanded install root: {fullTarget}");
+        }
+
+        Directory.Delete(fullTarget, recursive: true);
+        return 1;
     }
 
     private void OpenModBuildOutput(string modId)
@@ -879,7 +1016,8 @@ public sealed partial class MainForm
 
         var outRoot = ModBuildRoot(mod.ModId);
         var trioBase = Path.Combine(outRoot, mod.PackageBaseName);
-        var plugin = RegistryPluginService.CreateLayout(outRoot, mod.ModId, mod.RedBricks.Any(brick => brick.Enabled));
+        var plugin = RegistryPluginService.CreateLayout(outRoot, mod.ModId);
+        var corePlugin = RegistryPluginService.EnsureCorePlugin(outRoot);
         var files = new List<(string Source, string ArchivePath)>();
         const string ArchiveRoot = "LEGO Batman - Legacy of the Dark Knight";
 
@@ -897,12 +1035,9 @@ public sealed partial class MainForm
             foreach (var extension in new[] { ".pak", ".ucas", ".utoc" })
             {
                 var source = trioBase + extension;
-                AddRequired(source, $"{ArchiveRoot}/LEGOBatmanLotDK/Content/Paks/~mods/Slot/{Path.GetFileName(source)}");
+                AddRequired(source, $"{ArchiveRoot}/LEGOBatmanLotDK/Content/Paks/~mods/Expanded/{Path.GetFileName(source)}");
             }
 
-            AddRequired(
-                Path.Combine(outRoot, "LooseFiles", "LEGOBatmanLotDK", "Config", "Tags", $"{mod.ModId}Tags.ini"),
-                $"{ArchiveRoot}/LEGOBatmanLotDK/Config/Tags/{mod.ModId}Tags.ini");
             AddRequired(
                 Path.Combine(outRoot, "mod.json"),
                 $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/Mods/{mod.ModId}/mod.json");
@@ -910,12 +1045,23 @@ public sealed partial class MainForm
                 $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{plugin.PluginName}/{Path.GetFileName(plugin.DescriptorPath)}");
             AddRequired(plugin.RegistryPath,
                 $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{plugin.PluginName}/{Path.GetFileName(plugin.RegistryPath)}");
+            AddRequired(corePlugin.DescriptorPath,
+                $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{corePlugin.PluginName}/{Path.GetFileName(corePlugin.DescriptorPath)}");
+            AddRequired(RegistryPluginService.CoreGameIniPath(corePlugin),
+                $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{corePlugin.PluginName}/Config/Game.ini");
             foreach (var pluginFile in Directory.EnumerateFiles(plugin.PluginDirectory, "*", SearchOption.AllDirectories))
             {
                 if (files.Any(file => file.Source.Equals(pluginFile, StringComparison.OrdinalIgnoreCase))) continue;
                 var relative = Path.GetRelativePath(plugin.PluginDirectory, pluginFile).Replace('\\', '/');
                 files.Add((pluginFile,
                     $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{plugin.PluginName}/{relative}"));
+            }
+            foreach (var coreFile in Directory.EnumerateFiles(corePlugin.PluginDirectory, "*", SearchOption.AllDirectories))
+            {
+                if (files.Any(file => file.Source.Equals(coreFile, StringComparison.OrdinalIgnoreCase))) continue;
+                var relative = Path.GetRelativePath(corePlugin.PluginDirectory, coreFile).Replace('\\', '/');
+                files.Add((coreFile,
+                    $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{corePlugin.PluginName}/{relative}"));
             }
         }
         catch (FileNotFoundException ex)
@@ -1182,6 +1328,7 @@ public sealed partial class MainForm
         if (!string.IsNullOrWhiteSpace(result.TrioDestination)) model.Fields.Add(("Pak files", result.TrioDestination));
         if (!string.IsNullOrWhiteSpace(result.TagsDestination)) model.Fields.Add(("Gameplay tags", result.TagsDestination));
         if (!string.IsNullOrWhiteSpace(result.RegistryDestination)) model.Fields.Add(("Suit manifest", result.RegistryDestination));
+        if (!string.IsNullOrWhiteSpace(result.CoreRegistryDestination)) model.Fields.Add(("Asset Manager scan", result.CoreRegistryDestination));
         if (!string.IsNullOrWhiteSpace(result.AssetRegistryDestination)) model.Fields.Add(("Asset Registry", result.AssetRegistryDestination));
         Dialog.Show(this, model);
     }
@@ -1258,10 +1405,9 @@ public sealed partial class MainForm
         ModReleaseStep("Checking enabled suits and gameplay tags…");
 
         var enabled = mod.Suits.Where(s => s.Enabled).ToList();
-        var enabledBricks = (mod.RedBricks ?? []).Where(brick => brick.Enabled).ToList();
-        if (enabled.Count == 0 && enabledBricks.Count == 0)
+        if (enabled.Count == 0)
         {
-            AppendLog("Build mod: no enabled suits or Red Bricks.");
+            AppendLog("Build mod: no enabled suits.");
             return false;
         }
 
@@ -1281,7 +1427,6 @@ public sealed partial class MainForm
         var tagRows = new List<PawnTagConfigService.TagRow>();
         var stEntries = new Dictionary<string, string>(StringComparer.Ordinal);
         var manifestSuits = new List<ModManifestSuit>();
-        var manifestRedBricks = new List<ModManifestRedBrick>();
 
         foreach (var entry in enabled)
         {
@@ -1322,13 +1467,7 @@ public sealed partial class MainForm
             });
         }
 
-        foreach (var brick in enabledBricks)
-        {
-            stEntries[$"RedBrick.{brick.BrickId}.Name"] = brick.DisplayName ?? "";
-            stEntries[$"RedBrick.{brick.BrickId}.Type"] = "COLOR";
-        }
-
-        if (tagRows.Count == 0 && enabledBricks.Count == 0) { AppendLog("Build mod: nothing to build."); return false; }
+        if (tagRows.Count == 0) { AppendLog("Build mod: nothing to build."); return false; }
 
         // Fresh stage each build so a removed suit's assets don't linger in the trio.
         var stageRoot = Path.Combine(outRoot, "Stage");
@@ -1398,62 +1537,7 @@ public sealed partial class MainForm
                 AppendLog($"  bundled suit '{suit.DisplayName}' ({entry.SuitId}) → {suit.TargetPackages!.Dcmd}");
             }
 
-            var redBrickRows = new List<RegistryPluginService.RegistryRow>();
             var tagConfigPath = string.Empty;
-            if (enabledBricks.Count > 0)
-            {
-                if (!StageRedBrickTexturesIntoContentRoot(mod, stageContent, out var redBrickTextureError))
-                {
-                    preflight.Result.AddError("Red Brick icons", redBrickTextureError);
-                    _lastModReleaseFailure = new ModReleaseFailure(mod.DisplayName, preflight.Result);
-                    AppendLog("Build mod ABORTED: Red Brick icon staging failed: " + redBrickTextureError);
-                    return false;
-                }
-                ModReleaseStep("Staging Red Brick metadata and effects…");
-                var redBrickStage = new RedBrickTintProofService().StageRelease(new RedBrickTintProofService.ReleaseStageRequest
-                {
-                    ExtractedContentRoot = AppSettings.Current.EffectiveExportContentRoot(),
-                    UsmapPath = AppSettings.Current.EffectiveUsmapPath() ?? "",
-                    StageContentRoot = stageContent,
-                    ProjectRoot = projectRoot,
-                    ModId = mod.ModId,
-                    StringTableObjectPath = stObjectPath,
-                    Bricks = enabledBricks,
-                }, line => AppendLog(line));
-                if (!redBrickStage.Succeeded)
-                {
-                    preflight.Result.AddError("Red Bricks", redBrickStage.Error);
-                    _lastModReleaseFailure = new ModReleaseFailure(mod.DisplayName, preflight.Result);
-                    AppendLog("Build mod ABORTED: Red Brick staging failed.");
-                    return false;
-                }
-
-                tagRows.AddRange(redBrickStage.TagRows);
-                redBrickRows.AddRange(redBrickStage.RegistryRows);
-                foreach (var brick in enabledBricks)
-                {
-                    var id = brick.BrickId;
-                    manifestRedBricks.Add(new ModManifestRedBrick
-                    {
-                        brick_id = id,
-                        enabled = true,
-                        menu_order = brick.MenuOrder,
-                        display_name_key = $"RedBrick.{id}.Name",
-                        display_type_key = $"RedBrick.{id}.Type",
-                        description = brick.Description,
-                        payload_tag = $"Collectables.RedBrickTaggedAssets.MetaData.Mods.{mod.ModId}",
-                        effect_tag = $"Collectables.RedBricks.EffectDefinitions.Mods.{mod.ModId}.{id}",
-                        progress_tag = $"GameProgress.Definitions.RedBricks.Mods.{mod.ModId}.{id}",
-                        payload = redBrickStage.PayloadPackage,
-                        effect = $"/Game/Mods/{mod.ModId}/RedBricks/DA_RedBrickEffectDefinition_{id}",
-                        collectable = $"/Game/Mods/{mod.ModId}/RedBricks/DA_Collectable_RedBrick_{id}",
-                        progress = $"/Game/Mods/{mod.ModId}/Progress/PROG_RedBricks_{id}",
-                        icon = brick.IconPackagePath,
-                        unlocked_by_default = brick.UnlockedByDefault,
-                    });
-                }
-                ModService.SaveMod(mod);
-            }
 
             try
             {
@@ -1483,7 +1567,6 @@ public sealed partial class MainForm
                 string_table = stObjectPath,
                 build_id = $"{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}",
                 suits = manifestSuits,
-                red_bricks = manifestRedBricks,
             };
 
             ModReleaseStep("Validating the combined release…");
@@ -1527,15 +1610,13 @@ public sealed partial class MainForm
             ModReleaseStep("Verifying the mod Asset Registry plugin...");
             var registryRows = manifestSuits
                 .Select(suit => new RegistryPluginService.RegistryRow(suit.dcmd))
-                .Concat(redBrickRows)
                 .ToList();
             var registry = await new RegistryPluginService().BuildAsync(
                 outRoot,
                 mod.ModId,
                 mod.DisplayName,
                 registryRows,
-                line => AppendLog("  registry: " + line),
-                containsRedBricks: manifestRedBricks.Count > 0);
+                line => AppendLog("  registry: " + line));
             if (!registry.Succeeded || registry.Layout is null)
             {
                 preflight.Result.AddError("Asset Registry", registry.Error);
@@ -1552,7 +1633,7 @@ public sealed partial class MainForm
                 return false;
             }
             preflight.Result.AddInfo("Asset Registry", $"Verified {registry.Rows.Count} primary-asset row(s).");
-            if (manifestRedBricks.Count > 0)
+            if (!string.IsNullOrWhiteSpace(tagConfigPath) && File.Exists(tagConfigPath))
             {
                 var pluginTagPath = Path.Combine(registry.Layout.PluginDirectory, "Config", "Tags", $"{mod.ModId}Tags.ini");
                 Directory.CreateDirectory(Path.GetDirectoryName(pluginTagPath)!);
@@ -1563,7 +1644,7 @@ public sealed partial class MainForm
             AppendLog("  registry verification: " + registry.VerificationLine);
 
             File.WriteAllText(modJsonPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
-            AppendLog($"  mod.json: {manifestSuits.Count} suit(s), {manifestRedBricks.Count} Red Brick(s) -> {modJsonPath}");
+            AppendLog($"  mod.json: {manifestSuits.Count} suit(s) -> {modJsonPath}");
 
             var trioBase = Path.Combine(outRoot, mod.PackageBaseName);
             ModReleaseStep($"Packing {mod.PackageBaseName} into an IoStore trio…");
@@ -1575,10 +1656,10 @@ public sealed partial class MainForm
                 return false;
             }
 
-            AppendLog($"Build mod '{mod.DisplayName}' COMPLETE — installable trio for {mergedSuits} suit(s), {manifestRedBricks.Count} Red Brick(s):");
+            AppendLog($"Build mod '{mod.DisplayName}' COMPLETE — installable trio for {mergedSuits} suit(s):");
             AppendLog($"  {trioBase}.pak / .ucas / .utoc");
-            AppendLog($"  {mod.ModId}Tags.ini + mod.json also under {outRoot}");
-            AppendLog($"  Install: trio → ~mods/Slot, ini → Config/Tags, mod.json → ue4ss/{LotdkExpandedLayout.ModuleId}/Mods/{mod.ModId}/");
+            AppendLog($"  {mod.ModId}Tags.ini is embedded in the per-mod registry plugin; mod.json is under {outRoot}");
+            AppendLog($"  Install: trio -> ~mods/Expanded, mod.json -> ue4ss/{LotdkExpandedLayout.ModuleId}/Mods/{mod.ModId}/");
             RefreshWorkspaceAfterModChange();
             return true;
         }
@@ -1705,6 +1786,8 @@ public sealed partial class MainForm
     private static List<string> ValidateModReleaseStage(NativeSuitModProject mod, ModManifest manifest, string contentRoot)
     {
         var errors = new List<string>();
+        if (manifest.schema_version != 3)
+            errors.Add($"mod.json schema_version must be 3 for the installed LOTDKExpanded runtime (found {manifest.schema_version}).");
         if (string.IsNullOrWhiteSpace(mod.ModId)) errors.Add("mod_id is empty.");
         if (string.IsNullOrWhiteSpace(mod.PackageBaseName)) errors.Add("package_base_name is empty.");
         if (!string.Equals(manifest.string_table, StringTableGenService.ObjectPathFor(mod.ModId), StringComparison.Ordinal))
@@ -1750,46 +1833,6 @@ public sealed partial class MainForm
             }
         }
 
-        var brickIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var expectedPayloadTag = $"Collectables.RedBrickTaggedAssets.MetaData.Mods.{mod.ModId}";
-        foreach (var brick in manifest.red_bricks)
-        {
-            if (string.IsNullOrWhiteSpace(brick.brick_id) || !brickIds.Add(brick.brick_id))
-            {
-                errors.Add($"missing or duplicate Red Brick ID '{brick.brick_id}'.");
-                continue;
-            }
-            if (!string.Equals(brick.payload_tag, expectedPayloadTag, StringComparison.Ordinal))
-                errors.Add($"Red Brick '{brick.brick_id}' must use '{expectedPayloadTag}', not a shared or default payload tag.");
-            if (brick.payload_tag.Equals("Collectables.RedBrickTaggedAssets.MetaData.Default", StringComparison.OrdinalIgnoreCase))
-                errors.Add($"Red Brick '{brick.brick_id}' illegally targets the native Default payload tag.");
-            if (!string.Equals(brick.display_name_key, $"RedBrick.{brick.brick_id}.Name", StringComparison.Ordinal) ||
-                !string.Equals(brick.display_type_key, $"RedBrick.{brick.brick_id}.Type", StringComparison.Ordinal))
-                errors.Add($"StringTable keys are incomplete or do not match Red Brick '{brick.brick_id}'.");
-            if (string.IsNullOrWhiteSpace(brick.effect_tag) || string.IsNullOrWhiteSpace(brick.progress_tag))
-                errors.Add($"Red Brick '{brick.brick_id}' is missing its effect or progress tag.");
-
-            foreach (var required in new[]
-            {
-                (Role: "payload", Package: brick.payload),
-                (Role: "effect", Package: brick.effect),
-                (Role: "collectable", Package: brick.collectable),
-                (Role: "progress", Package: brick.progress),
-            })
-            {
-                var normalized = UnrealPathUtil.NormalizePackagePath(required.Package);
-                if (string.IsNullOrWhiteSpace(required.Package) || !string.Equals(required.Package, normalized, StringComparison.Ordinal) ||
-                    !normalized.StartsWith($"/Game/Mods/{mod.ModId}/", StringComparison.OrdinalIgnoreCase))
-                {
-                    errors.Add($"Red Brick '{brick.brick_id}' {required.Role} must be a clean package below /Game/Mods/{mod.ModId}/.");
-                    continue;
-                }
-                if (!HasCookedPackagePair(contentRoot, normalized))
-                    errors.Add($"Red Brick '{brick.brick_id}' {required.Role} is missing its .uasset or .uexp: '{normalized}'.");
-            }
-            if (!string.IsNullOrWhiteSpace(brick.icon) && !HasCookedPackagePair(contentRoot, brick.icon))
-                errors.Add($"Red Brick '{brick.brick_id}' custom icon is missing its .uasset or .uexp: '{brick.icon}'.");
-        }
         return errors;
     }
 
@@ -1941,7 +1984,7 @@ public sealed partial class MainForm
     // --- mod.json serialization shapes ---
     private sealed class ModManifest
     {
-        public int schema_version { get; set; } = 4;
+        public int schema_version { get; set; } = 3;
         public string format { get; set; } = "native_suit_mod";
         public string mod_id { get; set; } = "";
         public string display_name { get; set; } = "";
@@ -1950,7 +1993,6 @@ public sealed partial class MainForm
         public string string_table { get; set; } = "";
         public string build_id { get; set; } = "";
         public List<ModManifestSuit> suits { get; set; } = new();
-        public List<ModManifestRedBrick> red_bricks { get; set; } = new();
     }
 
     private sealed class ModManifestSuit
@@ -1969,22 +2011,4 @@ public sealed partial class MainForm
         public string uimd { get; set; } = "";
     }
 
-    private sealed class ModManifestRedBrick
-    {
-        public string brick_id { get; set; } = "";
-        public bool enabled { get; set; } = true;
-        public int menu_order { get; set; }
-        public string display_name_key { get; set; } = "";
-        public string display_type_key { get; set; } = "";
-        public string description { get; set; } = "";
-        public string payload_tag { get; set; } = "";
-        public string effect_tag { get; set; } = "";
-        public string progress_tag { get; set; } = "";
-        public string payload { get; set; } = "";
-        public string effect { get; set; } = "";
-        public string collectable { get; set; } = "";
-        public string progress { get; set; } = "";
-        public string icon { get; set; } = "";
-        public bool unlocked_by_default { get; set; }
-    }
 }

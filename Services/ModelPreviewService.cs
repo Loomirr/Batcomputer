@@ -164,16 +164,7 @@ public static class ModelPreviewService
         public string? ViewerLayoutProjectRoot { get; init; }
         public string? StagedPlayablePath { get; init; }
         public bool AllowPartMover { get; init; } = true;
-        public IReadOnlyCollection<PreviewRedBrickTint> RedBrickTints { get; init; } = Array.Empty<PreviewRedBrickTint>();
     }
-
-    /// <summary>One mod-owned Red Brick palette available to the local preview.</summary>
-    public sealed record PreviewRedBrickTint(
-        string DisplayName,
-        string PrimaryColourRow,
-        string SecondaryColourRow,
-        string TertiaryColourRow,
-        bool IsBaseGame);
 
     /// <summary>A component added by a saved part graft, without needing to mount the staged package.</summary>
     public sealed record PreviewAdditionalPart(
@@ -822,7 +813,6 @@ public static class ModelPreviewService
         string usmapPath,
         NativeSuitProject project,
         string projectRoot,
-        IReadOnlyCollection<PreviewRedBrickTint>? redBrickTints = null,
         Action<string>? diagnostics = null)
     {
         using var diagnosticScope = new PreviewDiagnosticScope(diagnostics);
@@ -980,7 +970,6 @@ public static class ModelPreviewService
             ViewerLayoutProjectRoot = projectRoot,
             StagedPlayablePath = HasLoosePackage(previewContentRoots, stagedBasePath) ? stagedBasePath : null,
             AllowPartMover = true,
-            RedBrickTints = redBrickTints ?? Array.Empty<PreviewRedBrickTint>(),
         }, looseContentRoots: previewContentRoots);
     }
 
@@ -1542,7 +1531,7 @@ public static class ModelPreviewService
             };
         }
 
-        return BuildPreviewCore(provider, parts, options.AllowPartMover, viewerLayoutKey, options.RedBrickTints);
+        return BuildPreviewCore(provider, parts, options.AllowPartMover, viewerLayoutKey);
     }
 
     /// <summary>Exports each mesh to glTF and writes the viewer that loads them into one scene.</summary>
@@ -1554,8 +1543,7 @@ public static class ModelPreviewService
         DefaultFileProvider provider,
         IReadOnlyList<PreviewPart> parts,
         bool allowPartMover = false,
-        string? viewerLayoutKey = null,
-        IReadOnlyCollection<PreviewRedBrickTint>? redBrickTints = null)
+        string? viewerLayoutKey = null)
     {
         _faceMaterial = null;
         _faceBaseline = null;
@@ -1760,7 +1748,7 @@ public static class ModelPreviewService
         {
             placed = PrepareFaceFeatures(provider, previewDir, placed);
         }
-        WriteViewerAssets(previewDir, placed, allowPartMover, viewerLayoutKey, redBrickTints);
+        WriteViewerAssets(previewDir, placed, allowPartMover, viewerLayoutKey);
         return previewDir;
     }
 
@@ -3345,7 +3333,7 @@ public static class ModelPreviewService
         var mmr = ExportMmrSlot(material, previewDir)
                   ?? ExportFallbackMmrSlot(provider, fallback, previewDir);
         // Prefer the material's explicit colour-mask parameters. CT remains a legacy fallback for
-        // older materials that expose their Red Brick channels under that name.
+        // older materials that expose their colour channels under that name.
         var colourMask = ExportFallbackSourceTexture(fallback, ["ColourMask", "ColorMask", "CT"], previewDir)
                          ?? ExportSlot(material, "ColourMask", previewDir)
                          ?? ExportSlot(material, "ColorMask", previewDir)
@@ -3994,8 +3982,7 @@ public static class ModelPreviewService
         string dir,
         IReadOnlyList<PlacedModel> models,
         bool allowPartMover,
-        string? viewerLayoutKey = null,
-        IReadOnlyCollection<PreviewRedBrickTint>? redBrickTints = null)
+        string? viewerLayoutKey = null)
     {
         foreach (var js in new[] { "three.min.js", "GLTFLoader.js", "OrbitControls.js" })
         {
@@ -4103,23 +4090,9 @@ public static class ModelPreviewService
             return sb.Append('}').ToString();
         }
 
-        var bodyHasColourMask = models
-            .Where(model => IsBodyMeshParent(model.ComponentName))
-            .SelectMany(model => model.Slots)
-            .Any(slot => !string.IsNullOrWhiteSpace(slot.ColourMask));
-        var tintJson = JsonSerializer.Serialize((redBrickTints ?? Array.Empty<PreviewRedBrickTint>())
-            .Select(tint => new
-            {
-                name = tint.DisplayName,
-                primary = RedBrickPalette.PreviewHex(tint.PrimaryColourRow),
-                secondary = RedBrickPalette.PreviewHex(tint.SecondaryColourRow),
-                tertiary = RedBrickPalette.PreviewHex(tint.TertiaryColourRow),
-                source = tint.IsBaseGame ? "base" : "modded",
-            }));
         File.WriteAllText(Path.Combine(dir, "models.js"),
             $"window.PREVIEW_MODELS={jsonList};window.PREVIEW_CAN_SAVE_PLACEMENTS={(allowPartMover ? "true" : "false")};" +
-            $"window.PREVIEW_LAYOUT_KEY={JsonSerializer.Serialize(viewerLayoutKey ?? string.Empty)};" +
-            $"window.PREVIEW_RED_BRICKS={tintJson};window.PREVIEW_REDBRICK_BODY_MASK={(bodyHasColourMask ? "true" : "false")};");
+            $"window.PREVIEW_LAYOUT_KEY={JsonSerializer.Serialize(viewerLayoutKey ?? string.Empty)};");
         File.WriteAllText(Path.Combine(dir, "index.html"), ViewerHtml);
         Console.WriteLine("  viewer assets written");
     }
@@ -4138,18 +4111,17 @@ public static class ModelPreviewService
   #exprwrap label{color:#f0c230;margin-right:4px}
   #expr{background:#22262c;color:#e6e9ee;border:1px solid #3a4048;border-radius:5px;padding:3px 6px;
     font-family:inherit;font-size:13px;outline:none}
-  #partmove,#meshmove,#redbrick,#matedit{position:absolute;right:14px;top:12px;width:214px;color:#dfe4ea;font-size:12px;
+  #partmove,#meshmove,#matedit{position:absolute;right:14px;top:12px;width:214px;color:#dfe4ea;font-size:12px;
     background:rgba(26,29,34,.9);padding:9px 10px;border:1px solid #333a44;border-radius:6px}
-  #redbrick{top:auto;bottom:14px}
   #matedit{right:244px;max-height:calc(100vh - 28px);overflow:auto}
-  #partmove label,#meshmove label,#redbrick label,#matedit label{display:block;color:#f0c230;margin-bottom:5px}
-  #partmove select,#meshmove select,#redbrick select,#matedit select{box-sizing:border-box;width:100%;margin-bottom:7px;background:#22262c;color:#e6e9ee;
+  #partmove label,#meshmove label,#matedit label{display:block;color:#f0c230;margin-bottom:5px}
+  #partmove select,#meshmove select,#matedit select{box-sizing:border-box;width:100%;margin-bottom:7px;background:#22262c;color:#e6e9ee;
     border:1px solid #3a4048;border-radius:4px;padding:4px;font:inherit}
   #partmove .axis,#meshmove .axis{display:grid;grid-template-columns:38px 1fr;align-items:center;gap:5px;margin:3px 0;color:#9ea6b2}
   #partmove input,#meshmove input{box-sizing:border-box;width:100%;background:#171a1f;color:#e6e9ee;border:1px solid #3a4048;
     border-radius:4px;padding:3px 5px;font:12px Consolas,monospace}
   #partmove .actions,#meshmove .actions{display:flex;gap:6px;margin-top:8px}
-  #partmove button,#meshmove button,#redbrick button,#matedit button{border:1px solid #3a4048;border-radius:4px;background:#232833;color:#dfe4ea;padding:4px 7px;cursor:pointer;font:inherit}
+  #partmove button,#meshmove button,#matedit button{border:1px solid #3a4048;border-radius:4px;background:#232833;color:#dfe4ea;padding:4px 7px;cursor:pointer;font:inherit}
   #partmove button.save,#meshmove button.save{border-color:#aa8b1b;color:#f0c230}
   #partmove button:disabled,#meshmove button:disabled{opacity:.45;cursor:default}
   #matedit .maptoggle{display:flex;align-items:center;justify-content:space-between;border-top:1px solid #303640;padding:5px 0;color:#cbd1d9}
@@ -4201,45 +4173,7 @@ const texLoader=new THREE.TextureLoader();
 const diag=[];
 function say(s){diag.push(s);document.getElementById('err').innerHTML=diag.join('<br>');}
 const partStates=new Map();
-const redBrickMaskMaterials=[];
 const materialEditorEntries=[];
-function setRedBrickPalette(palette){
-  redBrickMaskMaterials.forEach(state=>{
-    state.palette=palette;
-    if(!state.uniforms)return;
-    state.uniforms.redBrickEnabled.value=palette?1:0;
-    if(palette){
-      state.uniforms.redBrickPrimary.value.set(palette.primary).convertSRGBToLinear();
-      state.uniforms.redBrickSecondary.value.set(palette.secondary).convertSRGBToLinear();
-      state.uniforms.redBrickTertiary.value.set(palette.tertiary).convertSRGBToLinear();
-    }
-  });
-}
-function buildRedBrickTintUi(){
-  const presets=window.PREVIEW_RED_BRICKS||[];
-  if(!presets.length)return;
-  if(!window.PREVIEW_REDBRICK_BODY_MASK||!redBrickMaskMaterials.length){
-    say('Red Brick preview unavailable: CharacterMesh0 needs a compatible CT colour mask.');
-    return;
-  }
-  const panel=document.createElement('div');panel.id='redbrick';
-  const label=document.createElement('label');label.textContent='Red Brick preview';panel.appendChild(label);
-  const filter=document.createElement('select');
-  [['all','All Red Bricks'],['base','Base game'],['modded','Modded']].forEach(([value,text])=>{const option=document.createElement('option');option.value=value;option.textContent=text;filter.appendChild(option);});
-  panel.appendChild(filter);
-  const select=document.createElement('select');
-  function redraw(){
-    select.replaceChildren();
-    const off=document.createElement('option');off.value='';off.textContent='No Red Brick';select.appendChild(off);
-    presets.forEach((preset,index)=>{if(filter.value!=='all'&&preset.source!==filter.value)return;const option=document.createElement('option');option.value=String(index);
-      option.textContent=preset.name;select.appendChild(option);});
-    setRedBrickPalette(null);
-  }
-  filter.onchange=redraw;
-  redraw();
-  select.onchange=()=>setRedBrickPalette(select.value===''?null:presets[Number(select.value)]);
-  panel.appendChild(select);document.body.appendChild(panel);
-}
 function buildMaterialEditor(){
   if(!materialEditorEntries.length)return;
   const panel=document.createElement('div');panel.id='matedit';panel.title='Viewer-only map switches. These never change the suit or cooked files.';
@@ -4262,7 +4196,6 @@ function buildMaterialEditor(){
   addToggle('Normal map','normal');
   addToggle('MMR maps','mmr');
   addToggle('Ambient occlusion','ao');
-  addToggle('Red Brick tint','tint');
   const actions=document.createElement('div');actions.className='actions';
   const reset=document.createElement('button');reset.type='button';reset.textContent='Reset material';
   reset.onclick=()=>{const entry=materialEditorEntries[Number(select.value)];if(!entry)return;
@@ -4284,9 +4217,6 @@ function applyMaterialEditorEntry(entry){
   m.roughness=enabled.mmr?original.roughness:0.5;
   m.metalness=enabled.mmr?original.metalness:0;
   m.aoMap=enabled.ao?original.aoMap:null;
-  if(entry.tintState&&entry.tintState.uniforms){
-    entry.tintState.uniforms.redBrickEnabled.value=enabled.tint&&entry.tintState.palette?1:0;
-  }
   m.needsUpdate=true;
   const disabled=Object.entries(enabled).filter(([,on])=>!on).map(([key])=>key+' off').join(', ');
   say('material editor: '+entry.label+' - '+(disabled||'all maps on'));
@@ -4661,45 +4591,6 @@ function dress(g,info){
         if(auv)o.geometry.setAttribute('uv2',auv);
         m.aoMap=ao;m.aoMapIntensity=0.65;}
       else{m.aoMap=null;}
-      const cm=s.mask?tex(s.mask,false):null;
-      let tintState=null;
-      if(cm){
-        tintState={uniforms:null,palette:null};
-        if(tintState)redBrickMaskMaterials.push(tintState);
-        m.onBeforeCompile=sh=>{
-          let vertexCommon='#include <common>';
-          if(cm)vertexCommon+='\nvarying vec2 vColourMaskUv;';
-          // The colour mask belongs to the same material layer as its base colour and DNRM.
-          // vUv therefore preserves the selected UV channel for body atlases and attachments.
-          const vertexTail=cm?'\nvColourMaskUv=vUv;':'';
-          sh.vertexShader=sh.vertexShader
-            .replace('#include <common>',vertexCommon)
-            .replace('#include <uv_vertex>','#include <uv_vertex>'+vertexTail);
-
-          let fragmentCommon='#include <common>';
-          if(tintState){
-            sh.uniforms.redBrickMaskMap={value:cm};
-            sh.uniforms.redBrickEnabled={value:0};
-            sh.uniforms.redBrickPrimary={value:new THREE.Color('#ffffff')};
-            sh.uniforms.redBrickSecondary={value:new THREE.Color('#ffffff')};
-            sh.uniforms.redBrickTertiary={value:new THREE.Color('#ffffff')};
-            tintState.uniforms=sh.uniforms;
-            if(tintState.palette)setRedBrickPalette(tintState.palette);
-            fragmentCommon+='\nuniform sampler2D redBrickMaskMap;varying vec2 vColourMaskUv;uniform float redBrickEnabled;uniform vec3 redBrickPrimary;uniform vec3 redBrickSecondary;uniform vec3 redBrickTertiary;';
-          }
-          sh.fragmentShader=sh.fragmentShader.replace('#include <common>',fragmentCommon);
-          if(tintState){
-            sh.fragmentShader=sh.fragmentShader.replace('#include <map_fragment>',
-              '#include <map_fragment>\n'+
-              'vec3 redBrickMask=texture2D(redBrickMaskMap,vColourMaskUv).rgb;\n'+
-              'float redBrickTotal=redBrickMask.r+redBrickMask.g+redBrickMask.b;\n'+
-              'float redBrickWeight=clamp(max(redBrickMask.r,max(redBrickMask.g,redBrickMask.b)),0.0,1.0);\n'+
-              'vec3 redBrickColour=(redBrickMask.r*redBrickPrimary+redBrickMask.g*redBrickSecondary+redBrickMask.b*redBrickTertiary)/max(redBrickTotal,0.0001);\n'+
-              'diffuseColor.rgb=mix(diffuseColor.rgb,redBrickColour,redBrickEnabled*redBrickWeight);');
-          }
-        };
-        m.customProgramCacheKey=function(){return 'redBrick:'+Boolean(cm);};
-      }
       // MMR is exported repacked into ORM order (roughness->green, metalness->blue) so one texture
       // drives both maps the way three.js samples them. The scene has an environment map, so the
       // metallic belt/buckle now reflects it instead of rendering black (which is why metalness used
@@ -5069,7 +4960,6 @@ Promise.all(models.map(load)).then(loaded=>{
   frameAll();
   buildPartMover();
   buildCustomMeshMover();
-  buildRedBrickTintUi();
   buildMaterialEditor();
 });
 // Calibration aid: arrows move the face piece in 0.004 steps and report the total, so the right
