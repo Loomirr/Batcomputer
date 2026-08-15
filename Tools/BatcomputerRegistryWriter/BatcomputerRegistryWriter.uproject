@@ -2,10 +2,10 @@
   "FileVersion": 3,
   "EngineAssociation": "5.6",
   "Category": "Tools",
-  "Description": "Writes small UE 5.6 cooked AssetRegistry.bin files for Suit Slots startup registration proofs.",
+  "Description": "Writes minimal cooked AssetRegistry.bin files for Batcomputer-built LOTDK mods.",
   "Modules": [
     {
-      "Name": "SuitSlotsRegistryWriter",
+      "Name": "BatcomputerRegistryWriter",
       "Type": "Editor",
       "LoadingPhase": "Default"
     }

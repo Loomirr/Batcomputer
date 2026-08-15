@@ -261,11 +261,18 @@ public sealed partial class MainForm
             ShowCharacterInViewer(string.Empty, entry.Name, project);
             return;
         }
-        ShowCharacterInViewer(entry.ObjectPath, entry.Name);
+        ShowCharacterInViewer(
+            entry.ObjectPath,
+            entry.Name,
+            allowBaseGameRedBrickPreview: entry.Origin == CharacterCatalogService.Source.Playable);
     }
 
     /// <summary>Builds and shows a character; used by the tab and by "View in 3D" on My character.</summary>
-    private async void ShowCharacterInViewer(string objectPath, string label, NativeSuitProject? project = null)
+    private async void ShowCharacterInViewer(
+        string objectPath,
+        string label,
+        NativeSuitProject? project = null,
+        bool allowBaseGameRedBrickPreview = false)
     {
         var loadGeneration = ++_viewerLoadGeneration;
         var viewer = _viewer;
@@ -292,7 +299,7 @@ public sealed partial class MainForm
         try
         {
             var settings = AppSettings.Current;
-            var paks = settings.GamePaksRoot ?? string.Empty;
+            var paks = settings.EffectiveGamePaksRoot();
             var usmap = settings.EffectiveUsmapPath() ?? string.Empty;
             var previewDiagnostics = new System.Collections.Concurrent.ConcurrentQueue<string>();
             void FlushPreviewDiagnostics()
@@ -304,13 +311,23 @@ public sealed partial class MainForm
             }
             var folder = await Task.Run(() =>
                 project is null
-                    ? ModelPreviewService.BuildPreviewCharacter(paks, usmap, objectPath)
+                    ? ModelPreviewService.BuildPreviewCharacter(
+                        paks,
+                        usmap,
+                        objectPath,
+                        previewOptions: new ModelPreviewService.CharacterPreviewOptions
+                        {
+                            RedBrickTints = allowBaseGameRedBrickPreview
+                                ? ViewerBaseGameRedBrickPaletteService.LoadPreviewTints()
+                                : [],
+                        })
                     : ModelPreviewService.BuildPreviewSuit(
                         paks,
                         usmap,
                         project,
                         settings.EffectiveProjectRoot(),
-                        previewDiagnostics.Enqueue));
+                        previewDiagnostics.Enqueue,
+                        ViewerBaseGameRedBrickPaletteService.LoadPreviewTints()));
             FlushPreviewDiagnostics();
             if (loadGeneration != _viewerLoadGeneration || _viewerPanel?.Visible != true)
             {

@@ -48,7 +48,7 @@ public sealed class AnimLibraryService
     public void Save(AnimLibrary library)
     {
         Directory.CreateDirectory(LibraryRoot);
-        File.WriteAllText(IndexPath, JsonSerializer.Serialize(library, JsonOptions));
+        AtomicFileUtil.WriteAllText(IndexPath, JsonSerializer.Serialize(library, JsonOptions));
     }
 
     /// <summary>

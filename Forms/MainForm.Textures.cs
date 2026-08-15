@@ -471,9 +471,9 @@ public sealed partial class MainForm
         var projectRoot = Path.GetFullPath(_projectRootText.Text.Trim());
         var allowedRoot = Path.GetFullPath(Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureImports"));
         var outputRoot = Path.GetFullPath(texture.OutputRoot);
-        if (!outputRoot.StartsWith(allowedRoot, StringComparison.OrdinalIgnoreCase))
+        if (!FileSystemPathUtil.IsWithinDirectory(outputRoot, allowedRoot, allowRoot: true))
         {
-            AppendLog($"Refused to delete texture output outside _generated\\TextureImports: {outputRoot}");
+            AppendLog($"Refused to delete texture output outside the Generated texture workspace: {outputRoot}");
             return;
         }
 
@@ -533,7 +533,7 @@ public sealed partial class MainForm
         var templateJson = cookPreset.TemplateJson;
         if (string.IsNullOrWhiteSpace(templateJson) || !File.Exists(templateJson))
         {
-            AppendLog("Texture import needs a proven BGRA8 Texture2D template JSON under _generated.");
+            AppendLog("Texture import needs a proven BGRA8 Texture2D template JSON in the Generated workspace.");
             AppendLog($"Looked for: {templateJson}");
             return;
         }
@@ -1181,7 +1181,7 @@ public sealed partial class MainForm
             }
         }
 
-        return Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "SuitSlotsRawProbe");
+        return Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "BatcomputerRawTextureProbe");
     }
 
     private static string GuessTextureImportKind(string suggestedName)
@@ -2128,7 +2128,7 @@ public sealed partial class MainForm
 
         var contentRootFull = Path.GetFullPath(contentRootToPackage);
         var textureStageFull = Path.GetFullPath(textureStage);
-        if (!textureStageFull.StartsWith(contentRootFull, StringComparison.OrdinalIgnoreCase))
+        if (!FileSystemPathUtil.IsWithinDirectory(textureStageFull, contentRootFull))
         {
             AppendLog($"Texture stage cleanup skipped: path escaped content root ({textureStageFull}).");
             return;
@@ -2174,7 +2174,7 @@ public sealed partial class MainForm
                 }
 
                 var full = Path.GetFullPath(Path.Combine(contentRootFull, relative));
-                if (!full.StartsWith(contentRootFull, StringComparison.OrdinalIgnoreCase))
+                if (!FileSystemPathUtil.IsWithinDirectory(full, contentRootFull))
                 {
                     AppendLog($"Texture stage cleanup skipped escaped manifest entry: {relative}");
                     continue;

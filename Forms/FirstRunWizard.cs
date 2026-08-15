@@ -56,115 +56,64 @@ public sealed class FirstRunWizard : Form
         {
             new()
             {
-                Title = "retoc (included)",
-                Blurb = "Batcomputer includes an Oodle-capable retoc helper for extracting game assets and packing mod trios. " +
-                        "Keep the detected copy unless you deliberately use a different retoc build.",
-                Hint = "...\\Tools\\retoc-oodle\\retoc.exe. This bundled helper handles normal and compact releases.",
-                IsFile = true,
-                Filter = "retoc.exe|retoc.exe|Executables|*.exe|All files|*.*",
-                Get = s => string.IsNullOrWhiteSpace(s.RetocExePath) ? AppSettings.DefaultRetocExePath() : s.RetocExePath,
-                Set = (s, v) => s.RetocExePath = v,
+                Title = "Workspace folder",
+                Blurb = "Batcomputer's packaging helper and registry-writer source are already included. " +
+                        "Choose where projects, extracted assets and builds should live, or leave this blank for a portable workspace beside the app.",
+                Hint = "Blank = beside Batcomputer.exe. A separate writable drive is useful for the large game-asset extraction.",
+                Optional = true,
+                IsFile = false,
+                Get = s => s.ProjectRoot,
+                Set = (s, v) => s.ProjectRoot = v,
             },
             new()
             {
-                Title = "Oodle packer (optional)",
-                Blurb = "Compact mod releases use Batcomputer's Oodle-enabled retoc helper. " +
-                        "Portable author installs include this helper; it does not contain the proprietary Oodle runtime.",
-                Hint = "...\\Tools\\retoc-oodle\\retoc.exe. Skip until you have the compact-release helper.",
+                Title = "Mappings (.usmap)",
+                Blurb = "Choose the current mappings file for the installed game version. Batcomputer uses it to read and write cooked assets and copies it into Data\\Mappings.",
+                Hint = "A current .usmap dumped from the game, such as Dinner.usmap.",
                 IsFile = true,
-                Filter = "retoc.exe|retoc.exe|Executables|*.exe|All files|*.*",
+                Filter = "Mappings|*.usmap|All files|*.*",
+                Get = s => s.UsmapPath,
+                Set = (s, v) => s.UsmapPath = v,
+            },
+            new()
+            {
+                Title = "Game Content\\Paks folder",
+                Blurb = "Select the game's Content\\Paks folder. Batcomputer reads it during the one-click asset refresh; it never modifies the shipped game containers.",
+                Hint = "…\\LEGO Batman - Legacy of the Dark Knight\\LEGOBatmanLotDK\\Content\\Paks",
+                IsFile = false,
+                Get = s => s.GamePaksRoot,
+                Set = (s, v) => s.GamePaksRoot = v,
+            },
+            new()
+            {
+                Title = "Extracted game Content",
+                Blurb = "Already have a current unpacked Content dump? Select it here. Otherwise leave this blank and setup will offer the complete character-related extraction automatically. Budget about 18 GB of free space.",
+                Hint = "Optional: the Content folder itself, or Content\\Characters\\Minifig.",
                 Optional = true,
-                Get = s => string.IsNullOrWhiteSpace(s.OodleRetocExePath) ? AppSettings.DefaultOodleRetocExePath() : s.OodleRetocExePath,
-                Set = (s, v) => s.OodleRetocExePath = v,
+                IsFile = false,
+                Get = s => s.ExtractedContentRoot,
+                Set = (s, v) => s.ExtractedContentRoot = v,
+            },
+            new()
+            {
+                Title = "Unreal Engine 5.6 (optional for now)",
+                Blurb = "Mod authors need UE 5.6 when Batcomputer writes a startup Asset Registry. Players do not need Unreal. You may skip this while browsing assets, but a complete native mod build requires it.",
+                Hint = "Usually C:\\Program Files\\Epic Games\\UE_5.6",
+                Optional = true,
+                IsFile = false,
+                Get = s => string.IsNullOrWhiteSpace(s.UnrealEngineRoot) ? AppSettings.DefaultUnrealEngineRoot() : s.UnrealEngineRoot,
+                Set = (s, v) => s.UnrealEngineRoot = v,
             },
             new()
             {
                 Title = "Oodle runtime (optional)",
-                Blurb = "Choose oo2core_9_win64.dll from your own local UE 5.6 install. " +
-                        "Batcomputer uses it to make compact packages but never copies it into a mod or release.",
+                Blurb = "Compact packages use oo2core_9_win64.dll from your own UE 5.6 installation. Batcomputer detects it automatically when possible and never copies it into a mod or release.",
                 Hint = "Usually ...\\UE_5.6\\Engine\\Binaries\\DotNET\\AutomationTool\\oo2core_9_win64.dll.",
                 IsFile = true,
                 Filter = "Oodle runtime|oo2core*_win64.dll|DLLs|*.dll|All files|*.*",
                 Optional = true,
                 Get = s => string.IsNullOrWhiteSpace(s.OodleRuntimeDllPath) ? s.EffectiveOodleRuntimeDllPath() : s.OodleRuntimeDllPath,
                 Set = (s, v) => s.OodleRuntimeDllPath = v,
-            },
-            new()
-            {
-                Title = "Unreal Engine 5.6 (optional for now)",
-                Blurb = "Batcomputer uses UE 5.6 only when building a mod's startup Asset Registry plugin. " +
-                        "Players who install your finished mod do not need Unreal. You can configure this later, " +
-                        "but Build Mod needs it before it can create a complete native release.",
-                Hint = "Usually C:\\Program Files\\Epic Games\\UE_5.6",
-                IsFile = false,
-                Optional = true,
-                Get = s => string.IsNullOrWhiteSpace(s.UnrealEngineRoot) ? AppSettings.DefaultUnrealEngineRoot() : s.UnrealEngineRoot,
-                Set = (s, v) => s.UnrealEngineRoot = v,
-            },
-            new()
-            {
-                Title = "SuitSlotsRegistryWriter project (optional for now)",
-                Blurb = "This small UE project writes and round-trip verifies the cooked AssetRegistry.bin " +
-                        "for every enabled suit in a mod. Keep it beside Batcomputer under Tools when making a portable author install.",
-                Hint = "…\\Tools\\SuitSlotsRegistryWriter\\SuitSlotsRegistryWriter.uproject",
-                IsFile = true,
-                Filter = "Unreal project|*.uproject|All files|*.*",
-                Optional = true,
-                Get = s => string.IsNullOrWhiteSpace(s.RegistryWriterProjectPath) ? AppSettings.DefaultRegistryWriterProjectPath() : s.RegistryWriterProjectPath,
-                Set = (s, v) => s.RegistryWriterProjectPath = v,
-            },
-            new()
-            {
-                Title = "Mappings (.usmap)",
-                Blurb = "Tells the tool how the game's assets are laid out. Needed to read and write " +
-                        "anything from the game. Batcomputer copies the selected mapping into its own Data\\Mappings folder.",
-                Hint = "A .usmap file dumped from the game — e.g. Dinner.usmap.",
-                IsFile = true,
-                Filter = "Mappings|*.usmap|All files|*.*",
-                Get = s => s.UsmapPath, Set = (s, v) => s.UsmapPath = v,
-            },
-            new()
-            {
-                Title = "Game Content\\Paks folder",
-                Blurb = "Your LEGO Batman install's Paks folder. The tool reads the shipped game data " +
-                        "from here when refreshing assets.",
-                Hint = "…\\LEGO Batman - Legacy of the Dark Knight\\LEGOBatmanLotDK\\Content\\Paks",
-                IsFile = false,
-                Get = s => s.GamePaksRoot, Set = (s, v) => s.GamePaksRoot = v,
-            },
-            new()
-            {
-                Title = "Extracted game Content",
-                Blurb = "An unpacked Content dump. This is what the part index, materials browser and " +
-                        "base-character picker read from.\r\n\r\n" +
-                        "Already have a dump? Select it here. Otherwise leave this blank: finishing setup offers the full character, animation, and localisation extraction automatically. Budget about 18 GB of free space.",
-                Hint = "The Content folder itself, or Content\\Characters\\Minifig.",
-                Optional = true,
-                IsFile = false,
-                Get = s => string.IsNullOrWhiteSpace(s.ExtractedContentRoot)
-                    ? AppSettings.DefaultFirstRunExtractedContentRoot()
-                    : s.ExtractedContentRoot,
-                Set = (s, v) => s.ExtractedContentRoot = v,
-            },
-            new()
-            {
-                Title = "Workspace folder",
-                Blurb = "Where your suits, mods and build output are saved. By default Batcomputer keeps its " +
-                        "Generated, Data, Runtime, and settings folders beside the app.\r\n\r\n" +
-                        "Leave this blank for a portable install. Choose another drive only when you want the large extracted game dump elsewhere.",
-                Hint = "Blank = next to Batcomputer.exe. Pick another writable folder only for a larger workspace.",
-                Optional = true,
-                IsFile = false,
-                Get = s => s.ProjectRoot, Set = (s, v) => s.ProjectRoot = v,
-            },
-            new()
-            {
-                Title = "Game mod folder",
-                Blurb = "Where built mods get installed so the game loads them. You can set this later " +
-                        "if you only want to build, not install.",
-                Hint = "…\\LEGOBatmanLotDK\\Content\\Paks\\~mods\\Slot",
-                IsFile = false, Optional = true,
-                Get = s => s.GamePaksModFolder, Set = (s, v) => s.GamePaksModFolder = v,
             },
         };
 

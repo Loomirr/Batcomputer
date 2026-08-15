@@ -1,8 +1,8 @@
 using UnrealBuildTool;
 
-public class SuitSlotsRegistryWriter : ModuleRules
+public class BatcomputerRegistryWriter : ModuleRules
 {
-    public SuitSlotsRegistryWriter(ReadOnlyTargetRules Target) : base(Target)
+    public BatcomputerRegistryWriter(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 

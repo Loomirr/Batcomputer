@@ -7,7 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>Batcomputer</AssemblyName>
     <RootNamespace>Batcomputer</RootNamespace>
-    <ApplicationIcon>Assets\Icon.ico</ApplicationIcon>
+    <ApplicationIcon Condition="Exists('Assets\Icon.ico')">Assets\Icon.ico</ApplicationIcon>
     <!-- Code-built controls do not need designer serialization metadata. -->
     <NoWarn>$(NoWarn);WFO1000</NoWarn>
   </PropertyGroup>
@@ -33,15 +33,18 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- Unreal build rules are not part of Batcomputer. -->
-    <Compile Remove="Tools\SuitSlotsRegistryWriter\**\*.cs" />
+    <Compile Remove="Tools\BatcomputerRegistryWriter\**\*.cs" />
     <Compile Remove="artifacts\**\*.cs" />
     <Compile Remove="Generated\**\*.cs" />
     <!-- Embed app art in the single-file release. -->
     <EmbeddedResource Include="Assets\**\*.png" />
+    <!-- Red Brick authoring is intentionally out of scope; only the code-driven, read-only
+         base-game palette selector remains in the 3D viewer. -->
+    <EmbeddedResource Remove="Assets\RedBricks.png" />
     <EmbeddedResource Include="Assets\**\*.gif" />
     <EmbeddedResource Include="Assets\Font\**\*.otf" />
     <!-- Embed the window and taskbar icon. -->
-    <EmbeddedResource Include="Assets\Icon.ico" />
+    <EmbeddedResource Include="Assets\Icon.ico" Condition="Exists('Assets\Icon.ico')" />
     <!-- Offline three.js preview runtime; see licenses/three.js-LICENSE.txt. -->
     <EmbeddedResource Include="Web\preview\*.js" />
     <!-- Shipped game-data catalogs and runtime socket calibration profiles. -->
@@ -65,13 +68,20 @@
     <None Update="README.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <None Update="THIRD_PARTY_NOTICES.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <None Update="licenses\*.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
-    <!-- D-DIN is bundled under the SIL Open Font License 1.1. -->
-    <None Update="Assets\Font\SIL Open Font License.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <!-- D-DIN is bundled under the SIL Open Font License 1.1. Keep the notice with
+         the other release licenses instead of publishing a mostly empty Assets tree. -->
+    <None Update="Assets\Font\SIL Open Font License.txt"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"
+          ExcludeFromSingleFile="true"
+          TargetPath="licenses\D-DIN-SIL-OFL-1.1.txt" />
     <!-- Bundle author-tool source and config, not Unreal build outputs. -->
+    <None Remove="Tools\BatcomputerRegistryWriter\Binaries\**\*;Tools\BatcomputerRegistryWriter\DerivedDataCache\**\*;Tools\BatcomputerRegistryWriter\Intermediate\**\*;Tools\BatcomputerRegistryWriter\Saved\**\*" />
+    <Content Remove="Tools\BatcomputerRegistryWriter\Binaries\**\*;Tools\BatcomputerRegistryWriter\DerivedDataCache\**\*;Tools\BatcomputerRegistryWriter\Intermediate\**\*;Tools\BatcomputerRegistryWriter\Saved\**\*" />
     <None Update="Tools\README.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <None Update="Tools\Build-NativeSuitTemplateIndex.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
-    <None Update="Tools\SuitSlotsRegistryWriter\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
-    <None Include="Tools\SuitSlotsRegistryWriter\Source\**\*.cs"
+    <None Update="Tools\BatcomputerRegistryWriter\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Include="Tools\BatcomputerRegistryWriter\Source\**\*.cs"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest"
           ExcludeFromSingleFile="true" />
@@ -85,5 +95,13 @@
   <Target Name="CreatePortableGeneratedFolder" AfterTargets="Publish">
     <MakeDir Directories="$(PublishDir)Generated" />
     <WriteLinesToFile File="$(PublishDir)Generated\.gitkeep" Lines="" Overwrite="true" />
+  </Target>
+  <!-- NuGet supplies WebView2 XML API documentation next to the app by default. It is
+       useful while developing but is not a runtime dependency or user document. -->
+  <Target Name="CleanPortablePublish" AfterTargets="Publish">
+    <ItemGroup>
+      <PortableWebViewDocumentation Include="$(PublishDir)Microsoft.Web.WebView2.*.xml" />
+    </ItemGroup>
+    <Delete Files="@(PortableWebViewDocumentation)" />
   </Target>
 </Project>

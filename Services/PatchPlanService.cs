@@ -108,7 +108,7 @@ public static class PatchPlanService
             Source = project.CutsceneTemplate?.Stem ?? "",
             Target = "BP_Batman_Thomas_Cutscene / BP_Batman_Thomas_Cutscene_C",
             Action = "Rewrite cutscene package name, generated class name, SCS owner paths, component template object names.",
-            Notes = "Cutscene class must be a real generated class path that F8/F9 can resolve."
+            Notes = "Cutscene class must be a valid generated class path referenced by the patched metadata."
         });
         plan.Steps.Add(new PatchStep
         {
@@ -117,7 +117,7 @@ public static class PatchPlanService
             Source = project.DcmdTemplate?.PackagePath ?? "",
             Target = project.TargetPackages.Dcmd,
             Action = "Patch DCMD Pawn/MenuActor/CinematicsActor soft paths and PawnTag/ProgressTag/DisplayName.",
-            Notes = "Target release bridge remains TheBatman2025 later; command-only tests can keep ThomasWayne.Default bridge."
+            Notes = "Use the project's unique PawnTag and generated actor paths; do not retain donor identity fields."
         });
         plan.Steps.Add(new PatchStep
         {
@@ -144,7 +144,7 @@ public static class PatchPlanService
             Source = "patched stage",
             Target = "Io Store trio",
             Action = "Run retoc to-zen after UAssetAPI writes succeed.",
-            Notes = "Then test with existing F8/F9 command-only bridge."
+            Notes = "Cold-start the game and verify discovery through the owning character's native suit menu."
         });
 
         return plan;

@@ -146,7 +146,7 @@ internal static class ViewerLayoutService
     private static void Write(string path, LayoutStore store)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, JsonSerializer.Serialize(store, Json));
+        AtomicFileUtil.WriteAllText(path, JsonSerializer.Serialize(store, Json));
     }
 
     private static IReadOnlyList<SavedPreviewPartPlacement> Clone(IEnumerable<SavedPreviewPartPlacement> placements) =>

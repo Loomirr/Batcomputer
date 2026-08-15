@@ -6,9 +6,9 @@ namespace Batcomputer;
 /// <summary>
 /// User-configurable tool paths. Persisted next to the .exe as
 /// Batcomputer.settings.json so it is portable and survives per-user.
-/// Every field is optional: an empty/invalid value falls back to the built-in
-/// default (which is the original hardcoded path), so the original author's setup
-/// works with no config while other modders can override each path.
+/// Every field is optional: an empty or invalid value falls back to portable
+/// discovery or a known game-install default. Machine-specific inputs remain
+/// user-configurable without baking an author's workspace into the application.
 /// </summary>
 public sealed class AppSettings
 {
@@ -39,7 +39,8 @@ public sealed class AppSettings
     // Cooked/split export Content root the packager stages from.
     public string? ExportContentRoot { get; set; }
 
-    // Game install folder where the packaged mod trio is installed (~mods\Slot).
+    // Legacy per-suit install destination. Current releases use ~mods\Expanded;
+    // this field remains only so older portable settings can migrate safely.
     public string? GamePaksModFolder { get; set; }
 
     // Game Content\Paks folder used by the one-click asset refresh workflow.
@@ -49,7 +50,7 @@ public sealed class AppSettings
     // AssetRegistry writer. Players installing a finished mod do not need it.
     public string? UnrealEngineRoot { get; set; }
 
-    // The small UE project containing SuitSlotsRegistryWriterCommandlet.
+    // The small bundled UE project containing BatcomputerRegistryWriterCommandlet.
     public string? RegistryWriterProjectPath { get; set; }
 
     // Developer-only character research surfaces. Kept off for the normal builder
@@ -128,7 +129,7 @@ public sealed class AppSettings
     public void Save()
     {
         AdoptUsmapIntoToolData();
-        File.WriteAllText(SettingsFilePath, JsonSerializer.Serialize(this, JsonOptions));
+        AtomicFileUtil.WriteAllText(SettingsFilePath, JsonSerializer.Serialize(this, JsonOptions));
     }
 
     private void AdoptUsmapIntoToolData()
@@ -179,7 +180,7 @@ public sealed class AppSettings
         UsableFile(RetocExePath) ?? DefaultRetocExePath();
 
     public string EffectiveOodleRetocExePath() =>
-        UsableFile(OodleRetocExePath) ?? DefaultOodleRetocExePath();
+        UsableFile(OodleRetocExePath) ?? EffectiveRetocExePath();
 
     public string? EffectiveOodleRuntimeDllPath() =>
         UsableFile(OodleRuntimeDllPath) ?? OodleRuntimeFromEngine(EffectiveUnrealEngineRoot());
@@ -192,8 +193,28 @@ public sealed class AppSettings
             File.Exists(runtime);
     }
 
-    public string EffectiveGamePaksModFolder() =>
-        (!string.IsNullOrWhiteSpace(GamePaksModFolder) ? GamePaksModFolder! : DefaultGamePaksModFolder());
+    public string EffectiveGamePaksModFolder()
+    {
+        if (!string.IsNullOrWhiteSpace(GamePaksModFolder))
+        {
+            var configured = Path.GetFullPath(GamePaksModFolder!);
+            var directory = new DirectoryInfo(configured);
+            if (directory.Name.Equals("Slot", StringComparison.OrdinalIgnoreCase) &&
+                directory.Parent?.Name.Equals("~mods", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                // Pre-release settings used ~mods\Slot. Preserve the game install while
+                // transparently moving that default onto the current shared mod layout.
+                return Path.Combine(directory.Parent.FullName, "Expanded");
+            }
+
+            return configured;
+        }
+
+        var paksRoot = EffectiveGamePaksRoot();
+        return Directory.Exists(paksRoot)
+            ? Path.Combine(paksRoot, "~mods", "Expanded")
+            : DefaultGamePaksModFolder();
+    }
 
     public string EffectiveGamePaksRoot() =>
         UsableDir(GamePaksRoot) ?? DefaultGamePaksRoot();
@@ -201,8 +222,21 @@ public sealed class AppSettings
     public string EffectiveUnrealEngineRoot() =>
         UsableDir(UnrealEngineRoot) ?? DefaultUnrealEngineRoot();
 
-    public string EffectiveRegistryWriterProjectPath() =>
-        UsableFile(RegistryWriterProjectPath) ?? DefaultRegistryWriterProjectPath();
+    public string EffectiveRegistryWriterProjectPath()
+    {
+        var configured = UsableFile(RegistryWriterProjectPath);
+        if (configured is not null &&
+            !Path.GetFileName(configured).Equals(
+                "SuitSlotsRegistryWriter.uproject",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return configured;
+        }
+
+        // Existing settings may still point at the pre-release writer. Prefer
+        // the renamed bundled project so stale build artifacts cannot be used.
+        return DefaultRegistryWriterProjectPath();
+    }
 
     /// <summary>
     /// A settings file is "complete" for silent startup when the paths the tool
@@ -227,12 +261,12 @@ public sealed class AppSettings
         var issues = new List<string>();
         var retoc = Path.Combine(ToolRoot, "Tools", "retoc-oodle", "retoc.exe");
         var indexer = Path.Combine(ToolRoot, "Tools", "Build-NativeSuitTemplateIndex.ps1");
-        var registryProject = Path.Combine(ToolRoot, "Tools", "SuitSlotsRegistryWriter", "SuitSlotsRegistryWriter.uproject");
+        var registryProject = Path.Combine(ToolRoot, "Tools", "BatcomputerRegistryWriter", "BatcomputerRegistryWriter.uproject");
         var gameData = Path.Combine(ToolRoot, "gamedata");
 
         if (!File.Exists(retoc)) issues.Add("Tools\\retoc-oodle\\retoc.exe");
         if (!File.Exists(indexer)) issues.Add("Tools\\Build-NativeSuitTemplateIndex.ps1");
-        if (!File.Exists(registryProject)) issues.Add("Tools\\SuitSlotsRegistryWriter\\SuitSlotsRegistryWriter.uproject");
+        if (!File.Exists(registryProject)) issues.Add("Tools\\BatcomputerRegistryWriter\\BatcomputerRegistryWriter.uproject");
         if (!Directory.Exists(gameData) || !Directory.EnumerateFiles(gameData, "*.json").Any()) issues.Add("gamedata\\*.json");
         return issues;
     }
@@ -253,7 +287,7 @@ public sealed class AppSettings
         RegistryWriterProjectPath = DefaultRegistryWriterProjectPath()
     };
 
-    // ---- Built-in defaults (the original hardcoded paths) --------------------
+    // ---- Portable discovery and known install defaults -----------------------
 
     /// <summary>Folder name for everything the tool generates.</summary>
     public const string GeneratedFolderName = "Generated";
@@ -334,13 +368,11 @@ public sealed class AppSettings
         return null;
     }
 
-    // A portable install can bundle retoc here; Setup still permits an external tool path.
+    // Portable author releases bundle one Oodle-capable retoc helper. Settings
+    // still permits an explicit override for development and troubleshooting.
     public static string DefaultRetocExePath()
     {
-        var bundled = Path.Combine(ToolRoot, "Tools", "retoc", "retoc.exe");
-        // The Oodle-capable fork remains fully compatible with normal to-legacy
-        // extraction, so one bundled retoc covers both ordinary and compact builds.
-        return File.Exists(bundled) ? bundled : DefaultOodleRetocExePath();
+        return DefaultOodleRetocExePath();
     }
 
 
@@ -407,7 +439,7 @@ public sealed class AppSettings
         Path.Combine(GeneratedRootFor(DefaultProjectRoot()), "ExportContent");
 
     public static string DefaultGamePaksModFolder() =>
-        @"C:\Program Files (x86)\Steam\steamapps\common\LEGO Batman - Legacy of the Dark Knight\LEGOBatmanLotDK\Content\Paks\~mods\Slot";
+        @"C:\Program Files (x86)\Steam\steamapps\common\LEGO Batman - Legacy of the Dark Knight\LEGOBatmanLotDK\Content\Paks\~mods\Expanded";
 
     public static string DefaultGamePaksRoot() =>
         Path.GetFullPath(Path.Combine(DefaultGamePaksModFolder(), "..", ".."));
@@ -422,7 +454,7 @@ public sealed class AppSettings
     /// <summary>Returns the registry-writer project shipped in a portable install.</summary>
     public static string DefaultRegistryWriterProjectPath()
     {
-        var relative = Path.Combine("Tools", "SuitSlotsRegistryWriter", "SuitSlotsRegistryWriter.uproject");
+        var relative = Path.Combine("Tools", "BatcomputerRegistryWriter", "BatcomputerRegistryWriter.uproject");
         var bundled = Path.Combine(ToolRoot, relative);
         return File.Exists(bundled) ? bundled : "";
     }

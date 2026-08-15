@@ -109,7 +109,7 @@ public sealed class SuitProjectService
     {
         Directory.CreateDirectory(GuiOutputRoot);
         var path = ProjectPathForSlot(project.SlotId);
-        File.WriteAllText(path, JsonSerializer.Serialize(project, JsonOptions));
+        AtomicFileUtil.WriteAllText(path, JsonSerializer.Serialize(project, JsonOptions));
         return path;
     }
 
@@ -137,7 +137,7 @@ public sealed class SuitProjectService
         Directory.CreateDirectory(GuiOutputRoot);
         var safeSlot = MakeSafeFileName(plan.Project.SlotId);
         var path = Path.Combine(GuiOutputRoot, $"{safeSlot}.patch-plan.json");
-        File.WriteAllText(path, JsonSerializer.Serialize(plan, JsonOptions));
+        AtomicFileUtil.WriteAllText(path, JsonSerializer.Serialize(plan, JsonOptions));
         return path;
     }
 
@@ -151,9 +151,8 @@ public sealed class SuitProjectService
     /// </summary>
     public void DeleteProjectFromTool(string projectPath, NativeSuitProject project)
     {
-        var root = Path.GetFullPath(GuiOutputRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         var fullProjectPath = Path.GetFullPath(projectPath);
-        if (!fullProjectPath.StartsWith(root, StringComparison.OrdinalIgnoreCase) ||
+        if (!FileSystemPathUtil.IsWithinDirectory(fullProjectPath, GuiOutputRoot) ||
             !fullProjectPath.EndsWith(".native-suit-project.json", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("Refused to delete a project outside the tool's saved-project folder.");
@@ -165,7 +164,7 @@ public sealed class SuitProjectService
         }
 
         var projectDir = Path.GetFullPath(ProjectOutputDirectory(project));
-        if (projectDir.StartsWith(root, StringComparison.OrdinalIgnoreCase) && Directory.Exists(projectDir))
+        if (FileSystemPathUtil.IsWithinDirectory(projectDir, GuiOutputRoot) && Directory.Exists(projectDir))
         {
             Directory.Delete(projectDir, recursive: true);
         }
@@ -173,7 +172,7 @@ public sealed class SuitProjectService
 
     public string CreateUnpatchedStage(NativeSuitProject project)
     {
-        var stageRoot = Path.Combine(GuiOutputRoot, project.SlotId, "UnpatchedStage", "LEGOBatmanLotDK", "Content");
+        var stageRoot = Path.Combine(ProjectOutputDirectory(project), "UnpatchedStage", "LEGOBatmanLotDK", "Content");
         CopyPackagePair(project.PlayableTemplate, project.TargetPackages.Playable, stageRoot);
         CopyPackagePair(project.CutsceneTemplate, project.TargetPackages.Cutscene, stageRoot);
         CopyPackagePair(project.DcmdTemplate, project.TargetPackages.Dcmd, stageRoot);

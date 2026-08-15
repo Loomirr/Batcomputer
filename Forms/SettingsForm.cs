@@ -65,12 +65,6 @@ public sealed partial class SettingsForm : Form
 
         _rows = new List<PathRow>
         {
-            new() { Key = "RetocExePath", Label = "retoc (included)", Section = "Tools", IsFile = true, Filter = "retoc.exe|retoc.exe|Executables|*.exe|All files|*.*",
-                Get = s => string.IsNullOrWhiteSpace(s.RetocExePath) ? AppSettings.DefaultRetocExePath() : s.RetocExePath,
-                Set = (s, v) => s.RetocExePath = v },
-            new() { Key = "OodleRetocExePath", Label = "Oodle packer (retoc.exe)", Section = "Tools", IsFile = true, Filter = "retoc.exe|retoc.exe|Executables|*.exe|All files|*.*",
-                Get = s => string.IsNullOrWhiteSpace(s.OodleRetocExePath) ? AppSettings.DefaultOodleRetocExePath() : s.OodleRetocExePath,
-                Set = (s, v) => s.OodleRetocExePath = v },
             new() { Key = "OodleRuntimeDllPath", Label = "Oodle runtime (local UE 5.6)", Section = "Tools", IsFile = true, Filter = "Oodle runtime|oo2core*_win64.dll|DLLs|*.dll|All files|*.*",
                 Get = s => string.IsNullOrWhiteSpace(s.OodleRuntimeDllPath) ? s.EffectiveOodleRuntimeDllPath() : s.OodleRuntimeDllPath,
                 Set = (s, v) => s.OodleRuntimeDllPath = v },
@@ -79,21 +73,16 @@ public sealed partial class SettingsForm : Form
             new() { Key = "UnrealEngineRoot", Label = "Unreal Engine 5.6 (Asset Registry writer)", Section = "Tools", IsFile = false, Filter = "",
                 Get = s => string.IsNullOrWhiteSpace(s.UnrealEngineRoot) ? AppSettings.DefaultUnrealEngineRoot() : s.UnrealEngineRoot,
                 Set = (s, v) => s.UnrealEngineRoot = v },
-            new() { Key = "RegistryWriterProjectPath", Label = "SuitSlotsRegistryWriter (.uproject)", Section = "Tools", IsFile = true, Filter = "Unreal project|*.uproject|All files|*.*",
-                Get = s => string.IsNullOrWhiteSpace(s.RegistryWriterProjectPath) ? AppSettings.DefaultRegistryWriterProjectPath() : s.RegistryWriterProjectPath,
-                Set = (s, v) => s.RegistryWriterProjectPath = v },
             new() { Key = "ProjectRoot", Label = "Workspace folder (blank = beside Batcomputer)", Section = "Project", IsFile = false, Filter = "",
                 Get = s => s.ProjectRoot, Set = (s, v) => s.ProjectRoot = v },
             new() { Key = "ExportContentRoot", Label = "Export Content root (staging source)", Section = "Project", IsFile = false, Filter = "",
                 Get = s => s.ExportContentRoot, Set = (s, v) => s.ExportContentRoot = v },
-            new() { Key = "ExtractedContentRoot", Label = "Extracted game Content (UAssetGUI)", Section = "Project", IsFile = false, Filter = "",
+            new() { Key = "ExtractedContentRoot", Label = "Extracted game Content", Section = "Project", IsFile = false, Filter = "",
                 Get = s => s.ExtractedContentRoot, Set = (s, v) => s.ExtractedContentRoot = v },
             new() { Key = "GamePaksRoot", Label = "Game Content\\Paks (asset refresh source)", Section = "Game", IsFile = false, Filter = "",
                 Get = s => s.GamePaksRoot, Set = (s, v) => s.GamePaksRoot = v },
             new() { Key = "AssetExtractRoot", Label = "Extracted assets output (blank = workspace\\Generated\\GameExtracts)", Section = "Project", IsFile = false, Filter = "",
                 Get = s => s.AssetExtractRoot, Set = (s, v) => s.AssetExtractRoot = v },
-            new() { Key = "GamePaksModFolder", Label = "Game install mod folder (~mods\\Slot)", Section = "Game", IsFile = false, Filter = "",
-                Get = s => s.GamePaksModFolder, Set = (s, v) => s.GamePaksModFolder = v }
         };
 
         // --- footer (Dock=Bottom) ---
@@ -239,7 +228,7 @@ public sealed partial class SettingsForm : Form
             AutoSize = false, Left = RowLabelX, Top = 16, Width = 690, Height = firstRun ? 40 : 22,
             ForeColor = Theme.OnDarkMuted, Font = Theme.Caption,
             Text = firstRun
-                ? "First-time setup: point the builder at retoc.exe, your .usmap, the game Content\\Paks folder, and an extracted Content dump (the Content folder or Content\\Characters\\Minifig). Oodle compression is optional until you are ready to build compact releases."
+                ? "First-time setup: Batcomputer has already found its bundled packaging helper. Select your .usmap and game Content\\Paks folder; the tool can create the required character-asset dump for you. Unreal Engine 5.6 and its Oodle runtime are authoring dependencies that may be configured now or later."
                 : "Tool & game paths."
         };
         panel.Controls.Add(intro);

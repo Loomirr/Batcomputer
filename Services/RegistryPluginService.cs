@@ -15,9 +15,9 @@ public sealed class RegistryPluginService
 {
     public const string PrimaryAssetType = "PawnMetaData";
     public const string PawnMetadataClass = "/Script/DinnerPawnMetaData.DinnerCharacterMetaData";
-    public const string WriterResultMarker = "SUIT_SLOTS_REGISTRY_WRITER_RESULT";
+    public const string WriterResultMarker = "BATCOMPUTER_REGISTRY_WRITER_RESULT";
     public const string CorePluginName = LotdkExpandedLayout.CoreRegistryPluginName;
-    private const string ProofSentinelRoot = "/Game/Developers/NstDevScan";
+    private const string ProofSentinelRoot = "/Game/Developers/BatcomputerRegistryProbe";
     private const string WriterProbePackage = "/Game/Mods/BatcomputerWriterProbe/Characters/DA_DCMD_BatcomputerWriterProbe_Playable";
 
     /// <summary>
@@ -279,7 +279,13 @@ public sealed class RegistryPluginService
         var layout = CreateLayout(buildRoot, modId);
         try
         {
-            EnsureCorePlugin(buildRoot);
+            // Only the official LOTDK Expanded project owns and distributes the
+            // global /Game/Mods scan extension. Add-on authors ship their own
+            // rows and tags, and require LOTDK Expanded at install time.
+            if (LotdkExpandedLayout.IsCoreMod(modId))
+            {
+                EnsureCorePlugin(buildRoot);
+            }
             Directory.CreateDirectory(layout.PluginDirectory);
             File.WriteAllText(layout.DescriptorPath, BuildDescriptorJson(layout.PluginName, modDisplayName));
             if (File.Exists(layout.RegistryPath))
@@ -366,7 +372,7 @@ public sealed class RegistryPluginService
         if (!File.Exists(buildScript) || !File.Exists(editorCommand) || !File.Exists(writerProject))
         {
             toolchain = null!;
-            error = "Static Asset Registry generation needs Unreal Engine 5.6 and SuitSlotsRegistryWriter. " +
+            error = "Static Asset Registry generation needs Unreal Engine 5.6 and BatcomputerRegistryWriter. " +
                     "Open Settings and set the UE 5.6 folder plus the writer .uproject path.";
             return false;
         }
@@ -395,7 +401,7 @@ public sealed class RegistryPluginService
             new[]
             {
                 "/c", toolchain.BuildScript,
-                "SuitSlotsRegistryWriterEditor", "Win64", "Development",
+                "BatcomputerRegistryWriterEditor", "Win64", "Development",
                 $"-Project={toolchain.WriterProject}", "-WaitMutex", "-NoHotReloadFromIDE",
             },
             log);
@@ -425,7 +431,7 @@ public sealed class RegistryPluginService
         var arguments = new List<string>
         {
             toolchain.WriterProject,
-            "-run=SuitSlotsRegistryWriter",
+            "-run=BatcomputerRegistryWriter",
             // The registry writer does not need a persistent UE Derived Data Cache.
             // This makes a headless write reliable on machines where the global
             // Zen/DDC location is unavailable or intentionally read-only.
@@ -474,7 +480,7 @@ public sealed class RegistryPluginService
     private static bool WriterArtifactsExist(string writerProject)
     {
         var directory = Path.Combine(Path.GetDirectoryName(writerProject) ?? "", "Binaries", "Win64");
-        return File.Exists(Path.Combine(directory, "UnrealEditor-SuitSlotsRegistryWriter.dll")) &&
+        return File.Exists(Path.Combine(directory, "UnrealEditor-BatcomputerRegistryWriter.dll")) &&
             Directory.Exists(directory) &&
             Directory.EnumerateFiles(directory, "*.modules", SearchOption.TopDirectoryOnly).Any();
     }

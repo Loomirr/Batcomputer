@@ -27,6 +27,7 @@ public sealed class ModelPreviewControl : UserControl
     private bool _ready;
     private bool _active = true;
     private uint? _browserProcessId;
+    private string? _userDataFolder;
     private int _rendererVersion;
 
     /// <summary>Raised when the in-viewer part mover asks the host to persist an alignment.</summary>
@@ -78,6 +79,8 @@ public sealed class ModelPreviewControl : UserControl
         _ready = false;
         var browserProcessId = _browserProcessId;
         _browserProcessId = null;
+        var userDataFolder = _userDataFolder;
+        _userDataFolder = null;
         var web = _web;
         _web = null;
         if (web is not null)
@@ -86,6 +89,7 @@ public sealed class ModelPreviewControl : UserControl
             web.Dispose();
         }
         StopBrowserProcess(browserProcessId);
+        QueueUserDataCleanup(userDataFolder);
 
         if (!string.IsNullOrWhiteSpace(_pendingFolder))
         {
@@ -148,12 +152,12 @@ public sealed class ModelPreviewControl : UserControl
         try
         {
             var web = _web ??= CreateWebView();
-            // Own user-data folder per process: the default one is derived from the exe path, so a
-            // second instance (or a leftover msedgewebview2 child) locks it and startup fails with
-            // 0x800700AA "resource in use".
+            // Own user-data folder per renderer. A process-level folder made the embedded viewer
+            // and pop-out viewer share one browser tree, so releasing one could terminate the other.
             var userData = Path.Combine(AppSettings.RuntimeRoot, "WebView2",
-                Environment.ProcessId.ToString());
+                $"{Environment.ProcessId}-embedded-{Guid.NewGuid():N}");
             Directory.CreateDirectory(userData);
+            _userDataFolder = userData;
             var env = await Microsoft.Web.WebView2.Core.CoreWebView2Environment.CreateAsync(
                 browserExecutableFolder: null, userDataFolder: userData);
             await web.EnsureCoreWebView2Async(env);
@@ -161,6 +165,7 @@ public sealed class ModelPreviewControl : UserControl
             if (!_active || !ReferenceEquals(web, _web))
             {
                 StopBrowserProcess(browserProcessId);
+                QueueUserDataCleanup(userData);
                 return false;
             }
             web.CoreWebView2.Settings.AreDevToolsEnabled = false;
@@ -220,6 +225,36 @@ public sealed class ModelPreviewControl : UserControl
         {
             // The browser exited while the control was being released.
         }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // Windows was already tearing down the isolated browser process.
+        }
+    }
+
+    private static void QueueUserDataCleanup(string? folder)
+    {
+        if (string.IsNullOrWhiteSpace(folder))
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            for (var attempt = 0; attempt < 5; attempt++)
+            {
+                await Task.Delay(500 + attempt * 500).ConfigureAwait(false);
+                try
+                {
+                    if (Directory.Exists(folder))
+                    {
+                        Directory.Delete(folder, recursive: true);
+                    }
+                    return;
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+        });
     }
 
     private void QueueMemoryTrim(int rendererVersion)
@@ -257,7 +292,17 @@ public sealed class ModelPreviewControl : UserControl
     {
         if (disposing)
         {
-            _web?.Dispose();
+            _active = false;
+            Interlocked.Increment(ref _rendererVersion);
+            var web = _web;
+            _web = null;
+            var browserProcessId = _browserProcessId;
+            _browserProcessId = null;
+            var userDataFolder = _userDataFolder;
+            _userDataFolder = null;
+            web?.Dispose();
+            StopBrowserProcess(browserProcessId);
+            QueueUserDataCleanup(userDataFolder);
         }
         base.Dispose(disposing);
     }

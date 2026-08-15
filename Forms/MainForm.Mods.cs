@@ -801,13 +801,27 @@ public sealed partial class MainForm
         var tagsInstalled = false;
         var registryInstalled = false;
         var assetRegistryInstalled = false;
-        var coreRegistryInstalled = false;
+        var coreRegistryReady = false;
         try
         {
 
             // 1) trio -> ~mods/Expanded
             var gameRoot = GameLegoRoot()
                 ?? throw new InvalidOperationException("Batcomputer could not locate the game's LEGOBatmanLotDK folder from settings.");
+            result.CoreRegistryDestination = LotdkExpandedLayout.CoreRegistryPluginDirectory(gameRoot);
+            if (!LotdkExpandedLayout.IsCoreMod(mod.ModId))
+            {
+                ModReleaseStep("Checking the LOTDK Expanded core dependency...");
+                coreRegistryReady = LotdkExpandedLayout.HasInstalledCoreRegistry(gameRoot);
+                if (!coreRegistryReady)
+                {
+                    result.Status = ModInstallStatus.Failed;
+                    result.Detail = "LOTDK Expanded is not installed. Install the LOTDK Expanded core before installing this add-on.";
+                    AppendLog("Install mod stopped before copying files: the LOTDK Expanded core dependency is missing.");
+                    return result;
+                }
+                AppendLog($"  LOTDK Expanded core dependency found -> {result.CoreRegistryDestination}");
+            }
             result.TrioDestination = LotdkExpandedLayout.ExpandedPaksRoot(gameRoot);
             var slotDest = result.TrioDestination;
             ModReleaseStep("Copying the IoStore release files…");
@@ -838,15 +852,21 @@ public sealed partial class MainForm
                 AppendLog($"  mod.json → {packDestination}");
             }
 
-            var corePlugin = RegistryPluginService.EnsureCorePlugin(outRoot);
-            result.CoreRegistryDestination = LotdkExpandedLayout.CoreRegistryPluginDirectory(gameRoot);
-            ModReleaseStep("Installing the shared Asset Manager scan configuration...");
-            if (File.Exists(corePlugin.DescriptorPath) && File.Exists(RegistryPluginService.CoreGameIniPath(corePlugin)))
+            if (LotdkExpandedLayout.IsCoreMod(mod.ModId))
             {
-                CopyDirectoryContents(corePlugin.PluginDirectory, result.CoreRegistryDestination, overwrite: true);
-                installed += Directory.EnumerateFiles(corePlugin.PluginDirectory, "*", SearchOption.AllDirectories).Count();
-                coreRegistryInstalled = true;
-                AppendLog($"  {corePlugin.PluginName} -> {result.CoreRegistryDestination}");
+                var corePlugin = RegistryPluginService.EnsureCorePlugin(outRoot);
+                ModReleaseStep("Installing the shared Asset Manager scan configuration...");
+                if (File.Exists(corePlugin.DescriptorPath) && File.Exists(RegistryPluginService.CoreGameIniPath(corePlugin)))
+                {
+                    CopyDirectoryContents(corePlugin.PluginDirectory, result.CoreRegistryDestination, overwrite: true);
+                    installed += Directory.EnumerateFiles(corePlugin.PluginDirectory, "*", SearchOption.AllDirectories).Count();
+                    coreRegistryReady = true;
+                    AppendLog($"  {corePlugin.PluginName} -> {result.CoreRegistryDestination}");
+                }
+            }
+            else
+            {
+                coreRegistryReady = true;
             }
 
             var plugin = RegistryPluginService.CreateLayout(outRoot, mod.ModId);
@@ -864,7 +884,7 @@ public sealed partial class MainForm
                 AppendLog($"  {plugin.PluginName} -> {result.AssetRegistryDestination}");
             }
 
-            result.Status = trioFilesCopied == 3 && tagsInstalled && registryInstalled && coreRegistryInstalled && assetRegistryInstalled
+            result.Status = trioFilesCopied == 3 && tagsInstalled && registryInstalled && coreRegistryReady && assetRegistryInstalled
                 ? ModInstallStatus.Complete
                 : ModInstallStatus.Partial;
             string previousIdCleanupError = "";
@@ -898,7 +918,9 @@ public sealed partial class MainForm
                 ? "The release is installed. Restart the game before testing the mod."
                 : !string.IsNullOrWhiteSpace(previousIdCleanupError)
                     ? "The new release was installed, but Batcomputer could not remove every previous-ID file. Close the game and install again.\n\n" + previousIdCleanupError
-                    : "Some expected release files were missing, so this install may be incomplete. Check Diagnostics before testing.";
+                    : !coreRegistryReady
+                        ? "This add-on was copied, but LOTDK Expanded is not installed. Install the LOTDK Expanded core first, then install this mod again."
+                        : "Some expected release files were missing, so this install may be incomplete. Check Diagnostics before testing.";
             AppendLog($"Installed mod '{mod.DisplayName}' - {installed} file(s). Restart the game to load it.");
             return result;
         }
@@ -975,10 +997,8 @@ public sealed partial class MainForm
     {
         if (!Directory.Exists(target)) return 0;
 
-        var root = Path.GetFullPath(allowedRoot)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
         var fullTarget = Path.GetFullPath(target);
-        if (!fullTarget.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+        if (!FileSystemPathUtil.IsWithinDirectory(fullTarget, allowedRoot))
         {
             throw new InvalidOperationException($"Refusing to remove a path outside the LOTDK Expanded install root: {fullTarget}");
         }
@@ -1017,7 +1037,11 @@ public sealed partial class MainForm
         var outRoot = ModBuildRoot(mod.ModId);
         var trioBase = Path.Combine(outRoot, mod.PackageBaseName);
         var plugin = RegistryPluginService.CreateLayout(outRoot, mod.ModId);
-        var corePlugin = RegistryPluginService.EnsureCorePlugin(outRoot);
+        RegistryPluginService.PluginLayout? corePlugin = null;
+        if (LotdkExpandedLayout.IsCoreMod(mod.ModId))
+        {
+            corePlugin = RegistryPluginService.EnsureCorePlugin(outRoot);
+        }
         var files = new List<(string Source, string ArchivePath)>();
         const string ArchiveRoot = "LEGO Batman - Legacy of the Dark Knight";
 
@@ -1045,10 +1069,13 @@ public sealed partial class MainForm
                 $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{plugin.PluginName}/{Path.GetFileName(plugin.DescriptorPath)}");
             AddRequired(plugin.RegistryPath,
                 $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{plugin.PluginName}/{Path.GetFileName(plugin.RegistryPath)}");
-            AddRequired(corePlugin.DescriptorPath,
-                $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{corePlugin.PluginName}/{Path.GetFileName(corePlugin.DescriptorPath)}");
-            AddRequired(RegistryPluginService.CoreGameIniPath(corePlugin),
-                $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{corePlugin.PluginName}/Config/Game.ini");
+            if (corePlugin is not null)
+            {
+                AddRequired(corePlugin.DescriptorPath,
+                    $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{corePlugin.PluginName}/{Path.GetFileName(corePlugin.DescriptorPath)}");
+                AddRequired(RegistryPluginService.CoreGameIniPath(corePlugin),
+                    $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{corePlugin.PluginName}/Config/Game.ini");
+            }
             foreach (var pluginFile in Directory.EnumerateFiles(plugin.PluginDirectory, "*", SearchOption.AllDirectories))
             {
                 if (files.Any(file => file.Source.Equals(pluginFile, StringComparison.OrdinalIgnoreCase))) continue;
@@ -1056,12 +1083,15 @@ public sealed partial class MainForm
                 files.Add((pluginFile,
                     $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{plugin.PluginName}/{relative}"));
             }
-            foreach (var coreFile in Directory.EnumerateFiles(corePlugin.PluginDirectory, "*", SearchOption.AllDirectories))
+            if (corePlugin is not null)
             {
-                if (files.Any(file => file.Source.Equals(coreFile, StringComparison.OrdinalIgnoreCase))) continue;
-                var relative = Path.GetRelativePath(corePlugin.PluginDirectory, coreFile).Replace('\\', '/');
-                files.Add((coreFile,
-                    $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{corePlugin.PluginName}/{relative}"));
+                foreach (var coreFile in Directory.EnumerateFiles(corePlugin.PluginDirectory, "*", SearchOption.AllDirectories))
+                {
+                    if (files.Any(file => file.Source.Equals(coreFile, StringComparison.OrdinalIgnoreCase))) continue;
+                    var relative = Path.GetRelativePath(corePlugin.PluginDirectory, coreFile).Replace('\\', '/');
+                    files.Add((coreFile,
+                        $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{corePlugin.PluginName}/{relative}"));
+                }
             }
         }
         catch (FileNotFoundException ex)
@@ -1095,11 +1125,15 @@ public sealed partial class MainForm
                 WindowTitle = "Batcomputer - Mod release archive",
                 Title = "Mod release archive created",
                 Subtitle = mod.DisplayName,
-                Message = "Extract this archive into your Steam common folder. Its game-relative paths are already arranged for installation.",
+                Message = LotdkExpandedLayout.IsCoreMod(mod.ModId)
+                    ? "Extract this archive into your Steam common folder. Its game-relative paths are already arranged for installation."
+                    : "Install LOTDK Expanded first, then extract this add-on into your Steam common folder. Its game-relative paths are already arranged for installation.",
                 Severity = Dialog.Level.Good,
                 PrimaryText = "Done",
                 CalloutTitle = "Ready to share",
-                CalloutDetail = $"{files.Count} release file{(files.Count == 1 ? "" : "s")} packaged. The archive contains no authoring projects or generated previews.",
+                CalloutDetail = LotdkExpandedLayout.IsCoreMod(mod.ModId)
+                    ? $"{files.Count} release file{(files.Count == 1 ? "" : "s")} packaged, including the shared registry core. The archive contains no authoring projects or generated previews."
+                    : $"{files.Count} add-on file{(files.Count == 1 ? "" : "s")} packaged. The shared registry core is intentionally omitted and supplied by LOTDK Expanded.",
                 Fields = new List<(string Label, string Value)>
                 {
                     ("Archive", zipPath),
@@ -1471,8 +1505,21 @@ public sealed partial class MainForm
 
         // Fresh stage each build so a removed suit's assets don't linger in the trio.
         var stageRoot = Path.Combine(outRoot, "Stage");
-        try { if (Directory.Exists(stageRoot)) Directory.Delete(stageRoot, recursive: true); }
-        catch (Exception ex) { AppendLog($"Build mod: could not clear old stage: {ex.Message}"); }
+        try
+        {
+            if (Directory.Exists(stageRoot))
+            {
+                Directory.Delete(stageRoot, recursive: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            preflight.Result.AddError("build workspace",
+                "Batcomputer could not clear the previous build stage. Close programs using generated files, then build again. " + ex.Message);
+            _lastModReleaseFailure = new ModReleaseFailure(mod.DisplayName, preflight.Result);
+            AppendLog($"Build mod ABORTED: could not clear old stage: {ex.Message}");
+            return false;
+        }
 
         // 1) StringTable ST_<ModId>.
         ModReleaseStep("Generating the mod StringTable…");

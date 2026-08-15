@@ -1,4 +1,4 @@
-#include "SuitSlotsRegistryWriterCommandlet.h"
+#include "BatcomputerRegistryWriterCommandlet.h"
 
 #include "AssetRegistry/AssetData.h"
 #include "AssetRegistry/AssetRegistryState.h"
@@ -10,7 +10,7 @@
 #include "Serialization/ArrayWriter.h"
 #include "UObject/PrimaryAssetId.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogSuitSlotsRegistryWriter, Log, All);
+DEFINE_LOG_CATEGORY_STATIC(LogBatcomputerRegistryWriter, Log, All);
 
 namespace
 {
@@ -31,7 +31,7 @@ bool ReadRequiredValue(
     if (!FParse::Value(*Params, Key, OutValue))
     {
         UE_LOG(
-            LogSuitSlotsRegistryWriter,
+            LogBatcomputerRegistryWriter,
             Error,
             TEXT("Missing required argument %s<value>"),
             Key);
@@ -43,7 +43,7 @@ bool ReadRequiredValue(
     if (OutValue.IsEmpty())
     {
         UE_LOG(
-            LogSuitSlotsRegistryWriter,
+            LogBatcomputerRegistryWriter,
             Error,
             TEXT("Argument %s must not be empty"),
             Key);
@@ -53,7 +53,7 @@ bool ReadRequiredValue(
 }
 }
 
-USuitSlotsRegistryWriterCommandlet::USuitSlotsRegistryWriterCommandlet()
+UBatcomputerRegistryWriterCommandlet::UBatcomputerRegistryWriterCommandlet()
 {
     IsClient = false;
     IsEditor = true;
@@ -62,7 +62,7 @@ USuitSlotsRegistryWriterCommandlet::USuitSlotsRegistryWriterCommandlet()
     ShowErrorCount = true;
 }
 
-int32 USuitSlotsRegistryWriterCommandlet::Main(const FString& Params)
+int32 UBatcomputerRegistryWriterCommandlet::Main(const FString& Params)
 {
     FString OutputPath;
     FString PackageName;
@@ -91,7 +91,7 @@ int32 USuitSlotsRegistryWriterCommandlet::Main(const FString& Params)
             !FPackageName::IsValidLongPackageName(SentinelPackageName))
         {
             UE_LOG(
-                LogSuitSlotsRegistryWriter,
+                LogBatcomputerRegistryWriter,
                 Error,
                 TEXT("Invalid SentinelPackage long package name: %s"),
                 *SentinelPackageName);
@@ -102,7 +102,7 @@ int32 USuitSlotsRegistryWriterCommandlet::Main(const FString& Params)
     if (!FPackageName::IsValidLongPackageName(PackageName))
     {
         UE_LOG(
-            LogSuitSlotsRegistryWriter,
+            LogBatcomputerRegistryWriter,
             Error,
             TEXT("Invalid long package name: %s"),
             *PackageName);
@@ -121,7 +121,7 @@ int32 USuitSlotsRegistryWriterCommandlet::Main(const FString& Params)
         ClassAssetName.IsEmpty())
     {
         UE_LOG(
-            LogSuitSlotsRegistryWriter,
+            LogBatcomputerRegistryWriter,
             Error,
             TEXT("Class must be a top-level object path such as /Script/Module.Class: %s"),
             *ClassPathText);
@@ -149,7 +149,7 @@ int32 USuitSlotsRegistryWriterCommandlet::Main(const FString& Params)
             RowText.ParseIntoArray(Fields, TEXT("|"), false);
             if (Fields.Num() != 2 && Fields.Num() != 4)
             {
-                UE_LOG(LogSuitSlotsRegistryWriter, Error,
+                UE_LOG(LogBatcomputerRegistryWriter, Error,
                     TEXT("Invalid AdditionalRows entry (expected Package|PrimaryAssetName or Package|PrimaryAssetName|PrimaryAssetType|Class): %s"),
                     *RowText);
                 return 10;
@@ -172,7 +172,7 @@ int32 USuitSlotsRegistryWriterCommandlet::Main(const FString& Params)
                 !Row.ClassPathText.Split(TEXT("."), &RowClassPackage, &RowClassAsset, ESearchCase::CaseSensitive, ESearchDir::FromEnd) ||
                 RowClassPackage.IsEmpty() || RowClassAsset.IsEmpty())
             {
-                UE_LOG(LogSuitSlotsRegistryWriter, Error,
+                UE_LOG(LogBatcomputerRegistryWriter, Error,
                     TEXT("Invalid AdditionalRows entry: %s"), *RowText);
                 return 10;
             }
@@ -229,7 +229,7 @@ int32 USuitSlotsRegistryWriterCommandlet::Main(const FString& Params)
     // primary type the game does not scan or load. If this row keeps its tags
     // while the real row loses them, a later physical-package discovery is
     // replacing the real row rather than plugin deserialization filtering it.
-    const FString SentinelPrimaryAssetType = TEXT("SuitSlotsRegistrySentinel");
+    const FString SentinelPrimaryAssetType = TEXT("BatcomputerRegistrySentinel");
     const FString SentinelPrimaryAssetName =
         bWriteSentinel
             ? FPackageName::GetShortName(SentinelPackageName)
@@ -267,7 +267,7 @@ int32 USuitSlotsRegistryWriterCommandlet::Main(const FString& Params)
     if (!State.Save(Serialized, Options))
     {
         UE_LOG(
-            LogSuitSlotsRegistryWriter,
+            LogBatcomputerRegistryWriter,
             Error,
             TEXT("FAssetRegistryState::Save failed"));
         return 5;
@@ -284,7 +284,7 @@ int32 USuitSlotsRegistryWriterCommandlet::Main(const FString& Params)
     if (!bHasCookedHeader)
     {
         UE_LOG(
-            LogSuitSlotsRegistryWriter,
+            LogBatcomputerRegistryWriter,
             Error,
             TEXT("Generated registry is missing the cooked bFilterEditorOnlyData header flag"));
         return 9;
@@ -297,7 +297,7 @@ int32 USuitSlotsRegistryWriterCommandlet::Main(const FString& Params)
     if (!FFileHelper::SaveArrayToFile(Serialized, *OutputPath))
     {
         UE_LOG(
-            LogSuitSlotsRegistryWriter,
+            LogBatcomputerRegistryWriter,
             Error,
             TEXT("Could not write %s"),
             *OutputPath);
@@ -311,7 +311,7 @@ int32 USuitSlotsRegistryWriterCommandlet::Main(const FString& Params)
             VerificationState))
     {
         UE_LOG(
-            LogSuitSlotsRegistryWriter,
+            LogBatcomputerRegistryWriter,
             Error,
             TEXT("The newly written registry did not load: %s"),
             *OutputPath);
@@ -430,9 +430,9 @@ int32 USuitSlotsRegistryWriterCommandlet::Main(const FString& Params)
         FString::Join(ExpectedPrimaryAssetIds, TEXT("|"));
 
     UE_LOG(
-        LogSuitSlotsRegistryWriter,
+        LogBatcomputerRegistryWriter,
         Display,
-        TEXT("SUIT_SLOTS_REGISTRY_WRITER_RESULT output=%s bytes=%lld cooked_header=%s assets=%d expected_primary_rows=%d exact_primary_rows=%d exact_primary_ids=%d expected_primary_asset_ids=%s package=%s object=%s class=%s primary_id=%s:%s exact_row=%s exact_primary_id=%s additional_rows=%d all_expected_rows=%s all_expected_primary_ids=%s sentinel_enabled=%s sentinel_object=%s sentinel_primary_id=%s:%s sentinel_exact_row=%s sentinel_exact_primary_id=%s"),
+        TEXT("BATCOMPUTER_REGISTRY_WRITER_RESULT output=%s bytes=%lld cooked_header=%s assets=%d expected_primary_rows=%d exact_primary_rows=%d exact_primary_ids=%d expected_primary_asset_ids=%s package=%s object=%s class=%s primary_id=%s:%s exact_row=%s exact_primary_id=%s additional_rows=%d all_expected_rows=%s all_expected_primary_ids=%s sentinel_enabled=%s sentinel_object=%s sentinel_primary_id=%s:%s sentinel_exact_row=%s sentinel_exact_primary_id=%s"),
         *OutputPath,
         static_cast<long long>(Serialized.Num()),
         bHasCookedHeader ? TEXT("yes") : TEXT("no"),

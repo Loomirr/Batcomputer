@@ -33,7 +33,12 @@ internal static class Program
             // --preview-suit <paksDir> <usmap> <suitProjectJson> <projectRoot>
             var project = JsonSerializer.Deserialize<NativeSuitProject>(File.ReadAllText(args[3]), JsonOptions)
                 ?? throw new InvalidOperationException("Could not read the suit project.");
-            Console.WriteLine(ModelPreviewService.BuildPreviewSuit(args[1], args[2], project, args[4]));
+            Console.WriteLine(ModelPreviewService.BuildPreviewSuit(
+                args[1],
+                args[2],
+                project,
+                args[4],
+                redBrickTints: ViewerBaseGameRedBrickPaletteService.LoadPreviewTints()));
             return 0;
         }
 
@@ -356,7 +361,7 @@ internal static class Program
             var plan = indexService.LoadRecommendedDonorPlan();
             if (plan is null)
             {
-                Console.Error.WriteLine("Recommended Thomas plan not found. Run the template indexer first.");
+                Console.Error.WriteLine("Recommended donor plan not found. Run the template indexer first.");
                 return 2;
             }
 
@@ -647,6 +652,7 @@ internal static class Program
         }
 
         ApplicationConfiguration.Initialize();
+        ConfigureGuiCrashReporting();
 
         // Keep the bundled typeface as the default for controls without an explicit font.
         try { Application.SetDefaultFont(AppFonts.Condensed(10f, FontStyle.Bold)); } catch { /* pre-window only */ }
@@ -660,12 +666,12 @@ internal static class Program
             Dialog.Error(null, "Portable install is incomplete",
                 "These files are missing beside Batcomputer.exe:\n\n  " + string.Join("\n  ", portableIssues) +
                 "\n\nExtract a complete Batcomputer release zip, then launch it again.");
+            return 1;
         }
 
-        // First-time setup: show the setup dialog only when the effective paths do
-        // not resolve. If the built-in defaults already work (the original author's
-        // machine), this is skipped entirely and no config file is needed. New users
-        // whose defaults don't exist get guided through setup on first launch.
+        // First-time setup asks only for machine-specific game data. Batcomputer's
+        // own retoc helper and registry-writer project are bundled and discovered
+        // automatically from the portable install.
         var initialExtractionRequested = false;
         var registryWriterPreparationRequested = false;
         if (!AppSettings.Current.IsUsable())
@@ -679,7 +685,7 @@ internal static class Program
             if (!AppSettings.Current.IsUsable() && !initialExtractionRequested)
             {
                 Dialog.Warn(null, "Setup incomplete", "Batcomputer can open, but setup is incomplete.\n\n" +
-                    "Before building indexes or packaging, open Setup and point the tool at retoc.exe, your .usmap mappings file, and your game Content\\Paks folder.");
+                    "Before building indexes or packaging, open Setup and select your current .usmap mappings file and the game's Content\\Paks folder.");
             }
         }
 
@@ -688,6 +694,7 @@ internal static class Program
         if (AppSettings.Current.DescribeRootWritability() is { } writeProblem)
         {
             Dialog.Error(null, "Can't write to the tool folder", writeProblem);
+            return 1;
         }
 
         var mainForm = new MainForm();
@@ -699,6 +706,69 @@ internal static class Program
         }
         Application.Run(mainForm);
         return 0;
+    }
+
+    private static int _handlingGuiCrash;
+
+    private static void ConfigureGuiCrashReporting()
+    {
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        Application.ThreadException += (_, eventArgs) =>
+        {
+            if (Interlocked.Exchange(ref _handlingGuiCrash, 1) != 0)
+            {
+                return;
+            }
+
+            var report = WriteCrashReport(eventArgs.Exception, "Windows Forms UI thread");
+            try
+            {
+                MessageBox.Show(
+                    "Batcomputer encountered an unexpected error and should be restarted.\n\n" +
+                    "A diagnostic report was saved here:\n" + report,
+                    "Batcomputer - Unexpected error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+            catch { /* the UI itself is already failing */ }
+            Application.Exit();
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
+        {
+            if (eventArgs.ExceptionObject is Exception exception)
+            {
+                WriteCrashReport(exception, "Unhandled application thread");
+            }
+        };
+    }
+
+    private static string WriteCrashReport(Exception exception, string source)
+    {
+        var fileName = $"Batcomputer-crash-{DateTime.UtcNow:yyyyMMdd-HHmmss-fff}.log";
+        var candidates = new[]
+        {
+            Path.Combine(AppSettings.DataRoot, "Logs"),
+            Path.Combine(Path.GetTempPath(), "Batcomputer", "Logs"),
+        };
+        foreach (var directory in candidates)
+        {
+            try
+            {
+                Directory.CreateDirectory(directory);
+                var path = Path.Combine(directory, fileName);
+                File.WriteAllText(path,
+                    $"Batcomputer {typeof(Program).Assembly.GetName().Version}\n" +
+                    $"UTC: {DateTime.UtcNow:O}\n" +
+                    $"Source: {source}\n" +
+                    $"OS: {Environment.OSVersion}\n" +
+                    $".NET: {Environment.Version}\n\n" +
+                    exception);
+                return path;
+            }
+            catch { /* try the next writable location */ }
+        }
+
+        return "The diagnostic report could not be written.";
     }
 
     /// <summary>

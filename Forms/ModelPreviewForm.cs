@@ -14,6 +14,8 @@ public sealed class ModelPreviewForm : Form
     // camera inside a different character's geometry. A fresh host name has an empty cache.
     private readonly string _virtualHost = $"p{Guid.NewGuid():N}.batcomputer";
     private readonly WebView2 _web = new() { Dock = DockStyle.Fill };
+    private readonly string _userDataFolder = Path.Combine(AppSettings.RuntimeRoot, "WebView2",
+        $"{Environment.ProcessId}-window-{Guid.NewGuid():N}");
     private readonly string? _html;
     private readonly string? _folder;
 
@@ -28,6 +30,7 @@ public sealed class ModelPreviewForm : Form
         Icon = EmbeddedAssets.LoadIcon("Icon.ico") ?? Icon;
         Controls.Add(_web);
         Load += async (_, _) => await InitAsync();
+        FormClosed += (_, _) => QueueUserDataCleanup();
     }
 
     /// <summary>Serves a preview folder (index.html + model.glb + three.js) over a virtual host.</summary>
@@ -44,6 +47,7 @@ public sealed class ModelPreviewForm : Form
         Icon = EmbeddedAssets.LoadIcon("Icon.ico") ?? Icon;
         Controls.Add(_web);
         Load += async (_, _) => await InitAsync();
+        FormClosed += (_, _) => QueueUserDataCleanup();
     }
 
     private async Task InitAsync()
@@ -53,11 +57,9 @@ public sealed class ModelPreviewForm : Form
             // Each preview gets its OWN WebView2 user-data folder. The default folder is derived from
             // the exe path, so a second instance (or a leftover msedgewebview2 child from a previous
             // run) holds a lock on it and the next launch dies with 0x800700AA "resource in use".
-            var userData = Path.Combine(AppSettings.RuntimeRoot, "WebView2",
-                Environment.ProcessId.ToString());
-            Directory.CreateDirectory(userData);
+            Directory.CreateDirectory(_userDataFolder);
             var env = await Microsoft.Web.WebView2.Core.CoreWebView2Environment.CreateAsync(
-                browserExecutableFolder: null, userDataFolder: userData);
+                browserExecutableFolder: null, userDataFolder: _userDataFolder);
             await _web.EnsureCoreWebView2Async(env);
             _web.CoreWebView2.Settings.AreDevToolsEnabled = false;
             _web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
@@ -93,6 +95,29 @@ public sealed class ModelPreviewForm : Form
                      + ex.Message,
             });
         }
+    }
+
+    private void QueueUserDataCleanup()
+    {
+        _web.Dispose();
+        var folder = _userDataFolder;
+        _ = Task.Run(async () =>
+        {
+            for (var attempt = 0; attempt < 5; attempt++)
+            {
+                await Task.Delay(500 + attempt * 500).ConfigureAwait(false);
+                try
+                {
+                    if (Directory.Exists(folder))
+                    {
+                        Directory.Delete(folder, recursive: true);
+                    }
+                    return;
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+        });
     }
 
     private static void SaveViewerPlacement(string json)

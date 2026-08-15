@@ -28,6 +28,8 @@ public sealed partial class MainForm
         _targetPlayableText.Text = project.TargetPackages?.Playable ?? "";
         _targetCutsceneText.Text = project.TargetPackages?.Cutscene ?? "";
         _targetDcmdText.Text = project.TargetPackages?.Dcmd ?? "";
+        _matOutputText.Text = SuggestedMaterialOutputPackage(project.TargetPackages?.Playable);
+        _lastAutoMaterialOutputPackage = _matOutputText.Text.Trim();
         _basePlayableText.Text = project.PlayableTemplate?.Uasset ?? "";
         _baseCutsceneText.Text = project.CutsceneTemplate?.Uasset ?? "";
         _baseDcmdText.Text = project.DcmdTemplate?.Uasset ?? "";
@@ -37,7 +39,7 @@ public sealed partial class MainForm
             // Deliberately do NOT touch _lastAutoPackageBaseName: it means "the last name we
             // AUTO-DERIVED". Claiming a saved (possibly custom) name is auto-derived makes
             // DeriveOutputs - which UseAsBase calls - think it's free to re-derive, silently
-            // renaming the suit's pak (e.g. ElectricBP_P -> ElectricLBM2_Electric_P).
+            // renaming the suit's package trio (e.g. Prototype_P -> MyMod_MySuit_P).
             _packageBaseNameText.Text = project.PackageBaseName;
         }
 
@@ -51,7 +53,9 @@ public sealed partial class MainForm
             try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(project); } catch { /* best effort */ }
         }
 
-        var stageRoot = Path.Combine(AppSettings.GeneratedRootFor(_projectRootText.Text.Trim()), "NativeSuitGuiProjects", project.SlotId, "PatchedNameMapStage");
+        var stageRoot = Path.Combine(
+            new SuitProjectService(_projectRootText.Text.Trim()).ProjectOutputDirectory(project),
+            "PatchedNameMapStage");
         if (!Directory.Exists(stageRoot))
         {
             AppendLog("  note: no staged content for this suit yet — use Base → Set base suit to (re)build the stage before editing materials.");
@@ -79,6 +83,25 @@ public sealed partial class MainForm
         _session.RaiseChanged();
         RefreshToyboxTiles();
         UpdateToyboxChips();
+    }
+
+    private static string SuggestedMaterialOutputPackage(string? playablePackage)
+    {
+        var mod = ExtractModFolder(playablePackage);
+        var playableName = UnrealPathUtil.AssetName(playablePackage);
+        if (string.IsNullOrWhiteSpace(mod) || string.IsNullOrWhiteSpace(playableName))
+        {
+            return "";
+        }
+
+        var stem = playableName.StartsWith("BP_", StringComparison.OrdinalIgnoreCase)
+            ? playableName[3..]
+            : playableName;
+        if (stem.EndsWith("_Playable", StringComparison.OrdinalIgnoreCase))
+        {
+            stem = stem[..^"_Playable".Length];
+        }
+        return $"/Game/Mods/{mod}/Materials/MI_{stem}_Body";
     }
 
     private void OpenMaterialWizard()
@@ -458,8 +481,8 @@ public sealed partial class MainForm
             yield break;
         }
 
-        var generatedRoot = AppSettings.GeneratedRootFor(_projectRootText.Text.Trim());
-        var projectRoot = Path.Combine(generatedRoot, "NativeSuitGuiProjects", project.SlotId);
+        var projectRoot = new SuitProjectService(_projectRootText.Text.Trim())
+            .ProjectOutputDirectory(project);
         foreach (var stage in new[] { "GraftedPartStage", "GraftedTorso2Stage", "PatchedNameMapStage", "IoStore" })
         {
             yield return stage.Equals("IoStore", StringComparison.OrdinalIgnoreCase)
@@ -616,7 +639,7 @@ public sealed partial class MainForm
 
         var contentRoot = AppSettings.Current.EffectiveExtractedContentRoot();
         var full = dialog.FileName;
-        if (!full.StartsWith(contentRoot, StringComparison.OrdinalIgnoreCase))
+        if (!FileSystemPathUtil.IsWithinDirectory(full, contentRoot))
         {
             AppendLog($"Material must be under the extracted content root: {contentRoot}");
             return;
@@ -679,7 +702,7 @@ public sealed partial class MainForm
         layout.Controls.Add(bottom, 0, 2);
         bottom.Controls.Add(new Label { Text = "Output package", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
         _matOutputText.Dock = DockStyle.Fill;
-        _matOutputText.Text = "/Game/Mods/ElectricLBM2/MI_Batman_ElectricLBM2_Body";
+        _matOutputText.PlaceholderText = "/Game/Mods/YourMod/Materials/MI_YourSuit_Body";
         bottom.Controls.Add(_matOutputText, 1, 0);
         var useGeneratedTexture = new Button { Text = "Use gen texture", Dock = DockStyle.Fill };
         useGeneratedTexture.Click += (_, _) => UseGeneratedTextureForSelectedMaterialGridRow();

@@ -222,6 +222,8 @@ public sealed partial class MainForm : Form
 
     private string _lastAutoPackageBaseName = "";
 
+    private string _lastAutoMaterialOutputPackage = "";
+
     // Home is mod-first. This is intentionally a session selection rather than a derived output:
     // the user may keep several mods open and choose which collection they are working on.
     private string _homeActiveModProjectPath = "";
@@ -792,6 +794,8 @@ public sealed partial class MainForm : Form
         _baseDcmdText.Text = "";
         _packageBaseNameText.Text = "";
         _lastAutoPackageBaseName = "";
+        _matOutputText.Text = "";
+        _lastAutoMaterialOutputPackage = "";
 
         ReadFieldsIntoProject(_currentProject);
         ApplyProjectToFields(_currentProject);
@@ -1272,6 +1276,8 @@ public sealed partial class MainForm : Form
         _baseDcmdText.Text = "";
         _packageBaseNameText.Text = "";
         _lastAutoPackageBaseName = "";
+        _matOutputText.Text = "";
+        _lastAutoMaterialOutputPackage = "";
         _session.RaiseChanged();
         UpdateToyboxChips();
     }
@@ -1670,19 +1676,26 @@ public sealed partial class MainForm : Form
             {
                 throw new InvalidOperationException("Texture2D root not found in template JSON.");
             }
-            var package = root.TryGetProperty("Package", out var pkgEl)
-                ? UnrealPathUtil.NormalizePackagePath(pkgEl.GetString())
-                : "/Game/Mods/ElectricLBM2/T_Batman_ElectricLBM2_ColorMask";
-            var name = root.TryGetProperty("Name", out var nameEl)
-                ? nameEl.GetString() ?? UnrealPathUtil.AssetName(package)
-                : UnrealPathUtil.AssetName(package);
+            if (!root.TryGetProperty("Package", out var pkgEl) ||
+                string.IsNullOrWhiteSpace(pkgEl.GetString()))
+            {
+                throw new InvalidDataException("Texture2D template JSON has no Package value.");
+            }
+            if (!root.TryGetProperty("Name", out var nameEl) ||
+                string.IsNullOrWhiteSpace(nameEl.GetString()))
+            {
+                throw new InvalidDataException("Texture2D template JSON has no Name value.");
+            }
+
+            var package = UnrealPathUtil.NormalizePackagePath(pkgEl.GetString());
+            var name = nameEl.GetString()!;
             return (package.Length, name.Length);
         }
-        catch
+        catch (Exception ex) when (ex is not InvalidDataException)
         {
-            const string fallbackPackage = "/Game/Mods/ElectricLBM2/T_Batman_ElectricLBM2_ColorMask";
-            const string fallbackName = "T_Batman_ElectricLBM2_ColorMask";
-            return (fallbackPackage.Length, fallbackName.Length);
+            throw new InvalidDataException(
+                $"Could not read the Texture2D identity from template JSON '{templateJson}'.",
+                ex);
         }
     }
 
@@ -1878,6 +1891,14 @@ public sealed partial class MainForm : Form
         _targetPlayableText.Text = $"{basePath}/BP_{family}_{stem}_Playable";
         _targetCutsceneText.Text = $"{basePath}/BP_{family}_{stem}_Cutscene";
         _targetDcmdText.Text = $"{basePath}/DA_DCMD_{family}_{stem}_Playable";
+
+        var derivedMaterialOutputPackage = $"/Game/Mods/{mod}/Materials/MI_{family}_{stem}_Body";
+        if (string.IsNullOrWhiteSpace(_matOutputText.Text) ||
+            string.Equals(_matOutputText.Text.Trim(), _lastAutoMaterialOutputPackage, StringComparison.OrdinalIgnoreCase))
+        {
+            _matOutputText.Text = derivedMaterialOutputPackage;
+        }
+        _lastAutoMaterialOutputPackage = derivedMaterialOutputPackage;
 
         var derivedPackageBaseName = MakeSafePackageBaseName($"{mod}_{stem}_P");
         if (string.IsNullOrWhiteSpace(_packageBaseNameText.Text) ||
@@ -2116,8 +2137,8 @@ public sealed partial class MainForm : Form
         AppendLog($"Loaded {_playableCandidates.Count} playable candidates.");
         AppendLog($"Loaded {_cutsceneCandidates.Count} cutscene candidates.");
         AppendLog(_recommendedPlan is null
-            ? "Recommended Thomas plan not found."
-            : "Recommended Thomas plan loaded.");
+            ? "Recommended donor plan not found."
+            : "Recommended donor plan loaded.");
 
         LoadPartIndexAndRefreshGrid(logIfMissing: false);
     }
@@ -2137,7 +2158,7 @@ public sealed partial class MainForm : Form
         _currentProject = PatchPlanService.CreateProjectFromRecommendedPlan(_recommendedPlan);
         ApplyProjectToFields(_currentProject);
         UpdateSelectedLabels();
-        AppendLog("Applied recommended Thomas donor plan.");
+        AppendLog("Applied recommended donor plan.");
     }
 
     private void PickPlayableFromGrid()
@@ -2526,7 +2547,8 @@ public sealed partial class MainForm : Form
             return;
         }
 
-        var slotRoot = Path.Combine(AppSettings.GeneratedRootFor(_projectRootText.Text.Trim()), "NativeSuitGuiProjects", _currentProject.SlotId);
+        var slotRoot = new SuitProjectService(_projectRootText.Text.Trim())
+            .ProjectOutputDirectory(_currentProject);
         if (!Directory.Exists(slotRoot))
         {
             AppendLog($"Clean output: nothing generated yet for '{_currentProject.SlotId}'.");
@@ -2750,6 +2772,8 @@ public sealed partial class MainForm : Form
             ? MakeSafePackageBaseName($"{project.SlotId}_P")
             : project.PackageBaseName;
         _lastAutoPackageBaseName = _packageBaseNameText.Text.Trim();
+        _matOutputText.Text = SuggestedMaterialOutputPackage(project.TargetPackages.Playable);
+        _lastAutoMaterialOutputPackage = _matOutputText.Text.Trim();
     }
 
     private void SyncProjectFieldsForViews()

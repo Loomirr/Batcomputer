@@ -129,7 +129,7 @@ public sealed class ModProjectService
             throw new InvalidOperationException("Mod ID is empty or has no valid characters.");
         }
         var path = Path.Combine(ModOutputRoot, $"{safe}.native-suit-mod-project.json");
-        File.WriteAllText(path, JsonSerializer.Serialize(mod, JsonOptions));
+        AtomicFileUtil.WriteAllText(path, JsonSerializer.Serialize(mod, JsonOptions));
         return path;
     }
 
@@ -270,9 +270,16 @@ public sealed class ModProjectService
     /// <summary>Deletes the mod project JSON only. Never touches referenced suit projects.</summary>
     public void DeleteMod(string path)
     {
-        if (File.Exists(path))
+        var fullPath = Path.GetFullPath(path);
+        if (!FileSystemPathUtil.IsWithinDirectory(fullPath, ModOutputRoot) ||
+            !fullPath.EndsWith(".native-suit-mod-project.json", StringComparison.OrdinalIgnoreCase))
         {
-            File.Delete(path);
+            throw new InvalidOperationException("Refused to delete a project outside the tool's saved-mod folder.");
+        }
+
+        if (File.Exists(fullPath))
+        {
+            File.Delete(fullPath);
         }
     }
 

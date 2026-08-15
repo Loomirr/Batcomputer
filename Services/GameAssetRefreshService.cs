@@ -40,6 +40,9 @@ public sealed class GameAssetRefreshService
         // the ST_<ModId> template. Narrow substring filters -> just these two tables.
         "Content/Localization/StringTables/ST_TagNames",
         "Content/Localization/StringTables/ST_UI",
+        // One metadata asset used only by the Playable 3D viewer's read-only native
+        // colour-preset selector. This does not restore Red Brick authoring assets.
+        ViewerBaseGameRedBrickPaletteService.RetocFilter,
     }.Concat(TextureCookTemplateService.RetocFilters).ToArray();
 
     // The normal refresh profile used by the builder - this has to be SELF-SUFFICIENT, because it
@@ -55,6 +58,9 @@ public sealed class GameAssetRefreshService
         "Content/Characters/",
         "Content/Localization/StringTables/",
         "Content/Animation/",
+        // Keep the clean-install viewer self-sufficient without broadening this into
+        // a Red Brick authoring or collectables extraction profile.
+        ViewerBaseGameRedBrickPaletteService.RetocFilter,
     }.Concat(TextureCookTemplateService.RetocFilters).ToArray();
 
     // Developer-only research profile. This is broader than the normal builder
@@ -71,6 +77,7 @@ public sealed class GameAssetRefreshService
         "Content/UI/",
         "Content/Localization/StringTables/",
         "Content/Plugins/GameFeatures/",
+        ViewerBaseGameRedBrickPaletteService.RetocFilter,
     };
 
     private readonly string _projectRoot;

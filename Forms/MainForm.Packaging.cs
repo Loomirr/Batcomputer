@@ -220,7 +220,8 @@ public sealed partial class MainForm
         {
             Dock = DockStyle.Fill,
             ForeColor = Color.DarkOrange,
-            Text = "After install: launch the game, F8 probes paths, Ctrl+F8 runs the self-bounce donor test, F9 runs the old command swap. Remove older paks with the same /Game/Mods paths so the new trio wins the mount."
+            Text = "After install: fully restart the game, then open the owning character's suit menu. " +
+                   "If the suit is missing, confirm LOTDK Expanded is enabled and use Verify last UE4SS log for a focused diagnosis."
         }, 0, 4);
         return box;
     }

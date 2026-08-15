@@ -147,8 +147,8 @@ public sealed class MaterialGenService
     public sealed class GenRequest
     {
         public string BaseUassetPath { get; set; } = "";
-        public string OutputPackagePath { get; set; } = ""; // e.g. /Game/Mods/ElectricLBM2/MI_Batman_ElectricLBM2_Body
-        // Parameter name -> texture object path (e.g. /Game/Mods/ElectricLBM2/T_..._BC)
+        public string OutputPackagePath { get; set; } = ""; // e.g. /Game/Mods/MyMod/Materials/MI_MySuit_Body
+        // Parameter name -> texture object path (e.g. /Game/Mods/MyMod/Textures/T_MySuit_BC)
         public Dictionary<string, string> ParamToTexture { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         // Parameter name -> linear RGBA colour. The base MI's parent graph and switches are retained.
         public Dictionary<string, ColorParam> ParamToColor { get; set; } = new(StringComparer.OrdinalIgnoreCase);

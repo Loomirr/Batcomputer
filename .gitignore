@@ -5,7 +5,7 @@ obj/
 .vs/
 .vscode/
 
-# Release staging + zips produced by publish-release.ps1
+# Local release staging and archives
 artifacts/
 
 # UI artwork. Compiled into the exe as an embedded resource, so it is required to
@@ -35,10 +35,10 @@ Tools/retoc-oodle/*.exe
 Tools/retoc-oodle/*.dll
 
 # UE creates these under the bundled registry-writer source on the author's machine.
-Tools/SuitSlotsRegistryWriter/Binaries/
-Tools/SuitSlotsRegistryWriter/DerivedDataCache/
-Tools/SuitSlotsRegistryWriter/Intermediate/
-Tools/SuitSlotsRegistryWriter/Saved/
+Tools/BatcomputerRegistryWriter/Binaries/
+Tools/BatcomputerRegistryWriter/DerivedDataCache/
+Tools/BatcomputerRegistryWriter/Intermediate/
+Tools/BatcomputerRegistryWriter/Saved/
 
 # OS
 Thumbs.db

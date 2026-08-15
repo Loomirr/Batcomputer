@@ -260,7 +260,8 @@ public sealed class SuitBaseProfile
 /// A mod is the release/package/localization unit; a suit is a native identity
 /// contained inside it. A mod COMPOSES suit projects by reference (it does not
 /// absorb their authoring data) - the same suit can live in multiple mods. Persisted
-/// as <c>_generated/NativeSuitModProjects/&lt;ModId&gt;.native-suit-mod-project.json</c>.
+/// as <c>Generated/NativeSuitModProjects/&lt;ModId&gt;.native-suit-mod-project.json</c>
+/// (or the migrated legacy Generated workspace selected by the author).
 ///
 /// Everything keys off <see cref="ModId"/>: the pak trio name, the
 /// <c>/Game/Mods/&lt;ModId&gt;</c> content root, the <c>ST_&lt;ModId&gt;</c> StringTable,
@@ -519,8 +520,8 @@ public sealed class NativeSuitPatchPlan
     public int SchemaVersion { get; set; } = 1;
     public string ToolVersion { get; set; } = "0.1-plan-gui";
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
-    public string Status { get; set; } = "plan-only";
-    public string Backend { get; set; } = "UAssetAPI intended; direct writes not enabled in this first GUI pass.";
+    public string Status { get; set; } = "reference-plan";
+    public string Backend { get; set; } = "UAssetAPI staged rewrite plus native Asset Registry generation.";
     public NativeSuitProject Project { get; set; } = new();
     public List<PatchStep> Steps { get; set; } = new();
 }

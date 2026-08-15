@@ -69,10 +69,11 @@ character, animation, and localisation assets and needs about 18 GB of free spac
 
 The native runtime is installed separately. Batcomputer installs each mod's `mod.json` under
 `ue4ss\LOTDKExpanded\Mods` and its registry plugin under
-`ue4ss\LOTDKExpanded\RegistryPlugins`. It also installs one shared
-`LOTDKExpandedCoreRegistry` plugin which keeps the Asset Manager scanning `/Game/Mods` for
-custom suits. Per-mod plugins contain only that mod's registry rows and gameplay
-tags. Batcomputer does not modify the runtime DLL or `mods.txt`.
+`ue4ss\LOTDKExpanded\RegistryPlugins`. The official project whose Mod ID is exactly
+`LOTDKExpanded` owns the one shared `LOTDKExpandedCoreRegistry` plugin that keeps the Asset
+Manager scanning `/Game/Mods`. Third-party archives contain only their own registry rows,
+gameplay tags, manifest, and cooked assets; they require LOTDK Expanded and never overwrite
+its shared core. Batcomputer does not modify the runtime DLL or `mods.txt`.
 
 ## Building a Suit
 
@@ -99,11 +100,18 @@ guessing gameplay metadata.
 ## 3D Viewer
 
 The viewer lists shipped playable and cutscene characters plus suit projects in the current
-workspace. It deliberately ignores installed game mods, so an existing `~mods\Slot` folder cannot
-change the base-game catalog or preview material resolution.
+workspace. It deliberately ignores installed game mods, so content under the game's `~mods` folder
+cannot change the base-game catalog or preview material resolution.
 
 Generated 3D preview files are cleaned automatically by default. The cleanup setting can be changed
 in Settings when a generated model or texture needs to be inspected.
+
+For shipped **Playable** entries and modded suit projects, the viewer can also offer read-only
+previews of the base game's Red Brick colour palettes. The selector is omitted unless the assembled
+body material has a usable Colour Mask, so a mask found only on an accessory cannot enable it. It is
+never shown for Cutscene entries, and it does not create, package, register, unlock, or edit Red
+Bricks. The normal character refresh extracts only the one native metadata payload needed to label
+these built-in colour presets.
 
 ## Building From Source
 

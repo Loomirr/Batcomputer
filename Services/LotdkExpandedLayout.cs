@@ -6,6 +6,18 @@ internal static class LotdkExpandedLayout
     public const string ModuleId = "LOTDKExpanded";
     public const string CoreRegistryPluginName = "LOTDKExpandedCoreRegistry";
 
+    /// <summary>
+    /// The official LOTDK Expanded content pack is the sole owner of the shared
+    /// Asset Manager scan plugin. Third-party packs depend on that installation
+    /// and must never overwrite it from their own releases.
+    /// </summary>
+    public static bool IsCoreMod(string? modId) =>
+        string.Equals(modId?.Trim(), ModuleId, StringComparison.OrdinalIgnoreCase);
+
+    public static bool HasInstalledCoreRegistry(string gameRoot) =>
+        File.Exists(Path.Combine(CoreRegistryPluginDirectory(gameRoot), CoreRegistryPluginName + ".uplugin")) &&
+        File.Exists(Path.Combine(CoreRegistryPluginDirectory(gameRoot), "Config", "Game.ini"));
+
     public static string Ue4ssRoot(string gameRoot) =>
         Path.Combine(gameRoot, "Binaries", "Win64", "ue4ss");
 
