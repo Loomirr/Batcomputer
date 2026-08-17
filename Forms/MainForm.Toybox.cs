@@ -121,7 +121,7 @@ public sealed partial class MainForm
         _toyboxSearchText.MinimumSize = new Size(150, 30);
         _toyboxSearchText.MaximumSize = new Size(0, 30);
         _toyboxSearchText.Margin = new Padding(0, 4, 6, 0);
-        _toyboxSearchText.PlaceholderText = "Search toybox...";
+        _toyboxSearchText.PlaceholderText = "Search toybox…";
         _toyboxSearchDebounce.Tick += (_, _) => { _toyboxSearchDebounce.Stop(); RefreshToyboxTiles(); };
         _toyboxSearchText.TextChanged += (_, _) => { _toyboxSearchDebounce.Stop(); _toyboxSearchDebounce.Start(); };
         Theme.StyleGoldButton(_toyboxPrimaryActionButton);
@@ -3036,7 +3036,7 @@ public sealed partial class MainForm
         layout.Controls.Add(_useAsBaseButton, 0, 5);
 
         _detectedLabel.Dock = DockStyle.Fill;
-        _detectedLabel.ForeColor = Color.DimGray;
+        _detectedLabel.ForeColor = Theme.OnDarkMuted;
         _detectedLabel.Text = "No base set yet.";
         layout.Controls.Add(_detectedLabel, 0, 6);
 

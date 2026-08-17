@@ -33,6 +33,17 @@ internal static class LotdkExpandedLayout
     public static string ExpandedPaksRoot(string gameRoot) =>
         Path.Combine(gameRoot, "Content", "Paks", "~mods", "Expanded");
 
+    /// <summary>
+    /// GameplayTags imports loose tag lists from the game's project Config/Tags
+    /// directory during startup. A content-only registry plugin cannot register
+    /// its own Config/Tags directory with the tag manager.
+    /// </summary>
+    public static string GameConfigTagsRoot(string gameRoot) =>
+        Path.Combine(gameRoot, "Config", "Tags");
+
+    public static string ModGameplayTagsPath(string gameRoot, string modId) =>
+        Path.Combine(GameConfigTagsRoot(gameRoot), $"{RequireLeafName(modId, "mod ID")}Tags.ini");
+
     public static string RegistryPluginsRoot(string gameRoot) =>
         Path.Combine(DataRoot(gameRoot), "RegistryPlugins");
 

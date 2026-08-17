@@ -187,7 +187,8 @@ public static class ModelPreviewService
         float SourceObjScale = 1f,
         Vector3? SourceObjOffset = null,
         Vector3? SourceObjRotation = null,
-        string? CustomMeshId = null);
+        string? CustomMeshId = null,
+        string? DisplayName = null);
 
     /// <summary>An explicit material assignment stored on a suit project.</summary>
     public sealed record PreviewMaterialFallback(
@@ -219,7 +220,8 @@ public static class ModelPreviewService
         float SourceObjScale = 1f,
         Vector3? SourceObjOffset = null,
         Vector3? SourceObjRotation = null,
-        string? CustomMeshId = null);
+        string? CustomMeshId = null,
+        string? DisplayName = null);
 
     /// <summary>
     /// The SCS is the Blueprint's real component hierarchy. Component templates themselves often
@@ -895,9 +897,7 @@ public static class ModelPreviewService
                 continue;
             }
 
-            var component = string.IsNullOrWhiteSpace(custom.ResolvedComponent)
-                ? "CustomMesh_" + new string(custom.Id.Where(char.IsLetterOrDigit).ToArray())
-                : custom.ResolvedComponent;
+            var component = CustomStaticMeshImportService.ComponentNameFor(custom);
             var attachment = CustomStaticMeshImportService.ResolveAttachmentSlot(custom.Target, custom.AttachSocket);
             var material = string.IsNullOrWhiteSpace(custom.MaterialPath)
                 ? "/Game/Characters/Attachments/Hat/Batman08/MI_Hat_Batman08"
@@ -916,7 +916,8 @@ public static class ModelPreviewService
                 SourceObjScale: custom.Scale,
                 SourceObjOffset: new Vector3(custom.OffsetX, custom.OffsetY, custom.OffsetZ),
                 SourceObjRotation: new Vector3(custom.RotationPitch, custom.RotationYaw, custom.RotationRoll),
-                CustomMeshId: custom.Id));
+                CustomMeshId: custom.Id,
+                DisplayName: custom.DisplayName));
         }
 
         // Early OBJ proofs were staged before custom imports were saved in the project file.
@@ -1499,7 +1500,8 @@ public static class ModelPreviewService
                 SourceObjScale: extra.SourceObjScale,
                 SourceObjOffset: extra.SourceObjOffset,
                 SourceObjRotation: extra.SourceObjRotation,
-                CustomMeshId: extra.CustomMeshId));
+                CustomMeshId: extra.CustomMeshId,
+                DisplayName: extra.DisplayName));
             if (stagedComponent?.Transform is { } transform)
             {
                 Console.WriteLine($"  {extra.ComponentName}: staged component transform -> "
@@ -1867,6 +1869,8 @@ public static class ModelPreviewService
         public bool UsesRuntimeSocketCalibration { get; init; }
         /// <summary>Stable component identity used by the project-aware part mover.</summary>
         public string ComponentName { get; init; } = "";
+        /// <summary>Author-facing label; the stable component identity remains internal.</summary>
+        public string? DisplayName { get; init; }
         /// <summary>Saved small translation layered over the Blueprint's authored placement.</summary>
         public SavedPreviewPartPlacement? Adjustment { get; init; }
         /// <summary>Project identity and baked transform for an imported static mesh.</summary>
@@ -3910,6 +3914,7 @@ public static class ModelPreviewService
                     Transform = part.Transform,
                     UsesRuntimeSocketCalibration = part.UsesRuntimeSocketCalibration,
                     ComponentName = part.ComponentName,
+                    DisplayName = part.DisplayName,
                     Adjustment = part.Adjustment,
                     CustomMeshId = part.CustomMeshId,
                     CustomMeshScale = part.SourceObjScale,
@@ -4044,7 +4049,7 @@ public static class ModelPreviewService
                   $"\"rotation\":[{F(m.CustomMeshRotation?.X ?? 0f)},{F(m.CustomMeshRotation?.Y ?? 0f)},{F(m.CustomMeshRotation?.Z ?? 0f)}]}}";
             return $"{{\"file\":\"{m.File}\",\"base\":\"{baseName}\",\"body\":{(m.IsBody ? "true" : "false")},\"isface\":{(m.IsFace ? "true" : "false")},\"ishead\":{(m.IsHead ? "true" : "false")}," +
                     $"{transform}," +
-                    $"\"part\":{Q(m.ComponentName)},\"move\":{(movable ? "true" : "false")},\"custom\":{(isCustomStaticMesh ? "true" : "false")},\"mesh\":{customMesh},\"adj\":{adjustment}," +
+                    $"\"part\":{Q(m.ComponentName)},\"label\":{Q(m.DisplayName)},\"move\":{(movable ? "true" : "false")},\"custom\":{(isCustomStaticMesh ? "true" : "false")},\"mesh\":{customMesh},\"adj\":{adjustment}," +
                    $"\"fgroups\":{fg},\"mouth\":{Q(m.MouthTex)},\"mhide\":{(m.MouthHidden ? "true" : "false")}," +
                     $"\"fbands\":[{string.Join(",", (m.Bands ?? new()).Select(b => $"[{b.Band},{b.Tris},{Q(b.Tex)},{(b.Tint is null ? "null" : $"\"#{b.Tint.Value.R:X2}{b.Tint.Value.G:X2}{b.Tint.Value.B:X2}\"")},{b.Mode},{Q(b.Feature)},{F(b.Pdo)},{Q(b.Nrm)},{Q(b.Orm)},{(b.Roughness is null ? "null" : F(b.Roughness.Value))},{(b.Metallic is null ? "null" : F(b.Metallic.Value))},{Q(b.Emissive)},{(b.EmissiveColour is null ? "null" : $"\"#{b.EmissiveColour.Value.R:X2}{b.EmissiveColour.Value.G:X2}{b.EmissiveColour.Value.B:X2}\"")},{(b.EmissiveStrength is null ? "null" : F(b.EmissiveStrength.Value))},{UvLayerJson(b.EyeSpecLayer)},{MouthLayersJson(b.MouthLayers)}]"))}]," +
                    $"\"poses\":{PoseJson(m.Poses)},\"curves\":{CurveJson(m.Curves)}," +
@@ -4052,7 +4057,7 @@ public static class ModelPreviewService
                    $"\"offset\":[{m.Offset.X:0.#####},{m.Offset.Y:0.#####},{m.Offset.Z:0.#####}]," +
                    $"\"slots\":[{slots}]}}";
         })) + "]";
-        static string Q(string? v) => v is null ? "null" : $"\"{v}\"";
+        static string Q(string? v) => v is null ? "null" : System.Text.Json.JsonSerializer.Serialize(v);
         static string F(float v) => v.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
         string UvLayerJson(FaceUvLayer? layer) => layer is null
             ? "null"
@@ -4185,6 +4190,8 @@ public static class ModelPreviewService
   #matedit .summary{margin:0 0 7px;color:#9ea6b2;line-height:1.35}
   #matedit .actions{display:flex;gap:6px;margin-top:8px}
   #matedit .actions button{border-color:#aa8b1b;color:#f0c230}
+  .panel-drag-handle{cursor:move;user-select:none;touch-action:none}
+  .panel-dragging{opacity:.92}
   #err{position:absolute;left:12px;bottom:12px;color:#f0c230;font-size:12px;line-height:1.5;font-family:Consolas,monospace}
   canvas{display:block}
 </style></head><body>
@@ -4231,6 +4238,23 @@ function say(s){diag.push(s);document.getElementById('err').innerHTML=diag.join(
 const partStates=new Map();
 const redBrickMaskMaterials=[];
 const materialEditorEntries=[];
+function makePanelDraggable(panel,handle){
+  if(!panel||!handle)return;
+  handle.classList.add('panel-drag-handle');handle.title='Drag to move this panel';
+  let drag=null;
+  const move=e=>{if(!drag)return;
+    const maxX=Math.max(0,window.innerWidth-panel.offsetWidth),maxY=Math.max(0,window.innerHeight-panel.offsetHeight);
+    panel.style.left=Math.min(maxX,Math.max(0,drag.left+e.clientX-drag.x))+'px';
+    panel.style.top=Math.min(maxY,Math.max(0,drag.top+e.clientY-drag.y))+'px';};
+  const stop=e=>{if(!drag)return;drag=null;panel.classList.remove('panel-dragging');
+    try{handle.releasePointerCapture(e.pointerId);}catch(_){}};
+  handle.addEventListener('pointerdown',e=>{if(e.button!==0)return;
+    const rect=panel.getBoundingClientRect();
+    panel.style.left=rect.left+'px';panel.style.top=rect.top+'px';panel.style.right='auto';panel.style.bottom='auto';
+    drag={x:e.clientX,y:e.clientY,left:rect.left,top:rect.top};panel.classList.add('panel-dragging');
+    try{handle.setPointerCapture(e.pointerId);}catch(_){}e.preventDefault();});
+  handle.addEventListener('pointermove',move);handle.addEventListener('pointerup',stop);handle.addEventListener('pointercancel',stop);
+}
 function setRedBrickPalette(palette){
   redBrickMaskMaterials.forEach(state=>{
     state.palette=palette;
@@ -4255,7 +4279,7 @@ function buildRedBrickTintUi(){
   presets.forEach((preset,index)=>{const option=document.createElement('option');option.value=String(index);
     option.textContent=preset.name;select.appendChild(option);});
   select.onchange=()=>setRedBrickPalette(select.value===''?null:presets[Number(select.value)]);
-  panel.appendChild(select);document.body.appendChild(panel);
+  panel.appendChild(select);document.body.appendChild(panel);makePanelDraggable(panel,label);
 }
 function buildMaterialEditor(){
   if(!materialEditorEntries.length)return;
@@ -4289,7 +4313,7 @@ function buildMaterialEditor(){
     toggles.forEach(([key,input])=>{input.checked=entry.available[key]&&!!entry.enabled[key];
       input.disabled=!entry.available[key];});
   }
-  select.onchange=sync;sync();document.body.appendChild(panel);
+  select.onchange=sync;sync();document.body.appendChild(panel);makePanelDraggable(panel,label);
 }
 function applyMaterialEditorEntry(entry){
   const m=entry.material,original=entry.original,enabled=entry.enabled;
@@ -4357,7 +4381,7 @@ function buildPartMover(){
    const label=document.createElement('label');label.textContent='Part';panel.appendChild(label);
   const select=document.createElement('select');
   parts.forEach(state=>{const option=document.createElement('option');option.value=state.component;
-    option.textContent=state.component;select.appendChild(option);});
+    option.textContent=state.label||state.component;select.appendChild(option);});
   panel.appendChild(select);
   const inputs=[];
    ['X','Y','Z'].forEach((axis,index)=>{
@@ -4403,7 +4427,7 @@ function buildCustomMeshMover(){
   const label=document.createElement('label');label.textContent='Custom mesh';panel.appendChild(label);
   const select=document.createElement('select');
   parts.forEach(state=>{const option=document.createElement('option');option.value=state.component;
-    option.textContent=state.component;select.appendChild(option);});
+    option.textContent=state.label||state.component;select.appendChild(option);});
   select.disabled=parts.length===1;panel.appendChild(select);
   const inputs={};
   [['Scale','scale',.1],['X offset (cm)','x',.1],['Y offset (cm)','y',.1],['Z offset (cm)','z',.1],
@@ -4735,7 +4759,7 @@ function dress(g,info){
       // Keep the live maps around for the viewer-only material editor. This is deliberately
       // separate from suit state: it helps diagnose a material without rewriting anything.
       if(!info.isface){
-        const part=info.part||info.base||info.file||'Part';
+        const part=info.label||info.part||info.base||info.file||'Part';
         materialEditorEntries.push({
           label:part+' - material '+(li+1),material:m,
           enabled:{base:true,normal:true,mmr:true,ao:true},
@@ -5050,7 +5074,7 @@ Promise.all(models.map(load)).then(loaded=>{
     if(x.m.part&&!x.m.part.startsWith('__')&&(x.m.move||availableUvs.length)){
       const defaultUv=availableUvs.indexOf(x.m.uvdefault)>=0?x.m.uvdefault:availableUvs[0];
       const selectedUv=availableUvs.indexOf(x.m.uv)>=0?x.m.uv:defaultUv;
-      partStates.set(x.m.part,{component:x.m.part,scene:x.scene,basePosition:basePosition,baseScale:x.scene.scale.clone(),custom:!!x.m.custom,face:!!x.m.isface,
+      partStates.set(x.m.part,{component:x.m.part,label:x.m.label||x.m.part,scene:x.scene,basePosition:basePosition,baseScale:x.scene.scale.clone(),custom:!!x.m.custom,face:!!x.m.isface,
         customId:x.m.mesh&&x.m.mesh.id||null,authored:x.m.mesh||null,scale:1,
         movable:!!x.m.move,adjustment:[adjustment[0]||0,adjustment[1]||0,adjustment[2]||0],
         uvs:availableUvs,defaultUv:defaultUv,uvChannel:selectedUv});

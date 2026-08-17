@@ -54,11 +54,13 @@ public sealed partial class SettingsForm : Form
         Theme.StyleTooltip(_tips);
 
         Text = firstRun ? "Batcomputer — First-time setup" : "Batcomputer — Settings";
+        AutoScaleMode = AutoScaleMode.Dpi;
         ClientSize = new Size(940, 620);
+        MinimumSize = new Size(820, 560);
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
-        MaximizeBox = false;
-        FormBorderStyle = FormBorderStyle.FixedDialog;
+        MaximizeBox = true;
+        FormBorderStyle = FormBorderStyle.Sizable;
         BackColor = Theme.WindowBg;
         ForeColor = Theme.OnDark;
         Font = Theme.Body;
@@ -443,15 +445,16 @@ public sealed partial class SettingsForm : Form
             Placeholder = "Choose a theme",
         };
         _themePicker.Items.Add("Classic");
-        _themePicker.Items.Add("Batcompuper");
-        _themePicker.SelectedItem = string.Equals(_settings.VisualTheme, "Batcompuper", StringComparison.OrdinalIgnoreCase)
-            ? "Batcompuper"
+        _themePicker.Items.Add("Alternate");
+        _themePicker.SelectedItem = string.Equals(_settings.VisualTheme, "Batcompuper", StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(_settings.VisualTheme, "Alternate", StringComparison.OrdinalIgnoreCase)
+            ? "Alternate"
             : "Classic";
         panel.Controls.Add(_themePicker);
         panel.Controls.Add(new Label
         {
             Left = RowLabelX, Top = y + 42, Width = RowRightEdge - RowLabelX, Height = 34,
-            Text = "Batcompuper uses header2.png. All other colors and controls stay the same.",
+            Text = "Alternate uses header2.png. All other colors and controls stay the same.",
             ForeColor = Theme.OnDarkMuted, Font = Theme.Caption,
         });
         y += 94;

@@ -293,8 +293,8 @@ public sealed partial class MainForm
                 AppendLog($"Viewer: could not save cross-kind head removal: {ex.Message}");
             }
         }
-        viewer.ShowMessage($"Building {label}...");
-        _viewerStatus!.Text = $"Building {label} - decoding meshes, materials and parts...";
+        viewer.ShowMessage($"Building {label}…");
+        _viewerStatus!.Text = $"Building {label} — decoding meshes, materials and parts…";
         _viewerLoadButton!.Enabled = false;
         try
         {
@@ -429,13 +429,13 @@ public sealed partial class MainForm
                 return;
             }
 
-            _viewerStatus!.Text = $"{mesh.DisplayName}: baking its transform, then rebuilding the custom mesh...";
+            _viewerStatus!.Text = $"{mesh.DisplayName}: baking its transform, then rebuilding the custom mesh…";
             await RebuildGraftStageFromDeclarativeAsync(project, projectService.ProjectRoot);
             projectService.SaveProject(project);
             RecordChange("Parts", mesh.DisplayName,
                 $"custom mesh scale {mesh.Scale:0.###}; position {mesh.OffsetX:0.###}, {mesh.OffsetY:0.###}, {mesh.OffsetZ:0.###}; rotation {mesh.RotationPitch:0.###}, {mesh.RotationYaw:0.###}, {mesh.RotationRoll:0.###}",
                 status: "staged");
-            _viewerStatus.Text = $"{mesh.DisplayName}: transform baked to the suit. Reloading preview...";
+            _viewerStatus.Text = $"{mesh.DisplayName}: transform baked to the suit. Reloading preview…";
             ShowCharacterInViewer(string.Empty, project.DisplayName, project);
         }
         catch (Exception ex)

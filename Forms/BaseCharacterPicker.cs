@@ -37,6 +37,7 @@ public sealed partial class BaseCharacterPicker : Form
     {
         _playablesOnly = playablesOnly;
         InitializeComponent();
+        AutoScaleMode = AutoScaleMode.Dpi;
         if (WinFormsDesignerSupport.IsInDesigner())
         {
             return;
@@ -74,7 +75,7 @@ public sealed partial class BaseCharacterPicker : Form
         _search.Left = 14;
         _search.Top = 58;
         _search.Width = 556;
-        _search.PlaceholderText = "Search characters...";
+        _search.PlaceholderText = "Search characters…";
         _search.TextChanged += (_, _) => ApplyFilter();
 
         _list.Left = 14;
@@ -84,7 +85,7 @@ public sealed partial class BaseCharacterPicker : Form
         Theme.StyleListBox(_list);
         _list.DoubleClick += (_, _) => Accept();
 
-        var browse = new Button { Text = "Browse files...", Left = 14, Top = 482, Width = 120, Height = 30 };
+        var browse = new Button { Text = "Browse files…", Left = 14, Top = 482, Width = 120, Height = 30 };
         Theme.StyleDarkButton(browse);
         browse.Click += (_, _) => { BrowseManuallyRequested = true; DialogResult = DialogResult.OK; Close(); };
 

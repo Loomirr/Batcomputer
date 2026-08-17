@@ -8,7 +8,27 @@ internal static class TextureCookTemplateService
     // inline BC7 mip payloads. Its OffsetInFile values point at each
     // FByteBulkData record; the BC7 bytes begin 0x11 bytes later. The cooker
     // applies that shared prefix while preserving the inter-record separators.
+    //
+    // UAssetGUI's full legacy package contains an editor-only user-data export
+    // and property, so its first record is 0x7F. reTOC's clean one-click
+    // conversion omits those 27 bytes and starts the equivalent record at
+    // 0x64. Both carry the same native BC7 mip stream and are verified below.
     private const int InlineMipInterRecordBytes = 0x10;
+    public const string NativeSuitIconTemplateFolder = "TextureStandaloneTemplate_SuitIconUI_BC7";
+    private const string NativeSuitIconAssetName = "T_SuitIcon_NULL_BCA";
+    private const int NativeSuitIconFullUassetBytes = 1616;
+    private const int NativeSuitIconFullUexpBytes = 87708;
+    private const int NativeSuitIconRetocUassetBytes = 1133;
+    private const int NativeSuitIconRetocUexpBytes = 87681;
+    private const int NativeSuitIconFullFirstMipOffset = 0x7F;
+    private const int NativeSuitIconRetocFirstMipOffset = 0x64;
+
+    private enum NativeSuitIconLayout
+    {
+        None,
+        FullLegacy,
+        RetocLegacy,
+    }
 
     private sealed record Definition(
         string Folder,
@@ -68,15 +88,86 @@ internal static class TextureCookTemplateService
             "Models/Gadgets/GA_Batclaw/T_DECAL_BatclawLogo",
             "/Game/Models/Gadgets/GA_Batclaw/T_DECAL_BatclawLogo",
             2048, 2048, "PF_DXT5", 1, 5),
+        // Suit-selector tiles use the game's native compact UMG texture layout,
+        // not the 2K world/decal donors above. The verified donor has a 256px
+        // BC7 top mip and nine inline mips in its .uexp.
+        new(
+            NativeSuitIconTemplateFolder,
+            "T_SuitIcon_NULL_BCA.json",
+            "UI/Icons/Suits/T_SuitIcon_NULL_BCA",
+            "/Game/UI/Icons/Suits/T_SuitIcon_NULL_BCA",
+            256, 256, "PF_BC7", 1, 9,
+            FirstMipWidth: 256,
+            FirstMipHeight: 256,
+            FirstMipOffset: NativeSuitIconFullFirstMipOffset,
+            InlineMips: true),
     };
 
     public static IReadOnlyList<string> RetocFilters { get; } = Definitions
         .Select(definition => "Content/" + definition.ContentRelativePath)
         .ToArray();
 
-    /// <summary>Returns true only when every template required by the supported texture workflows is present.</summary>
+    /// <summary>
+    /// Returns true when the general world-texture donors are ready. The native
+    /// suit-icon donor is intentionally optional so a missing UI-only asset
+    /// never blocks body/material texture authoring.
+    /// </summary>
     public static bool HasCoreTemplates(string projectRoot) => Definitions
+        .Where(definition => !IsNativeSuitIconDefinition(definition))
         .All(definition => IsTemplateReady(TemplateJsonPath(projectRoot, definition.Folder)));
+
+    public static bool HasNativeSuitIconTemplate(string projectRoot)
+    {
+        var definition = NativeSuitIconDefinition();
+        var templateJson = TemplateJsonPath(projectRoot, definition.Folder);
+        var assetBase = Path.Combine(Path.GetDirectoryName(templateJson)!, NativeSuitIconAssetName);
+        return IsTemplateReady(templateJson) &&
+            DetectNativeSuitIconLayout(assetBase + ".uasset", assetBase + ".uexp") != NativeSuitIconLayout.None;
+    }
+
+    /// <summary>
+    /// Restores the canonical 256px BC7 recipe when a verified native donor is
+    /// available. This also upgrades workspaces left by the retired Red Brick
+    /// authoring prototype without reintroducing Red Brick tooling.
+    /// </summary>
+    public static bool NormalizeNativeSuitIconTemplate(string projectRoot)
+    {
+        var definition = NativeSuitIconDefinition();
+        var generatedRoot = AppSettings.GeneratedRootFor(projectRoot);
+        var destination = Path.Combine(generatedRoot, definition.Folder);
+        var destinationBase = Path.Combine(destination, NativeSuitIconAssetName);
+
+        if (DetectNativeSuitIconLayout(destinationBase + ".uasset", destinationBase + ".uexp") == NativeSuitIconLayout.None)
+        {
+            var candidates = new List<string>
+            {
+                Path.Combine(generatedRoot, "TextureStandaloneTemplate_RedBrickIconUI_DXT5", NativeSuitIconAssetName),
+                Path.Combine(AppSettings.Current.EffectiveExtractedContentRoot(), "UI", "Icons", "Suits", NativeSuitIconAssetName),
+                Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "UAssetGUI", "Extracted", "LEGOBatmanLotDK", "Content", "UI", "Icons", "Suits", NativeSuitIconAssetName),
+            };
+
+            var sourceBase = candidates.FirstOrDefault(candidate =>
+                DetectNativeSuitIconLayout(candidate + ".uasset", candidate + ".uexp") != NativeSuitIconLayout.None);
+            if (!string.IsNullOrWhiteSpace(sourceBase))
+            {
+                Directory.CreateDirectory(destination);
+                File.Copy(sourceBase + ".uasset", destinationBase + ".uasset", overwrite: true);
+                File.Copy(sourceBase + ".uexp", destinationBase + ".uexp", overwrite: true);
+            }
+        }
+
+        var layout = DetectNativeSuitIconLayout(destinationBase + ".uasset", destinationBase + ".uexp");
+        if (layout == NativeSuitIconLayout.None)
+        {
+            return false;
+        }
+
+        Directory.CreateDirectory(destination);
+        WriteCanonicalTemplateJson(DefinitionForNativeLayout(definition, layout), Path.Combine(destination, definition.JsonFile));
+        return true;
+    }
 
     public static string TemplateJsonPath(string projectRoot, string folder) =>
         Path.Combine(
@@ -106,6 +197,13 @@ internal static class TextureCookTemplateService
         var result = new Result();
         foreach (var definition in Definitions)
         {
+            if (IsNativeSuitIconDefinition(definition) && NormalizeNativeSuitIconTemplate(projectRoot))
+            {
+                result.Prepared++;
+                result.Logs.Add($"Texture template ready: {definition.Folder} (native UI, {definition.PixelFormat} {definition.Width}x{definition.Height})");
+                continue;
+            }
+
             var sourceBase = Path.Combine(
                 contentRoot,
                 definition.ContentRelativePath.Replace('/', Path.DirectorySeparatorChar));
@@ -117,6 +215,17 @@ internal static class TextureCookTemplateService
             if (missing.Count > 0)
             {
                 result.Warnings.Add($"Texture template donor is missing: {definition.ContentRelativePath} ({string.Join(", ", missing.Select(Path.GetFileName))})");
+                continue;
+            }
+
+            var nativeLayout = IsNativeSuitIconDefinition(definition)
+                ? DetectNativeSuitIconLayout(sourceBase + ".uasset", sourceBase + ".uexp")
+                : NativeSuitIconLayout.None;
+            if (IsNativeSuitIconDefinition(definition) && nativeLayout == NativeSuitIconLayout.None)
+            {
+                result.Warnings.Add(
+                    "Native suit-icon donor did not match either verified 256px BC7 layout and was not installed. " +
+                    "Refresh game assets after updating Batcomputer or select another icon cook profile.");
                 continue;
             }
 
@@ -156,21 +265,65 @@ internal static class TextureCookTemplateService
                 }
             }
 
-            var json = new TemplateDocument(
-                Path.GetFileName(definition.ContentRelativePath),
-                definition.PackagePath,
-                definition.Width,
-                definition.Height,
-                definition.PixelFormat,
-                BuildMips(definition));
-            File.WriteAllText(
-                Path.Combine(destination, definition.JsonFile),
-                JsonSerializer.Serialize(json, new JsonSerializerOptions { WriteIndented = true }));
+            var recipeDefinition = IsNativeSuitIconDefinition(definition)
+                ? DefinitionForNativeLayout(definition, nativeLayout)
+                : definition;
+            WriteCanonicalTemplateJson(recipeDefinition, Path.Combine(destination, definition.JsonFile));
             result.Prepared++;
-            result.Logs.Add($"Texture template ready: {definition.Folder} ({definition.PixelFormat} {definition.Width}x{definition.Height})");
+            var layoutDetail = IsNativeSuitIconDefinition(definition)
+                ? $", {nativeLayout}"
+                : "";
+            result.Logs.Add($"Texture template ready: {definition.Folder} ({definition.PixelFormat} {definition.Width}x{definition.Height}{layoutDetail})");
         }
 
         return result;
+    }
+
+    private static Definition NativeSuitIconDefinition() => Definitions.Single(IsNativeSuitIconDefinition);
+
+    private static bool IsNativeSuitIconDefinition(Definition definition) =>
+        definition.Folder.Equals(NativeSuitIconTemplateFolder, StringComparison.Ordinal);
+
+    private static NativeSuitIconLayout DetectNativeSuitIconLayout(string uassetPath, string uexpPath)
+    {
+        if (!File.Exists(uassetPath) || !File.Exists(uexpPath))
+        {
+            return NativeSuitIconLayout.None;
+        }
+
+        var uassetBytes = new FileInfo(uassetPath).Length;
+        var uexpBytes = new FileInfo(uexpPath).Length;
+        if (uassetBytes == NativeSuitIconFullUassetBytes && uexpBytes == NativeSuitIconFullUexpBytes)
+        {
+            return NativeSuitIconLayout.FullLegacy;
+        }
+
+        if (uassetBytes == NativeSuitIconRetocUassetBytes && uexpBytes == NativeSuitIconRetocUexpBytes)
+        {
+            return NativeSuitIconLayout.RetocLegacy;
+        }
+
+        return NativeSuitIconLayout.None;
+    }
+
+    private static Definition DefinitionForNativeLayout(Definition definition, NativeSuitIconLayout layout) =>
+        definition with
+        {
+            FirstMipOffset = layout == NativeSuitIconLayout.RetocLegacy
+                ? NativeSuitIconRetocFirstMipOffset
+                : NativeSuitIconFullFirstMipOffset,
+        };
+
+    private static void WriteCanonicalTemplateJson(Definition definition, string destination)
+    {
+        var json = new TemplateDocument(
+            Path.GetFileName(definition.ContentRelativePath),
+            definition.PackagePath,
+            definition.Width,
+            definition.Height,
+            definition.PixelFormat,
+            BuildMips(definition));
+        File.WriteAllText(destination, JsonSerializer.Serialize(json, new JsonSerializerOptions { WriteIndented = true }));
     }
 
     private static IReadOnlyList<TemplateMip> BuildMips(Definition definition)
@@ -192,7 +345,7 @@ internal static class TextureCookTemplateService
                     definition.InlineMips
                         ? "BULKDATA_SingleUse | BULKDATA_ForceInlinePayload"
                         : "PayloadInSeperateFile")));
-            // The 512px UI donor keeps its platform-data records inline in the
+            // The native UI donor keeps its platform-data records inline in the
             // .uexp. Each following bulk-data record begins after the previous
             // compressed payload plus a native 16-byte gap. Treating the
             // payloads as one contiguous stream overwrites those records,

@@ -15,7 +15,7 @@ public sealed class ThemedDropDown : Control
 
     public List<object> Items { get; } = new();
 
-    public string Placeholder { get; set; } = "Select...";
+    public string Placeholder { get; set; } = "Select…";
 
     public int SelectedIndex
     {

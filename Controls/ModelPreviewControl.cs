@@ -106,7 +106,7 @@ public sealed class ModelPreviewControl : UserControl
         _active = true;
         if (!string.IsNullOrWhiteSpace(_pendingFolder) && Directory.Exists(_pendingFolder))
         {
-            ShowMessage("Reloading 3D preview...");
+            ShowMessage("Reloading 3D preview…");
             await ShowFolderAsync(_pendingFolder);
         }
     }

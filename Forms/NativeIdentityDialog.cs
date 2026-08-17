@@ -28,8 +28,8 @@ public sealed class NativeIdentityDialog : Form
     {
         _suggestedTag = suggestedTag ?? "";
         Text = "Native identity";
-        AutoScaleMode = AutoScaleMode.None;
-        AutoScroll = false;
+        AutoScaleMode = AutoScaleMode.Dpi;
+        AutoScroll = true;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;

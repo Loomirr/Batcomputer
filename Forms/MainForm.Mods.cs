@@ -28,7 +28,7 @@ public sealed partial class MainForm
     private async Task<RegistryPluginService.WriterPreparationResult> PrepareRegistryWriterAsync(
         RegistryWriterProgressForm? progressWindow = null)
     {
-        AppendLog("Preparing the UE 5.6 Asset Registry writer for future builds...");
+        AppendLog("Preparing the UE 5.6 Asset Registry writer for future builds…");
         var result = await new RegistryPluginService().PrepareAsync(line =>
         {
             AppendLog("  registry: " + line);
@@ -543,9 +543,9 @@ public sealed partial class MainForm
     private System.Windows.Forms.ContextMenuStrip BuildModTileMenu(string modProjectPath, string modId)
     {
         var menu = new System.Windows.Forms.ContextMenuStrip();
-        menu.Items.Add("Edit suits (add / remove)...", null, (_, _) => EditModSuits(modProjectPath));
-        menu.Items.Add("Rename mod...", null, (_, _) => RenameMod(modProjectPath));
-        menu.Items.Add("Change Mod ID...", null, (_, _) => ChangeModId(modProjectPath));
+        menu.Items.Add("Edit suits (add / remove)…", null, (_, _) => EditModSuits(modProjectPath));
+        menu.Items.Add("Rename mod…", null, (_, _) => RenameMod(modProjectPath));
+        menu.Items.Add("Change Mod ID…", null, (_, _) => ChangeModId(modProjectPath));
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         menu.Items.Add("Build mod (trio + config + StringTable)", null, (_, _) => BuildMod(modProjectPath));
         menu.Items.Add("Install mod to game", null, (_, _) => InstallMod(modProjectPath));
@@ -811,7 +811,7 @@ public sealed partial class MainForm
             result.CoreRegistryDestination = LotdkExpandedLayout.CoreRegistryPluginDirectory(gameRoot);
             if (!LotdkExpandedLayout.IsCoreMod(mod.ModId))
             {
-                ModReleaseStep("Checking the LOTDK Expanded core dependency...");
+                ModReleaseStep("Checking the LOTDK Expanded core dependency…");
                 coreRegistryReady = LotdkExpandedLayout.HasInstalledCoreRegistry(gameRoot);
                 if (!coreRegistryReady)
                 {
@@ -838,7 +838,28 @@ public sealed partial class MainForm
             }
             AppendLog($"  trio → {slotDest}");
 
-            // 2) mod.json -> ue4ss/LOTDKExpanded/Mods/<ModId>/
+            // 2) loose gameplay tags -> LEGOBatmanLotDK/Config/Tags/
+            // GameplayTagsManager scans the project Config/Tags directory at
+            // startup. A Config/Tags file nested in our content-only registry
+            // plugin is not an active tag source.
+            var tagConfigSource = Path.Combine(
+                outRoot,
+                "LooseFiles",
+                PawnTagConfigService.RelativeConfigPath(mod.ModId)
+                    .Replace('/', Path.DirectorySeparatorChar));
+            var installedTagPath = LotdkExpandedLayout.ModGameplayTagsPath(gameRoot, mod.ModId);
+            result.TagsDestination = LotdkExpandedLayout.GameConfigTagsRoot(gameRoot);
+            ModReleaseStep("Installing the gameplay tags…");
+            if (File.Exists(tagConfigSource))
+            {
+                Directory.CreateDirectory(result.TagsDestination);
+                File.Copy(tagConfigSource, installedTagPath, overwrite: true);
+                installed++;
+                tagsInstalled = File.Exists(installedTagPath);
+                AppendLog($"  {Path.GetFileName(installedTagPath)} → {installedTagPath}");
+            }
+
+            // 3) mod.json -> ue4ss/LOTDKExpanded/Mods/<ModId>/
             var modJsonSrc = Path.Combine(outRoot, "mod.json");
             result.RegistryDestination = LotdkExpandedLayout.ContentPackDirectory(gameRoot, mod.ModId);
             ModReleaseStep("Installing the mod registry entry…");
@@ -855,7 +876,7 @@ public sealed partial class MainForm
             if (LotdkExpandedLayout.IsCoreMod(mod.ModId))
             {
                 var corePlugin = RegistryPluginService.EnsureCorePlugin(outRoot);
-                ModReleaseStep("Installing the shared Asset Manager scan configuration...");
+                ModReleaseStep("Installing the shared Asset Manager scan configuration…");
                 if (File.Exists(corePlugin.DescriptorPath) && File.Exists(RegistryPluginService.CoreGameIniPath(corePlugin)))
                 {
                     CopyDirectoryContents(corePlugin.PluginDirectory, result.CoreRegistryDestination, overwrite: true);
@@ -871,16 +892,20 @@ public sealed partial class MainForm
 
             var plugin = RegistryPluginService.CreateLayout(outRoot, mod.ModId);
             result.AssetRegistryDestination = LotdkExpandedLayout.RegistryPluginDirectory(gameRoot, plugin.PluginName);
-            ModReleaseStep("Installing the Asset Registry plugin...");
+            ModReleaseStep("Installing the Asset Registry plugin…");
             if (File.Exists(plugin.DescriptorPath) && File.Exists(plugin.RegistryPath) &&
                 !string.IsNullOrWhiteSpace(result.AssetRegistryDestination))
             {
                 CopyDirectoryContents(plugin.PluginDirectory, result.AssetRegistryDestination, overwrite: true);
                 installed += Directory.EnumerateFiles(plugin.PluginDirectory, "*", SearchOption.AllDirectories).Count();
                 assetRegistryInstalled = true;
-                var installedTagPath = Path.Combine(result.AssetRegistryDestination, "Config", "Tags", $"{mod.ModId}Tags.ini");
-                tagsInstalled = File.Exists(installedTagPath);
-                result.TagsDestination = Path.GetDirectoryName(installedTagPath) ?? result.AssetRegistryDestination;
+                // Remove the obsolete plugin-local copy left by an older build.
+                // The authoritative installed file is game Config/Tags above.
+                var legacyPluginTagPath = Path.Combine(result.AssetRegistryDestination, "Config", "Tags", $"{mod.ModId}Tags.ini");
+                if (File.Exists(legacyPluginTagPath))
+                {
+                    File.Delete(legacyPluginTagPath);
+                }
                 AppendLog($"  {plugin.PluginName} -> {result.AssetRegistryDestination}");
             }
 
@@ -989,6 +1014,13 @@ public sealed partial class MainForm
             removed += DeleteInstalledDirectory(
                 LotdkExpandedLayout.RegistryPluginsRoot(gameRoot),
                 LotdkExpandedLayout.RegistryPluginDirectory(gameRoot, $"{oldModId}Registry"));
+
+            var oldTagsPath = LotdkExpandedLayout.ModGameplayTagsPath(gameRoot, oldModId);
+            if (File.Exists(oldTagsPath))
+            {
+                File.Delete(oldTagsPath);
+                removed++;
+            }
         }
         return removed;
     }
@@ -1065,6 +1097,13 @@ public sealed partial class MainForm
             AddRequired(
                 Path.Combine(outRoot, "mod.json"),
                 $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/Mods/{mod.ModId}/mod.json");
+            AddRequired(
+                Path.Combine(
+                    outRoot,
+                    "LooseFiles",
+                    PawnTagConfigService.RelativeConfigPath(mod.ModId)
+                        .Replace('/', Path.DirectorySeparatorChar)),
+                $"{ArchiveRoot}/{PawnTagConfigService.RelativeConfigPath(mod.ModId)}");
             AddRequired(plugin.DescriptorPath,
                 $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{plugin.PluginName}/{Path.GetFileName(plugin.DescriptorPath)}");
             AddRequired(plugin.RegistryPath,
@@ -1080,6 +1119,7 @@ public sealed partial class MainForm
             {
                 if (files.Any(file => file.Source.Equals(pluginFile, StringComparison.OrdinalIgnoreCase))) continue;
                 var relative = Path.GetRelativePath(plugin.PluginDirectory, pluginFile).Replace('\\', '/');
+                if (relative.StartsWith("Config/Tags/", StringComparison.OrdinalIgnoreCase)) continue;
                 files.Add((pluginFile,
                     $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{plugin.PluginName}/{relative}"));
             }
@@ -1172,6 +1212,7 @@ public sealed partial class MainForm
             Text = $"Suits in {modId}",
             Width = 460,
             Height = 460,
+            AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi,
             FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog,
             StartPosition = System.Windows.Forms.FormStartPosition.CenterParent,
             MinimizeBox = false,
@@ -1179,6 +1220,7 @@ public sealed partial class MainForm
             BackColor = Theme.WindowBg,
             ForeColor = Theme.OnDark,
         };
+        dlg.Shown += (_, _) => Theme.UseDarkTitleBar(dlg);
         var lbl = new System.Windows.Forms.Label
         {
             Text = "Check the suits to include in this mod:",
@@ -1235,7 +1277,7 @@ public sealed partial class MainForm
         NativeSuitModProject mod,
         IReadOnlyList<ModSuitEntry> enabled)
     {
-        ModReleaseStep("Running release preflight...");
+        ModReleaseStep("Running release preflight…");
         var suits = new SuitProjectService(_projectRootText.Text.Trim());
         var inputs = new List<ModReleaseValidationService.SuitInput>();
         foreach (var entry in enabled)
@@ -1654,7 +1696,7 @@ public sealed partial class MainForm
 
             // Do this before retoc so a bad primary-asset row never produces a
             // misleadingly successful package.
-            ModReleaseStep("Verifying the mod Asset Registry plugin...");
+            ModReleaseStep("Verifying the mod Asset Registry plugin…");
             var registryRows = manifestSuits
                 .Select(suit => new RegistryPluginService.RegistryRow(suit.dcmd))
                 .ToList();
@@ -1680,13 +1722,14 @@ public sealed partial class MainForm
                 return false;
             }
             preflight.Result.AddInfo("Asset Registry", $"Verified {registry.Rows.Count} primary-asset row(s).");
-            if (!string.IsNullOrWhiteSpace(tagConfigPath) && File.Exists(tagConfigPath))
+            if (string.IsNullOrWhiteSpace(tagConfigPath) || !File.Exists(tagConfigPath))
             {
-                var pluginTagPath = Path.Combine(registry.Layout.PluginDirectory, "Config", "Tags", $"{mod.ModId}Tags.ini");
-                Directory.CreateDirectory(Path.GetDirectoryName(pluginTagPath)!);
-                File.Copy(tagConfigPath, pluginTagPath, overwrite: true);
-                AppendLog($"  registry tag config: {pluginTagPath}");
+                preflight.Result.AddError("Gameplay tags", $"The generated loose tag file for '{mod.ModId}' is missing.");
+                _lastModReleaseFailure = new ModReleaseFailure(mod.DisplayName, preflight.Result);
+                AppendLog("Build mod ABORTED: generated loose gameplay-tag config is missing.");
+                return false;
             }
+            AppendLog($"  loose gameplay-tag config: {tagConfigPath}");
             AppendLog($"  Asset Registry: {registry.Rows.Count} primary-asset row(s) -> {registry.Layout.RegistryPath}");
             AppendLog("  registry verification: " + registry.VerificationLine);
 
@@ -1705,8 +1748,8 @@ public sealed partial class MainForm
 
             AppendLog($"Build mod '{mod.DisplayName}' COMPLETE — installable trio for {mergedSuits} suit(s):");
             AppendLog($"  {trioBase}.pak / .ucas / .utoc");
-            AppendLog($"  {mod.ModId}Tags.ini is embedded in the per-mod registry plugin; mod.json is under {outRoot}");
-            AppendLog($"  Install: trio -> ~mods/Expanded, mod.json -> ue4ss/{LotdkExpandedLayout.ModuleId}/Mods/{mod.ModId}/");
+            AppendLog($"  {mod.ModId}Tags.ini is staged for LEGOBatmanLotDK/Config/Tags; mod.json is under {outRoot}");
+            AppendLog($"  Install: trio -> ~mods/Expanded, tags -> Config/Tags, mod.json -> ue4ss/{LotdkExpandedLayout.ModuleId}/Mods/{mod.ModId}/");
             RefreshWorkspaceAfterModChange();
             return true;
         }

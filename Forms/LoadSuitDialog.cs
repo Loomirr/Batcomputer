@@ -14,12 +14,14 @@ public sealed partial class LoadSuitDialog : Form
     public LoadSuitDialog()
     {
         InitializeComponent();
+        AutoScaleMode = AutoScaleMode.Dpi;
     }
 
     public LoadSuitDialog(IReadOnlyList<SuitProjectService.ProjectSummary> projects,
         Func<SuitProjectService.ProjectSummary, bool, bool, bool>? deleteSuit = null)
     {
         InitializeComponent();
+        AutoScaleMode = AutoScaleMode.Dpi;
         if (WinFormsDesignerSupport.IsInDesigner())
         {
             return;
@@ -74,7 +76,7 @@ public sealed partial class LoadSuitDialog : Form
 
         _search.Dock = DockStyle.Fill;
         _search.Height = 30;
-        _search.PlaceholderText = "Search saved suits...";
+        _search.PlaceholderText = "Search saved suits…";
         _search.TextChanged += (_, _) => RefreshList();
         root.Controls.Add(_search, 0, 1);
 

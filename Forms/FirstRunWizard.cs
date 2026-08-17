@@ -124,7 +124,9 @@ public sealed class FirstRunWizard : Form
     private void BuildChrome()
     {
         Text = "Batcomputer — Setup";
+        AutoScaleMode = AutoScaleMode.Dpi;
         ClientSize = new Size(620, 380);
+        MinimumSize = new Size(620, 380);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterScreen;
         MinimizeBox = false;
@@ -138,18 +140,22 @@ public sealed class FirstRunWizard : Form
         var w = ClientSize.Width - Pad * 2;
 
         _stepCount.SetBounds(Pad, 22, w, 16);
+        _stepCount.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _stepCount.Font = Theme.Eyebrow;
         _stepCount.ForeColor = Theme.Gold;
 
         _title.SetBounds(Pad, 42, w, 30);
+        _title.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _title.Font = AppFonts.Condensed(15f, FontStyle.Bold);
         _title.ForeColor = Theme.OnDark;
 
         _blurb.SetBounds(Pad, 76, w, 60);
+        _blurb.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _blurb.Font = Theme.Body;
         _blurb.ForeColor = Theme.OnDarkMuted;
 
         _inputWrap.SetBounds(Pad, 146, w - 96, 36);
+        _inputWrap.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _inputWrap.BackColor = Theme.Slate;
         _inputWrap.BorderColor = Theme.SlateLight;
         _inputWrap.CornerRadius = Theme.RadiusSm;
@@ -163,12 +169,14 @@ public sealed class FirstRunWizard : Form
         _inputWrap.Layout += (_, _) => _input.Top = (_inputWrap.Height - _input.Height) / 2;
 
         _browse.SetBounds(Pad + w - 88, 146, 88, 36);
+        _browse.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         _browse.Text = "Browse…";
         Theme.StyleDarkButton(_browse);
         _browse.Click += (_, _) => Browse();
 
         _dot.SetBounds(Pad + 2, 196, 10, 10);
         _status.SetBounds(Pad + 18, 190, w - 20, 20);
+        _status.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _status.Font = Theme.Caption;
         _status.ForeColor = Theme.OnDarkMuted;
 
@@ -178,13 +186,15 @@ public sealed class FirstRunWizard : Form
             Bounds = new Rectangle(Pad, 216, w, 34),
             Font = Theme.Caption,
             ForeColor = Theme.Blend(Theme.OnDarkMuted, Theme.WindowBg, 0.75),
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
         };
 
         _bar.SetBounds(Pad, 268, w, 8);
+        _bar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _bar.BackColor = Theme.WindowBg;
         _bar.Maximum = _steps.Count;
 
-        var footer = new Panel { Bounds = new Rectangle(0, 316, ClientSize.Width, 64), BackColor = Theme.SlateDark };
+        var footer = new Panel { Dock = DockStyle.Bottom, Height = 64, BackColor = Theme.SlateDark };
         footer.Paint += (_, e) =>
         {
             using var pen = new Pen(Theme.LineSoft);
@@ -196,11 +206,13 @@ public sealed class FirstRunWizard : Form
         _back.Click += (_, _) => GoTo(-1);
 
         _next.SetBounds(ClientSize.Width - Pad - 130, 16, 130, 32);
+        _next.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         _next.Text = "Next";
         Theme.StyleGoldButton(_next);
         _next.Click += (_, _) => GoTo(+1);
 
         _skip.SetBounds(_next.Left - 96, 16, 88, 32);
+        _skip.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         _skip.Text = "Skip";
         Theme.StyleDarkButton(_skip);
         _skip.Click += (_, _) => { Save(); GoTo(+1, skip: true); };

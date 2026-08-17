@@ -39,14 +39,16 @@ public sealed partial class MainForm
         var diagnosticsHeader = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 34,
-            Padding = new Padding(6, 3, 6, 3),
+            // Leave a real 32px control row after padding. The previous 34px
+            // outer height could clip the bundled condensed font at 125% DPI.
+            Height = 40,
+            Padding = new Padding(6, 4, 6, 4),
             BackColor = Theme.CardBg,
             ColumnCount = 2,
             RowCount = 1,
         };
         diagnosticsHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        diagnosticsHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92f));
+        diagnosticsHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 104f));
         diagnosticsHeader.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
         var diagHeader = new Button
         {
@@ -59,6 +61,7 @@ public sealed partial class MainForm
             Margin = Padding.Empty,
         };
         Theme.StyleSmallDarkButton(diagHeader);
+        diagHeader.Font = Theme.BodyStrong;
         diagHeader.Click += (_, _) => ToggleDiagnostics(diagHeader);
         var copyLog = new Button
         {
@@ -69,6 +72,7 @@ public sealed partial class MainForm
             Margin = Padding.Empty,
         };
         Theme.StyleSmallDarkButton(copyLog);
+        copyLog.Font = Theme.BodyStrong;
         copyLog.Click += (_, _) =>
         {
             copyLog.Text = _diagnostics.TryCopyLogToClipboard() ? "Copied" : "Copy failed";
@@ -160,7 +164,7 @@ public sealed partial class MainForm
     private ContextMenuStrip BuildSuitTileMenu(SuitProjectService.ProjectSummary summary)
     {
         var menu = new ContextMenuStrip();
-        menu.Items.Add("Set cover image...", null, (_, _) => SetSuitCoverImage(summary));
+        menu.Items.Add("Set cover image…", null, (_, _) => SetSuitCoverImage(summary));
         menu.Items.Add("Use generated suit icon", null, (_, _) => UseGeneratedSuitIconAsCover(summary));
         menu.Items.Add("Clear cover image", null, (_, _) => ClearSuitCoverImage(summary));
         menu.Items.Add(new ToolStripSeparator());
@@ -420,7 +424,7 @@ public sealed partial class MainForm
             return;
         }
 
-        AppendLog("Packaging IoStore trio...");
+        AppendLog("Packaging IoStore trio…");
         AppendLog($"Content root: {contentRootToPackage}");
         AppendLog($"Package base name: {packageBaseName}");
 
@@ -643,10 +647,13 @@ public sealed partial class MainForm
             Text = "Package contents preview",
             Width = 900,
             Height = 620,
+            AutoScaleMode = AutoScaleMode.Dpi,
+            MinimumSize = new Size(720, 500),
             StartPosition = FormStartPosition.CenterParent,
             BackColor = Theme.WindowBg,
             ForeColor = Theme.OnDark,
         };
+        dlg.Shown += (_, _) => Theme.UseDarkTitleBar(dlg);
 
         var header = new Label
         {
@@ -766,7 +773,7 @@ public sealed partial class MainForm
 
         if (logHeader)
         {
-            AppendLog("Running V2 package preflight...");
+            AppendLog("Running V2 package preflight…");
         }
 
         if (string.IsNullOrWhiteSpace(project.SlotId))
@@ -1270,12 +1277,15 @@ public sealed partial class MainForm
             Text = "Package built",
             Width = 620,
             Height = 560,
+            AutoScaleMode = AutoScaleMode.Dpi,
+            MinimumSize = new Size(560, 480),
             StartPosition = FormStartPosition.CenterParent,
             BackColor = Theme.WindowBg,
             ForeColor = Theme.OnDark,
             MinimizeBox = false,
             MaximizeBox = false,
         };
+        dlg.Shown += (_, _) => Theme.UseDarkTitleBar(dlg);
 
         var title = new Label
         {

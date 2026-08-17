@@ -480,7 +480,7 @@ public sealed partial class MainForm
         _selectedCutscenePart = cutscene;
         UpdateSelectedPartLabels();
 
-        AppendLog($"Glider: applying native preset '{presetName}' to base glide component '{glideComponent}' ({GliderService.GliderPresetSubtitle(playable ?? cutscene!)})...");
+        AppendLog($"Glider: applying native preset '{presetName}' to base glide component '{glideComponent}' ({GliderService.GliderPresetSubtitle(playable ?? cutscene!)})…");
         await GraftSelectedPartsAsync();
         project.GliderGrafted = true;
         RecordChange("Gliders", "Native glider preset", presetName, status: "staged");
@@ -987,7 +987,7 @@ public sealed partial class MainForm
             return;
         }
 
-        AppendLog($"Removing {label} ({component} slot {slot}) from staged playable/cutscene assets...");
+        AppendLog($"Removing {label} ({component} slot {slot}) from staged playable/cutscene assets…");
 
         ComponentRemoveResult result;
         try
@@ -1291,17 +1291,17 @@ public sealed partial class MainForm
             var legacy = _currentProject is null
                 ? null
                 : new CustomStaticMeshImportService().FindLegacyObjProof(_currentProject, _projectRootText.Text.Trim());
-            if (legacy is not null && MatchesToyboxSearch(search, legacy.DisplayName, legacy.SourceObjPath, "legacy OBJ proof"))
+            if (legacy is not null && MatchesToyboxSearch(search, legacy.DisplayName, legacy.SourceObjPath, "legacy OBJ import"))
             {
                 tiles.Add(new VirtualTilePanel.Tile
                 {
                     Section = "LEGACY MESHES",
                     Title = $"Adopt {TrimMiddle(legacy.DisplayName, 20)}",
-                    Subtitle = "existing OBJ proof\nmake it editable",
+                    Subtitle = "existing OBJ import\nmake it editable",
                     Accent = Theme.Parts,
                     Dashed = true,
                     OnClick = () => _ = AdoptLegacyStaticMeshAsync(legacy),
-                    ToolTip = "Copies this older OBJ proof into the suit. After adoption, click its tile or use the 3D viewer to save its real scale and local XYZ placement."
+                    ToolTip = "Copies this older OBJ import into the suit. After adoption, click its tile or use the 3D viewer to save its real scale and local XYZ placement."
                 });
             }
             return tiles;
@@ -1334,7 +1334,7 @@ public sealed partial class MainForm
         var project = _currentProject;
         if (project?.PlayableTemplate is null || project.CutsceneTemplate is null)
         {
-            Dialog.Warn(this, "Custom mesh", "Set a visual base first, then adopt the old OBJ proof.");
+            Dialog.Warn(this, "Custom mesh", "Set a visual base first, then adopt the old OBJ import.");
             return;
         }
 
@@ -1364,12 +1364,12 @@ public sealed partial class MainForm
         catch (Exception ex)
         {
             project.CustomStaticMeshes.Remove(mesh);
-            Dialog.Error(this, "Custom mesh", "Could not adopt the old OBJ proof. " + ex.Message);
+            Dialog.Error(this, "Custom mesh", "Could not adopt the old OBJ import. " + ex.Message);
             return;
         }
 
-        RecordChange("Parts", mesh.DisplayName, "adopted legacy OBJ proof", status: "staged");
-        AppendLog($"Custom mesh: adopted legacy OBJ proof '{mesh.DisplayName}'. It can now be edited in Parts or the 3D viewer.");
+        RecordChange("Parts", mesh.DisplayName, "adopted legacy OBJ import", status: "staged");
+        AppendLog($"Custom mesh: adopted legacy OBJ import '{mesh.DisplayName}'. It can now be edited in Parts or the 3D viewer.");
         _session.RaiseChanged();
         RefreshToyboxTiles();
     }
@@ -1720,6 +1720,7 @@ public sealed partial class MainForm
             Text = $"Place {eq.Name} in which slot?",
             Width = 420,
             Height = 210,
+            AutoScaleMode = AutoScaleMode.Dpi,
             StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MaximizeBox = false,
@@ -1727,6 +1728,7 @@ public sealed partial class MainForm
             BackColor = Theme.WindowBg,
             ForeColor = Theme.OnDark,
         };
+        dlg.Shown += (_, _) => Theme.UseDarkTitleBar(dlg);
         var info = new Label { Dock = DockStyle.Top, Height = 44, Padding = new Padding(12, 12, 12, 0), Text = $"Characters carry two gadgets. Which slot should '{eq.Name}' replace?" };
         var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, Padding = new Padding(12, 8, 12, 12), WrapContents = false };
 
@@ -2032,7 +2034,7 @@ public sealed partial class MainForm
         _loadIndexButton.Text = "Load index";
         _loadIndexButton.Dock = DockStyle.Fill;
         toolbar.Controls.Add(_loadIndexButton, 1, 0);
-        toolbar.Controls.Add(new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Color.DimGray, Text = "Build the part index once, then pick a part and graft it into a slot." }, 2, 0);
+        toolbar.Controls.Add(new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Theme.OnDarkMuted, Text = "Build the part index once, then pick a part and graft it into a slot." }, 2, 0);
         container.Controls.Add(toolbar, 0, 0);
 
         container.Controls.Add(CreatePartPickerPanel(), 0, 1);
@@ -2156,7 +2158,7 @@ public sealed partial class MainForm
             return true;
         }
 
-        AppendLog("Building the part index so the visual base can bring over its attachments...");
+        AppendLog("Building the part index so the visual base can bring over its attachments…");
         try
         {
             _partIndex = await Task.Run(() => service.BuildPartIndex());
@@ -2175,7 +2177,7 @@ public sealed partial class MainForm
         var projectRoot = _projectRootText.Text.Trim();
         var service = new PartIndexService(projectRoot);
 
-        AppendLog("Building native suit part index from extracted cooked character BPs...");
+        AppendLog("Building native suit part index from extracted cooked character BPs…");
         _buildPartIndexButton.Enabled = false;
         try
         {
@@ -2385,7 +2387,7 @@ public sealed partial class MainForm
         }
 
         ReadFieldsIntoProject(_currentProject);
-        AppendLog("Creating experimental Thomas + Absolute Torso2 graft stage...");
+        AppendLog("Creating experimental Thomas + Absolute Torso2 graft stage…");
         _graftTorso2Button.Enabled = false;
         try
         {

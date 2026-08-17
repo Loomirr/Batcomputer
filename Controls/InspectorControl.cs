@@ -23,8 +23,10 @@ public sealed class InspectorControl : UserControl
     public sealed class ComponentRow
     {
         public required string Name;
+        public string DisplayName = "";
         public string Class = "";
         public string Mesh = "";
+        public string DisplayMesh = "";
         public IReadOnlyList<SlotRow> Slots = Array.Empty<SlotRow>();
         public bool Customized => Slots.Any(s => s.Overridden);
     }
@@ -398,7 +400,9 @@ public sealed class InspectorControl : UserControl
         var shown = _components.Where(c =>
             (!_changedOnly.Checked || c.Customized) &&
             (filter.Length == 0 || c.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)
-                                || c.Mesh.Contains(filter, StringComparison.OrdinalIgnoreCase))).ToList();
+                                || c.DisplayName.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                                || c.Mesh.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                                || c.DisplayMesh.Contains(filter, StringComparison.OrdinalIgnoreCase))).ToList();
 
         _content.Controls.Add(SectionLabel($"Components", shown.Count, width));
         foreach (var comp in shown)
@@ -475,19 +479,22 @@ public sealed class InspectorControl : UserControl
         };
         var name = new Label
         {
-            Text = comp.Name,
+            Text = string.IsNullOrWhiteSpace(comp.DisplayName) ? comp.Name : comp.DisplayName,
             Left = 22, Top = 5, Width = width - 60, Height = 16,
             Font = Theme.BodyStrong, ForeColor = Theme.OnDark,
             BackColor = Color.Transparent, AutoEllipsis = true,
         };
         var mesh = new Label
         {
-            Text = string.IsNullOrWhiteSpace(comp.Mesh) ? "(mesh default materials)" : comp.Mesh,
+            Text = !string.IsNullOrWhiteSpace(comp.DisplayMesh)
+                ? comp.DisplayMesh
+                : string.IsNullOrWhiteSpace(comp.Mesh) ? "(mesh default materials)" : comp.Mesh,
             Left = 22, Top = 21, Width = width - 60, Height = 14,
             Font = Theme.Caption, ForeColor = Theme.OnDarkMuted,
             BackColor = Color.Transparent, AutoEllipsis = true,
         };
-        _tips.SetToolTip(mesh, comp.Mesh);
+        _tips.SetToolTip(name, string.IsNullOrWhiteSpace(comp.DisplayName) ? comp.Name : $"{comp.DisplayName}\nInternal component: {comp.Name}");
+        _tips.SetToolTip(mesh, string.IsNullOrWhiteSpace(comp.DisplayMesh) ? comp.Mesh : $"{comp.DisplayMesh}\nInternal mesh: {comp.Mesh}");
 
         var count = new Label
         {

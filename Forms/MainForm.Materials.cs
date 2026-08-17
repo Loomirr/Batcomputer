@@ -17,6 +17,17 @@ public sealed partial class MainForm
     {
         _currentProject = project;
         MigratePartGraftInstances(project);
+        if (NormalizeGeneratedUimdIconRecipes(project))
+        {
+            try
+            {
+                (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(project);
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"UIMD icon recipe save warning: {ex.Message}");
+            }
+        }
 
         // Set name/mod first (fires DeriveOutputs), then pin the project's own
         // authoritative values so nothing gets recomputed away.
@@ -858,7 +869,7 @@ public sealed partial class MainForm
         if (result.Status.Equals("no-stage", StringComparison.OrdinalIgnoreCase) &&
             _currentProject is not null && HasCurrentSuitBase())
         {
-            AppendLog("No editable stage was found. Recreating it from the selected base...");
+            AppendLog("No editable stage was found. Recreating it from the selected base…");
             if (PatchNameMapsWithUAssetApi())
             {
                 result = materialService.Apply(slotId, playablePkg, cutscenePkg, assignment);
@@ -881,6 +892,14 @@ public sealed partial class MainForm
             {
                 Component = component, Slot = slot, MiPackagePath = mi, Context = context
             });
+            // A custom static mesh also stores its base component material declaratively. Keep that
+            // source of truth aligned with a normal "both" slot-0 assignment so rebuilding the mesh
+            // cannot silently restore the donor material after the user already changed it.
+            if (slot == 0 && context.Equals("both", StringComparison.OrdinalIgnoreCase) &&
+                FindCustomStaticMeshForComponent(_currentProject, component) is { } customMesh)
+            {
+                customMesh.MaterialPath = UnrealPathUtil.NormalizePackagePath(mi);
+            }
             (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject);
         }
         if (!string.IsNullOrWhiteSpace(result.StageContentRoot))

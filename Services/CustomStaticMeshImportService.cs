@@ -116,6 +116,18 @@ public sealed class CustomStaticMeshImportService
         return $"/Game/Mods/{ModIdFromProject(project)}/Meshes/SM_Custom_{MakeSafeToken(import.Id)}";
     }
 
+    /// <summary>
+    /// Returns the stable Blueprint component identity for an imported mesh. The generated token is
+    /// deliberately separate from <see cref="CustomStaticMeshImport.DisplayName"/> so an author can
+    /// rename the mesh in Batcomputer without invalidating staged assets or saved material rows.
+    /// </summary>
+    public static string ComponentNameFor(CustomStaticMeshImport import)
+    {
+        return string.IsNullOrWhiteSpace(import.ResolvedComponent)
+            ? "CustomMesh_" + MakeSafeToken(import.Id)
+            : import.ResolvedComponent.Trim();
+    }
+
     public sealed class Result
     {
         public string Status { get; set; } = "";
@@ -192,6 +204,19 @@ public sealed class CustomStaticMeshImportService
             var modId = ModIdFromProject(project);
             var meshName = "SM_Custom_" + MakeSafeToken(import.Id);
             var meshPackage = $"/Game/Mods/{modId}/Meshes/{meshName}";
+            var componentSlot = ComponentNameFor(import);
+            var savedMaterial = project.MaterialAssignments.LastOrDefault(assignment =>
+                assignment.Slot == 0 &&
+                "both".Equals(assignment.Context, StringComparison.OrdinalIgnoreCase) &&
+                ComponentWithoutSlot(assignment.Component).Equals(
+                    ComponentWithoutSlot(componentSlot),
+                    StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(savedMaterial?.MiPackagePath))
+            {
+                // Older projects could have a valid inspector assignment while the import still
+                // remembered its donor material. Reconcile that state before regenerating the mesh.
+                import.MaterialPath = savedMaterial.MiPackagePath;
+            }
             var materialPackage = UnrealPathUtil.NormalizePackagePath(string.IsNullOrWhiteSpace(import.MaterialPath)
                 ? DefaultHeadMaterial
                 : import.MaterialPath);
@@ -202,7 +227,6 @@ public sealed class CustomStaticMeshImportService
 
             var playablePart = CreateStaticAttachmentPart(partIndex, "playable", ComponentDonorPlayable, attachment, meshPackage, meshName, materialPackage);
             var cutscenePart = CreateStaticAttachmentPart(partIndex, "cutscene", ComponentDonorCutscene, attachment, meshPackage, meshName, materialPackage);
-            var componentSlot = "CustomMesh_" + MakeSafeToken(import.Id);
             var graft = new PartGraftService(projectRoot).CreateSelectedPartGraftedStage(
                 project,
                 playablePart,
@@ -352,5 +376,12 @@ public sealed class CustomStaticMeshImportService
     {
         var token = new string((value ?? "").Where(char.IsLetterOrDigit).ToArray());
         return token.Length > 24 ? token[..24] : token;
+    }
+
+    private static string ComponentWithoutSlot(string value)
+    {
+        var safe = value ?? "";
+        var colon = safe.IndexOf(':');
+        return (colon >= 0 ? safe[..colon] : safe).Trim();
     }
 }

@@ -646,6 +646,18 @@ internal static class Program
             return CookTextureCli(args);
         }
 
+        if (args.Length >= 3 && args[0].Equals("--prepare-texture-templates", StringComparison.OrdinalIgnoreCase))
+        {
+            // Support diagnostic: exercise the exact post-extraction template preparation used by
+            // the GUI without launching a window.
+            var prepared = TextureCookTemplateService.PrepareFromContentRoot(args[1], args[2]);
+            foreach (var line in prepared.Logs) Console.WriteLine($"info: {line}");
+            foreach (var warning in prepared.Warnings) Console.WriteLine($"warning: {warning}");
+            Console.WriteLine($"prepared={prepared.Prepared}");
+            Console.WriteLine($"nativeSuitIcon={TextureCookTemplateService.HasNativeSuitIconTemplate(args[1])}");
+            return prepared.Prepared > 0 ? 0 : 1;
+        }
+
         if (args.Length >= 2 && args[0].Equals("--anim-lib", StringComparison.OrdinalIgnoreCase))
         {
             return AnimLibraryCli(args);

@@ -19,6 +19,7 @@ public sealed class ModDetailsDialog : Form
     public ModDetailsDialog(NativeSuitModProject mod, IReadOnlyList<(string Suit, string Slot)> suits, bool built, string buildPath)
     {
         Text = "Mod";
+        AutoScaleMode = AutoScaleMode.Dpi;
         ClientSize = new Size(520, 470);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;

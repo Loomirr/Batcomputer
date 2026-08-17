@@ -23,9 +23,11 @@ public sealed class ModelPreviewForm : Form
     public ModelPreviewForm(string html, string title = "Character preview")
     {
         _html = html;
+        AutoScaleMode = AutoScaleMode.Dpi;
         Text = title;
         StartPosition = FormStartPosition.CenterScreen;
         ClientSize = new Size(720, 720);
+        MinimumSize = new Size(520, 520);
         BackColor = Theme.WindowBg;
         Icon = EmbeddedAssets.LoadIcon("Icon.ico") ?? Icon;
         Controls.Add(_web);
@@ -40,9 +42,11 @@ public sealed class ModelPreviewForm : Form
     private ModelPreviewForm(string folder, string title, bool isFolder)
     {
         _folder = folder;
+        AutoScaleMode = AutoScaleMode.Dpi;
         Text = title;
         StartPosition = FormStartPosition.CenterScreen;
         ClientSize = new Size(760, 760);
+        MinimumSize = new Size(520, 520);
         BackColor = Theme.WindowBg;
         Icon = EmbeddedAssets.LoadIcon("Icon.ico") ?? Icon;
         Controls.Add(_web);

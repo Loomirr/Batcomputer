@@ -10,6 +10,7 @@ public sealed class RegistryWriterProgressForm : Form
     public RegistryWriterProgressForm()
     {
         Text = "Batcomputer - Finishing setup";
+        AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = Theme.WindowBg;
         ForeColor = Theme.OnDark;
         Font = Theme.Body;
@@ -39,16 +40,19 @@ public sealed class RegistryWriterProgressForm : Form
         };
 
         _phase.SetBounds(18, 112, 584, 18);
+        _phase.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _phase.Font = Theme.BodyStrong;
         _phase.ForeColor = Theme.OnDark;
-        _phase.Text = "Starting the writer build...";
+        _phase.Text = "Starting the writer build…";
 
         _detail.SetBounds(18, 132, 584, 18);
+        _detail.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _detail.Font = Theme.Caption;
         _detail.ForeColor = Theme.OnDarkMuted;
         _detail.Text = "Next: first-time game asset extraction.";
 
         _progress.SetBounds(18, 158, 584, 12);
+        _progress.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _progress.Indeterminate = true;
 
         Controls.AddRange(new Control[] { eyebrow, title, intro, _phase, _detail, _progress });
@@ -87,7 +91,7 @@ public sealed class RegistryWriterProgressForm : Form
         _progress.Indeterminate = false;
         _progress.Value = 100;
         _phase.Text = "Asset Registry writer ready";
-        _detail.Text = "Starting first-time game asset extraction...";
+        _detail.Text = "Starting first-time game asset extraction…";
     }
 
     public void SetFailed(string error)

@@ -27,6 +27,7 @@ public sealed class MaterialCatalogPicker : Form
 
     public MaterialCatalogPicker()
     {
+        AutoScaleMode = AutoScaleMode.Dpi;
         Text = "Batcomputer - Base material library";
         ClientSize = new Size(880, 650);
         MinimumSize = new Size(780, 560);
@@ -36,6 +37,7 @@ public sealed class MaterialCatalogPicker : Form
         BackColor = Theme.WindowBg;
         ForeColor = Theme.OnDark;
         Font = Theme.Body;
+        Shown += (_, _) => Theme.UseDarkTitleBar(this);
 
         BuildSurface();
         LoadCatalog();
@@ -120,7 +122,7 @@ public sealed class MaterialCatalogPicker : Form
         _search.Top = 91;
         _search.Width = filters.Width - 28;
         _search.Height = 34;
-        _search.PlaceholderText = "Search material name or game path...";
+        _search.PlaceholderText = "Search material name or game path…";
         Theme.StyleDarkInput(_search);
         _search.TextChanged += (_, _) => ApplyFilter();
 
@@ -261,9 +263,9 @@ public sealed class MaterialCatalogPicker : Form
         _colourParameterIndexBuilding = true;
         _list.Items.Clear();
         _use.Enabled = false;
-        _selection.Text = "Checking extracted material instances for vector colour parameters...";
+        _selection.Text = "Checking extracted material instances for vector colour parameters…";
         _selection.ForeColor = Theme.OnDarkMuted;
-        _count.Text = "Building colour-parameter index...";
+        _count.Text = "Building colour-parameter index…";
         try
         {
             var assets = _all.ToArray();

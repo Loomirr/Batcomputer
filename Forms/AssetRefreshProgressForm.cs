@@ -13,6 +13,7 @@ public sealed class AssetRefreshProgressForm : Form
     public AssetRefreshProgressForm(bool firstRun = false)
     {
         Text = firstRun ? "Batcomputer - First-time extraction" : "Refreshing game assets";
+        AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = Theme.WindowBg;
         ForeColor = Theme.OnDark;
         Font = Theme.Body;
@@ -49,6 +50,7 @@ public sealed class AssetRefreshProgressForm : Form
         _phase.Left = 18;
         _phase.Top = 16 + offset;
         _phase.Width = 584;
+        _phase.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _phase.Height = 20;
         _phase.Font = AppFonts.Condensed(10f, FontStyle.Bold);
         _phase.ForeColor = Theme.Gold;
@@ -57,6 +59,7 @@ public sealed class AssetRefreshProgressForm : Form
         _status.Left = 18;
         _status.Top = 38 + offset;
         _status.Width = 584;
+        _status.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _status.Height = 20;
         _status.AutoEllipsis = true;
         _status.Font = Theme.Mono;
@@ -66,6 +69,7 @@ public sealed class AssetRefreshProgressForm : Form
         _progress.Left = 18;
         _progress.Top = 68 + offset;
         _progress.Width = 584;
+        _progress.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _progress.Height = 14;
         _progress.Maximum = 100;
 
@@ -75,6 +79,7 @@ public sealed class AssetRefreshProgressForm : Form
         _cancel.Top = 106 + offset;
         _cancel.Width = 100;
         _cancel.Height = 28;
+        _cancel.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         _cancel.Click += (_, _) =>
         {
             _cancel.Enabled = false;

@@ -10,7 +10,7 @@ public static class PatchPlanService
         {
             SlotId = plan.SlotId,
             DisplayName = "Thomas Wayne",
-            Description = "Native suit prototype generated from template donors.",
+            Description = "Native suit generated from verified game donors.",
             TargetPackages = plan.TargetPackages,
             PlayableTemplate = playable,
             CutsceneTemplate = cutscene,

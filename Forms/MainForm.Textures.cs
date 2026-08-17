@@ -13,6 +13,8 @@ namespace Batcomputer;
 /// </summary>
 public sealed partial class MainForm
 {
+    private const string NativeUimdIconCookProfile = "ui-suit-256-bc7";
+
     private enum TextureProfileSafety
     {
         Verified,
@@ -100,6 +102,7 @@ public sealed partial class MainForm
         _currentProject.IconSuit = PersistedIconValue(dlg.IconSuit, donorIcons.Suit);
         _currentProject.IconLeft = PersistedIconValue(dlg.IconLeft, donorIcons.Left);
         _currentProject.IconRight = PersistedIconValue(dlg.IconRight, donorIcons.Right);
+        NormalizeGeneratedUimdIconRecipes(_currentProject);
         (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject);
         AppendLog("Saved suit icon paths. Repackage to bake them into the UIMD.");
     }
@@ -238,18 +241,18 @@ public sealed partial class MainForm
                 new()
                 {
                     Title = "Path format",
-                    Subtitle = "/Game/Mods/Tex/Textures/...",
+                    Subtitle = "/Game/Mods/<mod>/Textures/<name>",
                     Accent = Theme.Textures,
-                    OnClick = () => CopyText("/Game/Mods/Tex/Textures/T_Example_____________1234ABCD", "Copied example texture package path."),
-                    ToolTip = "Current Texture2D repathing is template-length based. The safe proof path uses a short Tex mod folder plus a Textures folder, then embeds your chosen name in a fixed-length asset name."
+                    OnClick = () => CopyText("/Game/Mods/ExampleMod/Textures/T_Example", "Copied example texture package path."),
+                    ToolTip = "Verified standalone Texture2D donors keep the owning mod's clean Textures folder and the unique name you enter."
                 },
                 new()
                 {
                     Title = "Packaging",
                     Subtitle = "normal suit pak",
                     Accent = Theme.Textures,
-                    OnClick = () => AppendLog("Texture imports still emit a separate proof trio for FModel checks, but normal suit packaging stages only this suit's generated Texture2D files into the suit pak."),
-                    ToolTip = "The proof trio is raw-patch based and may show template-source chunks. The normal Package button copies only each generated texture's cooked .uasset/.ubulk into the suit content root."
+                    OnClick = () => AppendLog("Generated Texture2D assets are staged directly into the owning suit mod when you build it; Batcomputer does not create a separate texture test pak."),
+                    ToolTip = "Build mod includes only the generated texture assets referenced by that suit, under its own /Game/Mods/<mod>/Textures path."
                 }
             }, header);
             return;
@@ -312,9 +315,9 @@ public sealed partial class MainForm
         menu.Items.Add("Copy object path", null, (_, _) => CopyText(TextureObjectPath(texture), $"Copied texture object path: {TextureObjectPath(texture)}"));
         menu.Items.Add("Copy source PNG path", null, (_, _) => CopyText(texture.SourcePng, $"Copied source PNG path: {texture.SourcePng}"));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("View recipe safety...", null, (_, _) => ShowTextureRecipeSafety(texture));
+        menu.Items.Add("View recipe safety…", null, (_, _) => ShowTextureRecipeSafety(texture));
         menu.Items.Add("Reimport image", null, (_, _) => ReimportCurrentSuitTexture(texture));
-        menu.Items.Add("Change cook profile...", null, (_, _) => ChangeGeneratedTextureCookProfile(texture));
+        menu.Items.Add("Change cook profile…", null, (_, _) => ChangeGeneratedTextureCookProfile(texture));
         var restore = menu.Items.Add("Restore latest texture backup", null, (_, _) => RestoreLatestTextureBackup(texture));
         restore.Enabled = FindLatestTextureBackup(texture) is not null;
         menu.Items.Add(new ToolStripSeparator());
@@ -533,7 +536,7 @@ public sealed partial class MainForm
         var templateJson = cookPreset.TemplateJson;
         if (string.IsNullOrWhiteSpace(templateJson) || !File.Exists(templateJson))
         {
-            AppendLog("Texture import needs a proven BGRA8 Texture2D template JSON in the Generated workspace.");
+            AppendLog("Texture import needs the selected verified Texture2D template in the Generated workspace.");
             AppendLog($"Looked for: {templateJson}");
             return;
         }
@@ -601,7 +604,11 @@ public sealed partial class MainForm
                 OutputContentRoot = cookedContentRoot,
                 OutputPackagePath = outputPackagePath,
                 NearestNeighborMips = nearestMips,
-                WriteInlineMips = IsColorMaskTextureKind(textureKind),
+                WriteInlineMips = IsColorMaskTextureKind(textureKind) || IsNativeUimdIconCookProfile(cookPreset.Id),
+                Bc7InputLayout = "rgba",
+                Bc7Quality = IsNativeUimdIconCookProfile(cookPreset.Id)
+                    ? "best"
+                    : "balanced",
             }));
 
             foreach (var log in cookResult.Log)
@@ -654,12 +661,17 @@ public sealed partial class MainForm
 
     private async Task<bool> EnsureTextureCookTemplatesAsync(string projectRoot)
     {
+        // The native suit-selector donor is optional and uses a different,
+        // inline-mip layout from the general texture templates. Normalize it
+        // whenever it is available, even when the core donors were already
+        // prepared by an older Batcomputer build.
+        TextureCookTemplateService.NormalizeNativeSuitIconTemplate(projectRoot);
         if (TextureCookTemplateService.HasCoreTemplates(projectRoot))
         {
             return true;
         }
 
-        AppendLog("Preparing the base-game texture cook templates...");
+        AppendLog("Preparing the base-game texture cook templates…");
         UseWaitCursor = true;
         try
         {
@@ -674,6 +686,7 @@ public sealed partial class MainForm
                 AppendLog("  texture template warning: " + warning);
             }
 
+            TextureCookTemplateService.NormalizeNativeSuitIconTemplate(projectRoot);
             return TextureCookTemplateService.HasCoreTemplates(projectRoot);
         }
         catch (Exception ex)
@@ -766,6 +779,7 @@ public sealed partial class MainForm
         var bgra1kPath = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_CloudMaskBGRA8_1K", "T_CloudMask.json");
         var bc5Path = TextureCookTemplateService.TemplateJsonPath(projectRoot, "TextureStandaloneTemplate_BatarangBC5");
         var dxt5Path = TextureCookTemplateService.TemplateJsonPath(projectRoot, "TextureStandaloneTemplate_BatclawLogo_DXT5");
+        var nativeSuitIconPath = TextureCookTemplateService.TemplateJsonPath(projectRoot, TextureCookTemplateService.NativeSuitIconTemplateFolder);
         var dxt1Path = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_EoMColorMask_DXT1", "T_TPAGE_Batman_TheBatman2025_ColourMask.json");
         var candidates = new List<TextureCookPreset>();
         void Add(
@@ -784,7 +798,13 @@ public sealed partial class MainForm
             }
         }
 
-        if (textureKind.Contains("normal", StringComparison.OrdinalIgnoreCase))
+        if (IsUiTextureKind(textureKind))
+        {
+            Add(NativeUimdIconCookProfile, "Native 256px BC7 UIMD icon", nativeSuitIconPath, 256, 256, "PF_BC7",
+                TextureProfileSafety.Verified,
+                "Uses the game's native suit-menu Texture2D layout: BC7 with nine inline mips. Verified for suit, menu, left, and right UIMD icon slots.");
+        }
+        else if (textureKind.Contains("normal", StringComparison.OrdinalIgnoreCase))
         {
             Add("normal-2k-bc5-legacy", "2K BC5 normal", bc5Path, 2048, 2048, "PF_BC5",
                 TextureProfileSafety.Verified, "Verified on Electric's body normal map in game.");
@@ -809,15 +829,6 @@ public sealed partial class MainForm
             Add("packed-2k-dxt5-legacy", "2K DXT5 packed map", dxt5Path, 2048, 2048, "PF_DXT5",
                 TextureProfileSafety.Experimental, "Legacy Electric-compatible donor. Test the target material in game first.");
         }
-        else if (IsUiTextureKind(textureKind))
-        {
-            Add("ui-2k-dxt5-legacy", "2K DXT5 UI (legacy)", dxt5Path, 2048, 2048, "PF_DXT5",
-                TextureProfileSafety.Verified, "Original UI cook route. Verified before the BGRA8 UI profile was added.");
-            Add("ui-2k-bgra8", "2K BGRA8 UI", bgraPath, 2048, 2048, "PF_B8G8R8A8",
-                TextureProfileSafety.Verified, "Used by the current generated Electric menu art.");
-            Add("ui-1k-bgra8", "1K BGRA8 UI", bgra1kPath, 1024, 1024, "PF_B8G8R8A8",
-                TextureProfileSafety.Experimental, "Lower-resolution UI option; verify menu presentation in game.");
-        }
         else
         {
             Add("character-2k-bgra8", "2K BGRA8 colour", bgraPath, 2048, 2048, "PF_B8G8R8A8",
@@ -836,8 +847,7 @@ public sealed partial class MainForm
         "normal-2k-bc5-legacy" => TextureProfileSafety.Verified,
         "character-2k-bgra8" => TextureProfileSafety.Verified,
         "mask-2k-bgra8" => TextureProfileSafety.Verified,
-        "ui-2k-dxt5-legacy" => TextureProfileSafety.Verified,
-        "ui-2k-bgra8" => TextureProfileSafety.Verified,
+        NativeUimdIconCookProfile => TextureProfileSafety.Verified,
         _ => TextureProfileSafety.Experimental,
     };
 
@@ -850,8 +860,10 @@ public sealed partial class MainForm
         "normal-2k-bc5-legacy" => "Verified on Electric's body normal map in game.",
         "character-2k-bgra8" => "Verified on Electric's base-colour maps in game.",
         "mask-2k-bgra8" => "Verified on Electric's current colour mask.",
-        "ui-2k-dxt5-legacy" => "Original UI cook route, verified before the BGRA8 UI profile was added.",
-        "ui-2k-bgra8" => "Used by the current generated Electric menu art.",
+        NativeUimdIconCookProfile => "Verified native UIMD icon layout: 256px BC7 with nine inline mips.",
+        "ui-2k-dxt5-legacy" => "Retired for UIMD icons: its world/decal layout corrupts suit-menu images.",
+        "ui-2k-bgra8" => "Retired for UIMD icons: its external-mip world-texture layout corrupts suit-menu images.",
+        "ui-1k-bgra8" => "Retired for UIMD icons: use the native 256px BC7 profile.",
         "character-1k-bgra8" => "Lower-resolution character colour; verify visual quality in game.",
         "mask-1k-bgra8" => "Lower-resolution profile; verify the target use in game.",
         "normal-2k-bgra8" => "Deprecated normal-map route. Choose BC5 instead.",
@@ -1203,14 +1215,26 @@ public sealed partial class MainForm
             return "Color mask";
         }
 
-        if (name.Contains("icon", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("ui", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("front", StringComparison.OrdinalIgnoreCase) ||
+        if (name.Contains("front", StringComparison.OrdinalIgnoreCase) ||
             name.Contains("left", StringComparison.OrdinalIgnoreCase) ||
             name.Contains("right", StringComparison.OrdinalIgnoreCase) ||
             name.Contains("menu", StringComparison.OrdinalIgnoreCase))
         {
-            return "UI icon";
+            return "UI artwork";
+        }
+
+        if (name.Contains("suiticon", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("suit_icon", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("selector", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("tile", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("icon", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Suit selector icon";
+        }
+
+        if (name.Contains("ui", StringComparison.OrdinalIgnoreCase))
+        {
+            return "UI artwork";
         }
 
         if (name.Contains("_mmr", StringComparison.OrdinalIgnoreCase) ||
@@ -1229,7 +1253,21 @@ public sealed partial class MainForm
     private static bool IsUiTextureKind(string? textureKind) =>
         !string.IsNullOrWhiteSpace(textureKind) &&
         (textureKind.Contains("ui", StringComparison.OrdinalIgnoreCase) ||
-         textureKind.Contains("icon", StringComparison.OrdinalIgnoreCase));
+         textureKind.Contains("icon", StringComparison.OrdinalIgnoreCase) ||
+         textureKind.Contains("artwork", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsSuitSelectorIconTextureKind(string? textureKind) =>
+        !string.IsNullOrWhiteSpace(textureKind) &&
+        (IsExplicitSuitSelectorIconTextureKind(textureKind) ||
+         textureKind.Equals("UI icon", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsExplicitSuitSelectorIconTextureKind(string? textureKind) =>
+        !string.IsNullOrWhiteSpace(textureKind) &&
+        (textureKind.Equals("Suit selector icon", StringComparison.OrdinalIgnoreCase) ||
+         textureKind.Contains("suit selector", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsNativeUimdIconCookProfile(string? cookProfile) =>
+        string.Equals(cookProfile, NativeUimdIconCookProfile, StringComparison.OrdinalIgnoreCase);
 
     private static bool UseNearestNeighborMipsForTextureKind(string? textureKind, string? cookProfile = null) =>
         !IsUiTextureKind(textureKind) ||
@@ -1272,6 +1310,87 @@ public sealed partial class MainForm
         changed |= AutoFillEmptyGeneratedUiIconSlot(project, "menu");
         changed |= AutoFillEmptyGeneratedUiIconSlot(project, "left");
         changed |= AutoFillEmptyGeneratedUiIconSlot(project, "right");
+        changed |= NormalizeGeneratedUimdIconRecipes(project);
+        return changed;
+    }
+
+    /// <summary>
+    /// Every generated texture referenced by a UIMD icon slot must use the
+    /// game's compact 256px BC7 layout. The retired 1K/2K UI profiles borrowed
+    /// world-texture donors with external mips; FModel could parse parts of
+    /// those assets, but the suit menu sampled corrupted data in game.
+    ///
+    /// This is deliberately role-based rather than name-based so old projects
+    /// such as Electric (legacy "UI icon") and projects already saved with a
+    /// generic profile are upgraded without renaming their package paths.
+    /// </summary>
+    private bool NormalizeGeneratedUimdIconRecipes(NativeSuitProject project)
+    {
+        var slots = new (string Name, string Path, string Kind)[]
+        {
+            ("menu", project.IconMenu, "UI artwork"),
+            ("suit", project.IconSuit, "Suit selector icon"),
+            ("left", project.IconLeft, "UI artwork"),
+            ("right", project.IconRight, "UI artwork"),
+        };
+        var targets = slots
+            .Select(slot => new { Slot = slot, Texture = FindGeneratedTextureByPackage(project, slot.Path) })
+            .Where(item => item.Texture is not null)
+            .GroupBy(item => item.Texture!.PackagePath, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group
+                .OrderByDescending(item => item.Slot.Name.Equals("suit", StringComparison.OrdinalIgnoreCase))
+                .First())
+            .ToList();
+        if (targets.Count == 0)
+        {
+            return false;
+        }
+
+        var projectRoot = _projectRootText.Text.Trim();
+        if (!TextureCookTemplateService.NormalizeNativeSuitIconTemplate(projectRoot))
+        {
+            var needsUpgrade = targets.Any(item =>
+                !IsNativeUimdIconCookProfile(item.Texture!.CookProfile) ||
+                !item.Texture.TemplateJson.Contains(
+                    TextureCookTemplateService.NativeSuitIconTemplateFolder,
+                    StringComparison.OrdinalIgnoreCase));
+            if (needsUpgrade)
+            {
+                AppendLog("UIMD icon migration blocked: the native 256px BC7 donor is unavailable. Refresh game assets before packaging this suit.");
+            }
+            return false;
+        }
+
+        var nativeTemplate = TextureCookTemplateService.TemplateJsonPath(
+            projectRoot,
+            TextureCookTemplateService.NativeSuitIconTemplateFolder);
+        var changed = false;
+        foreach (var item in targets)
+        {
+            var texture = item.Texture!;
+            var desiredKind = item.Slot.Kind;
+            var recipeChanged =
+                !string.Equals(texture.Kind, desiredKind, StringComparison.OrdinalIgnoreCase) ||
+                !IsNativeUimdIconCookProfile(texture.CookProfile) ||
+                !string.Equals(texture.TemplateJson, nativeTemplate, StringComparison.OrdinalIgnoreCase) ||
+                texture.CookWidth != 256 ||
+                texture.CookHeight != 256 ||
+                !string.Equals(texture.CookPixelFormat, "PF_BC7", StringComparison.OrdinalIgnoreCase);
+            if (!recipeChanged)
+            {
+                continue;
+            }
+
+            texture.Kind = desiredKind;
+            texture.CookProfile = NativeUimdIconCookProfile;
+            texture.CookWidth = 256;
+            texture.CookHeight = 256;
+            texture.CookPixelFormat = "PF_BC7";
+            texture.TemplateJson = nativeTemplate;
+            AppendLog($"UIMD icon recipe normalized: {item.Slot.Name} '{texture.DisplayName}' -> native 256px BC7 inline-mip layout.");
+            changed = true;
+        }
+
         return changed;
     }
 
@@ -1337,7 +1456,11 @@ public sealed partial class MainForm
             Path.GetFileNameWithoutExtension(texture.SourcePng ?? ""),
             texture.PackagePath ?? "").ToLowerInvariant();
 
-        return slot switch
+        // Legacy projects labelled all four UIMD images as "UI icon". Only the
+        // explicit modern selector kind receives the role bonus; otherwise the
+        // filename tokens keep ElectricSuit ahead of ElectricSuitFront/Left/Right.
+        var nativeSuitTileBonus = slot == "suit" && IsExplicitSuitSelectorIconTextureKind(texture.Kind) ? 1000 : 0;
+        return nativeSuitTileBonus + (slot switch
         {
             "suit" when token.Contains("suiticon") => 120,
             "suit" when token.Contains("icon") => 100,
@@ -1347,7 +1470,7 @@ public sealed partial class MainForm
             "left" when token.Contains("left") => 100,
             "right" when token.Contains("right") => 100,
             _ => 0
-        };
+        });
     }
 
     private string TexturePackagePathFromUserName(string templateJson, string requestedName, int index, string currentModFolder, string slotId, string? textureKind = null)
@@ -1387,7 +1510,7 @@ public sealed partial class MainForm
         {
             AppendLog(
                 $"Texture path note: template is an IoStore payload, not a standalone UAssetAPI package. " +
-                $"Using same-length proof path '{fallbackPath}' until a standalone Texture2D template is configured.");
+                $"Using compatibility path '{fallbackPath}' until a standalone Texture2D template is configured.");
             return fallbackPath;
         }
 
@@ -1685,12 +1808,15 @@ public sealed partial class MainForm
             Text = "Pick generated texture",
             StartPosition = FormStartPosition.CenterParent,
             Size = new Size(760, 420),
+            AutoScaleMode = AutoScaleMode.Dpi,
+            MinimumSize = new Size(600, 340),
             MinimizeBox = false,
             MaximizeBox = false,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             BackColor = Theme.WindowBg,
             ForeColor = Theme.OnDark
         };
+        form.Shown += (_, _) => Theme.UseDarkTitleBar(form);
 
         var list = new ListBox
         {
@@ -1741,6 +1867,18 @@ public sealed partial class MainForm
     private bool StageGeneratedTexturesIntoContentRoot(NativeSuitProject project, string contentRootToPackage, out string error)
     {
         error = "";
+
+        if (NormalizeGeneratedUimdIconRecipes(project))
+        {
+            try
+            {
+                (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(project);
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"UIMD icon recipe save warning: {ex.Message}");
+            }
+        }
 
         if (project.GeneratedTextures.Count == 0)
         {
@@ -1851,7 +1989,11 @@ public sealed partial class MainForm
             return true;
         }
 
-        if (!hasCompleteOutput && !EnsureGeneratedTextureCooked(texture, cookedContentRoot))
+        // Always validate a recorded recipe against its cook report. This is
+        // inexpensive when it matches, and is essential after an automatic
+        // donor/profile migration because the old files may still look
+        // structurally complete while containing the retired payload layout.
+        if (!EnsureGeneratedTextureCooked(texture, cookedContentRoot))
         {
             error = $"'{label}' could not regenerate its saved recipe. Check its PNG source and donor template, then try again.";
             return false;
@@ -1901,7 +2043,7 @@ public sealed partial class MainForm
         }
 
         var nearestMips = UseNearestNeighborMipsForTextureKind(texture.Kind, texture.CookProfile);
-        AppendLog($"Recooking texture '{texture.DisplayName}' with encoder v{TextureCookService.CurrentEncoderVersion} ({(nearestMips ? "nearest mips" : "high-quality UI mips")})...");
+        AppendLog($"Recooking texture '{texture.DisplayName}' with encoder v{TextureCookService.CurrentEncoderVersion} ({(nearestMips ? "nearest mips" : "high-quality UI mips")})…");
         var result = new TextureCookService(_projectRootText.Text.Trim()).Cook(new TextureCookService.Request
         {
             SourceImagePath = texture.SourcePng,
@@ -1912,7 +2054,11 @@ public sealed partial class MainForm
             // Native EoM ColorMask templates contain both external and inline
             // mips. Rewrite the inline tail too; otherwise the lower mips remain
             // the donor image and the game's material sampling can fall back to stale data.
-            WriteInlineMips = IsColorMaskTextureKind(texture.Kind)
+            WriteInlineMips = IsColorMaskTextureKind(texture.Kind) || IsNativeUimdIconCookProfile(texture.CookProfile),
+            Bc7InputLayout = "rgba",
+            Bc7Quality = IsNativeUimdIconCookProfile(texture.CookProfile)
+                ? "best"
+                : "balanced",
         });
 
         foreach (var warning in result.Warnings)

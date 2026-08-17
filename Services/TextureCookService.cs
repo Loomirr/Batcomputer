@@ -355,10 +355,10 @@ public sealed class TextureCookService
         if (outputName.Length != template.Name.Length || outputPackagePath.Length != template.Package.Length)
         {
             throw new InvalidOperationException(
-                "This Texture2D spike can only rename templates when the output asset name and package path are the same length as the donor. " +
+                "This legacy Texture2D template can only be renamed when the output asset name and package path are the same length as the donor. " +
                 $"Donor '{template.Package}' ({template.Package.Length}) / '{template.Name}' ({template.Name.Length}); " +
                 $"output '{outputPackagePath}' ({outputPackagePath.Length}) / '{outputName}' ({outputName.Length}). " +
-                "For the first proof, omit outputPackagePath to preserve the donor path, or choose a same-length probe path.");
+                "Preserve the donor path or choose a same-length compatibility path, then migrate to a standalone template when available.");
         }
 
         var packageHits = ReplaceAscii(uassetBytes, template.Package, outputPackagePath);

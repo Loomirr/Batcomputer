@@ -74,6 +74,7 @@ public static class Dialog
         using var form = new Form
         {
             Text = model.WindowTitle,
+            AutoScaleMode = AutoScaleMode.Dpi,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             StartPosition = owner is null ? FormStartPosition.CenterScreen : FormStartPosition.CenterParent,
             MinimizeBox = false,
@@ -232,7 +233,7 @@ public static class Dialog
         body.Height = y;
 
         // Footer.
-        var footer = new Panel { Left = 0, Top = body.Bottom, Width = W, Height = 54, BackColor = Theme.SlateDark };
+        var footer = new Panel { Dock = DockStyle.Bottom, Height = 54, BackColor = Theme.SlateDark };
         footer.Paint += (_, e) =>
         {
             using var pen = new Pen(Theme.LineSoft);
@@ -243,6 +244,7 @@ public static class Dialog
         Theme.StyleGoldButton(primary);
         primary.Width = Math.Max(96, TextRenderer.MeasureText(primary.Text, primary.Font).Width + 34);
         primary.Left = W - Pad - primary.Width;
+        primary.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         footer.Controls.Add(primary);
 
         Button? secondary = null;
@@ -252,14 +254,29 @@ public static class Dialog
             Theme.StyleDarkButton(secondary);
             secondary.Width = Math.Max(88, TextRenderer.MeasureText(secondary.Text, secondary.Font).Width + 30);
             secondary.Left = primary.Left - secondary.Width - 8;
+            secondary.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             footer.Controls.Add(secondary);
         }
 
-        form.Controls.Add(body);
+        var bodyHost = new Panel
+        {
+            Dock = DockStyle.Fill,
+            AutoScroll = true,
+            BackColor = Theme.WindowBg,
+        };
+        bodyHost.Controls.Add(body);
+        form.Controls.Add(bodyHost);
         form.Controls.Add(footer);
-        form.ClientSize = new Size(W, footer.Bottom);
+        var workingArea = owner is Control ownerControl
+            ? Screen.FromControl(ownerControl).WorkingArea
+            : Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
+        var desiredHeight = body.Height + footer.Height;
+        var maximumHeight = Math.Max(260, workingArea.Height - 96);
+        form.ClientSize = new Size(W, Math.Min(desiredHeight, maximumHeight));
+        bodyHost.AutoScrollMinSize = new Size(0, body.Height);
         form.AcceptButton = primary;
         if (secondary is not null) form.CancelButton = secondary;
+        form.Shown += (_, _) => Theme.UseDarkTitleBar(form);
 
         return form.ShowDialog(owner) == DialogResult.OK;
     }

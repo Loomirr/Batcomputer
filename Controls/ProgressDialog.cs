@@ -20,6 +20,7 @@ public sealed class ProgressDialog : Form
     {
         _owner = owner;
         Text = title;
+        AutoScaleMode = AutoScaleMode.Dpi;
         Width = 520;
         Height = 168;
         StartPosition = FormStartPosition.CenterParent;

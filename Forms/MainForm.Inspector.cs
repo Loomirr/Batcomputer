@@ -129,6 +129,27 @@ public sealed partial class MainForm
         return _inspectorTabs;
     }
 
+    private static CustomStaticMeshImport? FindCustomStaticMeshForComponent(
+        NativeSuitProject? project,
+        string component)
+    {
+        if (project?.CustomStaticMeshes is not { Count: > 0 } || string.IsNullOrWhiteSpace(component))
+        {
+            return null;
+        }
+
+        static string WithoutSlot(string value)
+        {
+            var colon = value.IndexOf(':');
+            return (colon >= 0 ? value[..colon] : value).Trim();
+        }
+
+        var expected = WithoutSlot(component);
+        return project.CustomStaticMeshes.FirstOrDefault(mesh =>
+            WithoutSlot(CustomStaticMeshImportService.ComponentNameFor(mesh))
+                .Equals(expected, StringComparison.OrdinalIgnoreCase));
+    }
+
     // Inspector material drops are handled by InspectorControl's per-slot rows now
     // (see _inspector.SlotMaterialDropped wiring) - no tree hit-testing needed.
 
@@ -208,6 +229,13 @@ public sealed partial class MainForm
 
                 foreach (var comp in report.Components)
                 {
+                    var customMesh = FindCustomStaticMeshForComponent(_currentProject, comp.Name);
+                    var friendlyComponent = customMesh?.DisplayName?.Trim();
+                    var friendlyMesh = customMesh is null
+                        ? ""
+                        : string.IsNullOrWhiteSpace(customMesh.SourceObjRelativePath)
+                            ? "Imported custom mesh"
+                            : "OBJ · " + Path.GetFileName(customMesh.SourceObjRelativePath);
                     if (role == "playable")
                     {
                         foreach (var s in comp.Slots.Where(s => !s.IsDefault))
@@ -224,8 +252,10 @@ public sealed partial class MainForm
                     rows.Add(new InspectorControl.ComponentRow
                     {
                         Name = comp.Name,
+                        DisplayName = friendlyComponent ?? "",
                         Class = comp.Class,
                         Mesh = comp.Mesh,
+                        DisplayMesh = friendlyMesh,
                         Slots = comp.Slots.OrderBy(s => s.Slot).Select(s => new InspectorControl.SlotRow
                         {
                             Slot = s.Slot,
@@ -238,7 +268,7 @@ public sealed partial class MainForm
                     {
                         issues.Add(new InspectorControl.IssueRow
                         {
-                            Title = $"{comp.Name} slot {s.Slot} has no material",
+                            Title = $"{(friendlyComponent ?? comp.Name)} slot {s.Slot} has no material",
                             Detail = "Ships with the mesh default. Drop one, or ignore.",
                             Level = InspectorControl.Severity.Crit,
                         });
@@ -321,11 +351,15 @@ public sealed partial class MainForm
             Text = title,
             Width = 760,
             Height = 560,
+            AutoScaleMode = AutoScaleMode.Dpi,
+            MinimumSize = new Size(600, 420),
             StartPosition = FormStartPosition.CenterParent,
             BackColor = Theme.WindowBg,
             ForeColor = Theme.OnDark,
         };
-        var search = new TextBox { Dock = DockStyle.Top, Height = 26, PlaceholderText = $"Filter {assets.Count} {className}...", BackColor = Theme.SlateDark, ForeColor = Theme.OnDark, BorderStyle = BorderStyle.FixedSingle };
+        dlg.Shown += (_, _) => Theme.UseDarkTitleBar(dlg);
+        var search = new TextBox { Dock = DockStyle.Top, Height = 30, PlaceholderText = $"Filter {assets.Count} {className}…" };
+        Theme.StyleDarkInput(search);
         var list = new ListBox { Dock = DockStyle.Fill, BackColor = Theme.CardBg, ForeColor = Theme.OnDark, BorderStyle = BorderStyle.None };
         Theme.StyleListBox(list);
         var ok = new Button { Text = "Use selected", Dock = DockStyle.Bottom, Height = 34 };
@@ -397,12 +431,15 @@ public sealed partial class MainForm
             Text = $"{role} materials" + (string.IsNullOrWhiteSpace(report.AssetFile) ? "" : $" — {report.AssetFile}"),
             Width = 760,
             Height = 560,
+            AutoScaleMode = AutoScaleMode.Dpi,
+            MinimumSize = new Size(620, 440),
             StartPosition = FormStartPosition.CenterParent,
             BackColor = Theme.WindowBg,
             ForeColor = Theme.OnDark,
             MinimizeBox = false,
             MaximizeBox = false,
         };
+        dlg.Shown += (_, _) => Theme.UseDarkTitleBar(dlg);
 
         var info = new Label
         {
@@ -503,7 +540,7 @@ public sealed partial class MainForm
         var packageBaseName = CurrentPackageBaseName();
         var logPath = EffectiveGameUe4ssLogPath();
 
-        AppendLog($"Verifying last UE4SS log for slot '{slotId}'...");
+        AppendLog($"Verifying last UE4SS log for slot '{slotId}'…");
         if (!File.Exists(logPath))
         {
             AppendLog($"  ✗ UE4SS.log not found: {logPath}");

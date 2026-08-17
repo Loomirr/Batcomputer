@@ -93,7 +93,9 @@ public sealed class RegistryPluginService
 
     /// <summary>
     /// The core plugin owns the one global Asset Manager scan extension. Per-mod
-    /// plugins carry only their own registry rows and gameplay tags.
+    /// plugins carry only their own registry rows. Gameplay tags are installed as
+    /// loose project config under LEGOBatmanLotDK/Config/Tags because a content-only
+    /// plugin does not add its Config/Tags directory to GameplayTagsManager.
     /// </summary>
     public static PluginLayout EnsureCorePlugin(string buildRoot)
     {
@@ -287,6 +289,14 @@ public sealed class RegistryPluginService
                 EnsureCorePlugin(buildRoot);
             }
             Directory.CreateDirectory(layout.PluginDirectory);
+            // Builds produced before the loose-config fix may have left a
+            // misleading Config/Tags copy in this reusable output directory.
+            // It is not consumed by this content-only plugin, so remove it.
+            var legacyPluginTagsDirectory = Path.Combine(layout.PluginDirectory, "Config", "Tags");
+            if (Directory.Exists(legacyPluginTagsDirectory))
+            {
+                Directory.Delete(legacyPluginTagsDirectory, recursive: true);
+            }
             File.WriteAllText(layout.DescriptorPath, BuildDescriptorJson(layout.PluginName, modDisplayName));
             if (File.Exists(layout.RegistryPath))
             {

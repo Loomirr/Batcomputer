@@ -284,6 +284,7 @@ public sealed partial class MainForm : Form
     public MainForm()
     {
         InitializeComponent();
+        AutoScaleMode = AutoScaleMode.Dpi;
 
         // Keep the Visual Studio designer light and editable. The real builder
         // surface is data-driven and is composed only when the app runs.
@@ -347,7 +348,7 @@ public sealed partial class MainForm : Form
         _diagnostics.Visible = !_diagnosticsCollapsed;
         header.Text = _diagnosticsCollapsed ? "▸  Diagnostics" : "▾  Diagnostics";
         // Row 1 of the root layout holds the log panel; collapsed leaves just the toggle bar.
-        _mainRootLayout.RowStyles[1].Height = _diagnosticsCollapsed ? 34 : 180;
+        _mainRootLayout.RowStyles[1].Height = _diagnosticsCollapsed ? 40 : 186;
     }
 
     /// <summary>The header's flat ground. Everything sitting on the bar clears to this.</summary>
@@ -381,6 +382,7 @@ public sealed partial class MainForm : Form
     private string _headerWordmarkAsset = "";
 
     private static string CurrentHeaderWordmarkAsset() =>
+        string.Equals(AppSettings.Current.VisualTheme, "Alternate", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(AppSettings.Current.VisualTheme, "Batcompuper", StringComparison.OrdinalIgnoreCase)
             ? "header2.png"
             : "Header.png";
@@ -817,6 +819,7 @@ public sealed partial class MainForm : Form
         {
             Text = title,
             ClientSize = new Size(W, 158),
+            AutoScaleMode = AutoScaleMode.Dpi,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             StartPosition = FormStartPosition.CenterParent,
             MinimizeBox = false,
@@ -1415,7 +1418,8 @@ public sealed partial class MainForm : Form
         {
             Text = "Batcomputer - Texture import",
             StartPosition = FormStartPosition.CenterParent,
-            ClientSize = new Size(Width, 340),
+            ClientSize = new Size(Width, 376),
+            AutoScaleMode = AutoScaleMode.Dpi,
             MinimizeBox = false,
             MaximizeBox = false,
             FormBorderStyle = FormBorderStyle.FixedDialog,
@@ -1441,7 +1445,7 @@ public sealed partial class MainForm : Form
 
         var fields = new RoundedPanel
         {
-            Left = Padding, Top = 80, Width = Width - Padding * 2, Height = 190,
+            Left = Padding, Top = 80, Width = Width - Padding * 2, Height = 226,
             BackColor = Theme.CardBg, BorderColor = Theme.LineSoft, CornerRadius = Theme.RadiusSm
         };
 
@@ -1464,7 +1468,11 @@ public sealed partial class MainForm : Form
         }
         else
         {
-            foreach (var textureKind in new[] { "Character texture", "Color mask", "UI icon", "Normal map", "Roughness/spec mask", "Other texture" })
+            foreach (var textureKind in new[]
+                     {
+                         "Character texture", "Color mask", "Suit selector icon", "UI artwork",
+                         "Normal map", "Roughness/spec mask", "Other texture"
+                     })
             {
                 kind.Items.Add(textureKind);
             }
@@ -1480,6 +1488,21 @@ public sealed partial class MainForm : Form
         var profile = new ThemedDropDown { Height = 34 };
         AddTextureDialogField(fields, "NATIVE COOK PROFILE", profile, 134);
 
+        var profileStatus = new Label
+        {
+            Left = 14,
+            Top = 174,
+            Width = fields.Width - 28,
+            Height = 34,
+            Font = Theme.Caption,
+            ForeColor = Theme.OnDarkMuted,
+            BackColor = Color.Transparent,
+            Text = "Choose the profile that matches where this texture is used.",
+        };
+        fields.Controls.Add(profileStatus);
+
+        Button? ok = null;
+
         void ReloadProfiles()
         {
             profile.Items.Clear();
@@ -1491,22 +1514,32 @@ public sealed partial class MainForm : Form
             if (profile.Items.Count > 0)
             {
                 profile.SelectedIndex = 0;
+                profileStatus.Text = "Choose the profile that matches where this texture is used.";
+                profileStatus.ForeColor = Theme.OnDarkMuted;
+                if (ok is not null) ok.Enabled = true;
+            }
+            else
+            {
+                profileStatus.Text = IsSuitSelectorIconTextureKind(kind.SelectedItem?.ToString())
+                    ? "Native suit-icon donor unavailable. Refresh game assets to prepare the verified 256px BC7 profile."
+                    : "No compatible native cook profile is available for this texture type.";
+                profileStatus.ForeColor = Theme.Warn;
+                if (ok is not null) ok.Enabled = false;
             }
         }
 
         kind.SelectedIndexChanged += (_, _) => ReloadProfiles();
-        ReloadProfiles();
 
         var footer = new Panel
         {
-            Left = 0, Top = 286, Width = Width, Height = 54, BackColor = Theme.SlateDark
+            Left = 0, Top = 322, Width = Width, Height = 54, BackColor = Theme.SlateDark
         };
         footer.Paint += (_, e) =>
         {
             using var pen = new Pen(Theme.LineSoft);
             e.Graphics.DrawLine(pen, 0, 0, footer.Width, 0);
         };
-        var ok = new Button { Text = "Import", DialogResult = DialogResult.OK, Width = 96, Height = 32, Left = Width - Padding - 96, Top = 11 };
+        ok = new Button { Text = "Import", DialogResult = DialogResult.OK, Width = 96, Height = 32, Left = Width - Padding - 96, Top = 11 };
         var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Width = 90, Height = 32, Left = Width - Padding - 96 - 98, Top = 11 };
         Theme.StyleGoldButton(ok);
         Theme.StyleDarkButton(cancel);
@@ -1518,6 +1551,7 @@ public sealed partial class MainForm : Form
         form.Controls.Add(footer);
         form.AcceptButton = ok;
         form.CancelButton = cancel;
+        ReloadProfiles();
         input.Select();
 
         if (form.ShowDialog(this) != DialogResult.OK)
@@ -1577,6 +1611,7 @@ public sealed partial class MainForm : Form
             Text = "Batcomputer - Texture cook profile",
             StartPosition = FormStartPosition.CenterParent,
             ClientSize = new Size(Width, 238),
+            AutoScaleMode = AutoScaleMode.Dpi,
             MinimizeBox = false,
             MaximizeBox = false,
             FormBorderStyle = FormBorderStyle.FixedDialog,
@@ -1987,7 +2022,7 @@ public sealed partial class MainForm : Form
 
         try
         {
-            AppendLog($"Refreshing game assets from IoStore (profile: {profile})...");
+            AppendLog($"Refreshing game assets from IoStore (profile: {profile})…");
             var progress = new Progress<GameAssetRefreshService.Progress>(progressWindow.SetProgress);
             var service = new GameAssetRefreshService(projectRoot);
             var result = await service.RefreshAsync(profile, cancellation.Token, progress);
@@ -2006,7 +2041,7 @@ public sealed partial class MainForm : Form
             AppSettings.Current.Save();
             AppendLog($"New extracted Content root selected: {result.ContentRoot}");
 
-            progressWindow.SetIndeterminate("Preparing texture cook templates...");
+            progressWindow.SetIndeterminate("Preparing texture cook templates…");
             var templates = TextureCookTemplateService.PrepareFromContentRoot(projectRoot, result.ContentRoot);
             foreach (var line in templates.Logs)
             {
@@ -2020,10 +2055,10 @@ public sealed partial class MainForm : Form
             // Each dump is ~18 GB, so replace rather than accumulate (Settings → keep old extracts).
             PruneOldExtracts(result.OutputRoot);
 
-            progressWindow.SetIndeterminate("Rebuilding template index...");
+            progressWindow.SetIndeterminate("Rebuilding template index…");
             await RunIndexerAsync();
 
-            progressWindow.SetIndeterminate("Rebuilding native part index...");
+            progressWindow.SetIndeterminate("Rebuilding native part index…");
             await BuildPartIndexAsync();
 
             progressWindow.SetFinished("Refresh complete. Re-select the base suit before packaging.");
@@ -2065,7 +2100,7 @@ public sealed partial class MainForm : Form
             return;
         }
 
-        AppendLog("Running template indexer...");
+        AppendLog("Running template indexer…");
         _runIndexerButton.Enabled = false;
         try
         {
@@ -2378,6 +2413,8 @@ public sealed partial class MainForm : Form
             Text = "Update all suits",
             Width = 720,
             Height = 520,
+            AutoScaleMode = AutoScaleMode.Dpi,
+            MinimumSize = new Size(640, 460),
             StartPosition = FormStartPosition.CenterParent,
             BackColor = Theme.WindowBg,
             ForeColor = Theme.OnDark,

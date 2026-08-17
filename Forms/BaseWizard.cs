@@ -18,11 +18,13 @@ public sealed partial class BaseWizard : Form
     public BaseWizard()
     {
         InitializeComponent();
+        AutoScaleMode = AutoScaleMode.Dpi;
     }
 
     public BaseWizard(string suitName, string modFolder, string playable, string cutscene, string dcmd)
     {
         InitializeComponent();
+        AutoScaleMode = AutoScaleMode.Dpi;
         if (WinFormsDesignerSupport.IsInDesigner())
         {
             return;
@@ -117,7 +119,7 @@ public sealed partial class BaseWizard : Form
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));
         row.Controls.Add(new Label { Text = label, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
         text.Dock = DockStyle.Fill; row.Controls.Add(text, 1, 0);
-        var browse = new Button { Text = "Browse...", Dock = DockStyle.Fill };
+        var browse = new Button { Text = "Browse…", Dock = DockStyle.Fill };
         Theme.StyleDarkButton(browse);
         browse.Click += (_, _) =>
         {

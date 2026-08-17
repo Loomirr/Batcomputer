@@ -35,12 +35,13 @@ public sealed partial class UimdIconsDialog : Form
 
         Controls.Clear();
         Text = "Suit icons";
-        AutoScaleMode = AutoScaleMode.None;
+        AutoScaleMode = AutoScaleMode.Dpi;
         ClientSize = new Size(760, 478);
-        MinimumSize = new Size(760, 478);
+        MinimumSize = new Size(700, 450);
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
-        MaximizeBox = false;
+        MaximizeBox = true;
+        FormBorderStyle = FormBorderStyle.Sizable;
         ShowInTaskbar = false;
         BackColor = Theme.WindowBg;
         ForeColor = Theme.OnDark;

@@ -39,6 +39,7 @@ public sealed partial class MaterialWizard : Form
         _projectRoot = "";
         _modFolder = "Suit";
         InitializeComponent();
+        AutoScaleMode = AutoScaleMode.Dpi;
     }
 
     public MaterialWizard(string projectRoot, string modFolder, string suggestedName, IEnumerable<GeneratedTextureEntry>? generatedTextures = null)
@@ -53,6 +54,7 @@ public sealed partial class MaterialWizard : Form
         }
 
         InitializeComponent();
+        AutoScaleMode = AutoScaleMode.Dpi;
         if (WinFormsDesignerSupport.IsInDesigner())
         {
             return;
@@ -70,6 +72,7 @@ public sealed partial class MaterialWizard : Form
 
         Text = "Batcomputer - Material forge";
         ClientSize = new Size(width, 590);
+        MinimumSize = new Size(720, 560);
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
         MaximizeBox = false;
@@ -99,7 +102,7 @@ public sealed partial class MaterialWizard : Form
         };
         sourceCard.Controls.Add(MakeFieldLabel("BASE MATERIAL", 14, 13, innerWidth - 28));
         sourceCard.Controls.Add(MakeInputSurface(_baseText, new Rectangle(14, 31, 500, 34)));
-        var browse = new Button { Text = "Browse...", Left = 522, Top = 31, Width = 88, Height = 34 };
+        var browse = new Button { Text = "Browse…", Left = 522, Top = 31, Width = 88, Height = 34 };
         Theme.StyleDarkButton(browse);
         browse.Click += (_, _) => Browse();
         sourceCard.Controls.Add(browse);

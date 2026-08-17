@@ -32,17 +32,17 @@ public sealed class CustomStaticMeshImportDialog : Form
     public CustomStaticMeshImportDialog(CustomStaticMeshImport? existing = null, string? sourcePath = null)
     {
         Text = existing is null ? "Import custom mesh" : "Edit custom mesh";
-        AutoScaleMode = AutoScaleMode.None;
-        FormBorderStyle = FormBorderStyle.FixedDialog;
+        AutoScaleMode = AutoScaleMode.Dpi;
+        FormBorderStyle = FormBorderStyle.Sizable;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
-        MaximizeBox = false;
+        MaximizeBox = true;
         ShowInTaskbar = false;
         BackColor = Theme.WindowBg;
         ForeColor = Theme.OnDark;
         Font = Theme.Body;
         ClientSize = new Size(780, 730);
-        MinimumSize = new Size(780, 730);
+        MinimumSize = new Size(720, 620);
 
         var root = new TableLayoutPanel
         {
@@ -221,7 +221,7 @@ public sealed class CustomStaticMeshImportDialog : Form
         _source.Dock = DockStyle.Fill;
         _source.Margin = new Padding(0, 6, 8, 6);
         fields.Controls.Add(_source, 1, row);
-        var browse = new Button { Text = "Browse...", Dock = DockStyle.Fill, Margin = new Padding(0, 6, 0, 6) };
+        var browse = new Button { Text = "Browse…", Dock = DockStyle.Fill, Margin = new Padding(0, 6, 0, 6) };
         Theme.StyleDarkButton(browse);
         browse.Click += (_, _) => BrowseForObj();
         fields.Controls.Add(browse, 2, row);

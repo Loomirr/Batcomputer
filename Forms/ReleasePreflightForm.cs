@@ -12,15 +12,17 @@ public sealed class ReleasePreflightForm : Form
     private ReleasePreflightForm(string modName, ModReleaseValidationService.Result result)
     {
         Text = "Batcomputer - Release preflight";
-        FormBorderStyle = FormBorderStyle.FixedDialog;
+        AutoScaleMode = AutoScaleMode.Dpi;
+        FormBorderStyle = FormBorderStyle.Sizable;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
-        MaximizeBox = false;
+        MaximizeBox = true;
         ShowInTaskbar = false;
         BackColor = Theme.WindowBg;
         ForeColor = Theme.OnDark;
         Font = Theme.Body;
         ClientSize = new Size(WidthPx, HeightPx);
+        MinimumSize = new Size(680, 520);
 
         var passed = result.Passed;
         var headerAccent = passed ? Theme.Good : Theme.Crit;
@@ -44,6 +46,7 @@ public sealed class ReleasePreflightForm : Form
             Top = 13,
             Left = WidthPx - 18 - 98,
             DialogResult = DialogResult.OK,
+            Anchor = AnchorStyles.Top | AnchorStyles.Right,
         };
         Theme.StyleGoldButton(done);
         Theme.RoundControl(done, Theme.RadiusSm);
@@ -74,6 +77,7 @@ public sealed class ReleasePreflightForm : Form
             Text = passed ? "Release preflight passed" : "Release preflight blocked",
             Font = AppFonts.Condensed(12f, FontStyle.Bold),
             ForeColor = Theme.OnDark,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
         });
         header.Controls.Add(new Label
         {
@@ -85,6 +89,7 @@ public sealed class ReleasePreflightForm : Form
             Font = Theme.Caption,
             ForeColor = Theme.OnDarkMuted,
             AutoEllipsis = true,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
         });
         var chips = new FlowLayoutPanel
         {
@@ -94,6 +99,7 @@ public sealed class ReleasePreflightForm : Form
             Height = 27,
             BackColor = Theme.WindowBg,
             WrapContents = false,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
         };
         chips.Controls.Add(MakeChip($"{result.ErrorCount} errors", result.ErrorCount == 0 ? Theme.Good : Theme.Crit));
         chips.Controls.Add(MakeChip($"{result.WarningCount} warnings", result.WarningCount == 0 ? Theme.Good : Theme.Warn));
@@ -117,6 +123,7 @@ public sealed class ReleasePreflightForm : Form
             Text = passed ? "Ready to build" : "Build remains blocked",
             Font = Theme.BodyStrong,
             ForeColor = Theme.OnDark,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
         });
         summary.Controls.Add(new Label
         {
@@ -131,6 +138,7 @@ public sealed class ReleasePreflightForm : Form
                 : "Resolve every error below, then validate again.",
             Font = Theme.Caption,
             ForeColor = Theme.OnDarkMuted,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
         });
         var summaryHost = new Panel { Dock = DockStyle.Top, Height = 78, Padding = new Padding(18, 0, 18, 16), BackColor = Theme.WindowBg };
         summary.Dock = DockStyle.Fill;
@@ -163,16 +171,31 @@ public sealed class ReleasePreflightForm : Form
             .ToList();
         if (ordered.Count == 0)
         {
-            findings.Controls.Add(CreateFindingRow(new ModReleaseValidationService.Finding(
-                "INFO", "release", "No issues found. This mod is ready for its staged build."), 700));
+            ordered.Add(new ModReleaseValidationService.Finding(
+                "INFO", "release", "No issues found. This mod is ready for its staged build."));
         }
-        else
+
+        var lastFindingsWidth = -1;
+        void PopulateFindings()
         {
+            var width = Math.Max(320,
+                findings.ClientSize.Width - findings.Padding.Horizontal - SystemInformation.VerticalScrollBarWidth - 4);
+            if (width == lastFindingsWidth)
+            {
+                return;
+            }
+
+            lastFindingsWidth = width;
+            findings.SuspendLayout();
+            findings.Controls.Clear();
             foreach (var finding in ordered)
             {
-                findings.Controls.Add(CreateFindingRow(finding, 700));
+                findings.Controls.Add(CreateFindingRow(finding, width));
             }
+            findings.ResumeLayout();
         }
+        findings.ClientSizeChanged += (_, _) => PopulateFindings();
+        PopulateFindings();
 
         Controls.Add(findings);
         Controls.Add(findingsLabel);
@@ -180,7 +203,11 @@ public sealed class ReleasePreflightForm : Form
         Controls.Add(header);
         Controls.Add(footer);
         AcceptButton = done;
-        Shown += (_, _) => Theme.UseDarkTitleBar(this);
+        Shown += (_, _) =>
+        {
+            Theme.UseDarkTitleBar(this);
+            PopulateFindings();
+        };
     }
 
     public static void Show(IWin32Window owner, string modName, ModReleaseValidationService.Result result)

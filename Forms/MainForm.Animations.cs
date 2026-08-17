@@ -221,11 +221,15 @@ public sealed partial class MainForm
             Text = title,
             Width = 800,
             Height = 580,
+            AutoScaleMode = AutoScaleMode.Dpi,
+            MinimumSize = new Size(620, 440),
             StartPosition = FormStartPosition.CenterParent,
             BackColor = Theme.WindowBg,
             ForeColor = Theme.OnDark,
         };
-        var search = new TextBox { Dock = DockStyle.Top, Height = 26, PlaceholderText = "Filter, or paste a custom /Game/... path", BackColor = Theme.SlateDark, ForeColor = Theme.OnDark, BorderStyle = BorderStyle.FixedSingle };
+        dlg.Shown += (_, _) => Theme.UseDarkTitleBar(dlg);
+        var search = new TextBox { Dock = DockStyle.Top, Height = 30, PlaceholderText = "Filter, or paste a custom /Game/… path" };
+        Theme.StyleDarkInput(search);
         var list = new ListBox { Dock = DockStyle.Fill, BackColor = Theme.CardBg, ForeColor = Theme.OnDark, BorderStyle = BorderStyle.None };
         Theme.StyleListBox(list);
         var ok = new Button { Text = "Use selected", Dock = DockStyle.Bottom, Height = 34 };
@@ -376,7 +380,8 @@ public sealed partial class MainForm
             .ToList();
         if (families.Count == 0) { AppendLog($"No other families have a '{category}' set."); return; }
 
-        using var dlg = new Form { Text = $"{category} — source family", Width = 360, Height = 420, StartPosition = FormStartPosition.CenterParent, BackColor = Theme.WindowBg, ForeColor = Theme.OnDark };
+        using var dlg = new Form { Text = $"{category} — source family", Width = 360, Height = 420, AutoScaleMode = AutoScaleMode.Dpi, MinimumSize = new Size(320, 340), StartPosition = FormStartPosition.CenterParent, BackColor = Theme.WindowBg, ForeColor = Theme.OnDark };
+        dlg.Shown += (_, _) => Theme.UseDarkTitleBar(dlg);
         var list = new ListBox { Dock = DockStyle.Fill, BackColor = Theme.CardBg, ForeColor = Theme.OnDark, BorderStyle = BorderStyle.None };
         Theme.StyleListBox(list);
         list.Items.Add("(donor default — remove override)");

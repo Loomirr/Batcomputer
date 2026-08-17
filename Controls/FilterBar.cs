@@ -326,7 +326,7 @@ public sealed class FilterBar : Control
         var search = new SearchBox
         {
             Bounds = new Rectangle(x, y, width, 28),
-            PlaceholderText = $"Search {title.ToLowerInvariant()}...",
+            PlaceholderText = $"Search {title.ToLowerInvariant()}…",
         };
         panel.Controls.Add(search);
 
