@@ -9,6 +9,8 @@ copyright: Batcomputer is an unofficial community tool and is not affiliated wit
 theme:
   name: material
   language: en
+  logo: assets/brand/Header3.png
+  favicon: assets/brand/Icon.ico
   palette:
     scheme: slate
     primary: black
@@ -33,6 +35,9 @@ markdown_extensions:
   - attr_list
   - md_in_html
   - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - pymdownx.superfences
   - pymdownx.tabbed:
       alternate_style: true

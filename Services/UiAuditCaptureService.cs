@@ -14,6 +14,10 @@ internal static class UiAuditCaptureService
 {
     private sealed record AuditFinding(string Window, string Severity, string Message);
     private sealed record CaptureResult(string Name, string File, int Width, int Height, long Bytes);
+    private static int _captureMaxWidth = 1280;
+    private static int _captureMaxHeight = 820;
+    private static long _captureJpegQuality = 38L;
+    private static long _contactSheetJpegQuality = 34L;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeRect
@@ -30,8 +34,12 @@ internal static class UiAuditCaptureService
     [DllImport("user32.dll")]
     private static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint flags);
 
-    public static int Run(string outputRoot)
+    public static int Run(string outputRoot, bool highQuality = false)
     {
+        _captureMaxWidth = highQuality ? 1920 : 1280;
+        _captureMaxHeight = highQuality ? 1200 : 820;
+        _captureJpegQuality = highQuality ? 92L : 38L;
+        _contactSheetJpegQuality = highQuality ? 82L : 34L;
         Directory.CreateDirectory(outputRoot);
         var captures = new List<CaptureResult>();
         var findings = new List<AuditFinding>();
@@ -115,7 +123,12 @@ internal static class UiAuditCaptureService
                 ("Manual base wizard", () => new BaseWizard("UI Audit Suit", "UiAudit", "C:\\Audit\\Playable.uasset", "C:\\Audit\\Cutscene.uasset", "C:\\Audit\\DCMD.uasset"), 150),
                 ("Custom mesh - import", () => new CustomStaticMeshImportDialog(null, "C:\\Audit\\sample-cowl.obj"), 150),
                 ("Custom mesh - edit", () => new CustomStaticMeshImportDialog(sampleMesh, "C:\\Audit\\sample-cowl.obj"), 150),
-                ("First-run wizard", () => new FirstRunWizard(AppSettings.BuiltInDefaults()), 150),
+                ("First-run wizard", () =>
+                {
+                    var form = new FirstRunWizard(AppSettings.BuiltInDefaults());
+                    form.ConfigureForUiAudit();
+                    return form;
+                }, 150),
                 ("Saved suit library", () => new LoadSuitDialog(projects), 150),
                 ("Material library", () => new MaterialCatalogPicker(), 250),
                 ("Material template picker", () => new MaterialTemplatePicker(new MaterialTemplateCatalogService.Target(
@@ -315,8 +328,8 @@ internal static class UiAuditCaptureService
         var fileName = SafeFileName(name) + ".jpg";
         var path = Path.Combine(outputRoot, fileName);
         using var original = CaptureWindow(form);
-        using var compact = ResizeToFit(original, 1280, 820);
-        SaveJpeg(compact, path, 38L);
+        using var compact = ResizeToFit(original, _captureMaxWidth, _captureMaxHeight);
+        SaveJpeg(compact, path, _captureJpegQuality);
         captures.Add(new CaptureResult(name, fileName, compact.Width, compact.Height, new FileInfo(path).Length));
     }
 
@@ -507,7 +520,7 @@ internal static class UiAuditCaptureService
             graphics.DrawImage(image, target);
         }
 
-        SaveJpeg(sheet, Path.Combine(outputRoot, "00-contact-sheet.jpg"), 34L);
+        SaveJpeg(sheet, Path.Combine(outputRoot, "00-contact-sheet.jpg"), _contactSheetJpegQuality);
     }
 
     private static void WriteReports(string outputRoot, IReadOnlyList<CaptureResult> captures, IReadOnlyList<AuditFinding> findings)

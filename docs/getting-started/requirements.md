@@ -9,7 +9,7 @@
 | A matching `.usmap` | Cooked Unreal assets cannot be interpreted safely with mappings from another game build. |
 | Unreal Engine 5.6 | The bundled registry-writer project uses UE 5.6 to create native Asset Registry data. |
 | About 18 GB free for extraction | The full character, animation, and localization research dump is intentionally broad. |
-| LOTDK Expanded | Generated mods depend on its runtime and shared `/Game/Mods` discovery configuration. |
+| Loomirr's LOTDK UE4SS | Generated mods depend on its plugin loading and shared `/Game/Mods` discovery configuration. |
 
 ## Bundled with Batcomputer
 
@@ -25,7 +25,7 @@
 - A `.usmap` file.
 - Unreal Engine.
 - `oo2core_9_win64.dll`.
-- LOTDK Expanded or UE4SS.
+- Loomirr's LOTDK UE4SS.
 
 ## Player requirements
 
@@ -33,8 +33,7 @@ People installing a finished suit mod do **not** need Batcomputer, Unreal Engine
 extracted workspace. They need:
 
 1. A compatible game build.
-2. The required LOTDK UE4SS installation.
-3. LOTDK Expanded.
-4. Your finished mod release.
+2. Loomirr's LOTDK UE4SS.
+3. Your finished mod release.
 
 Next: [Install Batcomputer](install.md).

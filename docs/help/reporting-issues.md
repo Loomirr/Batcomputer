@@ -6,11 +6,11 @@ Use the repository's [bug report form](https://github.com/Loomirr/Batcomputer/is
 
 - Batcomputer version.
 - Current game build and mappings version/source date.
-- Whether LOTDK Expanded works with another known-good custom suit.
+- Whether Loomirr's LOTDK UE4SS works with another known-good custom suit.
 - Exact steps from launch to failure.
 - Expected result and actual result.
 - The relevant **Copy log** output from Batcomputer.
-- Relevant LOTDK Expanded or UE4SS log lines for in-game failures.
+- Relevant Loomirr's LOTDK UE4SS log lines for in-game failures.
 - A screenshot when the problem is visual.
 - Whether the problem reproduces after a cold game restart.
 

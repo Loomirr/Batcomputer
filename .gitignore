@@ -10,7 +10,7 @@ artifacts/
 
 # UI artwork. Compiled into the exe as an embedded resource, so it is required to
 # BUILD but is not kept in the repo. See the note in README.md.
-Assets/
+/Assets/
 
 # Anything the tool generates at runtime, and the per-machine settings file
 # (it stores absolute paths — never publish it).

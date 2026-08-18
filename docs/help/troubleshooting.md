@@ -60,7 +60,7 @@ to test in-game.
 ## The suit does not appear in the menu
 
 1. Fully restart the game.
-2. Confirm LOTDK Expanded and the mod's registry plugin loaded.
+2. Confirm Loomirr's LOTDK UE4SS and the mod's registry plugin loaded.
 3. Confirm the generated tag INI is under the game's `Config\Tags` folder.
 4. Check release preflight for duplicate PawnTag, suit ID, or DCMD package paths.
 5. Confirm the intended character family is encoded in the PawnTag.
@@ -76,7 +76,7 @@ may hold output files open. Then rebuild. Avoid authoring directly under `Progra
 Restore the last known-good release, then test one change at a time. Collect:
 
 - Batcomputer diagnostics.
-- Relevant LOTDK Expanded/UE4SS log lines.
+- Relevant Loomirr's LOTDK UE4SS log lines.
 - Exact action that triggered the crash.
 - Whether a clean cold launch crashes before opening the suit menu.
 

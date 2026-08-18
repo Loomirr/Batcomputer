@@ -3,7 +3,7 @@
 ## 0.9.0-beta.1
 
 - First public beta candidate.
-- Multi-suit native LOTDK Expanded releases.
+- Multi-suit native releases for Loomirr's LOTDK UE4SS.
 - Playable/cutscene donor separation and broad character-part indexing.
 - Donor-backed material templates, face helpers, texture cooking, equipment, gliders, and supported
   animation data.

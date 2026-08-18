@@ -2,7 +2,9 @@
 
 Batcomputer is a Windows authoring tool for creating native playable suit mods for
 *LEGO Batman: Legacy of the Dark Knight*. It uses assets extracted from your own game, builds the
-metadata the game expects, and produces a player-ready release for the LOTDK Expanded runtime.
+metadata the game expects, and produces a player-ready release for Loomirr's LOTDK UE4SS.
+
+![Batcomputer's mod workspace](assets/screenshots/home-mods.jpg){ .bc-doc-shot loading=lazy }
 
 !!! info "Public beta"
     The current build is **0.9.0-beta.1**. The core suit workflow is working in-game, but this is the
@@ -12,7 +14,7 @@ metadata the game expects, and produces a player-ready release for the LOTDK Exp
 
 <div class="grid cards" markdown>
 
--   :material-download: **Install Batcomputer**
+-   <span class="bc-card-heading"><img src="assets/icons/Download.png" alt=""> <strong>Install Batcomputer</strong></span>
 
     ---
 
@@ -20,7 +22,7 @@ metadata the game expects, and produces a player-ready release for the LOTDK Exp
 
     [Installation guide](getting-started/install.md)
 
--   :material-cog-outline: **Complete first-time setup**
+-   <span class="bc-card-heading"><img src="assets/icons/Settings.png" alt=""> <strong>Complete first-time setup</strong></span>
 
     ---
 
@@ -28,7 +30,7 @@ metadata the game expects, and produces a player-ready release for the LOTDK Exp
 
     [Setup guide](getting-started/setup.md)
 
--   :material-account-hard-hat: **Create a suit**
+-   <span class="bc-card-heading"><img src="assets/icons/Add.png" alt=""> <strong>Create a suit</strong></span>
 
     ---
 
@@ -36,7 +38,7 @@ metadata the game expects, and produces a player-ready release for the LOTDK Exp
 
     [First-suit tutorial](guides/first-suit.md)
 
--   :material-lifebuoy: **Solve a problem**
+-   <span class="bc-card-heading"><img src="assets/icons/Warning.png" alt=""> <strong>Solve a problem</strong></span>
 
     ---
 
@@ -58,8 +60,8 @@ metadata the game expects, and produces a player-ready release for the LOTDK Exp
 ## What it does not ship
 
 Batcomputer does not include game files, extracted assets, mappings, the proprietary Oodle runtime,
-Unreal Engine, or LOTDK Expanded. Authors provide those local dependencies from legitimate installs;
-players only need LOTDK Expanded and the finished mod.
+Unreal Engine, or Loomirr's LOTDK UE4SS. Authors provide those local dependencies from legitimate
+installs; players only need Loomirr's LOTDK UE4SS and the finished mod.
 
 ## The normal workflow
 

@@ -15,6 +15,8 @@ inventing a cooked material layout from scratch.
 A blank override inherits the donor value. **Set None** writes an intentional null/disabled value
 where the template supports it; it is different from leaving the override blank.
 
+![Material template browser](../assets/screenshots/material-template-picker.jpg){ .bc-doc-shot loading=lazy }
+
 ## Material families
 
 Use templates as compatibility rules, not just visual presets:
@@ -43,6 +45,8 @@ For a Batman cowl that should use the Joker '89 lower-face print without visible
 
 The Joker '89 face mesh itself is a different target and is not a safe substitute for the standard
 Batman face in this recipe.
+
+![Face-aware material editor helpers](../assets/screenshots/face-helper-material-editor.jpg){ .bc-doc-shot loading=lazy }
 
 ## Textures
 

@@ -3,6 +3,8 @@
 Batcomputer opens a guided setup on first launch. You can run it again later from **Settings →
 General → Run first-time setup again**.
 
+![Batcomputer first-time setup window](../assets/screenshots/first-run-wizard.jpg){ .bc-doc-shot loading=lazy }
+
 ## 1. Workspace folder
 
 Leave this blank to keep the workspace beside `Batcomputer.exe`, or select a writable folder on a

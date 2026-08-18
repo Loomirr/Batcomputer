@@ -99,6 +99,12 @@
           CopyToPublishDirectory="PreserveNewest"
           ExcludeFromSingleFile="true"
           TargetPath="Documentation\%(RecursiveDir)%(Filename)%(Extension)" />
+    <None Remove="docs\assets\**\*" />
+    <None Include="docs\assets\**\*"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"
+          ExcludeFromSingleFile="true"
+          TargetPath="Documentation\assets\%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
   <Target Name="RemoveWebView2WpfReference" BeforeTargets="ResolveAssemblyReferences">
     <ItemGroup>

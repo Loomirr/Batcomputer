@@ -2,8 +2,8 @@
 
 ## Do players need Batcomputer?
 
-No. Batcomputer is an authoring tool. Players need LOTDK Expanded, its compatible UE4SS setup, and
-the finished mod release.
+No. Batcomputer is an authoring tool. Players need Loomirr's LOTDK UE4SS and the finished mod
+release.
 
 ## Can one mod contain several suits?
 
@@ -12,8 +12,8 @@ registry infrastructure are generated once for that mod.
 
 ## Can users install suit mods from different authors together?
 
-Yes, provided every release has unique technical identities and depends on the one installed LOTDK
-Expanded core. Third-party mods do not ship the shared core registry.
+Yes, provided every release has unique technical identities and uses the shared runtime installed
+with Loomirr's LOTDK UE4SS. Third-party mods do not ship the shared core registry.
 
 ## Does this only work for Batman?
 

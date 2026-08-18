@@ -38,7 +38,7 @@ regenerate, so keep them when actively developing.
 
 ## Game install layout
 
-Generated test installations use the LOTDK Expanded layout:
+Generated test installations use the runtime namespace consumed by Loomirr's LOTDK UE4SS:
 
 ```text
 LEGOBatmanLotDK/
@@ -51,4 +51,5 @@ LEGOBatmanLotDK/
     RegistryPlugins/<ModId>Registry/...
 ```
 
-The official LOTDK Expanded mod additionally owns `LOTDKExpandedCoreRegistry`.
+The shared runtime additionally owns `LOTDKExpandedCoreRegistry`; third-party suit mods must not
+replace it.

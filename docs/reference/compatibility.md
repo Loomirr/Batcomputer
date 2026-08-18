@@ -2,7 +2,7 @@
 
 ## Supported in the beta
 
-- Native suit-menu discovery through LOTDK Expanded.
+- Native suit-menu discovery through the plugin loading provided by Loomirr's LOTDK UE4SS.
 - Multiple suits in one mod and multiple independently installed suit mods.
 - Batman and other character families when the suit uses an appropriate playable donor and unique
   identity.

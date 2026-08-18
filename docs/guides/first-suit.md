@@ -33,6 +33,10 @@ Batcomputer separates two jobs that the game often stores in different assets:
 For the first test, choose a playable donor close to the character family you are making. Select
 **Use as base** and wait for the generated playable and cutscene assets to complete.
 
+![Base character browser](../assets/screenshots/base-character-picker.jpg){ .bc-doc-shot loading=lazy }
+
+![Suit base workspace](../assets/screenshots/suit-base-workspace.jpg){ .bc-doc-shot loading=lazy }
+
 ## 4. Customize the character
 
 Use the left navigation:

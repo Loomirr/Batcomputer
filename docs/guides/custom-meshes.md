@@ -15,6 +15,8 @@ items such as cowls and accessories that can follow an existing character socket
 Use the generated name shown by Batcomputer, not a temporary source filename or UUID, when reviewing
 the component tree and material assignments.
 
+![Custom static-mesh import window](../assets/screenshots/custom-mesh-import.jpg){ .bc-doc-shot loading=lazy }
+
 ## Place the mesh
 
 In the 3D viewer:

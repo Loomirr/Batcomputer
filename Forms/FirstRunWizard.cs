@@ -121,6 +121,16 @@ public sealed class FirstRunWizard : Form
         LoadStep();
     }
 
+    /// <summary>Uses a short, neutral example path for documentation screenshots.</summary>
+    internal void ConfigureForUiAudit()
+    {
+        _input.Text = @"C:\BatcomputerWorkspace";
+        _input.SelectionStart = 0;
+        _input.SelectionLength = 0;
+        _dot.DotColor = Theme.Good;
+        _status.Text = "Example workspace.";
+    }
+
     private void BuildChrome()
     {
         Text = "Batcomputer — Setup";

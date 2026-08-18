@@ -1,4 +1,4 @@
-<img width="1791" height="314" alt="Header2" src="https://github.com/user-attachments/assets/41091604-e8f9-4e2f-b83e-d2abc5724b62" />
+[![Batcomputer](docs/assets/brand/Header3.png)](https://loomirr.github.io/Batcomputer/)
 
 Batcomputer is a Windows suit-building tool for *LEGO Batman: Legacy of the Dark Knight*.
 It assembles custom playable suits from shipped character assets, then builds and installs a native
@@ -8,7 +8,7 @@ mod release for the game.
 > **Documentation:** [loomirr.github.io/Batcomputer](https://loomirr.github.io/Batcomputer/)
 
 This repository contains the authoring tool only. It does not contain game files, extracted assets,
-Oodle, or the LOTDK Expanded runtime.
+Oodle, or Loomirr's LOTDK UE4SS.
 
 ## What It Does
 
@@ -29,7 +29,7 @@ Oodle, or the LOTDK Expanded runtime.
 - A local installation of *LEGO Batman: Legacy of the Dark Knight*.
 - A matching `.usmap` file for the current game build.
 - Unreal Engine 5.6 to build the small Asset Registry writer used by native releases.
-- The separate LOTDK Expanded runtime installed in the game.
+- Loomirr's LOTDK UE4SS installed in the game.
 
 ### Optional compact packages
 
@@ -39,7 +39,7 @@ copied into a mod, release ZIP, or this repository.
 
 ### Players
 
-Players only need the finished mod and the LOTDK Expanded runtime. They do not need Batcomputer, .NET,
+Players only need the finished mod and Loomirr's LOTDK UE4SS. They do not need Batcomputer, .NET,
 Unreal Engine, mappings, or extracted game assets.
 
 ## Portable Layout
@@ -71,14 +71,14 @@ character, animation, and localisation assets and needs about 18 GB of free spac
 For the complete walkthrough, see the
 [first-time setup guide](https://loomirr.github.io/Batcomputer/getting-started/setup/).
 
-## LOTDK Expanded Runtime
+## Loomirr's LOTDK UE4SS
 
-The native runtime is installed separately. Batcomputer installs each mod's `mod.json` under
+The required UE4SS distribution is installed separately. Batcomputer installs each mod's `mod.json` under
 `ue4ss\LOTDKExpanded\Mods` and its registry plugin under
 `ue4ss\LOTDKExpanded\RegistryPlugins`. The official project whose Mod ID is exactly
 `LOTDKExpanded` owns the one shared `LOTDKExpandedCoreRegistry` plugin that keeps the Asset
 Manager scanning `/Game/Mods`. Third-party archives contain only their own registry rows,
-gameplay tags, manifest, and cooked assets; they require LOTDK Expanded and never overwrite
+gameplay tags, manifest, and cooked assets; they require Loomirr's LOTDK UE4SS and never overwrite
 its shared core. Batcomputer does not modify the runtime DLL or `mods.txt`.
 
 ## Building a Suit

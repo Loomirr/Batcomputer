@@ -18,6 +18,27 @@
   background: #171a20;
 }
 
+.md-header__inner {
+  min-height: 3rem;
+}
+
+.md-header__button.md-logo {
+  margin: 0.2rem 0;
+  padding: 0;
+}
+
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg {
+  width: auto;
+  height: 2.25rem;
+  max-width: min(44vw, 14rem);
+}
+
+/* Header3 contains the complete Batcomputer wordmark, so the default text would repeat it. */
+.md-header__title {
+  display: none;
+}
+
 .md-typeset h1,
 .md-typeset h2 {
   font-weight: 700;
@@ -26,4 +47,35 @@
 .md-typeset .grid.cards > ul > li {
   border-color: #353b46;
   background: #20242c;
+}
+
+.bc-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-height: 3.25rem;
+}
+
+.bc-card-heading img {
+  width: 3.25rem;
+  height: 3.25rem;
+  flex: 0 0 3.25rem;
+  object-fit: contain;
+}
+
+.md-typeset .bc-doc-shot {
+  display: block;
+  width: 100%;
+  margin: 1.25rem auto 1.75rem;
+  border: 1px solid #353b46;
+  border-radius: 0.35rem;
+  box-shadow: 0 0.45rem 1.2rem rgb(0 0 0 / 28%);
+}
+
+@media screen and (max-width: 44.984375em) {
+  .md-header__button.md-logo img,
+  .md-header__button.md-logo svg {
+    height: 1.8rem;
+    max-width: 10.5rem;
+  }
 }

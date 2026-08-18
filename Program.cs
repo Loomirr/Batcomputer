@@ -684,7 +684,8 @@ internal static class Program
             var output = args.Length >= 2
                 ? Path.GetFullPath(args[1])
                 : Path.Combine(AppSettings.RuntimeRoot, "Generated", "UiAudit", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
-            return UiAuditCaptureService.Run(output);
+            var highQuality = args.Skip(2).Any(arg => arg.Equals("--high-quality", StringComparison.OrdinalIgnoreCase));
+            return UiAuditCaptureService.Run(output, highQuality);
         }
 
         var portableIssues = AppSettings.PortableLayoutIssues();

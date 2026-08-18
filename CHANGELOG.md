@@ -4,7 +4,7 @@
 
 First public beta candidate.
 
-- Native multi-suit mod authoring for LOTDK Expanded.
+- Native multi-suit mod authoring for Loomirr's LOTDK UE4SS.
 - Playable and cutscene visual donors with gameplay-donor separation.
 - Part grafting, donor-backed material generation, face workflows, texture cooking, equipment,
   glider, and supported animation authoring.
@@ -19,7 +19,7 @@ First public beta candidate.
 ### Beta limits
 
 - Windows x64 and the current supported game build only.
-- LOTDK Expanded is required to run generated suit mods.
+- Loomirr's LOTDK UE4SS is required to run generated suit mods.
 - A matching `.usmap` and a local Unreal Engine 5.6 installation are required for complete author
   builds.
 - Red Brick creation is not part of this beta; the viewer only previews shipped colour palettes.
