@@ -68,10 +68,21 @@ public static class Dialog
     // ---- the dialog ---------------------------------------------------------
     public static bool Show(IWin32Window? owner, Model model)
     {
+        using var form = CreateForm(owner, model);
+        return form.ShowDialog(owner) == DialogResult.OK;
+    }
+
+    /// <summary>
+    /// Builds a themed dialog without showing it. Keeping construction separate from the modal
+    /// call lets the release UI audit render every dialog state and verify that its actions remain
+    /// inside the visible footer at every supported DPI.
+    /// </summary>
+    internal static Form CreateForm(IWin32Window? owner, Model model)
+    {
         const int W = 480, Pad = 18;
         var accent = Accent(model.Severity);
 
-        using var form = new Form
+        var form = new Form
         {
             Text = model.WindowTitle,
             AutoScaleMode = AutoScaleMode.Dpi,
@@ -86,7 +97,7 @@ public static class Dialog
             ClientSize = new Size(W, 200),
         };
 
-        var body = new Panel { Left = 0, Top = 0, Width = W, BackColor = Theme.WindowBg };
+        var body = new Panel { Dock = DockStyle.Top, Width = W, BackColor = Theme.WindowBg };
         var y = Pad;
 
         // Header: severity rail + title (+ subtitle).
@@ -232,53 +243,99 @@ public static class Dialog
 
         body.Height = y;
 
-        // Footer.
-        var footer = new Panel { Dock = DockStyle.Bottom, Height = 54, BackColor = Theme.SlateDark };
+        // Footer. Keep button placement under a layout manager. Absolute coordinates calculated
+        // before WinForms performs DPI autoscaling can place otherwise-valid buttons beyond the
+        // final client edge (the former cause of the blank Delete texture footer).
+        var footer = new Panel { Dock = DockStyle.Fill, BackColor = Theme.SlateDark };
         footer.Paint += (_, e) =>
         {
             using var pen = new Pen(Theme.LineSoft);
             e.Graphics.DrawLine(pen, 0, 0, footer.Width, 0);
         };
 
-        var primary = new Button { Text = model.PrimaryText, Width = 0, Height = 32, Top = 11, DialogResult = DialogResult.OK };
+        var footerActions = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.RightToLeft,
+            WrapContents = false,
+            Padding = new Padding(Pad, 11, Pad, 10),
+            Margin = Padding.Empty,
+            BackColor = Theme.SlateDark,
+        };
+        footer.Controls.Add(footerActions);
+
+        var primary = new Button
+        {
+            Text = model.PrimaryText,
+            Width = 0,
+            Height = 32,
+            DialogResult = DialogResult.OK,
+            Margin = Padding.Empty,
+        };
         Theme.StyleGoldButton(primary);
         primary.Width = Math.Max(96, TextRenderer.MeasureText(primary.Text, primary.Font).Width + 34);
-        primary.Left = W - Pad - primary.Width;
-        primary.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        footer.Controls.Add(primary);
+        footerActions.Controls.Add(primary);
 
         Button? secondary = null;
         if (model.SecondaryText is not null)
         {
-            secondary = new Button { Text = model.SecondaryText, Height = 32, Top = 11, DialogResult = DialogResult.Cancel };
+            secondary = new Button
+            {
+                Text = model.SecondaryText,
+                Height = 32,
+                DialogResult = DialogResult.Cancel,
+                Margin = new Padding(8, 0, 0, 0),
+            };
             Theme.StyleDarkButton(secondary);
             secondary.Width = Math.Max(88, TextRenderer.MeasureText(secondary.Text, secondary.Font).Width + 30);
-            secondary.Left = primary.Left - secondary.Width - 8;
-            secondary.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            footer.Controls.Add(secondary);
+            footerActions.Controls.Add(secondary);
         }
 
         var bodyHost = new Panel
         {
             Dock = DockStyle.Fill,
-            AutoScroll = true,
+            AutoScroll = false,
             BackColor = Theme.WindowBg,
         };
         bodyHost.Controls.Add(body);
-        form.Controls.Add(bodyHost);
-        form.Controls.Add(footer);
-        var workingArea = owner is Control ownerControl
-            ? Screen.FromControl(ownerControl).WorkingArea
-            : Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
-        var desiredHeight = body.Height + footer.Height;
-        var maximumHeight = Math.Max(260, workingArea.Height - 96);
-        form.ClientSize = new Size(W, Math.Min(desiredHeight, maximumHeight));
-        bodyHost.AutoScrollMinSize = new Size(0, body.Height);
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
+            BackColor = Theme.WindowBg,
+        };
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 54f));
+        root.Controls.Add(bodyHost, 0, 0);
+        root.Controls.Add(footer, 0, 1);
+        form.Controls.Add(root);
         form.AcceptButton = primary;
         if (secondary is not null) form.CancelButton = secondary;
+        form.Load += (_, _) =>
+        {
+            // AutoScale runs when the form creates its handle. Fit against those final scaled
+            // dimensions rather than the design-time pixel values; otherwise a short dialog can
+            // incorrectly grow both scrollbars at 125%/150% DPI and hide its last field.
+            form.PerformLayout();
+            var workingArea = owner is Control ownerControl
+                ? Screen.FromControl(ownerControl).WorkingArea
+                : Screen.FromControl(form).WorkingArea;
+            var nonClientHeight = Math.Max(0, form.Height - form.ClientSize.Height);
+            var maximumClientHeight = Math.Max(260, workingArea.Height - nonClientHeight - 96);
+            var desiredClientHeight = body.Height + footer.Height;
+            var targetClientHeight = Math.Min(desiredClientHeight, maximumClientHeight);
+            form.ClientSize = new Size(form.ClientSize.Width, targetClientHeight);
+            bodyHost.AutoScroll = desiredClientHeight > targetClientHeight;
+            bodyHost.AutoScrollMinSize = bodyHost.AutoScroll ? new Size(0, body.Height) : Size.Empty;
+            body.Width = bodyHost.ClientSize.Width;
+        };
         form.Shown += (_, _) => Theme.UseDarkTitleBar(form);
 
-        return form.ShowDialog(owner) == DialogResult.OK;
+        return form;
     }
 
     private static Control MakeChip(string text, Color? dot)

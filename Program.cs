@@ -500,6 +500,13 @@ internal static class Program
             return ProbeMaterial(args[1]);
         }
 
+        if (args.Length >= 1 && args[0].Equals("--verify-material-templates", StringComparison.OrdinalIgnoreCase))
+        {
+            return VerifyMaterialTemplates(
+                args.Length >= 2 ? args[1] : null,
+                args.Length >= 3 ? args[2] : null);
+        }
+
 
         if (args.Length >= 4 && args[0].Equals("--repath-namemap", StringComparison.OrdinalIgnoreCase))
         {
@@ -671,6 +678,14 @@ internal static class Program
         ThemedMenuRenderer.Apply(); // dark context menus app-wide
         Theme.ApplyDarkTitleBarsAppWide();
         Animator.Enabled = AppSettings.Current.AnimationsEnabled;
+
+        if (args.Length >= 1 && args[0].Equals("--capture-ui-gallery", StringComparison.OrdinalIgnoreCase))
+        {
+            var output = args.Length >= 2
+                ? Path.GetFullPath(args[1])
+                : Path.Combine(AppSettings.RuntimeRoot, "Generated", "UiAudit", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+            return UiAuditCaptureService.Run(output);
+        }
 
         var portableIssues = AppSettings.PortableLayoutIssues();
         if (portableIssues.Count > 0)
@@ -1226,6 +1241,82 @@ internal static class Program
             }
         }
         return 0;
+    }
+
+    /// <summary>
+    /// Release diagnostic for the curated donor-backed material catalog. This is deliberately
+    /// read-only: it resolves every enabled donor, parses each cooked MI, and confirms that any
+    /// recipe-supplied texture defaults are authored parameters on every generated sibling.
+    /// </summary>
+    private static int VerifyMaterialTemplates(string? extractedContentRoot, string? usmapPath)
+    {
+        if (!string.IsNullOrWhiteSpace(extractedContentRoot))
+        {
+            AppSettings.Current.ExtractedContentRoot = Path.GetFullPath(extractedContentRoot);
+        }
+        if (!string.IsNullOrWhiteSpace(usmapPath))
+        {
+            AppSettings.Current.UsmapPath = Path.GetFullPath(usmapPath);
+        }
+
+        var catalog = new MaterialTemplateCatalogService();
+        var reader = new MaterialGenService(AppSettings.Current.EffectiveProjectRoot());
+        var errors = 0;
+        var donors = 0;
+
+        foreach (var recipe in catalog.Recipes())
+        {
+            if (!recipe.Enabled)
+            {
+                Console.WriteLine($"SKIP {recipe.Id}: {recipe.DisabledReason}");
+                continue;
+            }
+
+            var compatibility = catalog.Evaluate(recipe, target: null);
+            if (!compatibility.CanUse)
+            {
+                errors++;
+                Console.Error.WriteLine($"ERROR {recipe.Id}: {compatibility.Status} - {compatibility.Detail.Replace(Environment.NewLine, " | ")}");
+                continue;
+            }
+
+            var recipeErrors = 0;
+            foreach (var output in compatibility.ResolvedOutputs)
+            {
+                donors++;
+                var info = reader.ReadTemplate(output.DiskPath);
+                if (!info.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
+                {
+                    errors++;
+                    recipeErrors++;
+                    Console.Error.WriteLine($"ERROR {recipe.Id}/{output.Definition.Role}: parse={info.Status} {info.Error}");
+                    continue;
+                }
+
+                var authoredTextureParameters = info.TextureParams
+                    .Select(parameter => parameter.Name)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                foreach (var parameter in recipe.DefaultTextureOverrides.Keys)
+                {
+                    if (authoredTextureParameters.Contains(parameter))
+                    {
+                        continue;
+                    }
+
+                    errors++;
+                    recipeErrors++;
+                    Console.Error.WriteLine($"ERROR {recipe.Id}/{output.Definition.Role}: donor does not author texture parameter '{parameter}'.");
+                }
+            }
+
+            if (recipeErrors == 0)
+            {
+                Console.WriteLine($"OK   {recipe.Id}: {compatibility.ResolvedOutputs.Count} donor(s)");
+            }
+        }
+
+        Console.WriteLine($"Material template verification: recipes={catalog.Recipes().Count(recipe => recipe.Enabled)}, donors={donors}, errors={errors}");
+        return errors == 0 ? 0 : 1;
     }
 
     private static int GenAndVerifyDcmd(string outputBase, string dcmdPkg, string playablePkg, string cutscenePkg)

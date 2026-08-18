@@ -154,7 +154,7 @@ public sealed class FirstRunWizard : Form
         _blurb.Font = Theme.Body;
         _blurb.ForeColor = Theme.OnDarkMuted;
 
-        _inputWrap.SetBounds(Pad, 146, w - 96, 36);
+        _inputWrap.SetBounds(Pad, 146, w - 104, 36);
         _inputWrap.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _inputWrap.BackColor = Theme.Slate;
         _inputWrap.BorderColor = Theme.SlateLight;
@@ -168,7 +168,7 @@ public sealed class FirstRunWizard : Form
         _inputWrap.Controls.Add(_input);
         _inputWrap.Layout += (_, _) => _input.Top = (_inputWrap.Height - _input.Height) / 2;
 
-        _browse.SetBounds(Pad + w - 88, 146, 88, 36);
+        _browse.SetBounds(Pad + w - 96, 146, 96, 36);
         _browse.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         _browse.Text = "Browse…";
         Theme.StyleDarkButton(_browse);
@@ -194,30 +194,29 @@ public sealed class FirstRunWizard : Form
         _bar.BackColor = Theme.WindowBg;
         _bar.Maximum = _steps.Count;
 
-        var footer = new Panel { Dock = DockStyle.Bottom, Height = 64, BackColor = Theme.SlateDark };
-        footer.Paint += (_, e) =>
-        {
-            using var pen = new Pen(Theme.LineSoft);
-            e.Graphics.DrawLine(pen, 0, 0, footer.Width, 0);
-        };
         _back.SetBounds(Pad, 16, 90, 32);
         _back.Text = "Back";
         Theme.StyleDarkButton(_back);
         _back.Click += (_, _) => GoTo(-1);
 
-        _next.SetBounds(ClientSize.Width - Pad - 130, 16, 130, 32);
-        _next.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _next.Width = 130;
         _next.Text = "Next";
         Theme.StyleGoldButton(_next);
         _next.Click += (_, _) => GoTo(+1);
 
-        _skip.SetBounds(_next.Left - 96, 16, 88, 32);
-        _skip.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _skip.Width = 88;
         _skip.Text = "Skip";
         Theme.StyleDarkButton(_skip);
         _skip.Click += (_, _) => { Save(); GoTo(+1, skip: true); };
 
-        footer.Controls.AddRange(new Control[] { _back, _skip, _next });
+        var footer = DialogActionFooter.Create(_next, _skip);
+        footer.Height = 64;
+        if (footer.Controls.OfType<FlowLayoutPanel>().FirstOrDefault() is { } actions)
+        {
+            actions.Padding = new Padding(Pad, 16, Pad, 16);
+        }
+        footer.Controls.Add(_back);
+        _back.BringToFront();
 
         Controls.AddRange(new Control[]
         {

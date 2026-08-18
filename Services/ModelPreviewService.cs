@@ -959,7 +959,6 @@ public static class ModelPreviewService
             .ToDictionary(group => group.Key, group => group.Last().SourcePng, StringComparer.OrdinalIgnoreCase);
         var materials = project.MaterialAssignments
             .Where(material => material.Context is "both" or "playable")
-            .Where(material => !IsFaceComponent(material.Component, null))
             .Where(material => material.Slot >= 0 && !string.IsNullOrWhiteSpace(material.MiPackagePath))
             .Select(material => new PreviewMaterialOverride(
                 material.Component,
@@ -4171,10 +4170,12 @@ public static class ModelPreviewService
   #exprwrap label{color:#f0c230;margin-right:4px}
   #expr{background:#22262c;color:#e6e9ee;border:1px solid #3a4048;border-radius:5px;padding:3px 6px;
     font-family:inherit;font-size:13px;outline:none}
-  #partmove,#meshmove,#redbrick,#matedit{position:absolute;right:14px;top:12px;width:214px;color:#dfe4ea;font-size:12px;
+  #partmove,#meshmove,#redbrick,#matedit{position:absolute;width:214px;color:#dfe4ea;font-size:12px;
     background:rgba(26,29,34,.9);padding:9px 10px;border:1px solid #333a44;border-radius:6px}
-  #redbrick{top:auto;bottom:14px}
-  #matedit{right:244px;max-height:calc(100vh - 28px);overflow:auto}
+  #meshmove{right:14px;top:30px}
+  #partmove{right:14px;top:408px}
+  #redbrick{right:258px;top:30px}
+  #matedit{left:10px;top:202px;max-height:calc(100vh - 230px);overflow:auto}
   #partmove label,#meshmove label,#redbrick label,#matedit label{display:block;color:#f0c230;margin-bottom:5px}
   #partmove select,#meshmove select,#redbrick select,#matedit select{box-sizing:border-box;width:100%;margin-bottom:7px;background:#22262c;color:#e6e9ee;
     border:1px solid #3a4048;border-radius:4px;padding:4px;font:inherit}
@@ -4254,6 +4255,29 @@ function makePanelDraggable(panel,handle){
     drag={x:e.clientX,y:e.clientY,left:rect.left,top:rect.top};panel.classList.add('panel-dragging');
     try{handle.setPointerCapture(e.pointerId);}catch(_){}e.preventDefault();});
   handle.addEventListener('pointermove',move);handle.addEventListener('pointerup',stop);handle.addEventListener('pointercancel',stop);
+}
+function applyDefaultPanelLayout(){
+  // Keep the character unobstructed by default: diagnostics/material controls on the left, preview
+  // controls on the right, and the part editor immediately below the custom-mesh editor. These are
+  // only starting positions; every panel remains independently draggable afterwards.
+  const edge=14,gap=10,top=30;
+  const mesh=document.getElementById('meshmove');
+  const part=document.getElementById('partmove');
+  const red=document.getElementById('redbrick');
+  const material=document.getElementById('matedit');
+  const placeRight=(panel,right,y)=>{if(!panel)return;
+    const maxY=Math.max(0,window.innerHeight-panel.offsetHeight-edge);
+    panel.style.left='auto';panel.style.right=Math.max(0,right)+'px';
+    panel.style.bottom='auto';panel.style.top=Math.min(maxY,Math.max(0,y))+'px';};
+  placeRight(mesh,edge,top);
+  placeRight(red,mesh?edge+mesh.offsetWidth+gap:edge,top);
+  placeRight(part,edge,mesh?top+mesh.offsetHeight+14:top);
+  if(material){
+    const maxY=Math.max(0,window.innerHeight-material.offsetHeight-edge);
+    const y=Math.round((window.innerHeight-material.offsetHeight)*0.41);
+    material.style.right='auto';material.style.left='10px';material.style.bottom='auto';
+    material.style.top=Math.min(maxY,Math.max(60,y))+'px';
+  }
 }
 function setRedBrickPalette(palette){
   redBrickMaskMaterials.forEach(state=>{
@@ -4674,6 +4698,22 @@ function dress(g,info){
       o.geometry.setAttribute('aUv1',o.geometry.attributes.uv2);}
     // The shared LEGOfig body defaults to TEXCOORD_1 (ExtraUV0); other components default to UV0.
     if(info.body&&o.geometry.attributes.aUv1){o.geometry.setAttribute('uv',o.geometry.attributes.aUv1);}
+    // A custom FBX/OBJ converted through glTF can legitimately contain no authored material at all.
+    // GLTFLoader displays that with a shared implicit grey fallback. Mutating the fallback is not a
+    // reliable binding, so give every custom primitive its own real material before applying the
+    // Batcomputer assignment resolved in C# (textures, colour, normal, MMR and AO).
+    if(info.custom){
+      const source=Array.isArray(o.material)?o.material:[o.material];
+      const explicit=source.map((old,li)=>{
+        // MeshPhysicalMaterial lets an untextured solid Unreal material reduce dielectric
+        // reflectivity. MeshStandardMaterial fixes it at roughly four percent, which made
+        // near-black materials such as MI_Black look mid-grey under the studio environment.
+        const material=new THREE.MeshPhysicalMaterial({color:0xffffff,roughness:0.55,metalness:0});
+        material.name=(old&&old.name)||((info.label||info.part||'Custom mesh')+' material '+(li+1));
+        return material;
+      });
+      o.material=Array.isArray(o.material)?explicit:explicit[0];
+    }
     const list=Array.isArray(o.material)?o.material:[o.material];
     list.forEach((m,li)=>{if(!m)return;
       const s=slots[matIndex]||slots[0]||{};
@@ -4687,9 +4727,9 @@ function dress(g,info){
         t.flipY=false;t.encoding=THREE.sRGBEncoding;m.map=t;
         // The face tint is authoring-space sRGB; solid Base Color values came from Unreal
         // FLinearColor and are already in the space three.js expects.
-        m.color=s.col?(s.cut?new THREE.Color(s.col).convertSRGBToLinear():new THREE.Color(s.col)):new THREE.Color(0xffffff);applied++;}
-      else if(s.col){m.map=null;m.color=new THREE.Color(s.col);applied++;}
-      else if(!m.map){m.color=new THREE.Color(0x9aa0a8);}
+        m.color.set(s.col?(s.cut?new THREE.Color(s.col).convertSRGBToLinear():new THREE.Color(s.col)):new THREE.Color(0xffffff));applied++;}
+      else if(s.col){m.map=null;m.color.set(s.col);applied++;}
+      else if(!m.map){m.color.set(0x9aa0a8);}
       const n=tex(s.nrm,false); if(n)m.normalMap=n;else m.normalMap=null;
       // RAO.G is the EoM ambient-occlusion channel. three.js aoMap samples UV2, so give static
       // attachments their structural UV0 there; body meshes preserve the same UV as aUv0.
@@ -4738,6 +4778,14 @@ function dress(g,info){
         m.roughness=(s.rough===null||s.rough===undefined)?0.55:s.rough;
         m.metalness=(s.metal===null||s.metal===undefined)?0:s.metal;}
       m.envMapIntensity=0.5;
+      // Preserve authored texture/MMR response, but keep solid custom colours visually faithful.
+      // Otherwise the fixed PBR specular lobe and bright preview environment can be brighter than
+      // a near-black diffuse value, making a correctly assigned black material appear grey.
+      if(info.custom&&!s.tex&&s.col&&!r){
+        m.reflectivity=0.04;
+        m.envMapIntensity=0.1;
+        m.roughness=Math.max(0.55,m.roughness);
+      }
       // LEGO packs masks into alpha - it is not opacity.
       m.transparent=false;m.alphaTest=0;m.opacity=1;m.depthWrite=true;
       // Cape cloth: the baked weave alpha makes the deep weave holes see-through (the game's
@@ -5100,6 +5148,7 @@ Promise.all(models.map(load)).then(loaded=>{
   buildCustomMeshMover();
   buildRedBrickTintUi();
   buildMaterialEditor();
+  applyDefaultPanelLayout();
 }).catch(e=>say('Scene error: '+(e&&e.stack||e&&e.message||e)));
 addEventListener('error',e=>say('Script error: '+(e&&e.message||e)));
 addEventListener('unhandledrejection',e=>say('Promise error: '+(e&&e.reason&&e.reason.message||e&&e.reason||e)));

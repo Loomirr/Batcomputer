@@ -159,7 +159,7 @@ public sealed class MaterialCatalogPicker : Form
 
         _selection.Left = 18;
         _selection.Top = ClientSize.Height - 68;
-        _selection.Width = ClientSize.Width - 288;
+        _selection.Width = ClientSize.Width - 258;
         _selection.Height = 32;
         _selection.ForeColor = Theme.OnDarkMuted;
         _selection.TextAlign = ContentAlignment.MiddleLeft;
@@ -167,7 +167,7 @@ public sealed class MaterialCatalogPicker : Form
         var cancel = new Button
         {
             Text = "Cancel",
-            Left = ClientSize.Width - 212,
+            Left = ClientSize.Width - 228,
             Top = ClientSize.Height - 56,
             Width = 88,
             Height = 34,
@@ -177,9 +177,9 @@ public sealed class MaterialCatalogPicker : Form
         Theme.StyleDarkButton(cancel);
 
         _use.Text = "Use material";
-        _use.Left = ClientSize.Width - 116;
+        _use.Left = ClientSize.Width - 132;
         _use.Top = ClientSize.Height - 56;
-        _use.Width = 100;
+        _use.Width = 116;
         _use.Height = 34;
         _use.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
         _use.Enabled = false;
@@ -423,10 +423,10 @@ public sealed class MaterialCatalogPicker : Form
             _list.Columns[1].Width = Math.Max(180, _list.Width - _list.Columns[0].Width - 20);
         }
         selection.Top = ClientSize.Height - 68;
-        selection.Width = ClientSize.Width - 288;
-        cancel.Left = ClientSize.Width - 212;
+        selection.Width = ClientSize.Width - 258;
+        cancel.Left = ClientSize.Width - 228;
         cancel.Top = ClientSize.Height - 56;
-        _use.Left = ClientSize.Width - 116;
+        _use.Left = ClientSize.Width - 132;
         _use.Top = ClientSize.Height - 56;
     }
 }

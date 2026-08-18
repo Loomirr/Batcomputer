@@ -124,7 +124,6 @@ public sealed partial class MainForm
     {
         _characterSlots.Clear();
         _characterSlots.AddRange(DiscoverToyboxSlots()
-            .Where(slot => !slot.Component.Contains("face", StringComparison.OrdinalIgnoreCase))
             .Where(slot => IsToyboxVisualComponent(slot.Component)));
 
         // The figure needs its part art. A build made without Assets/ has none, so fall back to
@@ -620,7 +619,7 @@ public sealed partial class MainForm
         var (baseName, _) = SplitGeneratedDuplicateComponent(name);
         return baseName.Equals("CharacterMesh0", StringComparison.OrdinalIgnoreCase) ||
                baseName.Equals("Mesh", StringComparison.OrdinalIgnoreCase) ||
-               baseName.Equals("Face", StringComparison.OrdinalIgnoreCase) ||
+               baseName.StartsWith("Face", StringComparison.OrdinalIgnoreCase) ||
                baseName.Equals("Head", StringComparison.OrdinalIgnoreCase) ||
                baseName.Equals("Hair", StringComparison.OrdinalIgnoreCase) ||
                baseName.Equals("Hat", StringComparison.OrdinalIgnoreCase) ||
@@ -665,7 +664,7 @@ public sealed partial class MainForm
         {
             return AppendDuplicateLabel("Hair", duplicateNumber);
         }
-        if (baseComponent.Equals("Face", StringComparison.OrdinalIgnoreCase))
+        if (baseComponent.StartsWith("Face", StringComparison.OrdinalIgnoreCase))
         {
             return AppendDuplicateLabel("Face", duplicateNumber);
         }
@@ -1497,11 +1496,20 @@ public sealed partial class MainForm
         }
     }
 
+    private enum FaceMaterialCompatibility
+    {
+        Compatible,
+        Unknown,
+        Incompatible,
+    }
+
+    private sealed record FaceTarget(string Label, string Component, int Slot, string MeshPackagePath);
+
     /// <summary>
-    /// Faces are printed-expression materials (MI_FACE_*) on the shared SK_LEGOface
-    /// mesh - swapping a face = assigning that material to the Face slot. Tiles are
-    /// drag-only; drag one onto the Face row to apply. Right-click to base a new
-    /// custom face material on it.
+    /// Face materials are applied to the existing Face skeletal component. Most minifigs use
+    /// SK_LEGOface, but the game also ships Superhero, Joker89, FaceTex and a few one-off meshes.
+    /// The material browser therefore compares the donor material's observed mesh family with the
+    /// current Face component before enabling a one-click/drag application.
     /// </summary>
     private void RefreshFaceTiles(string? type)
     {
@@ -1515,22 +1523,287 @@ public sealed partial class MainForm
         var folder = (type is null || type == "<all faces>") ? null : type;
         var faceSource = FilterVal(0);
         var search = CurrentToyboxSearch();
-        var all = AttachmentCatalogService.FaceMaterials(folder)
+        var gameFaces = AttachmentCatalogService.FaceMaterials(folder)
             .Where(a => faceSource is null || a.Path.Contains($"/{faceSource}/", StringComparison.OrdinalIgnoreCase))
             .Where(a => MatchesToyboxSearch(search, a.Path, AttachmentCatalogService.AssetName(a.Path)))
             .ToList();
 
+        var mod = ExtractModFolder(_targetPlayableText.Text.Trim());
+        var userFaces = DiscoverUserMaterialPaths(mod)
+            .Where(IsFaceMaterialPackage)
+            .Where(path => MatchesToyboxSearch(search, path, UnrealPathUtil.AssetName(path)))
+            .ToList();
+
+        var tiles = new List<VirtualTilePanel.Tile>();
+        tiles.AddRange(userFaces.Select(path => BuildFaceMaterialTile(path, isUserMade: true, "Your face materials")));
+        tiles.AddRange(gameFaces.Select(asset => BuildFaceMaterialTile(asset.Path, isUserMade: false, "Base-game faces")));
+
         ShowVirtualTiles(
-            all.Select(a => new VirtualTilePanel.Tile
-            {
-                Title = AttachmentCatalogService.AssetName(a.Path).Replace("MI_FACE_", ""),
-                Subtitle = "face · drag to Face slot",
-                Accent = Theme.Faces,
-                DragPayload = new ToyboxDragPayload { Kind = "material", MaterialPath = a.Path },
-                MenuFactory = () => BuildMaterialTileMenu(a.Path, isUserMade: false),
-            }).ToList(),
-            header: $"Faces{(folder is null ? "" : $" · {folder}")} — printed expressions on the shared face mesh. Drag one onto the Face slot to apply (no extraction needed); right-click to make a custom variant. Type in the search box to filter.",
+            tiles,
+            header: $"Faces{(folder is null ? "" : $" · {folder}")} — swaps the printed-expression material on the existing Face component. Matching mesh families apply directly; special face rigs are blocked. Click or drag a compatible face onto the Face row, or right-click to create a custom variant.",
             emptyMessage: "No face materials matched. Try <all faces> or clear the search.");
+    }
+
+    private VirtualTilePanel.Tile BuildFaceMaterialTile(string materialPath, bool isUserMade, string section)
+    {
+        var compatibility = FaceCompatibilityFor(materialPath, CurrentFaceTarget(), out var targetMesh, out var sourceMeshes);
+        var sourceLabel = sourceMeshes.Count == 0
+            ? "unrecorded face family"
+            : string.Join(", ", sourceMeshes.Select(UnrealPathUtil.AssetName));
+        var subtitle = compatibility switch
+        {
+            FaceMaterialCompatibility.Compatible => "compatible · click or drag to Face",
+            FaceMaterialCompatibility.Incompatible => $"blocked · requires {sourceLabel}",
+            _ => "face material · compatibility unrecorded",
+        };
+        var tooltip = $"{materialPath}\nTarget face mesh: {(string.IsNullOrWhiteSpace(targetMesh) ? "unknown" : targetMesh)}\nObserved donor mesh: {sourceLabel}";
+
+        return new VirtualTilePanel.Tile
+        {
+            Title = UnrealPathUtil.AssetName(materialPath).Replace("MI_FACE_", "", StringComparison.OrdinalIgnoreCase),
+            Subtitle = subtitle,
+            Accent = compatibility == FaceMaterialCompatibility.Incompatible ? Theme.Warn : Theme.Faces,
+            Section = section,
+            ToolTip = tooltip,
+            DragPayload = compatibility == FaceMaterialCompatibility.Incompatible
+                ? null
+                : new ToyboxDragPayload { Kind = "material", MaterialPath = materialPath, FaceOnly = true },
+            OnClick = () => ApplyFaceMaterial(materialPath),
+            MenuFactory = () => BuildFaceMaterialTileMenu(materialPath, isUserMade),
+        };
+    }
+
+    private ContextMenuStrip BuildFaceMaterialTileMenu(string materialPath, bool isUserMade)
+    {
+        var menu = new ContextMenuStrip();
+        menu.Items.Add("Apply to Face", null, (_, _) => ApplyFaceMaterial(materialPath));
+        menu.Items.Add(new ToolStripSeparator());
+        if (isUserMade)
+        {
+            menu.Items.Add("Edit this face material…", null, (_, _) => OpenMaterialFromBase(materialPath, editInPlace: true));
+            menu.Items.Add("Delete this face material…", null, async (_, _) => await DeleteGeneratedMaterialAsync(materialPath));
+        }
+        else
+        {
+            menu.Items.Add("Use as base for a custom face…", null, (_, _) => OpenMaterialFromBase(materialPath, editInPlace: false));
+        }
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Copy material path", null, (_, _) =>
+        {
+            try { Clipboard.SetText(materialPath); }
+            catch { /* clipboard may be busy */ }
+        });
+        return menu;
+    }
+
+    private void ApplyFaceMaterial(string materialPath)
+    {
+        var target = CurrentFaceTarget();
+        if (target is null)
+        {
+            AppendLog($"Face material not applied: this character has no editable Face component ({materialPath}).");
+            Dialog.Warn(this, "No Face component", "This character base does not expose an editable Face component. A printed face material cannot be applied safely.");
+            return;
+        }
+
+        if (!CanApplyFaceMaterial(materialPath, target.Component, target.Slot, confirmUnknown: true))
+        {
+            return;
+        }
+
+        SelectToyboxSlot(target.Label, target.Component, target.Slot);
+        ApplyToyboxMaterial(materialPath);
+    }
+
+    private bool CanApplyFaceMaterial(string materialPath, string component, int slot, bool confirmUnknown)
+    {
+        if (!component.Contains("face", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var target = FaceTargetFor(component, slot);
+        if (target is null)
+        {
+            AppendLog($"Face material blocked: {component} slot {slot} is not the character's editable skeletal face overlay.");
+            Dialog.Warn(this, "Not a face overlay",
+                "That component is named like a face part, but it is not the character's editable LEGO face overlay. Batcomputer will not replace a bandana or other Face1 accessory with a printed-face material.");
+            return false;
+        }
+
+        var compatibility = FaceCompatibilityFor(materialPath, target, out var targetMesh, out var sourceMeshes);
+        if (compatibility == FaceMaterialCompatibility.Incompatible)
+        {
+            var required = string.Join(", ", sourceMeshes.Select(UnrealPathUtil.AssetName));
+            var current = string.IsNullOrWhiteSpace(targetMesh) ? "an unknown face mesh" : UnrealPathUtil.AssetName(targetMesh);
+            AppendLog($"Face material blocked: {materialPath} was observed on [{required}], current Face uses {current}.");
+            Dialog.Warn(this, "Different face rig",
+                $"This material was observed on {required}, but the current character uses {current}. Batcomputer will not force a material across different face mesh families because UVs and expression layers may not line up.");
+            return false;
+        }
+
+        if (compatibility == FaceMaterialCompatibility.Unknown && confirmUnknown)
+        {
+            return Dialog.Confirm(this, "Unverified face material",
+                "Batcomputer recognizes this as a face material, but an older project did not record which face mesh family it came from. Apply it to the current Face component anyway? Verify it in the 3D preview and in-game.",
+                confirmText: "Apply face", severity: Dialog.Level.Warn);
+        }
+
+        return true;
+    }
+
+    private FaceMaterialCompatibility FaceCompatibilityFor(
+        string materialPath,
+        FaceTarget? target,
+        out string targetMesh,
+        out IReadOnlyList<string> sourceMeshes)
+    {
+        targetMesh = UnrealPathUtil.NormalizePackagePath(target?.MeshPackagePath);
+        sourceMeshes = CompatibleFaceMeshesForMaterial(materialPath);
+        if (string.IsNullOrWhiteSpace(targetMesh) || sourceMeshes.Count == 0)
+        {
+            return FaceMaterialCompatibility.Unknown;
+        }
+
+        var normalizedTargetMesh = targetMesh;
+        return sourceMeshes.Any(source => UnrealPathUtil.NormalizePackagePath(source)
+                .Equals(normalizedTargetMesh, StringComparison.OrdinalIgnoreCase))
+            ? FaceMaterialCompatibility.Compatible
+            : FaceMaterialCompatibility.Incompatible;
+    }
+
+    private FaceTarget? CurrentFaceTarget()
+    {
+        return _characterSlots
+            .Select(slot => FaceTargetFor(slot.Component, slot.Slot, slot.Label))
+            .Where(target => target is not null)
+            .OrderByDescending(target => IsKnownFaceOverlayMesh(target!.MeshPackagePath))
+            .ThenByDescending(target => SplitGeneratedDuplicateComponent(target!.Component).BaseComponent
+                .Equals("Face", StringComparison.OrdinalIgnoreCase))
+            .FirstOrDefault();
+    }
+
+    private FaceTarget? FaceTargetFor(string component, int slot, string? label = null)
+    {
+        if (string.IsNullOrWhiteSpace(component) ||
+            !component.Contains("face", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var mesh = _slotDetails.TryGetValue($"{component}:{slot}", out var detail)
+            ? UnrealPathUtil.NormalizePackagePath(detail.Mesh)
+            : "";
+        var baseComponent = SplitGeneratedDuplicateComponent(component).BaseComponent;
+        if (!IsKnownFaceOverlayMesh(mesh) &&
+            !baseComponent.Equals("Face", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return new FaceTarget(
+            string.IsNullOrWhiteSpace(label) ? FriendlySlotLabel(component, slot) : label,
+            component,
+            slot,
+            mesh);
+    }
+
+    private static bool IsKnownFaceOverlayMesh(string? meshPackagePath)
+    {
+        var mesh = UnrealPathUtil.NormalizePackagePath(meshPackagePath);
+        return mesh.Contains("/Attachments/LEGOface/", StringComparison.OrdinalIgnoreCase) ||
+               mesh.Contains("/Attachments/FaceTex/", StringComparison.OrdinalIgnoreCase) ||
+               UnrealPathUtil.AssetName(mesh).StartsWith("SK_LEGOface", StringComparison.OrdinalIgnoreCase) ||
+               UnrealPathUtil.AssetName(mesh).StartsWith("SK_FaceTex", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private IReadOnlyList<string> CompatibleFaceMeshesForMaterial(string materialPath)
+    {
+        var package = UnrealPathUtil.NormalizePackagePath(materialPath);
+        var authored = _currentProject?.GeneratedMaterials?.FirstOrDefault(material =>
+            UnrealPathUtil.NormalizePackagePath(material.PackagePath)
+                .Equals(package, StringComparison.OrdinalIgnoreCase));
+        if (authored?.CompatibleFaceMeshPackagePaths is { Count: > 0 })
+        {
+            return authored.CompatibleFaceMeshPackagePaths
+                .Select(UnrealPathUtil.NormalizePackagePath)
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        return FaceMeshesForMaterial(package);
+    }
+
+    private IReadOnlyList<string> FaceMeshesForMaterial(string materialPath)
+    {
+        if (_partIndex is null)
+        {
+            _partIndex = new PartIndexService(_projectRootText.Text.Trim()).LoadPartIndex();
+        }
+
+        var package = UnrealPathUtil.NormalizePackagePath(materialPath);
+        if (_partIndex is null || string.IsNullOrWhiteSpace(package))
+        {
+            return Array.Empty<string>();
+        }
+
+        return _partIndex.Parts
+            .Where(part => part.Slot.Contains("face", StringComparison.OrdinalIgnoreCase) ||
+                           part.SemanticKind.Equals("Face", StringComparison.OrdinalIgnoreCase))
+            .Where(part => part.Materials.Any(material =>
+                UnrealPathUtil.NormalizePackagePath(material.PackagePath).Equals(package, StringComparison.OrdinalIgnoreCase) ||
+                UnrealPathUtil.NormalizePackagePath(material.ObjectPath).Equals(package, StringComparison.OrdinalIgnoreCase)))
+            .Select(part => UnrealPathUtil.NormalizePackagePath(part.MeshPackagePath))
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private bool IsFaceMaterialPackage(string materialPath)
+    {
+        var package = UnrealPathUtil.NormalizePackagePath(materialPath);
+        var authored = _currentProject?.GeneratedMaterials?.FirstOrDefault(material =>
+            UnrealPathUtil.NormalizePackagePath(material.PackagePath)
+                .Equals(package, StringComparison.OrdinalIgnoreCase));
+        if (authored?.Kind.Equals("Face", StringComparison.OrdinalIgnoreCase) == true ||
+            package.Contains("/Attachments/Face/", StringComparison.OrdinalIgnoreCase) ||
+            UnrealPathUtil.AssetName(package).StartsWith("MI_FACE_", StringComparison.OrdinalIgnoreCase) ||
+            FaceMeshesForMaterial(package).Count > 0)
+        {
+            return true;
+        }
+
+        var diskPath = ResolveMaterialDiskPath(package, preferExport: true);
+        if (diskPath is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var info = new MaterialGenService(_projectRootText.Text.Trim()).ReadTemplate(diskPath);
+            return info.Status.Equals("ok", StringComparison.OrdinalIgnoreCase) &&
+                   (info.ParentMaterialPath.Contains("LEGOface", StringComparison.OrdinalIgnoreCase) ||
+                    info.TextureParams.Any(parameter => IsFaceParameterName(parameter.Name)) ||
+                    info.ScalarParams.Any(parameter => IsFaceParameterName(parameter.Name)));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsFaceParameterName(string? parameter)
+    {
+        var compact = new string((parameter ?? "").Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+        return compact.Contains("brow", StringComparison.Ordinal) ||
+               compact.Contains("eyelid", StringComparison.Ordinal) ||
+               compact.Contains("lash", StringComparison.Ordinal) ||
+               compact.Contains("mouth", StringComparison.Ordinal) ||
+               compact.Contains("teeth", StringComparison.Ordinal) ||
+               compact.Contains("tongue", StringComparison.Ordinal);
     }
 
     /// <summary>Shows glider visuals and saves the selected package-time graft.</summary>

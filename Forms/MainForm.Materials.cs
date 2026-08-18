@@ -126,13 +126,19 @@ public sealed partial class MainForm
         }
 
         var suggested = $"MI_Batman_{mod}_{_toyboxSlotLabel.Replace(" ", "").Replace("/", "")}";
-        using var wiz = new MaterialWizard(_projectRootText.Text.Trim(), mod, suggested, _currentProject?.GeneratedTextures);
+        using var wiz = new MaterialWizard(
+            _projectRootText.Text.Trim(),
+            mod,
+            suggested,
+            _currentProject?.GeneratedTextures,
+            CurrentMaterialTemplateTarget());
         if (wiz.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(wiz.ResultMiPackagePath))
         {
             return;
         }
+        RegisterGeneratedMaterial(wiz);
         AppendLog($"Created material {wiz.ResultMiPackagePath}");
-        SelectComboValue(_toyboxCategoryCombo, "Materials");
+        SelectComboValue(_toyboxCategoryCombo, wiz.ResultIsFaceMaterial ? "Faces" : "Materials");
         RefreshToyboxTiles();
     }
 
@@ -168,7 +174,12 @@ public sealed partial class MainForm
             ? baseStem
             : $"MI_{mod}_{baseStem.Replace("MI_", "")}_Custom";
 
-        using var wiz = new MaterialWizard(_projectRootText.Text.Trim(), mod, suggested, _currentProject?.GeneratedTextures);
+        using var wiz = new MaterialWizard(
+            _projectRootText.Text.Trim(),
+            mod,
+            suggested,
+            _currentProject?.GeneratedTextures,
+            CurrentMaterialTemplateTarget());
         wiz.PrefillBase(diskPath, suggested, editInPlace);
         if (wiz.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(wiz.ResultMiPackagePath))
         {
@@ -178,9 +189,82 @@ public sealed partial class MainForm
         {
             RenameGeneratedMaterial(miGamePath, wiz.ResultMiPackagePath);
         }
+        RegisterGeneratedMaterial(wiz);
         AppendLog($"{(editInPlace ? "Edited" : "Created from base")} material {wiz.ResultMiPackagePath}");
-        SelectComboValue(_toyboxCategoryCombo, "Materials");
+        SelectComboValue(_toyboxCategoryCombo, wiz.ResultIsFaceMaterial ? "Faces" : "Materials");
         RefreshToyboxTiles();
+    }
+
+    private void RegisterGeneratedMaterial(MaterialWizard wizard)
+    {
+        EnsureProject();
+        if (_currentProject is null || string.IsNullOrWhiteSpace(wizard.ResultMiPackagePath))
+        {
+            return;
+        }
+
+        var results = wizard.ResultGeneratedMaterials.Count > 0
+            ? wizard.ResultGeneratedMaterials
+            : new List<MaterialWizard.GeneratedMaterialResult>
+            {
+                new()
+                {
+                    PackagePath = wizard.ResultMiPackagePath ?? "",
+                    SourceMaterialPackagePath = wizard.ResultSourceMaterialPackagePath ?? "",
+                    ParentMaterialPath = wizard.ResultParentMaterialPath ?? "",
+                    IsFaceMaterial = wizard.ResultIsFaceMaterial,
+                },
+            };
+        _currentProject.GeneratedMaterials ??= new List<GeneratedMaterialEntry>();
+        foreach (var result in results)
+        {
+            var package = UnrealPathUtil.NormalizePackagePath(result.PackagePath);
+            var source = UnrealPathUtil.NormalizePackagePath(result.SourceMaterialPackagePath);
+            var parent = UnrealPathUtil.NormalizePackagePath(result.ParentMaterialPath);
+            _currentProject.GeneratedMaterials.RemoveAll(material =>
+                UnrealPathUtil.NormalizePackagePath(material.PackagePath)
+                    .Equals(package, StringComparison.OrdinalIgnoreCase));
+            var faceMeshes = result.IsFaceMaterial
+                ? (result.CompatibleFaceMeshPackagePaths.Count > 0
+                    ? result.CompatibleFaceMeshPackagePaths
+                    : FaceMeshesForMaterial(source).ToList())
+                : new List<string>();
+            _currentProject.GeneratedMaterials.Add(new GeneratedMaterialEntry
+            {
+                DisplayName = UnrealPathUtil.AssetName(package),
+                Kind = result.IsFaceMaterial ? "Face" : "Material",
+                PackagePath = package,
+                SourceMaterialPackagePath = source,
+                ParentMaterialPath = parent,
+                CompatibleFaceMeshPackagePaths = faceMeshes
+                    .Select(UnrealPathUtil.NormalizePackagePath)
+                    .Where(path => !string.IsNullOrWhiteSpace(path))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                    .ToList(),
+                TemplateRecipeId = result.TemplateRecipeId,
+                TemplateOutputRole = result.TemplateOutputRole,
+                TemplateGroupId = result.TemplateGroupId,
+                CreatedUtc = DateTime.UtcNow.ToString("O"),
+            });
+        }
+        (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject);
+    }
+
+    private MaterialTemplateCatalogService.Target? CurrentMaterialTemplateTarget()
+    {
+        if (string.IsNullOrWhiteSpace(_toyboxComponent))
+        {
+            return null;
+        }
+        var mesh = _slotDetails.TryGetValue($"{_toyboxComponent}:{_toyboxSlot}", out var detail)
+            ? UnrealPathUtil.NormalizePackagePath(detail.Mesh)
+            : "";
+        return new MaterialTemplateCatalogService.Target(
+            _toyboxComponent,
+            _toyboxSlotLabel,
+            _toyboxSlot,
+            mesh);
     }
 
     /// <summary>Right-click menu for a material tile (drag-only tiles need a menu to expose actions).</summary>
@@ -352,6 +436,7 @@ public sealed partial class MainForm
             foreach (var miPath in DiscoverUserMaterialPaths(mod))
             {
                 var name = UnrealPathUtil.AssetName(miPath);
+                var isFace = IsFaceMaterialPackage(miPath);
                 if (!MatchesToyboxSearch(search, name, miPath))
                 {
                     continue;
@@ -360,10 +445,12 @@ public sealed partial class MainForm
                 tiles.Add(new VirtualTilePanel.Tile
                 {
                     Title = name.Replace("MI_", ""),
-                    Subtitle = "your MI · drag to apply",
-                    Accent = Theme.Materials,
-                    DragPayload = new ToyboxDragPayload { Kind = "material", MaterialPath = miPath },
-                    MenuFactory = () => BuildMaterialTileMenu(miPath, isUserMade: true),
+                    Subtitle = isFace ? "your face MI · apply to Face" : "your MI · drag to apply",
+                    Accent = isFace ? Theme.Faces : Theme.Materials,
+                    DragPayload = new ToyboxDragPayload { Kind = "material", MaterialPath = miPath, FaceOnly = isFace },
+                    MenuFactory = () => isFace
+                        ? BuildFaceMaterialTileMenu(miPath, isUserMade: true)
+                        : BuildMaterialTileMenu(miPath, isUserMade: true),
                 });
             }
             ShowVirtualTiles(tiles, header);
@@ -390,13 +477,20 @@ public sealed partial class MainForm
             .ToList();
 
         ShowVirtualTiles(
-            all.Select(a => new VirtualTilePanel.Tile
+            all.Select(a =>
             {
-                Title = a.Path[(a.Path.LastIndexOf('/') + 1)..].Replace("MI_", ""),
-                Subtitle = MaterialGroupFolder(a.Path),
-                Accent = Theme.Materials,
-                DragPayload = new ToyboxDragPayload { Kind = "material", MaterialPath = a.Path },
-                MenuFactory = () => BuildMaterialTileMenu(a.Path, isUserMade: false),
+                var isFace = a.Path.Contains("/Attachments/Face/", StringComparison.OrdinalIgnoreCase) ||
+                             UnrealPathUtil.AssetName(a.Path).StartsWith("MI_FACE_", StringComparison.OrdinalIgnoreCase);
+                return new VirtualTilePanel.Tile
+                {
+                    Title = a.Path[(a.Path.LastIndexOf('/') + 1)..].Replace("MI_", ""),
+                    Subtitle = isFace ? "face material · apply to Face" : MaterialGroupFolder(a.Path),
+                    Accent = isFace ? Theme.Faces : Theme.Materials,
+                    DragPayload = new ToyboxDragPayload { Kind = "material", MaterialPath = a.Path, FaceOnly = isFace },
+                    MenuFactory = () => isFace
+                        ? BuildFaceMaterialTileMenu(a.Path, isUserMade: false)
+                        : BuildMaterialTileMenu(a.Path, isUserMade: false),
+                };
             }).ToList(),
             header: $"Base-game materials{(folderFilter is null ? "" : $" · {folderFilter}")} for slot [{_toyboxSlotLabel}]. Drag onto a slot to apply (no extraction needed); right-click to use one as a base for a new material. Type in the search box to filter.",
             emptyMessage: "No game materials matched. Try <all game materials> or clear the search box.");
@@ -415,6 +509,15 @@ public sealed partial class MainForm
 
         if (_currentProject is not null)
         {
+            foreach (var generated in _currentProject.GeneratedMaterials ?? Enumerable.Empty<GeneratedMaterialEntry>())
+            {
+                var package = UnrealPathUtil.NormalizePackagePath(generated.PackagePath);
+                if (package.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    paths.Add(package);
+                }
+            }
+
             foreach (var assignment in _currentProject.MaterialAssignments)
             {
                 var package = UnrealPathUtil.NormalizePackagePath(assignment.MiPackagePath);
@@ -435,8 +538,25 @@ public sealed partial class MainForm
                 continue;
             }
 
-            foreach (var uasset in Directory.EnumerateFiles(modRoot, "MI_*.uasset", SearchOption.AllDirectories))
+            var candidates = Directory.EnumerateFiles(modRoot, "MI_*.uasset", SearchOption.AllDirectories)
+                .Concat(Directory.EnumerateFiles(modRoot, "*.uasset", SearchOption.TopDirectoryOnly));
+            var materialsFolder = Path.Combine(modRoot, "Materials");
+            if (Directory.Exists(materialsFolder))
             {
+                candidates = candidates.Concat(Directory.EnumerateFiles(materialsFolder, "*.uasset", SearchOption.AllDirectories));
+            }
+
+            foreach (var uasset in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                // Old Material Forge builds allowed names without MI_. Validate
+                // those direct-root assets so legacy materials remain visible
+                // without accidentally listing textures or Blueprints.
+                if (!Path.GetFileName(uasset).StartsWith("MI_", StringComparison.OrdinalIgnoreCase) &&
+                    !IsMaterialInstanceAsset(uasset))
+                {
+                    continue;
+                }
+
                 var relative = Path.GetRelativePath(contentRoot, uasset)
                     .Replace(Path.DirectorySeparatorChar, '/')
                     .Replace(Path.AltDirectorySeparatorChar, '/');
@@ -450,6 +570,20 @@ public sealed partial class MainForm
         }
 
         return paths.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private bool IsMaterialInstanceAsset(string uassetPath)
+    {
+        try
+        {
+            return new MaterialGenService(_projectRootText.Text.Trim())
+                .ReadTemplate(uassetPath)
+                .Status.Equals("ok", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private string? ResolveMaterialDiskPath(string miGamePath, bool preferExport)
@@ -512,8 +646,22 @@ public sealed partial class MainForm
         }
 
         var reassigned = 0;
+        var registryUpdated = 0;
         if (_currentProject is not null)
         {
+            foreach (var generated in _currentProject.GeneratedMaterials ?? Enumerable.Empty<GeneratedMaterialEntry>())
+            {
+                if (!UnrealPathUtil.NormalizePackagePath(generated.PackagePath)
+                        .Equals(oldPackage, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                generated.PackagePath = newPackage;
+                generated.DisplayName = UnrealPathUtil.AssetName(newPackage);
+                registryUpdated++;
+            }
+
             foreach (var assignment in _currentProject.MaterialAssignments)
             {
                 if (!UnrealPathUtil.NormalizePackagePath(assignment.MiPackagePath)
@@ -526,15 +674,18 @@ public sealed partial class MainForm
                 reassigned++;
             }
 
-            if (reassigned > 0)
+            if (reassigned > 0 || registryUpdated > 0)
             {
                 (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject);
-                ApplySavedMaterials(_currentProject, logIfNone: false);
+                if (reassigned > 0)
+                {
+                    ApplySavedMaterials(_currentProject, logIfNone: false);
+                }
             }
         }
 
         var removed = DeleteGeneratedMaterialFiles(oldPackage);
-        AppendLog($"Renamed material {UnrealPathUtil.AssetName(oldPackage)} to {UnrealPathUtil.AssetName(newPackage)}; updated {reassigned} assignment(s), removed {removed} old file(s).");
+        AppendLog($"Renamed material {UnrealPathUtil.AssetName(oldPackage)} to {UnrealPathUtil.AssetName(newPackage)}; updated {reassigned} assignment(s) and {registryUpdated} authored-material record(s), removed {removed} old file(s).");
         RefreshInspector();
     }
 
@@ -562,12 +713,22 @@ public sealed partial class MainForm
         }
 
         var removedAssignments = 0;
-        if (_currentProject is not null && assignments.Count > 0)
+        var removedRegistryEntries = 0;
+        if (_currentProject is not null)
         {
-            removedAssignments = _currentProject.MaterialAssignments.RemoveAll(assignment =>
-                UnrealPathUtil.NormalizePackagePath(assignment.MiPackagePath)
+            if (assignments.Count > 0)
+            {
+                removedAssignments = _currentProject.MaterialAssignments.RemoveAll(assignment =>
+                    UnrealPathUtil.NormalizePackagePath(assignment.MiPackagePath)
+                        .Equals(package, StringComparison.OrdinalIgnoreCase));
+            }
+            removedRegistryEntries = (_currentProject.GeneratedMaterials ?? new List<GeneratedMaterialEntry>())
+                .RemoveAll(material => UnrealPathUtil.NormalizePackagePath(material.PackagePath)
                     .Equals(package, StringComparison.OrdinalIgnoreCase));
-            (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject);
+            if (removedAssignments > 0 || removedRegistryEntries > 0)
+            {
+                (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject);
+            }
         }
 
         var removedFiles = DeleteGeneratedMaterialFiles(package);
@@ -577,7 +738,7 @@ public sealed partial class MainForm
         }
 
         RecordChange("Materials", UnrealPathUtil.AssetName(package), "deleted", status: "deleted");
-        AppendLog($"Deleted material {package}; removed {removedAssignments} assignment(s) and {removedFiles} file(s).");
+        AppendLog($"Deleted material {package}; removed {removedAssignments} assignment(s), {removedRegistryEntries} authored-material record(s), and {removedFiles} file(s).");
         RefreshInspector();
         RefreshToyboxTiles();
     }

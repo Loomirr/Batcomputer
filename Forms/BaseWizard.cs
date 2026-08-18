@@ -116,7 +116,7 @@ public sealed partial class BaseWizard : Form
         var row = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1 };
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
         row.Controls.Add(new Label { Text = label, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
         text.Dock = DockStyle.Fill; row.Controls.Add(text, 1, 0);
         var browse = new Button { Text = "Browse…", Dock = DockStyle.Fill };

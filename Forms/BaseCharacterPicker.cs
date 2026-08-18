@@ -85,18 +85,22 @@ public sealed partial class BaseCharacterPicker : Form
         Theme.StyleListBox(_list);
         _list.DoubleClick += (_, _) => Accept();
 
-        var browse = new Button { Text = "Browse files…", Left = 14, Top = 482, Width = 120, Height = 30 };
+        var browse = new Button { Text = "Browse files…", Left = 14, Top = 11, Width = 130, Height = 32 };
         Theme.StyleDarkButton(browse);
         browse.Click += (_, _) => { BrowseManuallyRequested = true; DialogResult = DialogResult.OK; Close(); };
 
-        var accept = new Button { Text = playablesOnly ? "Use donor" : "Use visual base", Left = 380, Top = 482, Width = 110, Height = 30 };
+        var accept = new Button { Text = playablesOnly ? "Use donor" : "Use visual base", Width = 140 };
         Theme.StyleGoldButton(accept);
         accept.Click += (_, _) => Accept();
 
-        var cancel = new Button { Text = "Cancel", Left = 494, Top = 482, Width = 76, Height = 30, DialogResult = DialogResult.Cancel };
+        var cancel = new Button { Text = "Cancel", Width = 84, DialogResult = DialogResult.Cancel };
         Theme.StyleDarkButton(cancel);
 
-        Controls.AddRange(new Control[] { prompt, _search, _list, browse, accept, cancel });
+        var footer = DialogActionFooter.Create(accept, cancel);
+        footer.Controls.Add(browse);
+        browse.BringToFront();
+
+        Controls.AddRange(new Control[] { prompt, _search, _list, footer });
         AcceptButton = accept;
         CancelButton = cancel;
         ApplyFilter();

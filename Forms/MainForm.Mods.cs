@@ -1237,11 +1237,12 @@ public sealed partial class MainForm
             var idx = list.Items.Add(new SuitItem(s));
             if (alreadyIn.Contains(s.Path)) list.SetItemChecked(idx, true);
         }
-        var ok = new System.Windows.Forms.Button { Text = "OK", DialogResult = System.Windows.Forms.DialogResult.OK, Left = 264, Top = 372, Width = 80 };
-        var cancel = new System.Windows.Forms.Button { Text = "Cancel", DialogResult = System.Windows.Forms.DialogResult.Cancel, Left = 354, Top = 372, Width = 80 };
+        var ok = new System.Windows.Forms.Button { Text = "OK", DialogResult = System.Windows.Forms.DialogResult.OK, Width = 80 };
+        var cancel = new System.Windows.Forms.Button { Text = "Cancel", DialogResult = System.Windows.Forms.DialogResult.Cancel, Width = 80 };
         Theme.StyleGoldButton(ok);
         Theme.StyleDarkButton(cancel);
-        dlg.Controls.AddRange(new System.Windows.Forms.Control[] { lbl, list, ok, cancel });
+        var footer = DialogActionFooter.Create(ok, cancel);
+        dlg.Controls.AddRange(new System.Windows.Forms.Control[] { lbl, list, footer });
         dlg.AcceptButton = ok;
         dlg.CancelButton = cancel;
 

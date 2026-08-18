@@ -202,6 +202,8 @@ public sealed partial class SettingsForm : Form
         }
     }
 
+    internal void SelectUiAuditTab(int index) => SelectTab(index);
+
     private (Panel item, Label bar) BuildNavItem(string text, int top)
     {
         var item = new Panel { Left = 8, Top = top, Width = 160, Height = 38, Cursor = Cursors.Hand, BackColor = Theme.SlateDark };

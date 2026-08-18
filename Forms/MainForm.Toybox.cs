@@ -93,7 +93,7 @@ public sealed partial class MainForm
         _toyboxCategoryCombo.DropDownStyle = ComboBoxStyle.DropDownList;
         var categories = new List<object>
         {
-            "Home", "Base", "Materials", "Textures", "Parts", "Equipment", "Gliders", "Animations",
+            "Home", "Base", "Materials", "Faces", "Textures", "Parts", "Equipment", "Gliders", "Animations",
             "Build mod", "Review"
         };
         if (AppSettings.Current.ShowResearchTools)
@@ -287,7 +287,7 @@ public sealed partial class MainForm
         };
 
         _menuButton.Text = "☰";
-        _menuButton.Width = 36; _menuButton.Height = 34; _menuButton.Margin = new Padding(6, 0, 0, 0);
+        _menuButton.Width = 42; _menuButton.Height = 34; _menuButton.Margin = new Padding(6, 0, 0, 0);
         Theme.StyleDarkButton(_menuButton);
         _menuButton.ForeColor = Theme.Gold;
         _menuButton.Click += (_, _) =>
@@ -475,7 +475,7 @@ public sealed partial class MainForm
     private Control CreateCategoryRail()
     {
         var rail = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, BackColor = Theme.PanelBg, Padding = new Padding(4, 6, 4, 6) };
-        var cats = new[] { ("Home", "⌂"), ("Base", "◱"), ("Materials", "◈"), ("Textures", "▣"), ("Parts", "◆"), ("Equipment", "★"), ("Gliders", "︾"), ("Animations", "➤"), ("Research", "⌕") };
+        var cats = new[] { ("Home", "⌂"), ("Base", "◱"), ("Materials", "◈"), ("Faces", "◉"), ("Textures", "▣"), ("Parts", "◆"), ("Equipment", "★"), ("Gliders", "︾"), ("Animations", "➤"), ("Research", "⌕") };
 
         // Load PNGs per category instead of requiring every category to have one.
         // Home/Textures can fall back to glyphs without disabling the real bundled
@@ -1541,6 +1541,16 @@ public sealed partial class MainForm
         if (payload.Kind.Equals("material", StringComparison.OrdinalIgnoreCase) &&
             !string.IsNullOrWhiteSpace(payload.MaterialPath))
         {
+            if (payload.FaceOnly && !component.Contains("face", StringComparison.OrdinalIgnoreCase))
+            {
+                AppendLog($"Face material drop refused: '{payload.MaterialPath}' belongs on the Face component, not {component}.");
+                Dialog.Warn(this, "Face material", "Face materials can only be applied to the Face component. Drop this tile on the Face row or use Apply to Face from its right-click menu.");
+                return;
+            }
+            if (payload.FaceOnly && !CanApplyFaceMaterial(payload.MaterialPath, component, slot, confirmUnknown: true))
+            {
+                return;
+            }
             AppendLog($"Dropped material {payload.MaterialPath} onto {component} slot {slot}.");
             ApplyToyboxMaterial(payload.MaterialPath);
             RefreshInspector();

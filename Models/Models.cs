@@ -242,6 +242,12 @@ public sealed class NativeSuitProject
 
     // Cooked Texture2D imports staged into the suit's IoStore trio.
     public List<GeneratedTextureEntry> GeneratedTextures { get; set; } = new();
+
+    // Material instances authored by Batcomputer. Older projects did not record
+    // these and are still discovered from disk; new entries retain their donor
+    // material and face-mesh compatibility so the Faces browser can reject a
+    // cross-rig assignment before it reaches the game.
+    public List<GeneratedMaterialEntry> GeneratedMaterials { get; set; } = new();
 }
 
 /// <summary>Visual source and runtime donor chosen for a suit base.</summary>
@@ -333,6 +339,22 @@ public sealed class GeneratedTextureEntry
     public string OutputRoot { get; set; } = "";
     public string IoStoreRoot { get; set; } = "";
     public string PackageBaseName { get; set; } = "";
+    public string CreatedUtc { get; set; } = "";
+}
+
+public sealed class GeneratedMaterialEntry
+{
+    public string DisplayName { get; set; } = "";
+    public string Kind { get; set; } = "Material"; // Material | Face
+    public string PackagePath { get; set; } = "";
+    public string SourceMaterialPackagePath { get; set; } = "";
+    public string ParentMaterialPath { get; set; } = "";
+    public List<string> CompatibleFaceMeshPackagePaths { get; set; } = new();
+    // Empty for legacy/direct-clone materials. Recipe metadata keeps paired outputs and
+    // compatibility provenance intact without breaking older suit project JSON files.
+    public string TemplateRecipeId { get; set; } = "";
+    public string TemplateOutputRole { get; set; } = "";
+    public string TemplateGroupId { get; set; } = "";
     public string CreatedUtc { get; set; } = "";
 }
 

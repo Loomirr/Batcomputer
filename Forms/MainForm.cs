@@ -279,6 +279,8 @@ public sealed partial class MainForm : Form
         public string Kind { get; init; } = "";
         public string? MaterialPath { get; init; }
         public NativeSuitPartRecord? Part { get; init; }
+        /// <summary>Face materials must never be dropped onto a body/cape slot by accident.</summary>
+        public bool FaceOnly { get; init; }
     }
 
     public MainForm()
@@ -850,21 +852,12 @@ public sealed partial class MainForm : Form
         box.Top = (wrap.Height - box.Height) / 2;
         wrap.Controls.Add(box);
 
-        var footer = new Panel { Left = 0, Top = 92, Width = W, Height = 54, BackColor = Theme.SlateDark };
-        footer.Paint += (_, e) =>
-        {
-            using var pen = new Pen(Theme.LineSoft);
-            e.Graphics.DrawLine(pen, 0, 0, footer.Width, 0);
-        };
-        var ok = new Button { Text = confirmText, DialogResult = DialogResult.OK, Height = 32, Top = 11 };
-        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Height = 32, Top = 11, Width = 90 };
+        var ok = new Button { Text = confirmText, DialogResult = DialogResult.OK };
+        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Width = 90 };
         Theme.StyleGoldButton(ok);
         Theme.StyleDarkButton(cancel);
         ok.Width = Math.Max(96, TextRenderer.MeasureText(ok.Text, ok.Font).Width + 34);
-        ok.Left = W - Pad - ok.Width;
-        cancel.Left = ok.Left - cancel.Width - 8;
-        footer.Controls.Add(ok);
-        footer.Controls.Add(cancel);
+        var footer = DialogActionFooter.Create(ok, cancel);
 
         dlg.Controls.AddRange(new Control[] { lbl, wrap, footer });
         dlg.AcceptButton = ok;
@@ -1530,21 +1523,11 @@ public sealed partial class MainForm : Form
 
         kind.SelectedIndexChanged += (_, _) => ReloadProfiles();
 
-        var footer = new Panel
-        {
-            Left = 0, Top = 322, Width = Width, Height = 54, BackColor = Theme.SlateDark
-        };
-        footer.Paint += (_, e) =>
-        {
-            using var pen = new Pen(Theme.LineSoft);
-            e.Graphics.DrawLine(pen, 0, 0, footer.Width, 0);
-        };
-        ok = new Button { Text = "Import", DialogResult = DialogResult.OK, Width = 96, Height = 32, Left = Width - Padding - 96, Top = 11 };
-        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Width = 90, Height = 32, Left = Width - Padding - 96 - 98, Top = 11 };
+        ok = new Button { Text = "Import", DialogResult = DialogResult.OK, Width = 96 };
+        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Width = 90 };
         Theme.StyleGoldButton(ok);
         Theme.StyleDarkButton(cancel);
-        footer.Controls.Add(ok);
-        footer.Controls.Add(cancel);
+        var footer = DialogActionFooter.Create(ok, cancel);
 
         form.Controls.Add(header);
         form.Controls.Add(fields);
@@ -1649,21 +1632,11 @@ public sealed partial class MainForm : Form
         profile.SelectedIndex = currentIndex >= 0 ? currentIndex : 0;
         AddTextureDialogField(fields, "NATIVE COOK PROFILE", profile, 14);
 
-        var footer = new Panel
-        {
-            Left = 0, Top = 184, Width = Width, Height = 54, BackColor = Theme.SlateDark
-        };
-        footer.Paint += (_, e) =>
-        {
-            using var pen = new Pen(Theme.LineSoft);
-            e.Graphics.DrawLine(pen, 0, 0, footer.Width, 0);
-        };
-        var ok = new Button { Text = "Recook", DialogResult = DialogResult.OK, Width = 96, Height = 32, Left = Width - Padding - 96, Top = 11 };
-        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Width = 90, Height = 32, Left = Width - Padding - 96 - 98, Top = 11 };
+        var ok = new Button { Text = "Recook", DialogResult = DialogResult.OK, Width = 96 };
+        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Width = 90 };
         Theme.StyleGoldButton(ok);
         Theme.StyleDarkButton(cancel);
-        footer.Controls.Add(ok);
-        footer.Controls.Add(cancel);
+        var footer = DialogActionFooter.Create(ok, cancel);
 
         form.Controls.Add(header);
         form.Controls.Add(fields);

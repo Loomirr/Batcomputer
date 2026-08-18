@@ -27,30 +27,20 @@ public sealed class ReleasePreflightForm : Form
         var passed = result.Passed;
         var headerAccent = passed ? Theme.Good : Theme.Crit;
 
-        var footer = new Panel
-        {
-            Dock = DockStyle.Bottom,
-            Height = 58,
-            BackColor = Theme.SlateDark,
-        };
-        footer.Paint += (_, e) =>
-        {
-            using var pen = new Pen(Theme.LineSoft);
-            e.Graphics.DrawLine(pen, 0, 0, footer.Width, 0);
-        };
         var done = new Button
         {
             Text = "Done",
             Width = 98,
-            Height = 32,
-            Top = 13,
-            Left = WidthPx - 18 - 98,
             DialogResult = DialogResult.OK,
-            Anchor = AnchorStyles.Top | AnchorStyles.Right,
         };
         Theme.StyleGoldButton(done);
         Theme.RoundControl(done, Theme.RadiusSm);
-        footer.Controls.Add(done);
+        var footer = DialogActionFooter.Create(done);
+        footer.Height = 58;
+        if (footer.Controls.OfType<FlowLayoutPanel>().FirstOrDefault() is { } actions)
+        {
+            actions.Padding = new Padding(18, 13, 18, 13);
+        }
 
         var header = new Panel
         {
@@ -215,6 +205,9 @@ public sealed class ReleasePreflightForm : Form
         using var form = new ReleasePreflightForm(modName, result);
         form.ShowDialog(owner);
     }
+
+    internal static Form CreateForUiAudit(string modName, ModReleaseValidationService.Result result) =>
+        new ReleasePreflightForm(modName, result);
 
     private static Control MakeChip(string text, Color dot)
     {

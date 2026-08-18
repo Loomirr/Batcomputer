@@ -43,6 +43,13 @@ public sealed class MaterialGenService
         public float A { get; set; } = 1f;
     }
 
+    /// <summary>An authored Material Instance scalar parameter.</summary>
+    public sealed class ScalarParam
+    {
+        public string Name { get; set; } = "";
+        public float Value { get; set; }
+    }
+
     public sealed class MaterialTemplateInfo
     {
         public string Status { get; set; } = "";
@@ -52,6 +59,7 @@ public sealed class MaterialGenService
         public string ParentMaterialPath { get; set; } = "";
         public List<TextureParam> TextureParams { get; set; } = new();
         public List<ColorParam> ColorParams { get; set; } = new();
+        public List<ScalarParam> ScalarParams { get; set; } = new();
     }
 
     public MaterialTemplateInfo ReadTemplate(string uassetPath)
@@ -73,14 +81,17 @@ public sealed class MaterialGenService
 
             var (textureExport, textureArray) = FindParameterArray(asset, "TextureParameterValues");
             var (colorExport, colorArray) = FindParameterArray(asset, "VectorParameterValues");
-            if ((textureExport is null || textureArray is null) && (colorExport is null || colorArray is null))
+            var (scalarExport, scalarArray) = FindParameterArray(asset, "ScalarParameterValues");
+            if ((textureExport is null || textureArray is null) &&
+                (colorExport is null || colorArray is null) &&
+                (scalarExport is null || scalarArray is null))
             {
                 info.Status = "no-material-params";
-                info.Error = "No TextureParameterValues or VectorParameterValues array found (is this a Material Instance?).";
+                info.Error = "No texture, vector, or scalar parameter array was found (is this a Material Instance?).";
                 return info;
             }
 
-            var materialExport = textureExport ?? colorExport;
+            var materialExport = textureExport ?? colorExport ?? scalarExport;
             var parent = materialExport is null
                 ? null
                 : FindProperty<ObjectPropertyData>(materialExport.Data, "Parent");
@@ -131,6 +142,22 @@ public sealed class MaterialGenService
                 });
             }
 
+            foreach (var entry in scalarArray?.Value?.OfType<StructPropertyData>() ?? Enumerable.Empty<StructPropertyData>())
+            {
+                var name = ReadParamName(entry);
+                var value = FindScalarValue(entry);
+                if (string.IsNullOrWhiteSpace(name) || value is null)
+                {
+                    continue;
+                }
+
+                info.ScalarParams.Add(new ScalarParam
+                {
+                    Name = name,
+                    Value = value.Value,
+                });
+            }
+
             info.Status = "ok";
             return info;
         }
@@ -150,8 +177,15 @@ public sealed class MaterialGenService
         public string OutputPackagePath { get; set; } = ""; // e.g. /Game/Mods/MyMod/Materials/MI_MySuit_Body
         // Parameter name -> texture object path (e.g. /Game/Mods/MyMod/Textures/T_MySuit_BC)
         public Dictionary<string, string> ParamToTexture { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        // Parameters in this set retain their authored override entry but receive a null UObject
+        // reference. This is deliberately separate from an absent map value, which means inherit
+        // the texture already stored by the cloned base material instance.
+        public HashSet<string> TextureParamsToClear { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         // Parameter name -> linear RGBA colour. The base MI's parent graph and switches are retained.
         public Dictionary<string, ColorParam> ParamToColor { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        // Parameter name -> scalar value. Face helper controls use the base material's native
+        // visibility scalars rather than trying to remove every face texture independently.
+        public Dictionary<string, float> ParamToScalar { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     public sealed class GenResult
@@ -237,23 +271,31 @@ public sealed class MaterialGenService
 
             var (_, textureArray) = FindParameterArray(asset, "TextureParameterValues");
             var (_, colorArray) = FindParameterArray(asset, "VectorParameterValues");
-            if (textureArray is null && colorArray is null)
+            var (_, scalarArray) = FindParameterArray(asset, "ScalarParameterValues");
+            if (textureArray is null && colorArray is null && scalarArray is null)
             {
                 result.Status = "no-material-params";
-                result.Error = "No TextureParameterValues or VectorParameterValues array in base MI.";
+                result.Error = "No texture, vector, or scalar parameter array exists in the base MI.";
                 return result;
             }
 
             var textureNameReplacements = new Dictionary<string, string>(StringComparer.Ordinal);
-            if (request.ParamToTexture.Count > 0 && textureArray is null)
+            if ((request.ParamToTexture.Count > 0 || request.TextureParamsToClear.Count > 0) && textureArray is null)
             {
                 result.Warnings.Add("The base MI has no texture parameters to override.");
             }
             foreach (var entry in textureArray?.Value?.OfType<StructPropertyData>() ?? Enumerable.Empty<StructPropertyData>())
             {
                 var name = ReadParamName(entry);
-                if (string.IsNullOrWhiteSpace(name) || !request.ParamToTexture.TryGetValue(name, out var texturePath) ||
-                    string.IsNullOrWhiteSpace(texturePath))
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    continue;
+                }
+
+                var clearTexture = request.TextureParamsToClear.Contains(name);
+                var hasTextureOverride = request.ParamToTexture.TryGetValue(name, out var texturePath) &&
+                                         !string.IsNullOrWhiteSpace(texturePath);
+                if (!clearTexture && !hasTextureOverride)
                 {
                     continue;
                 }
@@ -270,7 +312,14 @@ public sealed class MaterialGenService
                 // so the streaming metadata can be retargeted after the MI
                 // parameter itself is changed.
                 var oldTextureName = DescribeObjectImport(asset, valueProp.Value);
-                var (texPackage, texObject) = SplitObjectPath(texturePath);
+                if (clearTexture)
+                {
+                    valueProp.Value = FPackageIndex.FromRawIndex(0);
+                    result.Retargeted.Add($"{name} -> None (null Texture2D)");
+                    continue;
+                }
+
+                var (texPackage, texObject) = SplitObjectPath(texturePath!);
                 var import = EnsureObjectImport(asset, texPackage, texObject, "/Script/Engine", "Texture2D");
                 if (import.IsNull())
                 {
@@ -307,6 +356,29 @@ public sealed class MaterialGenService
 
                 value.Value = new FLinearColor(colour.R, colour.G, colour.B, colour.A);
                 result.Retargeted.Add($"{name} -> linear ({colour.R:0.#####}, {colour.G:0.#####}, {colour.B:0.#####}, {colour.A:0.#####})");
+            }
+
+            if (request.ParamToScalar.Count > 0 && scalarArray is null)
+            {
+                result.Warnings.Add("The base MI has no scalar parameters to override.");
+            }
+            foreach (var entry in scalarArray?.Value?.OfType<StructPropertyData>() ?? Enumerable.Empty<StructPropertyData>())
+            {
+                var name = ReadParamName(entry);
+                if (string.IsNullOrWhiteSpace(name) || !request.ParamToScalar.TryGetValue(name, out var scalar))
+                {
+                    continue;
+                }
+
+                var value = FindScalarValue(entry);
+                if (value is null)
+                {
+                    result.Warnings.Add($"Param '{name}': no float ParameterValue to retarget.");
+                    continue;
+                }
+
+                value.Value = scalar;
+                result.Retargeted.Add($"{name} -> {scalar.ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture)}");
             }
 
             UpdateTextureStreamingData(asset, textureNameReplacements, result);
@@ -349,6 +421,9 @@ public sealed class MaterialGenService
         var parameterValue = FindProperty<StructPropertyData>(entry.Value, "ParameterValue");
         return parameterValue?.Value.OfType<LinearColorPropertyData>().FirstOrDefault();
     }
+
+    private static FloatPropertyData? FindScalarValue(StructPropertyData entry) =>
+        FindProperty<FloatPropertyData>(entry.Value, "ParameterValue");
 
     private static string ReadParamName(StructPropertyData entry)
     {
