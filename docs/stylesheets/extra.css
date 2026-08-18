@@ -1,0 +1,6 @@
+/*
+ * Compatibility alias for documentation pages cached before the stylesheet
+ * was renamed. Keep this file so every previously generated page receives the
+ * current site-wide header and branding rules.
+ */
+@import url("./batcomputer.css");

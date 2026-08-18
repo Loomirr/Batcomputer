@@ -30,8 +30,8 @@
 .md-header__button.md-logo img,
 .md-header__button.md-logo svg {
   width: auto;
-  height: 2.25rem;
-  max-width: min(44vw, 14rem);
+  height: 1.65rem;
+  max-width: min(40vw, 10rem);
 }
 
 /* Header3 contains the complete Batcomputer wordmark, so the default title must not repeat it. */
@@ -78,7 +78,7 @@ html .md-header__title {
 @media screen and (max-width: 44.984375em) {
   .md-header__button.md-logo img,
   .md-header__button.md-logo svg {
-    height: 1.8rem;
-    max-width: 10.5rem;
+    height: 1.45rem;
+    max-width: 8.75rem;
   }
 }
