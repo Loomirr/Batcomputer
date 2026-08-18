@@ -1315,6 +1315,33 @@ internal static class Program
             }
         }
 
+        // Regression guard: staged components commonly report just the asset name. That short
+        // form must accept the standard-face recipe without accepting another face topology.
+        var jokerPrint = catalog.Recipes().FirstOrDefault(recipe =>
+            recipe.Id.Equals("face.standard.joker89-print-no-eyes", StringComparison.OrdinalIgnoreCase));
+        if (jokerPrint is null)
+        {
+            errors++;
+            Console.Error.WriteLine("ERROR face compatibility: Joker '89 standard-face recipe is missing.");
+        }
+        else
+        {
+            var standard = catalog.Evaluate(jokerPrint,
+                new MaterialTemplateCatalogService.Target("Face", "Face", 0, "SK_LEGOface"));
+            var jokerMesh = catalog.Evaluate(jokerPrint,
+                new MaterialTemplateCatalogService.Target("Face", "Face", 0, "SK_LEGOface_Joker89"));
+            if (!standard.CanUse || jokerMesh.CanUse)
+            {
+                errors++;
+                Console.Error.WriteLine(
+                    $"ERROR face compatibility: shortStandard={standard.CanUse} joker89Rejected={!jokerMesh.CanUse}.");
+            }
+            else
+            {
+                Console.WriteLine("OK   face compatibility: short SK_LEGOface accepted; Joker89 topology rejected");
+            }
+        }
+
         Console.WriteLine($"Material template verification: recipes={catalog.Recipes().Count(recipe => recipe.Enabled)}, donors={donors}, errors={errors}");
         return errors == 0 ? 0 : 1;
     }

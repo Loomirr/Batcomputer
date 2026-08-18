@@ -31,6 +31,10 @@ public sealed partial class MainForm
 
         var body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Padding = new Padding(8, 6, 8, 8), BackColor = Theme.PanelBg };
         _toyboxBodyLayout = body;
+        // A one-row TableLayout defaults that row to AutoSize. The inspector's preferred design
+        // height could therefore extend behind the Diagnostics drawer and clip bottom actions.
+        // Constrain the workspace to the height its parent actually gives it.
+        body.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 98));
         body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 340));
         body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -1485,7 +1489,17 @@ public sealed partial class MainForm
             _inspectorTabs.ContainsTab(ResearchTabName);
         if (_inspectorTabs.Count > 0)
         {
-            _inspectorTabs.SelectTab(research ? ResearchTabName : SuitTabName);
+            if (research)
+            {
+                _inspectorTabs.SelectTab(ResearchTabName);
+            }
+            else if (string.IsNullOrWhiteSpace(_inspectorTabs.SelectedName) ||
+                     string.Equals(_inspectorTabs.SelectedName, ResearchTabName, StringComparison.OrdinalIgnoreCase))
+            {
+                // Preserve the user's Notes tab while moving around normal authoring categories.
+                // Only Research owns the inspector while its dedicated workspace is selected.
+                _inspectorTabs.SelectTab(SuitTabName);
+            }
         }
     }
 

@@ -286,6 +286,10 @@ public sealed class NativeSuitModProject
     public string Description { get; set; } = "";
     // Optional artwork shown on the Home "Mods" tile.
     public string CoverImagePath { get; set; } = "";
+    // Free-form author notebook for useful donor/material/texture paths and release notes.
+    // This belongs to the mod (the packaging unit), so every suit in the collection sees
+    // the same references and the notes travel with the authoring project.
+    public string NotebookText { get; set; } = "";
 
     // Derived from ModId ("<ModId>_P"), stored for review/diagnostics.
     public string PackageBaseName { get; set; } = "";

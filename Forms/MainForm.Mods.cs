@@ -246,6 +246,7 @@ public sealed partial class MainForm
             UpdateHomeWorkspaceRailSelection();
         }
         RefreshToyboxTiles();
+        RefreshModNotebook(force: true);
     }
 
     /// <summary>Direct rail action for the Home-selected release collection.</summary>

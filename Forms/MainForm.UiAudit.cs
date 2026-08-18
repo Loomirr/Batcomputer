@@ -21,6 +21,7 @@ public sealed partial class MainForm
         "Suits - Equipment",
         "Suits - Gliders",
         "Suits - Animations",
+        "Suits - Mod notebook",
         "3D viewer",
     };
 
@@ -42,6 +43,13 @@ public sealed partial class MainForm
                 break;
             case "3D viewer":
                 SelectWorkspaceFolder(WorkspaceFolder.Viewer);
+                break;
+            case "Suits - Mod notebook":
+                SelectWorkspaceFolder(WorkspaceFolder.Suits, refresh: false);
+                SelectComboValue(_toyboxCategoryCombo, "Materials");
+                RefreshToyboxTiles();
+                _inspectorTabs.SelectTab(NotebookTabName);
+                ConfigureModNotebookForUiAudit();
                 break;
             default:
                 SelectWorkspaceFolder(WorkspaceFolder.Suits, refresh: false);

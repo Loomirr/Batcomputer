@@ -122,6 +122,7 @@ public sealed partial class MainForm
             catch { /* clipboard may be busy */ }
         };
         _inspectorTabs.AddTab(SuitTabName, CreateInspectorPanel());
+        _inspectorTabs.AddTab(NotebookTabName, CreateModNotebookPanel());
         if (AppSettings.Current.ShowResearchTools)
         {
             _inspectorTabs.AddTab(ResearchTabName, _researchInspector);
@@ -313,6 +314,7 @@ public sealed partial class MainForm
         finally
         {
             _isRefreshingInspector = false;
+            RefreshModNotebook();
         }
 
         if (!string.IsNullOrWhiteSpace(_pendingInspectorComponentFocus))
