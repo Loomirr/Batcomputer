@@ -34,9 +34,12 @@
   max-width: min(44vw, 14rem);
 }
 
-/* Header3 contains the complete Batcomputer wordmark, so the default text would repeat it. */
-.md-header__title {
-  display: none;
+/* Header3 contains the complete Batcomputer wordmark, so the default title must not repeat it. */
+html .md-header__title {
+  display: none !important;
+  flex: 0 0 0;
+  margin: 0;
+  width: 0;
 }
 
 .md-typeset h1,
