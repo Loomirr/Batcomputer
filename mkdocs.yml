@@ -1,0 +1,61 @@
+site_name: Batcomputer
+site_url: https://loomirr.github.io/Batcomputer/
+site_description: Native suit authoring for LEGO Batman — Legacy of the Dark Knight
+repo_url: https://github.com/Loomirr/Batcomputer
+repo_name: Loomirr/Batcomputer
+edit_uri: edit/main/docs/
+copyright: Batcomputer is an unofficial community tool and is not affiliated with TT Games, Warner Bros. Games, or the LEGO Group.
+
+theme:
+  name: material
+  language: en
+  palette:
+    scheme: slate
+    primary: black
+    accent: amber
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+extra_css:
+  - stylesheets/extra.css
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Requirements: getting-started/requirements.md
+      - Install Batcomputer: getting-started/install.md
+      - First-time setup: getting-started/setup.md
+  - Tutorials:
+      - Create your first suit: guides/first-suit.md
+      - Materials, textures, and faces: guides/materials-textures-faces.md
+      - Custom static meshes: guides/custom-meshes.md
+      - Build, test, and share: guides/build-test-share.md
+  - Reference:
+      - Workspace and files: reference/workspace.md
+      - Compatibility and beta limits: reference/compatibility.md
+      - Frequently asked questions: reference/faq.md
+      - Changelog: reference/changelog.md
+  - Help:
+      - Troubleshooting: help/troubleshooting.md
+      - Report a problem: help/reporting-issues.md

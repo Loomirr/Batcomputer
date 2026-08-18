@@ -1,0 +1,55 @@
+name: Bug report
+description: Report a repeatable Batcomputer problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping test the beta. Please do not upload copyrighted game assets. Redact personal folder names if needed.
+  - type: input
+    id: version
+    attributes:
+      label: Batcomputer version
+      description: For example, 0.9.0-beta.1.
+    validations:
+      required: true
+  - type: input
+    id: game-build
+    attributes:
+      label: Game build and mappings
+      description: Include the game build and whether the .usmap was refreshed after the last update.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Opened...
+        2. Selected...
+        3. Built...
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected and actual result
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Batcomputer diagnostics
+      description: Use Copy log in Batcomputer and paste the relevant section here.
+      render: text
+  - type: textarea
+    id: game-log
+    attributes:
+      label: LOTDK Expanded or UE4SS log lines
+      description: Include only the relevant text around the failure. Do not upload game assets.
+      render: text
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots or additional context

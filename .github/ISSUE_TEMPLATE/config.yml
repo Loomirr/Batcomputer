@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Batcomputer documentation
+    url: https://loomirr.github.io/Batcomputer/
+    about: Check setup, tutorials, limitations, and troubleshooting before filing a report.

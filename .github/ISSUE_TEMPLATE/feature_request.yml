@@ -1,0 +1,23 @@
+name: Feature request
+description: Suggest an authoring or usability improvement
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Authoring problem
+      description: What are you trying to create, and what currently makes it difficult?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Suggested workflow
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Relevant game assets or examples
+      description: Package paths and text exports are useful. Do not upload copyrighted game assets.

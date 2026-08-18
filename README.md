@@ -4,6 +4,9 @@ Batcomputer is a Windows suit-building tool for *LEGO Batman: Legacy of the Dark
 It assembles custom playable suits from shipped character assets, then builds and installs a native
 mod release for the game.
 
+> **Current release:** `0.9.0-beta.1`
+> **Documentation:** [loomirr.github.io/Batcomputer](https://loomirr.github.io/Batcomputer/)
+
 This repository contains the authoring tool only. It does not contain game files, extracted assets,
 Oodle, or the LOTDK Expanded runtime.
 
@@ -65,6 +68,9 @@ Setup can then run the full character extraction. It reads only the shipped, top
 containers and ignores nested `~mods` folders. The standard all-character extraction includes
 character, animation, and localisation assets and needs about 18 GB of free space.
 
+For the complete walkthrough, see the
+[first-time setup guide](https://loomirr.github.io/Batcomputer/getting-started/setup/).
+
 ## LOTDK Expanded Runtime
 
 The native runtime is installed separately. Batcomputer installs each mod's `mod.json` under
@@ -87,6 +93,11 @@ its shared core. Batcomputer does not modify the runtime DLL or `mods.txt`.
 
 Every export is a mod, including a mod containing one suit. **Build Mod** creates the release and
 installs it into the configured game folders. Restart the game before testing a newly built mod.
+
+The documentation includes a full
+[first-suit tutorial](https://loomirr.github.io/Batcomputer/guides/first-suit/),
+[materials and faces guide](https://loomirr.github.io/Batcomputer/guides/materials-textures-faces/),
+and [troubleshooting checklist](https://loomirr.github.io/Batcomputer/help/troubleshooting/).
 
 ## Visual Base and Playable Donor
 
