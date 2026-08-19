@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.0-beta.2
+
+- Fixed Asset Registry writer builds failing with UnrealBuildTool exit code 6 when Batcomputer was
+  located in a deeply nested folder.
+- Writer source now builds from a short local cache and remains fingerprint-checked before reuse.
+
 ## 0.9.0-beta.1
 
 - First public beta.

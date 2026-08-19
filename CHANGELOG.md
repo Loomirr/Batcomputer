@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.0-beta.2 — 2026-08-18
+
+Asset Registry writer hotfix.
+
+- Builds the bundled UE 5.6 writer from a short per-user cache path, preventing UnrealBuildTool
+  exit code 6 when Batcomputer is run from a deeply nested folder or source checkout.
+- Keeps Unreal-generated writer output out of Batcomputer's portable folder and repository.
+- Verifies the cached writer against its bundled source and configured UE 5.6 build before reuse.
+
 ## 0.9.0-beta.1 — 2026-08-18
 
 First public beta.

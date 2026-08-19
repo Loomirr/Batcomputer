@@ -69,6 +69,7 @@ public sealed class RegistryPluginService
 
     private sealed record WriterToolchain(
         string EngineRoot,
+        string SourceWriterProject,
         string WriterProject,
         string BuildScript,
         string EditorCommand);
@@ -140,7 +141,7 @@ public sealed class RegistryPluginService
             return new WriterPreparationResult { Error = ensured.Error };
         }
 
-        var probeDirectory = Path.Combine(AppSettings.CacheRoot, "RegistryWriter", "SetupProbe");
+        var probeDirectory = Path.Combine(WriterWorkspaceRoot, "SetupProbe");
         var probeOutput = Path.Combine(probeDirectory, "AssetRegistry.bin");
         Directory.CreateDirectory(probeDirectory);
         if (File.Exists(probeOutput)) File.Delete(probeOutput);
@@ -387,9 +388,98 @@ public sealed class RegistryPluginService
             return false;
         }
 
-        toolchain = new WriterToolchain(engineRoot, writerProject, buildScript, editorCommand);
+        if (!TryStageWriterProject(writerProject, out var stagedWriterProject, out error))
+        {
+            toolchain = null!;
+            return false;
+        }
+
+        toolchain = new WriterToolchain(
+            engineRoot,
+            writerProject,
+            stagedWriterProject,
+            buildScript,
+            editorCommand);
         error = "";
         return true;
+    }
+
+    /// <summary>
+    /// UnrealBuildTool still rejects action paths over 260 characters even when
+    /// Windows long-path support is enabled. A source checkout or Debug build can
+    /// put the bundled writer several directories below the executable, so mirror
+    /// only its small source project into a predictable local cache before building.
+    /// Generated Unreal folders remain in that cache and never pollute the portable
+    /// install or source tree.
+    /// </summary>
+    private static bool TryStageWriterProject(
+        string sourceProject,
+        out string stagedProject,
+        out string error)
+    {
+        stagedProject = Path.Combine(WriterWorkspaceRoot, "P", "BatcomputerRegistryWriter.uproject");
+        error = "";
+        try
+        {
+            var sourceRoot = Path.GetDirectoryName(Path.GetFullPath(sourceProject))
+                ?? throw new InvalidOperationException("The Asset Registry writer source folder could not be resolved.");
+            var stagedRoot = Path.GetDirectoryName(Path.GetFullPath(stagedProject))
+                ?? throw new InvalidOperationException("The Asset Registry writer cache folder could not be resolved.");
+
+            if (string.Equals(sourceRoot, stagedRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                return File.Exists(stagedProject);
+            }
+
+            Directory.CreateDirectory(stagedRoot);
+            File.Copy(sourceProject, stagedProject, overwrite: true);
+            ReplaceWriterInputDirectory(
+                Path.Combine(sourceRoot, "Source"),
+                Path.Combine(stagedRoot, "Source"),
+                stagedRoot);
+            ReplaceWriterInputDirectory(
+                Path.Combine(sourceRoot, "Config"),
+                Path.Combine(stagedRoot, "Config"),
+                stagedRoot);
+            return File.Exists(stagedProject) && Directory.Exists(Path.Combine(stagedRoot, "Source"));
+        }
+        catch (Exception ex)
+        {
+            error = "Could not prepare the Asset Registry writer in its short build path: " + ex.Message;
+            return false;
+        }
+    }
+
+    private static void ReplaceWriterInputDirectory(
+        string sourceDirectory,
+        string destinationDirectory,
+        string stagedRoot)
+    {
+        var fullDestination = Path.GetFullPath(destinationDirectory);
+        var fullStagedRoot = Path.GetFullPath(stagedRoot).TrimEnd(
+            Path.DirectorySeparatorChar,
+            Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!fullDestination.StartsWith(fullStagedRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Refused to update an Asset Registry writer folder outside its cache.");
+        }
+
+        if (Directory.Exists(fullDestination))
+        {
+            Directory.Delete(fullDestination, recursive: true);
+        }
+        if (!Directory.Exists(sourceDirectory))
+        {
+            return;
+        }
+
+        foreach (var sourceFile in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
+        {
+            var relativePath = Path.GetRelativePath(sourceDirectory, sourceFile);
+            var destinationFile = Path.Combine(fullDestination, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationFile)!);
+            File.Copy(sourceFile, destinationFile, overwrite: true);
+        }
     }
 
     private static async Task<WriterEnsureResult> EnsureWriterAsync(
@@ -495,8 +585,21 @@ public sealed class RegistryPluginService
             Directory.EnumerateFiles(directory, "*.modules", SearchOption.TopDirectoryOnly).Any();
     }
 
+    private static string WriterWorkspaceRoot
+    {
+        get
+        {
+            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (string.IsNullOrWhiteSpace(localAppData))
+            {
+                localAppData = Path.GetTempPath();
+            }
+            return Path.Combine(localAppData, "Batcomputer", "RW");
+        }
+    }
+
     private static string WriterCachePath =>
-        Path.Combine(AppSettings.CacheRoot, "RegistryWriter", "writer-cache.json");
+        Path.Combine(WriterWorkspaceRoot, "writer-cache.json");
 
     private static void SaveWriterCache(WriterToolchain toolchain)
     {
@@ -521,8 +624,8 @@ public sealed class RegistryPluginService
             AddFingerprintText(hash, Path.GetFullPath(toolchain.EngineRoot));
             AddFingerprintFile(hash, Path.Combine(toolchain.EngineRoot, "Engine", "Build", "Build.version"), "Engine/Build/Build.version");
 
-            var projectRoot = Path.GetDirectoryName(toolchain.WriterProject) ?? "";
-            AddFingerprintFile(hash, toolchain.WriterProject, Path.GetFileName(toolchain.WriterProject));
+            var projectRoot = Path.GetDirectoryName(toolchain.SourceWriterProject) ?? "";
+            AddFingerprintFile(hash, toolchain.SourceWriterProject, Path.GetFileName(toolchain.SourceWriterProject));
             foreach (var directory in new[] { "Config", "Source" })
             {
                 var root = Path.Combine(projectRoot, directory);
