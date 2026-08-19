@@ -102,7 +102,7 @@ public static class PartRecipeService
         // Synthesized entries were assembled by the tool, not observed on a cooked component.
         if (part.IsSynthesized)
         {
-            return (RecipeConfidence.Inferred, "synthesized by the tool rather than observed on a native component.");
+            return (RecipeConfidence.Inferred, "built by Batcomputer rather than copied from a game component.");
         }
 
         // Attachments need a real parent/socket; body-ish slots legitimately have neither.

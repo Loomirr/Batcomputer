@@ -318,7 +318,7 @@ public sealed class ModReleaseValidationService
             if (!materialExists)
             {
                 result.AddError("material",
-                    $"{target} uses generated material '{package}', but its .uasset is missing from every valid material source (the export folder and this suit's saved authoring stages).",
+                    $"{target} uses generated material '{package}', but its .uasset is missing from the export folder and this suit's saved material folders.",
                     suitId);
             }
         }

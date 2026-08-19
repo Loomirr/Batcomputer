@@ -1255,7 +1255,7 @@ public sealed partial class MainForm : Form
             }
         }
 
-        AppendLog($"Removed {removed} installed file(s) for '{project.DisplayName}'. Shared LOTDK Expanded pack data is kept; remove the suit from its mod and rebuild that mod to update its manifest.");
+        AppendLog($"Removed {removed} installed file(s) for '{project.DisplayName}'. Shared mod files were kept; remove the suit from its mod and rebuild to update the manifest.");
     }
 
     private void ClearCurrentSuitAfterDeletion()

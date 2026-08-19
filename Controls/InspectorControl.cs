@@ -308,7 +308,7 @@ public sealed class InspectorControl : UserControl
             b.Height = 30;
             Theme.StyleDarkButton(b);
         }
-        _preflight.Text = "Preflight";
+        _preflight.Text = "Check";
         _preflight.Height = 30;
         Theme.StyleGoldButton(_preflight);
 

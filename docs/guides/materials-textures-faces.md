@@ -1,13 +1,13 @@
 # Materials, textures, and faces
 
-Batcomputer uses **donor-backed materials**. It clones a cooked material instance whose parent and
-parameter schema already work in the game, then changes supported parameters. This is safer than
-inventing a cooked material layout from scratch.
+Batcomputer starts with **working game materials**. It copies a cooked material instance whose
+parent and parameters already work in-game, then changes the supported values. This avoids guessing
+at a cooked material layout.
 
 ## Materials
 
 1. Select the target component and material slot.
-2. Open **Materials** and choose a compatible donor or a proven template.
+2. Open **Materials** and choose a compatible game material or a tested template.
 3. Read the donor parameters.
 4. Override only the textures or colors you intend to change.
 5. Generate the material and apply it to the slot.
@@ -30,7 +30,7 @@ Use templates as compatibility rules, not just visual presets:
 Batcomputer warns when a selected template targets another mesh family. Do not force a standard
 LEGOface recipe onto SuperheroFace, or the reverse, simply because both assets are faces.
 
-## Face workflow
+## Faces
 
 The face mesh and material topology must agree. Face helpers group hard-to-read parameters into
 eyes, brows, lids, lashes, mouth/lower-face, and related regions.
@@ -75,8 +75,8 @@ An old project may contain cooked textures with no recorded profile. Batcomputer
 legacy output rather than guessing how to recook it. Use **Change cook profile** before intentionally
 rebuilding that texture.
 
-## Color masks and shipped Red Brick previews
+## Color masks and Red Brick previews
 
 Playable characters and modded suits with a usable body Color Mask can preview the base game's
-shipped color palettes in the 3D viewer. This is read-only authoring feedback. Batcomputer does not
-create, register, unlock, or package custom Red Bricks in this beta.
+Red Brick colours in the 3D viewer. This changes only the preview. Batcomputer does not create,
+register, unlock, or package custom Red Bricks in this beta.

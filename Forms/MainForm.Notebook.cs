@@ -1,7 +1,7 @@
 namespace Batcomputer;
 
 /// <summary>
-/// A small mod-scoped scratchpad for donor paths and author notes. It deliberately stores plain
+/// A small mod-specific scratchpad for donor paths and notes. It stores plain
 /// text in the mod project instead of inventing a second database or attempting to interpret the
 /// pasted Unreal paths.
 /// </summary>

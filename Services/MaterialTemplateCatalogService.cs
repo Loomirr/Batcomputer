@@ -1,9 +1,9 @@
 namespace Batcomputer;
 
 /// <summary>
-/// Curated, donor-backed material recipes for LOTDK. A recipe never invents a parent graph or
-/// changes a static permutation: every output clones a cooked leaf Material Instance whose
-/// render context, mesh family, and switches are already proven by the game.
+/// Tested material templates for LOTDK. A template never invents a parent graph or
+/// changes a static permutation: every output copies a cooked Material Instance whose
+/// render context, mesh family, and switches already work in the game.
 /// </summary>
 internal sealed class MaterialTemplateCatalogService
 {
@@ -118,7 +118,7 @@ internal sealed class MaterialTemplateCatalogService
                 false,
                 false,
                 "Wrong target",
-                $"This recipe is for {string.Join(" / ", recipe.AllowedTargetKinds)} targets; the selected {target.DisplayName} is classified as {target.Kind}.",
+                $"This template is for {string.Join(" / ", recipe.AllowedTargetKinds)} targets; the selected {target.DisplayName} is classified as {target.Kind}.",
                 resolved);
         }
 
@@ -131,7 +131,7 @@ internal sealed class MaterialTemplateCatalogService
                     true,
                     false,
                     "Verify mesh family",
-                    $"The selected target did not expose a mesh path. This recipe requires {DescribeMeshes(recipe.CompatibleMeshPackagePaths)}; Batcomputer will record that requirement and validate it when applied.",
+                    $"The selected target did not expose a mesh path. This template requires {DescribeMeshes(recipe.CompatibleMeshPackagePaths)}; Batcomputer will check it when the material is applied.",
                     resolved);
             }
 
@@ -141,7 +141,7 @@ internal sealed class MaterialTemplateCatalogService
                     false,
                     false,
                     "Different mesh family",
-                    $"The selected target uses {UnrealPathUtil.AssetName(targetMesh)}. This recipe is authored for {DescribeMeshes(recipe.CompatibleMeshPackagePaths)} and cannot be forced across those UV/expression families.",
+                    $"The selected target uses {UnrealPathUtil.AssetName(targetMesh)}. This template is made for {DescribeMeshes(recipe.CompatibleMeshPackagePaths)} and cannot be used with a different UV or expression layout.",
                     resolved);
             }
         }
@@ -154,7 +154,7 @@ internal sealed class MaterialTemplateCatalogService
                 "Cutscene-only donor. It is not a gameplay material.",
             2 => "Generates a synchronized gameplay/cutscene pair.",
             4 => "Generates the complete gameplay/cutscene LOD0/LOD1 set.",
-            _ => "Generates one donor-backed material.",
+            _ => "Creates one material from a game template.",
         };
         return new Compatibility(true, true, "Compatible", contextNote, resolved);
     }
@@ -174,7 +174,7 @@ internal sealed class MaterialTemplateCatalogService
                 Id = "body.recolourable.absolute",
                 DisplayName = "Recolourable character body",
                 Category = "Character body",
-                Summary = "Textured minifigure body with the game's proven colour-mask / Red Brick branch.",
+                Summary = "Textured minifigure body with the game's working Colour Mask and Red Brick support.",
                 Guidance = "Replace BC, MMR, DNRM, pristine maps, and ColourMask as needed. Both runtime contexts are generated from Batman Absolute donors.",
                 AllowedTargetKinds = Kinds(TargetKinds.Body),
                 Outputs = new[]
@@ -204,7 +204,7 @@ internal sealed class MaterialTemplateCatalogService
                 Category = "Character body",
                 Summary = "A generic body that needs no texture artwork.",
                 Enabled = false,
-                DisabledReason = "No proven gameplay/cutscene donor pair exists with the required compiled solid-body permutation. Use Fixed-colour textured body with a tiny flat BC texture instead.",
+                DisabledReason = "No tested gameplay/cutscene pair has the required solid-body setup. Use Fixed-colour textured body with a tiny flat BC texture instead.",
                 AllowedTargetKinds = Kinds(TargetKinds.Body),
             },
             new()
@@ -213,7 +213,7 @@ internal sealed class MaterialTemplateCatalogService
                 DisplayName = "Solid-colour accessory (paired)",
                 Category = "Accessories",
                 Summary = "Simple plastic attachment with synchronized gameplay and cutscene outputs.",
-                Guidance = "The Bowler donor's geometry-specific RAO/CT/NRM/colour-ID maps are replaced with shipped neutral maps before generation.",
+                Guidance = "The Bowler material's geometry-specific RAO, CT, NRM, and colour-ID maps are replaced with built-in neutral maps.",
                 AllowedTargetKinds = Kinds(TargetKinds.Accessory),
                 Outputs = new[]
                 {
@@ -234,7 +234,7 @@ internal sealed class MaterialTemplateCatalogService
                 DisplayName = "Solid-colour accessory (clean gameplay donor)",
                 Category = "Accessories",
                 Summary = "Minimal single-colour gameplay attachment donor without Bowler geometry maps.",
-                Guidance = "This clean MI has no proven cutscene twin. Prefer the paired recipe for assets that must render in both contexts.",
+                Guidance = "This clean material has no tested cutscene match. Use the paired template when the part must appear in both gameplay and cutscenes.",
                 Advanced = true,
                 AllowedTargetKinds = Kinds(TargetKinds.Accessory),
                 Outputs = new[] { One("/Game/Characters/Attachments/Hair/MI_Black", "gameplay only") },
@@ -258,8 +258,8 @@ internal sealed class MaterialTemplateCatalogService
                 Id = "accessory.metallic.armoured",
                 DisplayName = "Metallic plastic attachment",
                 Category = "Accessories",
-                Summary = "Simple attachment with the proven metallic material branch enabled.",
-                Guidance = "Generates the Batman Armoured Suit gameplay/cutscene pair. Supply maps authored for your mesh.",
+                Summary = "Simple attachment using the game's metallic material option.",
+                Guidance = "Creates the Batman Armoured Suit gameplay/cutscene pair. Supply maps made for your mesh.",
                 AllowedTargetKinds = Kinds(TargetKinds.Accessory),
                 Outputs = new[]
                 {
@@ -273,7 +273,7 @@ internal sealed class MaterialTemplateCatalogService
                 DisplayName = "Cloth cape (complete LOD set)",
                 Category = "Capes",
                 Summary = "The four distinct materials required by a normal cloth cape.",
-                Guidance = "LODK uses different controller families for LOD0 and LOD1 as well as gameplay/cutscene variants; this recipe keeps all four together.",
+                Guidance = "LOTDK uses different controller families for LOD0 and LOD1, plus gameplay and cutscene variants. This template keeps all four together.",
                 AllowedTargetKinds = Kinds(TargetKinds.Cape),
                 Outputs = new[]
                 {
@@ -288,7 +288,7 @@ internal sealed class MaterialTemplateCatalogService
                 Id = "cape.rubber.one-hole",
                 DisplayName = "Rubber cape / attachment",
                 Category = "Capes",
-                Summary = "A proven rubber material branch with native colour-tint behavior.",
+                Summary = "A tested rubber material with the game's colour-tint behaviour.",
                 Guidance = "Gameplay-only donor. Keep rubber separate from ordinary plastic and cloth.",
                 Advanced = true,
                 AllowedTargetKinds = Kinds(TargetKinds.Cape, TargetKinds.Accessory),
@@ -299,7 +299,7 @@ internal sealed class MaterialTemplateCatalogService
                 "Full ordinary LEGO face topology with brows, eyes, print layers, and mouth support.",
                 "/Game/Characters/Attachments/Face/FACE_BruceAdult/MI_FACE_BruceAdult", StandardFaceMesh),
             Face("face.standard.simple", "Simple regular face", "Standard faces",
-                "A lighter ordinary face donor with fewer authored layers.",
+                "A simpler regular face with fewer editable layers.",
                 "/Game/Characters/Attachments/Face/FACE_GenericMale/MI_FACE_GenericMale", StandardFaceMesh),
             Face("face.standard.no-eyes", "No-eyes / cowl face", "Standard faces",
                 "Batman face donor whose left and right eye zones are compiled off.",
@@ -310,8 +310,8 @@ internal sealed class MaterialTemplateCatalogService
                 Id = "face.standard.joker89-print-no-eyes",
                 DisplayName = "Joker ’89 lower-face print — no eyes",
                 Category = "Standard faces",
-                Summary = "Joker ’89 lower-face artwork on Batman's standard, natively eye-disabled face topology.",
-                Guidance = "This is the safe cowl workflow: clone MI_FACE_Batman_NoEyes so eye zones 04/05 remain compiled off, then replace only HeadLowerUnder BC/NML with Joker ’89 textures. Do not apply the exact Joker89 face MI to SK_LEGOface.",
+                Summary = "Joker ’89 lower-face artwork on Batman's standard face with the eye regions disabled.",
+                Guidance = "For a cowl with no visible eyes, copy MI_FACE_Batman_NoEyes, then replace only HeadLowerUnder BC/NML with the Joker ’89 textures. Do not apply the Joker89 face material directly to SK_LEGOface.",
                 IsFace = true,
                 AllowedTargetKinds = Kinds(TargetKinds.Face),
                 CompatibleMeshPackagePaths = Meshes(StandardFaceMesh),
@@ -323,19 +323,19 @@ internal sealed class MaterialTemplateCatalogService
                 },
             },
             Face("face.standard.lashes", "Face with lashes", "Standard faces",
-                "Standard face topology with proven eyelash layers.",
+                "Standard face with working eyelash layers.",
                 "/Game/Characters/Attachments/Face/FACE_Batgirl/MI_FACE_Batgirl", StandardFaceMesh),
             Face("face.standard.recolour-lashes", "Recolourable lashes face", "Standard faces",
-                "Standard face topology with authored lash and tint controls.",
+                "Standard face with lash and tint controls.",
                 "/Game/Characters/Attachments/Face/FACE_Catwoman/MI_FACE_Catwoman", StandardFaceMesh),
             Face("face.standard.glasses", "Glasses face", "Standard faces",
-                "Rich standard face donor with the proven glasses zone and supporting layers.",
+                "Standard face material with a working glasses zone and its supporting layers.",
                 "/Game/Characters/Attachments/Face/FACE_QueerEye90sGlasses/MI_FACE_QueerEye90sGlasses", StandardFaceMesh),
             Face("face.superhero.robin", "Superhero-mask face", "Special face rigs",
-                "Face material authored for the alternate superhero face mesh.",
+                "Face material for the alternate superhero face mesh.",
                 "/Game/Characters/Attachments/Face/FACE_Robin/MI_FACE_Robin", SuperheroFaceMesh),
             Face("face.superhero.nightwing", "Superhero-mask face (Nightwing)", "Special face rigs",
-                "Alternate proven superhero-mask topology with colour-mask support.",
+                "Alternate superhero-mask layout with Colour Mask support.",
                 "/Game/Characters/Attachments/Face/FACE_Nightwing/MI_FACE_Nightwing", SuperheroFaceMesh),
             Face("face.facetex.deathstroke", "FaceTex projected face", "Special face rigs",
                 "Projected FaceTex material for the dedicated FaceTex mesh family.",
@@ -345,22 +345,22 @@ internal sealed class MaterialTemplateCatalogService
                 "Exact donor for SK_LEGOface_Joker89; its visible eye behavior is not represented by normal standard-face eye parameters.",
                 "/Game/Characters/Attachments/Face/FACE_Joker_Batman89/MI_FACE_Joker_Batman89", Joker89FaceMesh,
                 advanced: true,
-                guidance: "Only use with SK_LEGOface_Joker89. For a Batman cowl/no-eyes face, use the dedicated Joker ’89 lower-face print — no eyes recipe instead."),
+                guidance: "Only use with SK_LEGOface_Joker89. For a Batman cowl or no-eyes face, use the Joker ’89 lower-face print — no eyes template instead."),
             Face("face.exact.joker-mime", "Exact Joker Mime face", "Special face rigs",
-                "Joker89-family variant with authored eye-back textures.",
+                "Joker89-family variant with eye-back textures.",
                 "/Game/Characters/Attachments/Face/FACE_Joker_Mime/MI_FACE_Joker_Mime", Joker89FaceMesh,
                 advanced: true),
             Face("face.exact.mr-freeze", "Exact Mr. Freeze face", "Special face rigs",
-                "Material authored for the dedicated Batman & Robin Mr. Freeze face mesh.",
+                "Material for the dedicated Batman & Robin Mr. Freeze face mesh.",
                 "/Game/Characters/Attachments/Face/FACE_MrFreeze_BatmanAndRobin/MI_FACE_MrFreeze_BaR", MrFreezeFaceMesh,
                 advanced: true),
             Face("face.blank.standard", "Blank standard face baseline", "Advanced face bases",
-                "Shipped standard LEGOface defaults; useful only when its already-compiled zones match the intended result.",
+                "Built-in LEGOface defaults; use only when its compiled zones match the result you need.",
                 "/Game/Characters/Materials/M_Masters/LEGOface/MI_LEGOface-Defaults", StandardFaceMesh,
                 advanced: true,
                 guidance: "Clone-only baseline. Batcomputer cannot enable an absent static face zone, so start from a feature-bearing donor for an expressive face."),
             Face("face.blank.superhero", "Blank superhero face baseline", "Advanced face bases",
-                "Shipped defaults for the superhero face mesh.",
+                "Built-in defaults for the superhero face mesh.",
                 "/Game/Characters/Materials/M_Masters/LEGOface/MI_LEGOface-Defaults_Superhero", SuperheroFaceMesh,
                 advanced: true),
 
@@ -381,7 +381,7 @@ internal sealed class MaterialTemplateCatalogService
                 DisplayName = "Translucent emissive overlay",
                 Category = "Special / advanced",
                 Summary = "Mr. Freeze translucent overlay donor with its compiled emissive/translucent path.",
-                Guidance = "Specialist clone only; use on an overlay mesh that was authored for translucent sorting.",
+                Guidance = "Specialist template; use it only on an overlay mesh designed for translucent sorting.",
                 Advanced = true,
                 AllowedTargetKinds = Kinds(TargetKinds.Accessory),
                 Outputs = new[] { One("/Game/Characters/Attachments/Hat/MrFreeze_BatmanAndRobin/MI_HAT_MrFreeze_TranslucentOverlay") },
@@ -392,7 +392,7 @@ internal sealed class MaterialTemplateCatalogService
                 DisplayName = "Chrome / gold body (cutscene only)",
                 Category = "Special / advanced",
                 Summary = "Gold-specific body donor with metallic and emissive cheats.",
-                Guidance = "This proven donor is cutscene-only and must not be used as the gameplay half of a normal body pair.",
+                Guidance = "This game material is cutscene-only and cannot be used as the gameplay half of a normal body pair.",
                 Advanced = true,
                 AllowedTargetKinds = Kinds(TargetKinds.Body),
                 Outputs = new[] { One("/Game/Characters/Minifig/Batman/Material/MI_Batman_ChromeGold20Anniversary_CUT", "cutscene only") },
@@ -404,7 +404,7 @@ internal sealed class MaterialTemplateCatalogService
                 "Black cowl eyes",
                 "/Game/Characters/Materials/MI_Instances/EoM/Controller/MI_Cowl_BlackEyes",
                 enabled: false,
-                disabledReason: "The shipped leaf MI has no authored texture, colour, or scalar overrides to edit. Use Hollow cowl eyes or Molded cowl eyes as an editable donor."),
+                disabledReason: "The built-in leaf material has no texture, colour, or scalar values to edit. Use Hollow cowl eyes or Molded cowl eyes as an editable starting point."),
         };
 
         static Recipe Face(
@@ -439,7 +439,7 @@ internal sealed class MaterialTemplateCatalogService
             Id = id,
             DisplayName = name,
             Category = "Cowl eyes",
-            Summary = "Small cowl-eye material with a proven authored eye treatment.",
+            Summary = "Small cowl-eye material with an editable eye treatment.",
             Guidance = "Advanced clone-only option for a cowl eye material slot; this is not a printed LEGO face material.",
             Advanced = true,
             Enabled = enabled,

@@ -1,7 +1,7 @@
 # Create your first suit
 
-This tutorial follows the normal release workflow and intentionally starts with shipped assets.
-Prove one simple suit in-game before adding custom textures or meshes.
+This tutorial starts with the game's existing assets. Test one simple suit in-game before adding
+custom textures or meshes.
 
 ## 1. Create the mod
 
@@ -11,8 +11,8 @@ From **Home**, create a mod and set:
 - **Mod ID:** a stable technical identifier with no spaces.
 - **Description:** a short summary of the collection.
 
-The mod is the packaging unit. One mod can contain one suit or many suits, and shared resources such
-as its StringTable are generated once for the collection.
+A mod can contain one suit or many suits. Shared files such as its StringTable are generated once
+for the whole mod.
 
 !!! danger "Do not casually rename a published Mod ID"
     The Mod ID controls pak, registry, StringTable, runtime-manifest, and install paths. Batcomputer
@@ -42,16 +42,17 @@ For the first test, choose a playable donor close to the character family you ar
 Use the left navigation:
 
 - **Parts** — graft compatible hair, hats, capes, torsos, accessories, and other indexed components.
-- **Materials** — clone donor-backed material instances and apply them to mesh slots.
+- **Materials** — copy working game materials and apply them to mesh slots.
 - **Faces** — choose only recipes compatible with the selected face mesh family.
 - **Textures** — import and cook body maps, masks, and UI icons.
-- **Equipment / Gliders / Animations** — apply supported donor data, then verify behavior in-game.
+- **Equipment / Gliders / Animations** — apply compatible data from another character, then test it
+  in-game.
 
 The right inspector shows the playable and cutscene component trees and their material slots.
 
 ## 5. Set identity and icons
 
-Open the suit's native identity and review:
+Open **Native identity** and review:
 
 - The unique PawnTag.
 - The character family represented by the tag.
@@ -64,22 +65,22 @@ Use unique PawnTags and package paths. Duplicate identities are blocked by relea
 ## 6. Inspect in 3D
 
 Open **3D viewer** and check the assembled body, face, materials, and attachments. The viewer is a
-close authoring preview, not the game's renderer.
+close preview, not the game's renderer.
 
 For custom static meshes, transform edits save to the project and **Bake to game** rebuilds the
-generated mesh. Ordinary shipped-part placement controls remain preview-side calibration.
+generated mesh. Placement controls for normal game parts affect only the preview.
 
-## 7. Validate and build
+## 7. Check and build
 
 Return to the mod's Home page:
 
-1. Choose **Validate release**.
+1. Choose **Check mod**.
 2. Resolve every error. Read warnings instead of dismissing them automatically.
 3. Close the game and tools that may hold output files open.
 4. Choose **Build mod**.
 
-A successful build creates the cooked release and installs that exact build for local testing. A
-failed build does not silently install an older trio.
+A successful build creates the cooked release and installs it for local testing. A failed build
+does not install an older trio in its place.
 
 ## 8. Cold-launch test
 

@@ -78,7 +78,7 @@ public sealed class FirstRunWizard : Form
             new()
             {
                 Title = "Game Content\\Paks folder",
-                Blurb = "Select the game's Content\\Paks folder. Batcomputer reads it during the one-click asset refresh; it never modifies the shipped game containers.",
+                Blurb = "Select the game's Content\\Paks folder. Batcomputer reads it during asset extraction and never changes the original game files.",
                 Hint = "…\\LEGO Batman - Legacy of the Dark Knight\\LEGOBatmanLotDK\\Content\\Paks",
                 IsFile = false,
                 Get = s => s.GamePaksRoot,
@@ -97,7 +97,7 @@ public sealed class FirstRunWizard : Form
             new()
             {
                 Title = "Unreal Engine 5.6 (optional for now)",
-                Blurb = "Mod authors need UE 5.6 when Batcomputer writes a startup Asset Registry. Players do not need Unreal. You may skip this while browsing assets, but a complete native mod build requires it.",
+                Blurb = "Unreal Engine 5.6 is required when Batcomputer creates Asset Registry data. Players do not need Unreal. You can skip this while browsing assets, but you need it to build a mod.",
                 Hint = "Usually C:\\Program Files\\Epic Games\\UE_5.6",
                 Optional = true,
                 IsFile = false,

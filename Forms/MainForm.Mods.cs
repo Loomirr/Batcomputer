@@ -325,7 +325,7 @@ public sealed partial class MainForm
                 tiles.Add(new VirtualTilePanel.Tile
                 {
                     Section = SectionRelease,
-                    Title = "Validate release",
+                    Title = "Check mod",
                     Subtitle = "check identities, assets, textures, and registry rows",
                     Accent = Theme.Good,
                     OnClick = () => ValidateModReleaseFromWorkspace(modPath),
@@ -357,7 +357,7 @@ public sealed partial class MainForm
                 {
                     Section = SectionRelease,
                     Title = $"Zip {TrimMiddle(activeSummary.DisplayName, 20)}",
-                    Subtitle = "create a player-ready mod archive",
+                    Subtitle = "create an installable ZIP",
                     Accent = Theme.Info,
                     OnClick = () => CreateModReleaseZip(modPath),
                 });
@@ -812,16 +812,16 @@ public sealed partial class MainForm
             result.CoreRegistryDestination = LotdkExpandedLayout.CoreRegistryPluginDirectory(gameRoot);
             if (!LotdkExpandedLayout.IsCoreMod(mod.ModId))
             {
-                ModReleaseStep("Checking the LOTDK Expanded core dependency…");
+                ModReleaseStep("Checking the shared registry files…");
                 coreRegistryReady = LotdkExpandedLayout.HasInstalledCoreRegistry(gameRoot);
                 if (!coreRegistryReady)
                 {
                     result.Status = ModInstallStatus.Failed;
-                    result.Detail = "LOTDK Expanded is not installed. Install the LOTDK Expanded core before installing this add-on.";
-                    AppendLog("Install mod stopped before copying files: the LOTDK Expanded core dependency is missing.");
+                    result.Detail = "The shared registry files are missing. Reinstall Loomirr's LOTDK UE4SS before installing this mod.";
+                    AppendLog("Install mod stopped before copying files: the shared registry files from Loomirr's LOTDK UE4SS are missing.");
                     return result;
                 }
-                AppendLog($"  LOTDK Expanded core dependency found -> {result.CoreRegistryDestination}");
+                AppendLog($"  shared registry found -> {result.CoreRegistryDestination}");
             }
             result.TrioDestination = LotdkExpandedLayout.ExpandedPaksRoot(gameRoot);
             var slotDest = result.TrioDestination;
@@ -945,7 +945,7 @@ public sealed partial class MainForm
                 : !string.IsNullOrWhiteSpace(previousIdCleanupError)
                     ? "The new release was installed, but Batcomputer could not remove every previous-ID file. Close the game and install again.\n\n" + previousIdCleanupError
                     : !coreRegistryReady
-                        ? "This add-on was copied, but LOTDK Expanded is not installed. Install the LOTDK Expanded core first, then install this mod again."
+                        ? "This mod was copied, but the shared registry files are missing. Reinstall Loomirr's LOTDK UE4SS, then install this mod again."
                         : "Some expected release files were missing, so this install may be incomplete. Check Diagnostics before testing.";
             AppendLog($"Installed mod '{mod.DisplayName}' - {installed} file(s). Restart the game to load it.");
             return result;
@@ -1053,7 +1053,7 @@ public sealed partial class MainForm
     }
 
     /// <summary>
-    /// Writes a player-ready archive using the same paths as <see cref="InstallModCore"/>.
+    /// Writes an installable ZIP using the same paths as <see cref="InstallModCore"/>.
     /// The archive starts one directory above LEGOBatmanLotDK, so extracting it directly into
     /// Steam's common directory preserves the game's intended layout.
     /// </summary>
@@ -1160,7 +1160,7 @@ public sealed partial class MainForm
             File.Move(temporaryZipPath, zipPath, overwrite: true);
 
             var sizeMb = new FileInfo(zipPath).Length / 1024d / 1024d;
-            AppendLog($"Created player-ready release archive: {zipPath} ({sizeMb:0.0} MB, {files.Count} files).");
+            AppendLog($"Created release ZIP: {zipPath} ({sizeMb:0.0} MB, {files.Count} files).");
             Dialog.Show(this, new Dialog.Model
             {
                 WindowTitle = "Batcomputer - Mod release archive",
@@ -1168,13 +1168,13 @@ public sealed partial class MainForm
                 Subtitle = mod.DisplayName,
                 Message = LotdkExpandedLayout.IsCoreMod(mod.ModId)
                     ? "Extract this archive into your Steam common folder. Its game-relative paths are already arranged for installation."
-                    : "Install LOTDK Expanded first, then extract this add-on into your Steam common folder. Its game-relative paths are already arranged for installation.",
+                    : "Install Loomirr's LOTDK UE4SS first, then extract this mod into your Steam common folder. Its folders are already arranged for installation.",
                 Severity = Dialog.Level.Good,
                 PrimaryText = "Done",
                 CalloutTitle = "Ready to share",
                 CalloutDetail = LotdkExpandedLayout.IsCoreMod(mod.ModId)
-                    ? $"{files.Count} release file{(files.Count == 1 ? "" : "s")} packaged, including the shared registry core. The archive contains no authoring projects or generated previews."
-                    : $"{files.Count} add-on file{(files.Count == 1 ? "" : "s")} packaged. The shared registry core is intentionally omitted and supplied by LOTDK Expanded.",
+                    ? $"{files.Count} release file{(files.Count == 1 ? "" : "s")} packaged, including the shared registry core. Project files and generated previews are not included."
+                    : $"{files.Count} mod file{(files.Count == 1 ? "" : "s")} packaged. Loomirr's LOTDK UE4SS supplies the shared registry core.",
                 Fields = new List<(string Label, string Value)>
                 {
                     ("Archive", zipPath),
@@ -1279,7 +1279,7 @@ public sealed partial class MainForm
         NativeSuitModProject mod,
         IReadOnlyList<ModSuitEntry> enabled)
     {
-        ModReleaseStep("Running release preflight…");
+        ModReleaseStep("Checking the mod before building…");
         var suits = new SuitProjectService(_projectRootText.Text.Trim());
         var inputs = new List<ModReleaseValidationService.SuitInput>();
         foreach (var entry in enabled)
@@ -1303,7 +1303,7 @@ public sealed partial class MainForm
             AppSettings.Current.EffectiveExportContentRoot(),
             AppSettings.GeneratedRootFor(_projectRootText.Text.Trim()),
             EffectiveGameContentPacksFolder());
-        AppendLog($"Release preflight: {(result.Passed ? "passed" : "blocked")} ({result.ErrorCount} error(s), {result.WarningCount} warning(s)).");
+        AppendLog($"Build check: {(result.Passed ? "passed" : "failed")} ({result.ErrorCount} error(s), {result.WarningCount} warning(s)).");
         foreach (var finding in result.Findings.Where(f => !f.Severity.Equals("INFO", StringComparison.OrdinalIgnoreCase)))
         {
             var suit = string.IsNullOrWhiteSpace(finding.SuitId) ? "" : $" [{finding.SuitId}]";
@@ -1317,7 +1317,7 @@ public sealed partial class MainForm
         var mod = ModService.LoadMod(modProjectPath);
         if (mod is null)
         {
-            Dialog.Error(this, "Validate release", "The selected mod could not be loaded.");
+            Dialog.Error(this, "Build check", "The selected mod could not be loaded.");
             return;
         }
         ModProjectService.ApplyDerivedFields(mod);
@@ -1493,7 +1493,7 @@ public sealed partial class MainForm
         if (!preflight.Result.Passed)
         {
             _lastModReleaseFailure = new ModReleaseFailure(mod.DisplayName, preflight.Result);
-            AppendLog("Build mod ABORTED: release preflight found blockers.");
+            AppendLog("Build stopped: fix the errors reported by the build check.");
             return false;
         }
 

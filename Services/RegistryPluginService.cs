@@ -9,7 +9,7 @@ namespace Batcomputer;
 /// Produces the small, cooked AssetRegistry plugin that tells the game about an
 /// enabled mod's primary assets during startup. The actual binary is deliberately
 /// written by the verified UE 5.6 commandlet; Batcomputer owns layout,
-/// invocation, and the release-facing verification contract.
+/// invocation, and release validation.
 /// </summary>
 public sealed class RegistryPluginService
 {
@@ -283,7 +283,7 @@ public sealed class RegistryPluginService
         {
             // Only the official LOTDK Expanded project owns and distributes the
             // global /Game/Mods scan extension. Add-on authors ship their own
-            // rows and tags, and require LOTDK Expanded at install time.
+            // rows and tags, and require the shared registry from Loomirr's LOTDK UE4SS.
             if (LotdkExpandedLayout.IsCoreMod(modId))
             {
                 EnsureCorePlugin(buildRoot);

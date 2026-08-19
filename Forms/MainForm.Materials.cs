@@ -685,7 +685,7 @@ public sealed partial class MainForm
         }
 
         var removed = DeleteGeneratedMaterialFiles(oldPackage);
-        AppendLog($"Renamed material {UnrealPathUtil.AssetName(oldPackage)} to {UnrealPathUtil.AssetName(newPackage)}; updated {reassigned} assignment(s) and {registryUpdated} authored-material record(s), removed {removed} old file(s).");
+        AppendLog($"Renamed material {UnrealPathUtil.AssetName(oldPackage)} to {UnrealPathUtil.AssetName(newPackage)}; updated {reassigned} assignment(s) and {registryUpdated} saved material record(s), removed {removed} old file(s).");
         RefreshInspector();
     }
 
@@ -738,7 +738,7 @@ public sealed partial class MainForm
         }
 
         RecordChange("Materials", UnrealPathUtil.AssetName(package), "deleted", status: "deleted");
-        AppendLog($"Deleted material {package}; removed {removedAssignments} assignment(s), {removedRegistryEntries} authored-material record(s), and {removedFiles} file(s).");
+        AppendLog($"Deleted material {package}; removed {removedAssignments} assignment(s), {removedRegistryEntries} saved material record(s), and {removedFiles} file(s).");
         RefreshInspector();
         RefreshToyboxTiles();
     }

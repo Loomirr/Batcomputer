@@ -2,20 +2,20 @@
 
 ## Supported in the beta
 
-- Native suit-menu discovery through the plugin loading provided by Loomirr's LOTDK UE4SS.
+- Suit-menu discovery through the plugin loading provided by Loomirr's LOTDK UE4SS.
 - Multiple suits in one mod and multiple independently installed suit mods.
 - Batman and other character families when the suit uses an appropriate playable donor and unique
   identity.
-- Shipped playable/cutscene visual bases and indexed character parts.
-- Donor-backed material and face workflows.
+- Built-in playable and cutscene visual bases, plus indexed character parts.
+- Game-material templates and face tools.
 - Character, mask, normal/packed, and verified UI texture cooking.
 - Supported equipment, glider, and animation-data grafting.
 - Custom OBJ static-mesh attachments.
-- Direct install, validation, and player-ready release ZIPs.
+- Direct installation, build checks, and installable ZIPs.
 
 ## Not supported yet
 
-- Custom Red Brick authoring. Only read-only previews of shipped palettes remain in the viewer.
+- Custom Red Brick creation. The viewer only previews the game's existing colour options.
 - Custom skeletal-mesh cooking or skeleton transfer.
 - Arbitrary new gameplay powers or code-driven character mechanics.
 - Physical collectible placement in levels.

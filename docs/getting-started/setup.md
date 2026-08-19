@@ -29,12 +29,12 @@ Select:
 ...\LEGOBatmanLotDK\Content\Paks
 ```
 
-The extraction pipeline reads the shipped top-level containers. It ignores nested `~mods` content
+The extraction reads the game's original top-level containers. It ignores nested `~mods` content
 so installed mods cannot contaminate the base-game donor index.
 
 ## 4. Extracted game Content
 
-If you already have a current complete Content dump, select it. Otherwise leave the field blank and
+If you already have a current Content extraction, select it. Otherwise leave the field blank and
 accept the full extraction offered at the end of setup.
 
 The normal extraction includes character, shared animation, localization, and supporting metadata.
@@ -45,7 +45,7 @@ It uses roughly 18 GB and can take several minutes.
 Select the UE 5.6 installation root. Batcomputer prepares its bundled registry-writer project and
 reuses the verified result until its source or the configured engine changes.
 
-You can skip UE while browsing and assembling, but a complete native release build needs it.
+You can skip UE while browsing and assembling, but you need it to build a mod.
 
 ## 6. Oodle runtime
 

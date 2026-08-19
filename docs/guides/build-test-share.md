@@ -1,8 +1,8 @@
 # Build, test, and share
 
-## Validate first
+## Run the build check
 
-Open the mod and choose **Validate release**. Errors block packaging; warnings identify content that
+Open the mod and choose **Check mod**. Errors block packaging; warnings identify content that
 needs review but may still be intentional.
 
 Typical blockers include:
@@ -24,12 +24,12 @@ Close the game before building. **Build mod**:
 2. Validates the staged cooked data.
 3. Writes gameplay tags and native Asset Registry data.
 4. Builds the pak/ucas/utoc trio.
-5. Installs that exact successful release into the configured game.
+5. Installs the completed build into the configured game.
 
 Restart the game after each new installation. Unreal discovers tags, registry rows, and primary
 assets during startup.
 
-![Successful release preflight](../assets/screenshots/release-preflight-passed.jpg){ .bc-doc-shot loading=lazy }
+![Successful build check](../assets/screenshots/release-preflight-passed.jpg){ .bc-doc-shot loading=lazy }
 
 ## Test matrix
 
@@ -44,18 +44,18 @@ Test at least:
 | Persistence | Back out to frontend, reload gameplay, then fully restart the game. |
 | Compatibility | Test beside at least one other custom suit mod using Loomirr's LOTDK UE4SS. |
 
-## Create the player ZIP
+## Create the ZIP
 
 Use Batcomputer's release ZIP action after a successful build. The archive uses game-relative paths
 and starts above `LEGOBatmanLotDK`, so users can extract it into their Steam `common` directory or
 install it with a compatible mod manager.
 
-Third-party suit releases require Loomirr's LOTDK UE4SS. They must not include or overwrite the shared
-`LOTDKExpandedCoreRegistry`; only the official core mod owns it.
+Suit releases require Loomirr's LOTDK UE4SS. They must not include or overwrite its shared
+`LOTDKExpandedCoreRegistry`.
 
 ## Before publishing
 
-- Keep your authoring project and source textures/OBJ files backed up.
+- Back up your project and source textures or OBJ files.
 - Confirm the Mod ID is final.
 - Include Loomirr's LOTDK UE4SS and the compatible game build in requirements.
 - State that the release contains no Batcomputer, UE, mappings, or extracted game files.

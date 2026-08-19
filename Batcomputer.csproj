@@ -43,7 +43,7 @@
     <Compile Remove="Generated\**\*.cs" />
     <!-- Embed app art in the single-file release. -->
     <EmbeddedResource Include="Assets\**\*.png" />
-    <!-- Red Brick authoring is intentionally out of scope; only the code-driven, read-only
+    <!-- Red Brick creation is out of scope; only the code-driven, read-only
          base-game palette selector remains in the 3D viewer. -->
     <EmbeddedResource Remove="Assets\RedBricks.png" />
     <EmbeddedResource Include="Assets\**\*.gif" />
@@ -82,7 +82,7 @@
           CopyToPublishDirectory="PreserveNewest"
           ExcludeFromSingleFile="true"
           TargetPath="licenses\D-DIN-SIL-OFL-1.1.txt" />
-    <!-- Bundle author-tool source and config, not Unreal build outputs. -->
+    <!-- Bundle the helper source and config, not Unreal build outputs. -->
     <None Remove="Tools\BatcomputerRegistryWriter\Binaries\**\*;Tools\BatcomputerRegistryWriter\DerivedDataCache\**\*;Tools\BatcomputerRegistryWriter\Intermediate\**\*;Tools\BatcomputerRegistryWriter\Saved\**\*" />
     <Content Remove="Tools\BatcomputerRegistryWriter\Binaries\**\*;Tools\BatcomputerRegistryWriter\DerivedDataCache\**\*;Tools\BatcomputerRegistryWriter\Intermediate\**\*;Tools\BatcomputerRegistryWriter\Saved\**\*" />
     <None Update="Tools\README.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />

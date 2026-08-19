@@ -1,14 +1,15 @@
 # Batcomputer
 
-Batcomputer is a Windows authoring tool for creating native playable suit mods for
-*LEGO Batman: Legacy of the Dark Knight*. It uses assets extracted from your own game, builds the
-metadata the game expects, and produces a player-ready release for Loomirr's LOTDK UE4SS.
+Batcomputer is a Windows tool for creating playable suit mods for
+*LEGO Batman: Legacy of the Dark Knight*. It uses assets extracted from your own game, creates the
+metadata the game needs, and packages the finished mod for Loomirr's LOTDK UE4SS.
 
 ![Batcomputer's mod workspace](assets/screenshots/home-mods.jpg){ .bc-doc-shot loading=lazy }
 
 !!! info "Public beta"
-    The current build is **0.9.0-beta.1**. The core suit workflow is working in-game, but this is the
-    first broad author release. Keep source projects and report repeatable problems with diagnostics.
+    The current build is **0.9.0-beta.1**. Suit creation and packaging work in-game, but this is the
+    first public beta. Back up your projects, and include copied diagnostics when reporting a
+    repeatable problem.
 
 ## Start here
 
@@ -18,7 +19,7 @@ metadata the game expects, and produces a player-ready release for Loomirr's LOT
 
     ---
 
-    Unpack the portable build and learn which author-side dependencies are required.
+    Unpack the portable build and check what you need before making a mod.
 
     [Installation guide](getting-started/install.md)
 
@@ -50,24 +51,24 @@ metadata the game expects, and produces a player-ready release for Loomirr's LOT
 
 ## What Batcomputer builds
 
-- Playable and cutscene character Blueprints based on shipped donors.
-- Grafted character parts, materials, textures, equipment, gliders, and supported animation data.
+- Playable and cutscene character Blueprints based on game characters.
+- Character parts, materials, textures, equipment, gliders, and compatible animation data.
 - Custom static-mesh attachments imported from OBJ files.
-- Native PawnTag, DCMD, UIMD, StringTable, gameplay-tag configuration, and Asset Registry data.
-- One or more suits grouped into a single distributable mod.
-- A direct local test installation and a player-ready ZIP.
+- PawnTag, DCMD, UIMD, StringTable, gameplay-tag configuration, and Asset Registry data.
+- One or more suits in a single mod.
+- A local test installation and an installable ZIP.
 
-## What it does not ship
+## What it does not include
 
 Batcomputer does not include game files, extracted assets, mappings, the proprietary Oodle runtime,
-Unreal Engine, or Loomirr's LOTDK UE4SS. Authors provide those local dependencies from legitimate
-installs; players only need Loomirr's LOTDK UE4SS and the finished mod.
+Unreal Engine, or Loomirr's LOTDK UE4SS. You provide those files from your own installations;
+players only need Loomirr's LOTDK UE4SS and the finished mod.
 
-## The normal workflow
+## Basic steps
 
 ```text
 Install → Set up → Extract/index → Create mod → Add suit → Customize
-        → Validate → Build/install → Cold-launch test → Create release ZIP
+        → Check → Build/install → Cold-launch test → Create release ZIP
 ```
 
 Continue with [Requirements](getting-started/requirements.md).

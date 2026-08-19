@@ -450,7 +450,7 @@ public sealed partial class MainForm
             Padding = new Padding(8, 8, 8, 0),
             ForeColor = Theme.OnDarkMuted,
             Text = report.Found
-                ? $"Materials on the {role} character. Select a slot and click “Edit slot” to jump to it in the Materials workflow, then drag a material onto it."
+                ? $"Materials on the {role} character. Select a slot and click “Edit slot” to open it under Materials, then drag a material onto it."
                 : (report.Message ?? "No staged content to inspect.")
         };
 
@@ -514,7 +514,7 @@ public sealed partial class MainForm
             var (component, slot) = target;
             SelectComboValue(_toyboxCategoryCombo, "Materials");
             SelectToyboxSlot(FriendlySlotLabel(component, slot), component, slot);
-            AppendLog($"Editing {role} material — selected {component} slot {slot}. Drag or generate a material onto it in the Materials workflow.");
+            AppendLog($"Editing {role} material — selected {component} slot {slot}. Drag or create a material for it under Materials.");
             dlg.Close();
         }
 

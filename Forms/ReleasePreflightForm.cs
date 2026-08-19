@@ -11,7 +11,7 @@ public sealed class ReleasePreflightForm : Form
 
     private ReleasePreflightForm(string modName, ModReleaseValidationService.Result result)
     {
-        Text = "Batcomputer - Release preflight";
+        Text = "Batcomputer - Build check";
         AutoScaleMode = AutoScaleMode.Dpi;
         FormBorderStyle = FormBorderStyle.Sizable;
         StartPosition = FormStartPosition.CenterParent;
@@ -64,7 +64,7 @@ public sealed class ReleasePreflightForm : Form
             Top = 17,
             Width = WidthPx - 50,
             Height = 24,
-            Text = passed ? "Release preflight passed" : "Release preflight blocked",
+            Text = passed ? "Build check passed" : "Build check found errors",
             Font = AppFonts.Condensed(12f, FontStyle.Bold),
             ForeColor = Theme.OnDark,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
@@ -91,8 +91,12 @@ public sealed class ReleasePreflightForm : Form
             WrapContents = false,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
         };
-        chips.Controls.Add(MakeChip($"{result.ErrorCount} errors", result.ErrorCount == 0 ? Theme.Good : Theme.Crit));
-        chips.Controls.Add(MakeChip($"{result.WarningCount} warnings", result.WarningCount == 0 ? Theme.Good : Theme.Warn));
+        chips.Controls.Add(MakeChip(
+            $"{result.ErrorCount} {(result.ErrorCount == 1 ? "error" : "errors")}",
+            result.ErrorCount == 0 ? Theme.Good : Theme.Crit));
+        chips.Controls.Add(MakeChip(
+            $"{result.WarningCount} {(result.WarningCount == 1 ? "warning" : "warnings")}",
+            result.WarningCount == 0 ? Theme.Good : Theme.Warn));
         header.Controls.Add(chips);
 
         var summary = new RoundedPanel
@@ -110,7 +114,7 @@ public sealed class ReleasePreflightForm : Form
             Top = 10,
             Width = WidthPx - 68,
             Height = 19,
-            Text = passed ? "Ready to build" : "Build remains blocked",
+            Text = passed ? "Ready to build" : "Build is blocked",
             Font = Theme.BodyStrong,
             ForeColor = Theme.OnDark,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
@@ -123,9 +127,9 @@ public sealed class ReleasePreflightForm : Form
             Height = 18,
             Text = passed
                 ? result.WarningCount == 0
-                    ? "No release concerns found."
+                    ? "No issues found."
                     : "Warnings do not stop the build, but they are listed below for review."
-                : "Resolve every error below, then validate again.",
+                : "Resolve every error below, then run the check again.",
             Font = Theme.Caption,
             ForeColor = Theme.OnDarkMuted,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
@@ -162,7 +166,7 @@ public sealed class ReleasePreflightForm : Form
         if (ordered.Count == 0)
         {
             ordered.Add(new ModReleaseValidationService.Finding(
-                "INFO", "release", "No issues found. This mod is ready for its staged build."));
+                "INFO", "build", "No issues found. This mod is ready to build."));
         }
 
         var lastFindingsWidth = -1;

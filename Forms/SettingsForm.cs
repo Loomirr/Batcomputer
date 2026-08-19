@@ -232,7 +232,7 @@ public sealed partial class SettingsForm : Form
             AutoSize = false, Left = RowLabelX, Top = 16, Width = 690, Height = firstRun ? 40 : 22,
             ForeColor = Theme.OnDarkMuted, Font = Theme.Caption,
             Text = firstRun
-                ? "First-time setup: Batcomputer has already found its bundled packaging helper. Select your .usmap and game Content\\Paks folder; the tool can create the required character-asset dump for you. Unreal Engine 5.6 and its Oodle runtime are authoring dependencies that may be configured now or later."
+                ? "First-time setup: Batcomputer has already found its packaging helper. Select your .usmap and game Content\\Paks folder; Batcomputer can extract the character assets it needs. You can set the Unreal Engine 5.6 and Oodle paths now or later."
                 : "Tool & game paths."
         };
         panel.Controls.Add(intro);

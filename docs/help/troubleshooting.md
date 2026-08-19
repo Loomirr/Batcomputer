@@ -16,7 +16,7 @@ a real `Characters` folder. Check:
 ## Extraction fails or indexes are empty
 
 - Ensure roughly 18 GB is free at the extraction destination.
-- Select the shipped game `Content\Paks` folder, not `~mods`.
+- Select the game's original `Content\Paks` folder, not `~mods`.
 - Close FModel or other tools reading the same output.
 - Run the full character refresh again after a game update.
 - Confirm the final log reports parsed assets with zero errors before trusting the indexes.
@@ -26,10 +26,10 @@ a real `Characters` folder. Check:
 - Install or repair Microsoft Edge WebView2 Runtime.
 - Confirm mappings and the game Paks path are current.
 - Refresh extracted game assets.
-- Try another shipped playable to distinguish a project problem from renderer startup.
+- Try another built-in playable to separate a project problem from a viewer problem.
 - Copy diagnostics, including texture decode or GLB generation lines.
 
-The viewer is an authoring approximation. A material can look somewhat different under the game's
+The viewer is an approximation. A material can look somewhat different under the game's
 lighting without being broken.
 
 ## A generated material does not appear
@@ -62,14 +62,14 @@ to test in-game.
 1. Fully restart the game.
 2. Confirm Loomirr's LOTDK UE4SS and the mod's registry plugin loaded.
 3. Confirm the generated tag INI is under the game's `Config\Tags` folder.
-4. Check release preflight for duplicate PawnTag, suit ID, or DCMD package paths.
+4. Check the build results for a duplicate PawnTag, suit ID, or DCMD package path.
 5. Confirm the intended character family is encoded in the PawnTag.
 6. Rebuild from current post-update donors.
 
 ## Access denied while building or installing
 
 Close the game, FModel, UAssetGUI, Explorer preview panes, and any previous Batcomputer instance that
-may hold output files open. Then rebuild. Avoid authoring directly under `Program Files`.
+may hold output files open. Then rebuild. Do not keep your Batcomputer workspace under `Program Files`.
 
 ## The game crashes
 

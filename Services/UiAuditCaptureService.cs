@@ -109,7 +109,7 @@ internal static class UiAuditCaptureService
                 {
                     WindowTitle = "Batcomputer - Release warning",
                     Title = "A long warning remains readable",
-                    Message = "This deliberately long message checks wrapping, scrolling, action placement, and the maximum-height behavior used by release diagnostics.",
+                    Message = "This long message checks wrapping, scrolling, action placement, and the maximum-height behavior used by release diagnostics.",
                     Severity = Dialog.Level.Warn,
                     PrimaryText = "Continue anyway",
                     SecondaryText = "Go back",
@@ -159,13 +159,13 @@ internal static class UiAuditCaptureService
 
             var passed = new ModReleaseValidationService.Result();
             passed.AddWarning("texture", "A representative non-blocking warning with enough text to exercise wrapping.", "batman_ui_audit");
-            CaptureCase("Release preflight - passed", () => ReleasePreflightForm.CreateForUiAudit("UI Audit Mod", passed), 150,
+            CaptureCase("Build check - passed", () => ReleasePreflightForm.CreateForUiAudit("UI Audit Mod", passed), 150,
                 outputRoot, captures, findings, capturedFormTypes);
 
             var blocked = new ModReleaseValidationService.Result();
             blocked.AddError("registry", "The native registry writer could not find a representative generated asset.", "batman_ui_audit");
             blocked.AddWarning("texture", "A legacy texture has incomplete recorded dimensions or pixel format.", "batman_ui_audit");
-            CaptureCase("Release preflight - blocked", () => ReleasePreflightForm.CreateForUiAudit("UI Audit Mod", blocked), 150,
+            CaptureCase("Build check - errors", () => ReleasePreflightForm.CreateForUiAudit("UI Audit Mod", blocked), 150,
                 outputRoot, captures, findings, capturedFormTypes);
 
             CaptureProgressDialog(outputRoot, captures, findings, capturedFormTypes);

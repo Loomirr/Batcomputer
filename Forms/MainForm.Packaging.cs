@@ -294,7 +294,7 @@ public sealed partial class MainForm
 
             AppendLog(count == 0
                 ? $"No .pak/.ucas/.utoc found in {ioStoreDir}."
-                : $"Installed {count} file(s) to {dest}. Build Mod to install the LOTDK Expanded manifest and registry plugin.");
+                : $"Installed {count} file(s) to {dest}. Use Build Mod to install the mod manifest and registry plugin.");
         }
         catch (Exception ex)
         {
@@ -471,12 +471,12 @@ public sealed partial class MainForm
 
         var runtimeJsonPath = StageRuntimeV2SuitJson(_currentProject, buildId);
         AppendLog($"Runtime V2 suit JSON: {runtimeJsonPath}");
-        _packageProgress?.Report("Running preflight checks…");
+        _packageProgress?.Report("Checking the package…");
         if (!RunV2PackagePreflight(_currentProject, contentRootToPackage, runtimeJsonPath, logHeader: true,
                 out var preflightErrors, out var preflightWarnings))
         {
-            AppendLog("V2 preflight failed; package aborted before retoc.");
-            _packageProgress?.Report("Preflight failed — package aborted.");
+            AppendLog("Package check failed; nothing was sent to retoc.");
+            _packageProgress?.Report("Package check failed.");
             return;
         }
         _packageProgress?.Report($"Building IoStore trio ({packageBaseName})…");
@@ -752,7 +752,7 @@ public sealed partial class MainForm
         StageGeneratedMaterialsIntoContentRoot(_currentProject, contentRoot);
         if (!StageGeneratedTexturesIntoContentRoot(_currentProject, contentRoot, out var textureStageError))
         {
-            AppendLog("V2 package preflight blocked: " + textureStageError);
+            AppendLog("Package check failed: " + textureStageError);
             return;
         }
         StageGeneratedDcmdIntoContentRoot(_currentProject, contentRoot);
@@ -773,7 +773,7 @@ public sealed partial class MainForm
 
         if (logHeader)
         {
-            AppendLog("Running V2 package preflight…");
+            AppendLog("Checking the package…");
         }
 
         if (string.IsNullOrWhiteSpace(project.SlotId))
@@ -940,8 +940,8 @@ public sealed partial class MainForm
         }
 
         AppendLog(errors.Count == 0
-            ? $"V2 preflight passed ({warnings.Count} warning(s))."
-            : $"V2 preflight failed ({errors.Count} error(s), {warnings.Count} warning(s)).");
+            ? $"Package check passed ({warnings.Count} warning(s))."
+            : $"Package check failed ({errors.Count} error(s), {warnings.Count} warning(s)).");
 
         return errors.Count == 0;
     }
@@ -1093,7 +1093,7 @@ public sealed partial class MainForm
                 progressTag: project.ProgressTag,
                 donor: metadataDonor);
 
-        AppendLog($"DCMD generate: {result.Status} (PawnTag -> {pawnTag}, shipped beside BP assets at {dcmdPkg})");
+        AppendLog($"DCMD generate: {result.Status} (PawnTag -> {pawnTag}, written beside BP assets at {dcmdPkg})");
         if (!string.IsNullOrWhiteSpace(result.Error))
         {
             AppendLog("  " + result.Error);
@@ -1244,7 +1244,7 @@ public sealed partial class MainForm
                 string.IsNullOrWhiteSpace(project.DisplayName) ? project.SlotId : project.DisplayName,
                 declared, errors, warnings);
             AppendLog($"Build manifest: {manifestPath}");
-            AppendLog($"  build_id {manifest.BuildId} · {manifest.ShippedPackages.Count} shipped package(s) · {manifest.TrioFiles.Count} trio file(s) · {warnings.Count} warning(s)");
+            AppendLog($"  build_id {manifest.BuildId} · {manifest.ShippedPackages.Count} included package(s) · {manifest.TrioFiles.Count} trio file(s) · {warnings.Count} warning(s)");
             ShowPackageSuccessDialog(manifest, ioStoreDir);
         }
         catch (Exception ex)
@@ -1309,7 +1309,7 @@ public sealed partial class MainForm
             Text =
                 $"Build ID:  {manifest.BuildId}\n" +
                 $"Game build:  {manifest.GameBuild}\n" +
-                $"Shipped packages:  {manifest.ShippedPackages.Count}\n" +
+                $"Included packages: {manifest.ShippedPackages.Count}\n" +
                 $"Warnings:  {manifest.Validation.GetValueOrDefault("warnings")?.Count ?? 0}   ·   Errors:  {manifest.Validation.GetValueOrDefault("errors")?.Count ?? 0}\n\n" +
                 "Output trio:\n" + trioText + "\n\n" +
                 $"Location:\n   {ioStoreDir}\n\n" +

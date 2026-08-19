@@ -20,7 +20,7 @@ Batcomputer/
   Tools/
 ```
 
-## Persistent author data
+## Files to back up
 
 Back up:
 
@@ -28,12 +28,12 @@ Back up:
 - `Generated/NativeSuitModProjects`
 - `Generated/NativeSuitProjects`
 - Source images and OBJ files referenced by those projects
-- Any mod-scoped notebook text stored in the mod project
+- Notes stored in the mod project
 
 ## Rebuildable data
 
 Game extracts, indexes, preview folders, registry-writer binaries, and staged builds can be recreated
-from the current game, mappings, author projects, and source files. They may still be expensive to
+from the current game, mappings, projects, and source files. They may still take time to
 regenerate, so keep them when actively developing.
 
 ## Game install layout
@@ -51,5 +51,4 @@ LEGOBatmanLotDK/
     RegistryPlugins/<ModId>Registry/...
 ```
 
-The shared runtime additionally owns `LOTDKExpandedCoreRegistry`; third-party suit mods must not
-replace it.
+Loomirr's LOTDK UE4SS supplies `LOTDKExpandedCoreRegistry`; suit mods must not replace it.

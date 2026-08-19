@@ -2,18 +2,17 @@
 
 ## Do players need Batcomputer?
 
-No. Batcomputer is an authoring tool. Players need Loomirr's LOTDK UE4SS and the finished mod
-release.
+No. Players need Loomirr's LOTDK UE4SS and the finished mod.
 
 ## Can one mod contain several suits?
 
-Yes. The mod is the release unit and can contain multiple enabled suits. Shared StringTable and
-registry infrastructure are generated once for that mod.
+Yes. One mod can contain multiple enabled suits. Its shared StringTable and registry files are
+generated once.
 
 ## Can users install suit mods from different authors together?
 
-Yes, provided every release has unique technical identities and uses the shared runtime installed
-with Loomirr's LOTDK UE4SS. Third-party mods do not ship the shared core registry.
+Yes, provided every release has unique technical identities. Loomirr's LOTDK UE4SS supplies the
+shared registry files, so individual suit mods do not include them.
 
 ## Does this only work for Batman?
 
@@ -27,7 +26,7 @@ visual base supplies the assembly; the playable donor supplies gameplay-facing d
 
 ## Can I make a custom face?
 
-Yes, by cloning a compatible donor-backed face material and changing supported print layers. The
+Yes. Copy a compatible game face material and change its supported print layers. The
 face mesh family still matters: standard LEGOface and SuperheroFace are not interchangeable.
 
 ## Can I import a model?
@@ -42,5 +41,5 @@ palettes for compatible playable characters.
 
 ## Why does a build require Unreal Engine?
 
-The game discovers native custom assets through Asset Registry data. Batcomputer includes the small
-writer project's source, but UE 5.6 performs that author-side registry build.
+The game discovers custom assets through Asset Registry data. Batcomputer includes the small writer
+project, but UE 5.6 must build it on your computer.

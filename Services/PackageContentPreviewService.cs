@@ -78,7 +78,7 @@ public sealed class PackageContentPreviewService
             foreach (var pkg in byPackage.Keys.Where(otherPkgs.Contains))
             {
                 preview.Collisions.Add(new Collision(pkg,
-                    $"also shipped by suit '{otherSlot}' — whichever pak mounts last wins in-game. Give each suit its own /Game/Mods/<mod>/ namespace.",
+                    $"also included by suit '{otherSlot}' — whichever pak mounts last wins in-game. Give each suit its own /Game/Mods/<mod>/ namespace.",
                     "ERROR"));
             }
         }

@@ -977,7 +977,7 @@ public sealed partial class MainForm
         var baseMachinery = AnimArchetypeGraftService.DetectDonor(playableDisk, extracted, null);
         if (baseMachinery is null || !baseMachinery.Valid)
         {
-            AppendLog($"'{UnrealPathUtil.AssetName(playablePackage)}' is a villain/NPC — its body & movement live in its NPC class, so it can't be reparented into a working playable. Reskinning its look onto the runtime's proven playable base.");
+            AppendLog($"'{UnrealPathUtil.AssetName(playablePackage)}' is a villain/NPC — its body and movement live in its NPC class, so it cannot become a playable directly. Applying its appearance to the tested playable base instead.");
 
             // The runtime bridge uses TheBatman2025 as the proven NPC machinery donor. That does
             // not change this suit's own PawnTag, UI metadata, or generated package family.
@@ -2166,8 +2166,8 @@ public sealed partial class MainForm
                 tiles.Add(new VirtualTilePanel.Tile
                 {
                     Section = SectionBuild,
-                    Title = "Validate current suit",
-                    Subtitle = "preflight checks",
+                    Title = "Check current suit",
+                    Subtitle = "before packaging",
                     Accent = Theme.Materials,
                     OnClick = RunV2PreflightFromUi,
                 });

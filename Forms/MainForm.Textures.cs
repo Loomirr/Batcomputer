@@ -222,7 +222,7 @@ public sealed partial class MainForm
     {
         var search = CurrentToyboxSearch();
         var header =
-            "Textures are cooked Texture2D assets made from PNGs through the proven one-template duplicate path.\n" +
+            "Textures are cooked Texture2D assets made from PNGs by copying a tested game template.\n" +
             "Click a texture tile to copy its /Game package path; right-click for object path, output folder, and source PNG helpers. " +
             "Use the copied path in your custom material texture parameters.";
 
@@ -870,7 +870,7 @@ public sealed partial class MainForm
         "character-2k-dxt5-legacy" => "Legacy donor. Test the target texture role in game first.",
         "packed-2k-dxt5-legacy" => "Legacy donor. Test the target material response in game first.",
         "mask-1k-dxt1-legacy" => "Legacy colour-mask donor. Test the target material in game first.",
-        _ => "This saved recipe has not been classified yet. Preserve it unless you are deliberately testing a new profile.",
+        _ => "This saved recipe is not recognized yet. Keep it unless you are testing a new profile.",
     };
 
     private bool ConfirmTextureProfileSafety(TextureCookPreset preset, string action)

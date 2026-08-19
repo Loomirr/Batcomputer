@@ -27,21 +27,21 @@ In the 3D viewer:
 4. Save the preview state.
 5. Choose **Bake to game** before packaging.
 
-Offsets are authored in Unreal centimeters. The viewer converts them for preview and the bake step
+Offsets use Unreal centimeters. The viewer converts them for preview, and the bake step
 rebuilds the generated cooked mesh using the saved values.
 
 ## Apply a material
 
 Custom meshes expose material slots in the inspector. Generate or select a compatible material,
-then drag/apply it to the custom mesh slot exactly as you would for a shipped part. Reopen the 3D
+then drag or apply it to the custom mesh slot as you would for a normal game part. Reopen the 3D
 viewer and confirm the material resolved on that mesh before baking.
 
 ## Current limits
 
 - OBJ static meshes only.
 - No custom skeletal-mesh cooking or skeleton transfer.
-- No arbitrary new collision or physics-authoring workflow.
-- Geometry that falls outside the verified donor-shell assumptions may be rejected.
+- No custom collision or physics setup.
+- Geometry that does not fit the tested game-mesh template may be rejected.
 - The viewer cannot reproduce every game shader, animation, or lighting condition.
 
 Always test the baked result in-game before publishing.

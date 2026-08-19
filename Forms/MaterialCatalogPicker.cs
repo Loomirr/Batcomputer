@@ -241,7 +241,7 @@ public sealed class MaterialCatalogPicker : Form
         _list.EndUpdate();
 
         _count.Text = _all.Count == 0
-            ? "The shipped material catalog is not available."
+            ? "The game material catalog is not available."
             : $"{_view.Count:n0} material{(_view.Count == 1 ? "" : "s")}";
         if (_list.Items.Count > 0)
         {

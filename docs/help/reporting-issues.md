@@ -16,7 +16,7 @@ Use the repository's [bug report form](https://github.com/Loomirr/Batcomputer/is
 
 ## For build failures
 
-Also include the release-preflight findings and the final build section. If possible, say whether the
+Also include the build-check findings and the final build section. If possible, say whether the
 same suit builds without the newest texture, material, part, or custom mesh.
 
 ## Protect your machine and game data
@@ -34,7 +34,7 @@ Batcomputer: 0.9.0-beta.1
 Game/mappings: <build and date>
 Action: Build Mod
 Expected: release installs
-Actual: preflight blocks the UIMD icon
+Actual: build check blocks the UIMD icon
 Reproduces: yes, after restart
 
 Relevant diagnostics:

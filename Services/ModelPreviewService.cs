@@ -748,7 +748,7 @@ public static class ModelPreviewService
             BoneWorldTransformInGltfSpace(bodyMesh, calibrated.BoneName) is { } parentTransform)
         {
             var transform = ComposeTransforms(parentTransform, ToGltfTransform(calibrated))!;
-            Console.WriteLine($"  {componentName}: authored socket {socket} ({calibrated.ProfileName}) -> " +
+            Console.WriteLine($"  {componentName}: saved socket {socket} ({calibrated.ProfileName}) -> " +
                               $"({transform.Translation.X:0.###}, {transform.Translation.Y:0.###}, {transform.Translation.Z:0.###})");
             return new AttachmentPlacement(Vector3.Zero, transform, true, calibrated.ProfileName);
         }
@@ -1320,7 +1320,7 @@ public static class ModelPreviewService
         var socketProfiles = RuntimeSocketProfileService.Load();
         if (socketProfiles.Count > 0)
         {
-            Console.WriteLine($"  authored socket profiles: {socketProfiles.Count} bundled rig profile(s)");
+            Console.WriteLine($"  saved socket profiles: {socketProfiles.Count} bundled rig profile(s)");
         }
         var provider = MakeProvider(paksDir, usmapPath, looseContentRoots);
         var resolvedComponents = ResolveVisualBlueprintComponents(provider, bpPath);
@@ -1868,7 +1868,7 @@ public static class ModelPreviewService
         public bool UsesRuntimeSocketCalibration { get; init; }
         /// <summary>Stable component identity used by the project-aware part mover.</summary>
         public string ComponentName { get; init; } = "";
-        /// <summary>Author-facing label; the stable component identity remains internal.</summary>
+        /// <summary>Display label; the stable component identity remains internal.</summary>
         public string? DisplayName { get; init; }
         /// <summary>Saved small translation layered over the Blueprint's authored placement.</summary>
         public SavedPreviewPartPlacement? Adjustment { get; init; }

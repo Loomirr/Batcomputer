@@ -1,6 +1,6 @@
 namespace Batcomputer;
 
-/// <summary>Target-aware picker for the curated donor-backed material recipe catalog.</summary>
+/// <summary>Picker for tested game-material templates, filtered by the selected target.</summary>
 internal sealed class MaterialTemplatePicker : Form
 {
     private readonly MaterialTemplateCatalogService _catalog = new();
@@ -46,12 +46,12 @@ internal sealed class MaterialTemplatePicker : Form
         header.Controls.Add(new Label
         {
             Left = 33, Top = 13, Width = 500, Height = 18,
-            Text = "DONOR-BACKED MATERIALS", Font = Theme.Eyebrow, ForeColor = Theme.Materials,
+            Text = "GAME MATERIAL TEMPLATES", Font = Theme.Eyebrow, ForeColor = Theme.Materials,
         });
         header.Controls.Add(new Label
         {
             Left = 33, Top = 32, Width = 520, Height = 25,
-            Text = "Choose a proven material template", Font = Theme.Heading, ForeColor = Theme.OnDark,
+            Text = "Choose a tested material template", Font = Theme.Heading, ForeColor = Theme.OnDark,
         });
         _targetLabel.SetBounds(560, 20, 340, 38);
         _targetLabel.Anchor = AnchorStyles.Top | AnchorStyles.Right;
@@ -217,7 +217,7 @@ internal sealed class MaterialTemplatePicker : Form
             item.ForeColor = compatibility.CanUse ? Theme.OnDark : Theme.OnDarkMuted;
             if (recipe.Advanced)
             {
-                item.ToolTipText = "Advanced clone-only or context-limited recipe.";
+                item.ToolTipText = "Advanced template with limited uses.";
             }
             _list.Items.Add(item);
             if (recipe.Id.Equals(selectedId, StringComparison.OrdinalIgnoreCase))

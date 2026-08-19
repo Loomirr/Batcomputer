@@ -7,8 +7,8 @@
 3. Do not run the executable from inside the ZIP.
 4. Start `Batcomputer.exe`.
 
-Batcomputer deliberately stores its settings, indexes, projects, and generated files beside the
-application unless you choose another workspace. Avoid `Program Files`, the game directory, and
+Batcomputer stores its settings, indexes, projects, and generated files beside the application
+unless you choose another workspace. Avoid `Program Files`, the game directory, and
 cloud-synchronized folders for the portable itself when possible.
 
 ## Expected portable layout
@@ -36,7 +36,7 @@ of continuing with a half-working package.
    used the default portable workspace.
 5. Launch the new version and run release validation before rebuilding an existing mod.
 
-The safest beta workflow is to keep each portable version in its own folder until the replacement
-has opened your projects successfully.
+During the beta, keep each portable version in its own folder until the new version has opened your
+projects successfully.
 
 Next: [First-time setup](setup.md).

@@ -1245,9 +1245,9 @@ internal static class Program
     }
 
     /// <summary>
-    /// Release diagnostic for the curated donor-backed material catalog. This is deliberately
-    /// read-only: it resolves every enabled donor, parses each cooked MI, and confirms that any
-    /// recipe-supplied texture defaults are authored parameters on every generated sibling.
+    /// Read-only check for the material-template catalog. It resolves each enabled source
+    /// material, parses the cooked material instance, and confirms that template texture defaults
+    /// match parameters exposed by every generated output.
     /// </summary>
     private static int VerifyMaterialTemplates(string? extractedContentRoot, string? usmapPath)
     {
@@ -1306,7 +1306,7 @@ internal static class Program
 
                     errors++;
                     recipeErrors++;
-                    Console.Error.WriteLine($"ERROR {recipe.Id}/{output.Definition.Role}: donor does not author texture parameter '{parameter}'.");
+                    Console.Error.WriteLine($"ERROR {recipe.Id}/{output.Definition.Role}: game material does not expose texture parameter '{parameter}'.");
                 }
             }
 

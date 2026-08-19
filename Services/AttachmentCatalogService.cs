@@ -123,7 +123,7 @@ public static class AttachmentCatalogService
                 SemanticKind = PartRecipeService.SemanticKind(slot, mesh.Path, meshName,
                     new[] { $"TtCharacterAsset.{slot}" }),
                 IsSynthesized = true,
-                Notes = $"Catalog attachment ({slot}) — synthesized from the shipped registry."
+                Notes = $"Game attachment ({slot}) — built from the extracted registry."
             };
             if (anim is not null)
             {

@@ -2,7 +2,7 @@ namespace Batcomputer;
 
 /// <summary>
 /// Modal material forge: clone a base MI, map its texture parameters, then generate the new MI.
-/// The workflow remains deliberately small, while the surface matches the rest of Batcomputer.
+/// The dialog stays focused while matching the rest of Batcomputer.
 /// </summary>
 public sealed partial class MaterialWizard : Form
 {
@@ -157,7 +157,7 @@ public sealed partial class MaterialWizard : Form
         };
         Theme.StyleGoldButton(templates);
         templates.Click += (_, _) => SelectTemplate();
-        _toolTips.SetToolTip(templates, "Choose a target-aware recipe backed by proven cooked game Material Instances.");
+        _toolTips.SetToolTip(templates, "Choose a template that matches the target and uses a tested game Material Instance.");
         sourceCard.Controls.Add(templates);
         var browse = new Button
         {
@@ -367,7 +367,7 @@ public sealed partial class MaterialWizard : Form
         actions.Controls.Add(MakeFaceHelperButton("Hide mouth", 104, FaceHelperAction.Mouth,
             "Hides mouth, lip, teeth, and tongue layers."));
         actions.Controls.Add(MakeFaceHelperButton("Reset helpers", 128, FaceHelperAction.Reset,
-            "Clears only the helper-authored overrides so those values inherit from the donor again."));
+            "Clears only the face-helper changes so those values inherit from the game material again."));
         card.Controls.Add(actions);
         return card;
     }
@@ -527,7 +527,7 @@ public sealed partial class MaterialWizard : Form
         if (diskPath is null)
         {
             Dialog.Warn(this, "Material not extracted",
-                $"{picker.SelectedPackagePath} is in the shipped catalog, but its cooked .uasset was not found under your extracted content root. Extract that character's content, then choose the material again.");
+                $"{picker.SelectedPackagePath} is in the game material catalog, but its cooked .uasset was not found under your extracted Content folder. Extract that character's files, then choose the material again.");
             return;
         }
 
@@ -879,7 +879,7 @@ public sealed partial class MaterialWizard : Form
                 var dummyPath = FaceDummyTextureFor(parameter);
                 row.Cells["Override"].Value = dummyPath;
                 row.Cells["Override"].Style.ForeColor = Theme.Info;
-                row.Cells["Override"].ToolTipText = "Set by a face helper using a shipped inert texture of the matching map type.";
+                row.Cells["Override"].ToolTipText = "Set by a face helper using a built-in blank texture of the matching map type.";
                 _faceHelperAuthoredRows.Add(FaceHelperRowKey(row));
                 changed++;
             }
@@ -1047,7 +1047,7 @@ public sealed partial class MaterialWizard : Form
             }
             row.Cells["Override"].Value = texturePath;
             row.Cells["Override"].Style.ForeColor = Theme.Info;
-            row.Cells["Override"].ToolTipText = "Set by the selected donor-backed recipe.";
+            row.Cells["Override"].ToolTipText = "Set by the selected game-material template.";
         }
     }
 
