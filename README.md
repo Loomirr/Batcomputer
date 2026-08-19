@@ -4,7 +4,7 @@ Batcomputer is a Windows tool for creating playable suit mods for
 *LEGO Batman: Legacy of the Dark Knight*. It builds suits from character assets in your own copy of
 the game, then packages and installs them.
 
-> **Current release:** `0.9.0-beta.2`
+> **Current release:** `0.9.0-beta.3`
 > **Documentation:** [loomirr.github.io/Batcomputer](https://loomirr.github.io/Batcomputer/)
 
 This repository contains Batcomputer only. It does not contain game files, extracted assets, Oodle,
@@ -29,7 +29,7 @@ or Loomirr's LOTDK UE4SS.
 - A local installation of *LEGO Batman: Legacy of the Dark Knight*.
 - A matching `.usmap` file for the current game build.
 - Unreal Engine 5.6 to build the Asset Registry data used by new mods.
-- Loomirr's LOTDK UE4SS installed in the game.
+- Loomirr's LOTDK UE4SS 0.1.1 or newer installed in the game.
 
 ### To make smaller packages
 
@@ -39,7 +39,7 @@ copied into a mod, release ZIP, or this repository.
 
 ### To use finished mods
 
-Players only need the finished mod and Loomirr's LOTDK UE4SS. They do not need Batcomputer, .NET,
+Players only need the finished mod and Loomirr's LOTDK UE4SS 0.1.1 or newer. They do not need Batcomputer, .NET,
 Unreal Engine, mappings, or extracted game assets.
 
 ## Portable layout
@@ -52,7 +52,7 @@ Batcomputer/
   Generated/       build output, suit projects, previews, and extracts
   Data/            reusable indexes and the writer cache
   Runtime/         local runtime state
-  Tools/           retoc and the Asset Registry writer source
+  Tools/           retoc and the verified Asset Registry writer
 ```
 
 The default workspace stays beside `Batcomputer.exe`. Settings can move the workspace or the large
@@ -61,7 +61,7 @@ extracted game dump to another drive.
 ## First run
 
 Setup asks for the game Paks folder, mappings, and other local paths. When UE 5.6 is configured,
-setup builds and verifies the Asset Registry writer once. Later mod builds reuse that local writer
+setup verifies the bundled Asset Registry writer once. Later mod builds reuse that local writer
 until its source or the configured UE build changes.
 
 Setup can then run the full character extraction. It reads only the game's original top-level Paks

@@ -7,6 +7,10 @@
 3. Do not run the executable from inside the ZIP.
 4. Start `Batcomputer.exe`.
 
+Install Loomirr's LOTDK UE4SS 0.1.1 or newer in the game before using Batcomputer's direct mod
+installation. That framework release supplies the shared registry configuration used by every
+Batcomputer-authored suit mod.
+
 Batcomputer stores its settings, indexes, projects, and generated files beside the application
 unless you choose another workspace. Avoid `Program Files`, the game directory, and
 cloud-synchronized folders for the portable itself when possible.

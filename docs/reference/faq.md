@@ -2,7 +2,7 @@
 
 ## Do players need Batcomputer?
 
-No. Players need Loomirr's LOTDK UE4SS and the finished mod.
+No. Players need Loomirr's LOTDK UE4SS 0.1.1 or newer and the finished mod.
 
 ## Can one mod contain several suits?
 
@@ -11,7 +11,7 @@ generated once.
 
 ## Can users install suit mods from different authors together?
 
-Yes, provided every release has unique technical identities. Loomirr's LOTDK UE4SS supplies the
+Yes, provided every release has unique technical identities. Loomirr's LOTDK UE4SS 0.1.1 or newer supplies the
 shared registry files, so individual suit mods do not include them.
 
 ## Does this only work for Batman?

@@ -810,19 +810,28 @@ public sealed partial class MainForm
             var gameRoot = GameLegoRoot()
                 ?? throw new InvalidOperationException("Batcomputer could not locate the game's LEGOBatmanLotDK folder from settings.");
             result.CoreRegistryDestination = LotdkExpandedLayout.CoreRegistryPluginDirectory(gameRoot);
-            if (!LotdkExpandedLayout.IsCoreMod(mod.ModId))
+            ModReleaseStep("Checking the shared registry files…");
+            var missingCoreRegistryFiles = LotdkExpandedLayout.MissingCoreRegistryFiles(gameRoot);
+            coreRegistryReady = missingCoreRegistryFiles.Count == 0;
+            if (!coreRegistryReady)
             {
-                ModReleaseStep("Checking the shared registry files…");
-                coreRegistryReady = LotdkExpandedLayout.HasInstalledCoreRegistry(gameRoot);
-                if (!coreRegistryReady)
+                var missingList = string.Join(
+                    Environment.NewLine,
+                    missingCoreRegistryFiles.Select(path => "- " + path));
+                result.Status = ModInstallStatus.Failed;
+                result.Detail =
+                    "Loomirr's LOTDK UE4SS is missing required shared registry files:\n\n" +
+                    missingList +
+                    "\n\nInstall or update Loomirr's LOTDK UE4SS, then install this mod again. " +
+                    "The suit build is complete and does not need to be rebuilt.";
+                AppendLog("Install mod stopped before copying files: Loomirr's LOTDK UE4SS shared registry is incomplete.");
+                foreach (var missingPath in missingCoreRegistryFiles)
                 {
-                    result.Status = ModInstallStatus.Failed;
-                    result.Detail = "The shared registry files are missing. Reinstall Loomirr's LOTDK UE4SS before installing this mod.";
-                    AppendLog("Install mod stopped before copying files: the shared registry files from Loomirr's LOTDK UE4SS are missing.");
-                    return result;
+                    AppendLog($"  missing shared registry file: {missingPath}");
                 }
-                AppendLog($"  shared registry found -> {result.CoreRegistryDestination}");
+                return result;
             }
+            AppendLog($"  shared registry found -> {result.CoreRegistryDestination}");
             result.TrioDestination = LotdkExpandedLayout.ExpandedPaksRoot(gameRoot);
             var slotDest = result.TrioDestination;
             ModReleaseStep("Copying the IoStore release files…");
@@ -872,23 +881,6 @@ public sealed partial class MainForm
                 installed++;
                 registryInstalled = true;
                 AppendLog($"  mod.json → {packDestination}");
-            }
-
-            if (LotdkExpandedLayout.IsCoreMod(mod.ModId))
-            {
-                var corePlugin = RegistryPluginService.EnsureCorePlugin(outRoot);
-                ModReleaseStep("Installing the shared Asset Manager scan configuration…");
-                if (File.Exists(corePlugin.DescriptorPath) && File.Exists(RegistryPluginService.CoreGameIniPath(corePlugin)))
-                {
-                    CopyDirectoryContents(corePlugin.PluginDirectory, result.CoreRegistryDestination, overwrite: true);
-                    installed += Directory.EnumerateFiles(corePlugin.PluginDirectory, "*", SearchOption.AllDirectories).Count();
-                    coreRegistryReady = true;
-                    AppendLog($"  {corePlugin.PluginName} -> {result.CoreRegistryDestination}");
-                }
-            }
-            else
-            {
-                coreRegistryReady = true;
             }
 
             var plugin = RegistryPluginService.CreateLayout(outRoot, mod.ModId);
@@ -945,7 +937,7 @@ public sealed partial class MainForm
                 : !string.IsNullOrWhiteSpace(previousIdCleanupError)
                     ? "The new release was installed, but Batcomputer could not remove every previous-ID file. Close the game and install again.\n\n" + previousIdCleanupError
                     : !coreRegistryReady
-                        ? "This mod was copied, but the shared registry files are missing. Reinstall Loomirr's LOTDK UE4SS, then install this mod again."
+                        ? "This mod was copied, but the shared registry setup is incomplete. Check Diagnostics for the exact missing path, update Loomirr's LOTDK UE4SS, then install this mod again."
                         : "Some expected release files were missing, so this install may be incomplete. Check Diagnostics before testing.";
             AppendLog($"Installed mod '{mod.DisplayName}' - {installed} file(s). Restart the game to load it.");
             return result;
@@ -1070,11 +1062,6 @@ public sealed partial class MainForm
         var outRoot = ModBuildRoot(mod.ModId);
         var trioBase = Path.Combine(outRoot, mod.PackageBaseName);
         var plugin = RegistryPluginService.CreateLayout(outRoot, mod.ModId);
-        RegistryPluginService.PluginLayout? corePlugin = null;
-        if (LotdkExpandedLayout.IsCoreMod(mod.ModId))
-        {
-            corePlugin = RegistryPluginService.EnsureCorePlugin(outRoot);
-        }
         var files = new List<(string Source, string ArchivePath)>();
         const string ArchiveRoot = "LEGO Batman - Legacy of the Dark Knight";
 
@@ -1109,13 +1096,6 @@ public sealed partial class MainForm
                 $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{plugin.PluginName}/{Path.GetFileName(plugin.DescriptorPath)}");
             AddRequired(plugin.RegistryPath,
                 $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{plugin.PluginName}/{Path.GetFileName(plugin.RegistryPath)}");
-            if (corePlugin is not null)
-            {
-                AddRequired(corePlugin.DescriptorPath,
-                    $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{corePlugin.PluginName}/{Path.GetFileName(corePlugin.DescriptorPath)}");
-                AddRequired(RegistryPluginService.CoreGameIniPath(corePlugin),
-                    $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{corePlugin.PluginName}/Config/Game.ini");
-            }
             foreach (var pluginFile in Directory.EnumerateFiles(plugin.PluginDirectory, "*", SearchOption.AllDirectories))
             {
                 if (files.Any(file => file.Source.Equals(pluginFile, StringComparison.OrdinalIgnoreCase))) continue;
@@ -1123,16 +1103,6 @@ public sealed partial class MainForm
                 if (relative.StartsWith("Config/Tags/", StringComparison.OrdinalIgnoreCase)) continue;
                 files.Add((pluginFile,
                     $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{plugin.PluginName}/{relative}"));
-            }
-            if (corePlugin is not null)
-            {
-                foreach (var coreFile in Directory.EnumerateFiles(corePlugin.PluginDirectory, "*", SearchOption.AllDirectories))
-                {
-                    if (files.Any(file => file.Source.Equals(coreFile, StringComparison.OrdinalIgnoreCase))) continue;
-                    var relative = Path.GetRelativePath(corePlugin.PluginDirectory, coreFile).Replace('\\', '/');
-                    files.Add((coreFile,
-                        $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{corePlugin.PluginName}/{relative}"));
-                }
             }
         }
         catch (FileNotFoundException ex)
@@ -1166,15 +1136,11 @@ public sealed partial class MainForm
                 WindowTitle = "Batcomputer - Mod release archive",
                 Title = "Mod release archive created",
                 Subtitle = mod.DisplayName,
-                Message = LotdkExpandedLayout.IsCoreMod(mod.ModId)
-                    ? "Extract this archive into your Steam common folder. Its game-relative paths are already arranged for installation."
-                    : "Install Loomirr's LOTDK UE4SS first, then extract this mod into your Steam common folder. Its folders are already arranged for installation.",
+                Message = "Install Loomirr's LOTDK UE4SS first, then extract this mod into your Steam common folder. Its folders are already arranged for installation.",
                 Severity = Dialog.Level.Good,
                 PrimaryText = "Done",
                 CalloutTitle = "Ready to share",
-                CalloutDetail = LotdkExpandedLayout.IsCoreMod(mod.ModId)
-                    ? $"{files.Count} release file{(files.Count == 1 ? "" : "s")} packaged, including the shared registry core. Project files and generated previews are not included."
-                    : $"{files.Count} mod file{(files.Count == 1 ? "" : "s")} packaged. Loomirr's LOTDK UE4SS supplies the shared registry core.",
+                CalloutDetail = $"{files.Count} mod file{(files.Count == 1 ? "" : "s")} packaged. Loomirr's LOTDK UE4SS supplies the shared registry core.",
                 Fields = new List<(string Label, string Value)>
                 {
                     ("Archive", zipPath),

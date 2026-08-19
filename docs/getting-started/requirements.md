@@ -15,7 +15,7 @@
 
 - The self-contained .NET desktop runtime.
 - The Oodle-capable `retoc` packaging helper.
-- The source for the small Batcomputer Asset Registry writer.
+- A verified UE 5.6 Asset Registry writer module, plus its source fallback.
 - Game-data indexes and runtime calibration metadata that contain paths and measurements, not game
   textures or cooked assets.
 
@@ -26,6 +26,11 @@
 - Unreal Engine.
 - `oo2core_9_win64.dll`.
 - Loomirr's LOTDK UE4SS.
+
+Batcomputer normally uses its bundled writer module without compiling anything. If Epic replaces
+the UE 5.6 editor with a different build, the source fallback requires Visual Studio 2022 with the
+**Game development with C++** workload, the **.NET Framework 4.8 SDK**, and the **.NET Framework
+4.8 targeting pack**.
 
 ## To use finished mods
 

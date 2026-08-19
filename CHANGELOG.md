@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.0-beta.3 — 2026-08-19
+
+Shared registry dependency diagnostics.
+
+- Reports the exact missing `LOTDKExpandedCoreRegistry` file paths when a mod cannot be installed.
+- Explains that an already completed suit build does not need to be rebuilt after updating Loomirr's LOTDK UE4SS.
+- Aligns shared registry ownership with the corrected Loomirr's LOTDK UE4SS 0.1.1 package.
+- Ships a verified UE 5.6 writer module so normal mod builds no longer need Visual Studio or the
+  legacy .NET Framework SDK.
+- Falls back to the included source only when the configured editor has a different `BuildId`, with
+  a specific dependency error instead of a generic UnrealBuildTool exit code.
+
 ## 0.9.0-beta.2 — 2026-08-18
 
 Asset Registry writer hotfix.

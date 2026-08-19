@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0-beta.3
+
+- Missing shared-registry errors now list the exact absent files.
+- Completed suit builds can be installed after updating Loomirr's LOTDK UE4SS without rebuilding.
+- Added a verified prebuilt registry writer for Epic's UE 5.6 `BuildId`, avoiding first-run compiler
+  failures on otherwise valid author machines.
+- Added precise fallback guidance for missing .NET Framework SDK and Visual Studio C++ components.
+
 ## 0.9.0-beta.2
 
 - Fixed Asset Registry writer builds failing with UnrealBuildTool exit code 6 when Batcomputer was

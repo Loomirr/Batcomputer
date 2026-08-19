@@ -16,9 +16,12 @@ public sealed class RegistryPluginService
     public const string PrimaryAssetType = "PawnMetaData";
     public const string PawnMetadataClass = "/Script/DinnerPawnMetaData.DinnerCharacterMetaData";
     public const string WriterResultMarker = "BATCOMPUTER_REGISTRY_WRITER_RESULT";
-    public const string CorePluginName = LotdkExpandedLayout.CoreRegistryPluginName;
     private const string ProofSentinelRoot = "/Game/Developers/BatcomputerRegistryProbe";
     private const string WriterProbePackage = "/Game/Mods/BatcomputerWriterProbe/Characters/DA_DCMD_BatcomputerWriterProbe_Playable";
+    private const string PrebuiltDirectoryName = "Prebuilt";
+    private const string PrebuiltManifestFileName = "prebuilt-manifest.json";
+    private const string WriterModuleFileName = "UnrealEditor-BatcomputerRegistryWriter.dll";
+    private const string WriterModulesFileName = "UnrealEditor.modules";
 
     /// <summary>
     /// One primary-asset row. Suit callers can continue to provide only
@@ -81,6 +84,18 @@ public sealed class RegistryPluginService
         public string Fingerprint { get; set; } = "";
     }
 
+    private sealed class WriterPrebuiltManifest
+    {
+        public string EngineBuildId { get; set; } = "";
+        public string SourceFingerprint { get; set; } = "";
+        public string BinarySha256 { get; set; } = "";
+    }
+
+    private sealed record WriterPrebuiltPayload(
+        string ModulePath,
+        string ModulesPath,
+        WriterPrebuiltManifest Manifest);
+
     public static PluginLayout CreateLayout(string buildRoot, string modId)
     {
         var pluginName = $"{modId}Registry";
@@ -91,37 +106,6 @@ public sealed class RegistryPluginService
             Path.Combine(directory, pluginName + ".uplugin"),
             Path.Combine(directory, "AssetRegistry.bin"));
     }
-
-    /// <summary>
-    /// The core plugin owns the one global Asset Manager scan extension. Per-mod
-    /// plugins carry only their own registry rows. Gameplay tags are installed as
-    /// loose project config under LEGOBatmanLotDK/Config/Tags because a content-only
-    /// plugin does not add its Config/Tags directory to GameplayTagsManager.
-    /// </summary>
-    public static PluginLayout EnsureCorePlugin(string buildRoot)
-    {
-        var directory = Path.Combine(buildRoot, "Engine", "Plugins", "Mods", CorePluginName);
-        var layout = new PluginLayout(
-            CorePluginName,
-            directory,
-            Path.Combine(directory, CorePluginName + ".uplugin"),
-            Path.Combine(directory, "AssetRegistry.bin"));
-
-        Directory.CreateDirectory(Path.Combine(directory, "Config"));
-        File.WriteAllText(layout.DescriptorPath, BuildDescriptorJson(CorePluginName, "LOTDK Expanded Core"));
-        File.WriteAllText(CoreGameIniPath(layout), RenderCoreAssetManagerConfig(), new UTF8Encoding(false));
-        return layout;
-    }
-
-    public static string CoreGameIniPath(PluginLayout layout) =>
-        Path.Combine(layout.PluginDirectory, "Config", "Game.ini");
-
-    public static string RenderCoreAssetManagerConfig() => string.Join("\r\n", [
-        "[/Script/Engine.AssetManagerSettings]",
-        "-PrimaryAssetTypesToScan=(PrimaryAssetType=\"PawnMetaData\",AssetBaseClass=\"/Script/TtPawnMetaData.TtPawnMetaData\",bHasBlueprintClasses=False,bIsEditorOnly=False,Directories=((Path=\"/Game/Characters\"),(Path=\"/Game/PlaceHolder/Characters\"),(Path=\"/Game/Developers\"),(Path=\"/Game/Vehicles\"),(Path=\"/Game/AdditionalContent\")),SpecificAssets=,Rules=(Priority=-1,ChunkId=-1,bApplyRecursively=True,CookRule=AlwaysCook))",
-        "+PrimaryAssetTypesToScan=(PrimaryAssetType=\"PawnMetaData\",AssetBaseClass=\"/Script/TtPawnMetaData.TtPawnMetaData\",bHasBlueprintClasses=False,bIsEditorOnly=False,Directories=((Path=\"/Game/Characters\"),(Path=\"/Game/PlaceHolder/Characters\"),(Path=\"/Game/Developers\"),(Path=\"/Game/Vehicles\"),(Path=\"/Game/AdditionalContent\"),(Path=\"/Game/Mods\")),SpecificAssets=,Rules=(Priority=-1,ChunkId=-1,bApplyRecursively=True,CookRule=AlwaysCook))",
-        ""
-    ]);
 
     public static bool NeedsWriterPreparation()
     {
@@ -282,13 +266,6 @@ public sealed class RegistryPluginService
         var layout = CreateLayout(buildRoot, modId);
         try
         {
-            // Only the official LOTDK Expanded project owns and distributes the
-            // global /Game/Mods scan extension. Add-on authors ship their own
-            // rows and tags, and require the shared registry from Loomirr's LOTDK UE4SS.
-            if (LotdkExpandedLayout.IsCoreMod(modId))
-            {
-                EnsureCorePlugin(buildRoot);
-            }
             Directory.CreateDirectory(layout.PluginDirectory);
             // Builds produced before the loose-config fix may have left a
             // misleading Config/Tags copy in this reusable output directory.
@@ -388,7 +365,7 @@ public sealed class RegistryPluginService
             return false;
         }
 
-        if (!TryStageWriterProject(writerProject, out var stagedWriterProject, out error))
+        if (!TryStageWriterProject(writerProject, engineRoot, out var stagedWriterProject, out error))
         {
             toolchain = null!;
             return false;
@@ -414,6 +391,7 @@ public sealed class RegistryPluginService
     /// </summary>
     private static bool TryStageWriterProject(
         string sourceProject,
+        string engineRoot,
         out string stagedProject,
         out string error)
     {
@@ -441,6 +419,7 @@ public sealed class RegistryPluginService
                 Path.Combine(sourceRoot, "Config"),
                 Path.Combine(stagedRoot, "Config"),
                 stagedRoot);
+            StageCompatiblePrebuiltWriter(sourceRoot, stagedRoot, engineRoot);
             return File.Exists(stagedProject) && Directory.Exists(Path.Combine(stagedRoot, "Source"));
         }
         catch (Exception ex)
@@ -489,6 +468,10 @@ public sealed class RegistryPluginService
     {
         if (!forceBuild && HasCurrentWriterCache(toolchain))
         {
+            if (WriterArtifactsMatchBundledPrebuilt(toolchain))
+            {
+                log("Using the bundled UE 5.6 Asset Registry writer.");
+            }
             return new WriterEnsureResult(true, UsedCache: true);
         }
 
@@ -508,7 +491,7 @@ public sealed class RegistryPluginService
         if (writerBuild.ExitCode != 0)
         {
             return new WriterEnsureResult(false, UsedCache: false,
-                $"The Asset Registry writer build failed (exit {writerBuild.ExitCode}).");
+                DescribeWriterBuildFailure(writerBuild.ExitCode, writerBuild.Output));
         }
         if (!WriterArtifactsExist(toolchain.WriterProject))
         {
@@ -563,6 +546,7 @@ public sealed class RegistryPluginService
     private static bool HasCurrentWriterCache(WriterToolchain toolchain)
     {
         if (!WriterArtifactsExist(toolchain.WriterProject)) return false;
+        if (WriterArtifactsMatchBundledPrebuilt(toolchain)) return true;
         var fingerprint = BuildWriterFingerprint(toolchain);
         if (string.IsNullOrWhiteSpace(fingerprint)) return false;
         try
@@ -580,9 +564,157 @@ public sealed class RegistryPluginService
     private static bool WriterArtifactsExist(string writerProject)
     {
         var directory = Path.Combine(Path.GetDirectoryName(writerProject) ?? "", "Binaries", "Win64");
-        return File.Exists(Path.Combine(directory, "UnrealEditor-BatcomputerRegistryWriter.dll")) &&
+        return File.Exists(Path.Combine(directory, WriterModuleFileName)) &&
             Directory.Exists(directory) &&
             Directory.EnumerateFiles(directory, "*.modules", SearchOption.TopDirectoryOnly).Any();
+    }
+
+    private static void StageCompatiblePrebuiltWriter(string sourceRoot, string stagedRoot, string engineRoot)
+    {
+        if (!TryGetCompatiblePrebuiltWriter(sourceRoot, engineRoot, out var prebuilt)) return;
+
+        var destination = Path.Combine(stagedRoot, "Binaries", "Win64");
+        Directory.CreateDirectory(destination);
+        File.Copy(prebuilt.ModulePath, Path.Combine(destination, WriterModuleFileName), overwrite: true);
+        File.Copy(prebuilt.ModulesPath, Path.Combine(destination, WriterModulesFileName), overwrite: true);
+    }
+
+    private static bool WriterArtifactsMatchBundledPrebuilt(WriterToolchain toolchain)
+    {
+        try
+        {
+            var sourceRoot = Path.GetDirectoryName(toolchain.SourceWriterProject) ?? "";
+            if (!TryGetCompatiblePrebuiltWriter(sourceRoot, toolchain.EngineRoot, out var prebuilt)) return false;
+
+            var stagedRoot = Path.GetDirectoryName(toolchain.WriterProject) ?? "";
+            var stagedModule = Path.Combine(stagedRoot, "Binaries", "Win64", WriterModuleFileName);
+            var stagedModules = Path.Combine(stagedRoot, "Binaries", "Win64", WriterModulesFileName);
+            return File.Exists(stagedModule) &&
+                File.Exists(stagedModules) &&
+                string.Equals(FileSha256(stagedModule), prebuilt.Manifest.BinarySha256, StringComparison.OrdinalIgnoreCase) &&
+                TryReadWriterModuleDescriptor(stagedModules, out var stagedBuildId) &&
+                string.Equals(stagedBuildId, prebuilt.Manifest.EngineBuildId, StringComparison.Ordinal);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryGetCompatiblePrebuiltWriter(
+        string sourceRoot,
+        string engineRoot,
+        out WriterPrebuiltPayload prebuilt)
+    {
+        prebuilt = null!;
+        try
+        {
+            var directory = Path.Combine(sourceRoot, PrebuiltDirectoryName, "Win64");
+            var manifestPath = Path.Combine(directory, PrebuiltManifestFileName);
+            var modulePath = Path.Combine(directory, WriterModuleFileName);
+            var modulesPath = Path.Combine(directory, WriterModulesFileName);
+            if (!File.Exists(manifestPath) || !File.Exists(modulePath) || !File.Exists(modulesPath)) return false;
+
+            var manifest = JsonSerializer.Deserialize<WriterPrebuiltManifest>(File.ReadAllText(manifestPath));
+            if (manifest is null ||
+                string.IsNullOrWhiteSpace(manifest.EngineBuildId) ||
+                string.IsNullOrWhiteSpace(manifest.SourceFingerprint) ||
+                string.IsNullOrWhiteSpace(manifest.BinarySha256))
+            {
+                return false;
+            }
+
+            if (!string.Equals(
+                    BuildWriterSourceFingerprint(Path.Combine(sourceRoot, "BatcomputerRegistryWriter.uproject")),
+                    manifest.SourceFingerprint,
+                    StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(FileSha256(modulePath), manifest.BinarySha256, StringComparison.OrdinalIgnoreCase) ||
+                !TryReadWriterModuleDescriptor(modulesPath, out var prebuiltBuildId) ||
+                !string.Equals(prebuiltBuildId, manifest.EngineBuildId, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var engineModules = Path.Combine(engineRoot, "Engine", "Binaries", "Win64", WriterModulesFileName);
+            if (!TryReadModuleBuildId(engineModules, out var engineBuildId) ||
+                !string.Equals(engineBuildId, manifest.EngineBuildId, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            prebuilt = new WriterPrebuiltPayload(modulePath, modulesPath, manifest);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryReadModuleBuildId(string path, out string buildId)
+    {
+        buildId = "";
+        try
+        {
+            using var json = JsonDocument.Parse(File.ReadAllText(path));
+            if (!json.RootElement.TryGetProperty("BuildId", out var value)) return false;
+            buildId = value.GetString() ?? "";
+            return !string.IsNullOrWhiteSpace(buildId);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryReadWriterModuleDescriptor(string path, out string buildId)
+    {
+        buildId = "";
+        try
+        {
+            using var json = JsonDocument.Parse(File.ReadAllText(path));
+            if (!json.RootElement.TryGetProperty("BuildId", out var buildIdValue) ||
+                !json.RootElement.TryGetProperty("Modules", out var modules) ||
+                !modules.TryGetProperty("BatcomputerRegistryWriter", out var moduleValue) ||
+                !string.Equals(moduleValue.GetString(), WriterModuleFileName, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            buildId = buildIdValue.GetString() ?? "";
+            return !string.IsNullOrWhiteSpace(buildId);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string FileSha256(string path) =>
+        Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
+
+    private static string DescribeWriterBuildFailure(int exitCode, string output)
+    {
+        if (output.Contains("Could not find NetFxSDK install dir", StringComparison.OrdinalIgnoreCase))
+        {
+            return "The configured UE 5.6 build does not match Batcomputer's bundled registry writer, " +
+                   "and the fallback compile cannot find a .NET Framework SDK. In Visual Studio Installer, " +
+                   "add the .NET Framework 4.8 SDK and .NET Framework 4.8 targeting pack, then retry. " +
+                   $"UnrealBuildTool exited with code {exitCode}.";
+        }
+
+        if (output.Contains("No Visual C++ installation was found", StringComparison.OrdinalIgnoreCase) ||
+            output.Contains("Unable to find a valid", StringComparison.OrdinalIgnoreCase) &&
+            output.Contains("toolchain", StringComparison.OrdinalIgnoreCase))
+        {
+            return "The configured UE 5.6 build does not match Batcomputer's bundled registry writer, " +
+                   "and the fallback compile cannot find the Visual Studio C++ toolchain. Install the " +
+                   "Game development with C++ workload in Visual Studio 2022, then retry. " +
+                   $"UnrealBuildTool exited with code {exitCode}.";
+        }
+
+        return $"The Asset Registry writer build failed (exit {exitCode}). Check Diagnostics and " +
+               "UnrealBuildTool's log for the first RulesError or compiler error.";
     }
 
     private static string WriterWorkspaceRoot
@@ -623,9 +755,22 @@ public sealed class RegistryPluginService
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             AddFingerprintText(hash, Path.GetFullPath(toolchain.EngineRoot));
             AddFingerprintFile(hash, Path.Combine(toolchain.EngineRoot, "Engine", "Build", "Build.version"), "Engine/Build/Build.version");
+            AddFingerprintText(hash, BuildWriterSourceFingerprint(toolchain.SourceWriterProject));
+            return Convert.ToHexString(hash.GetHashAndReset());
+        }
+        catch
+        {
+            return "";
+        }
+    }
 
-            var projectRoot = Path.GetDirectoryName(toolchain.SourceWriterProject) ?? "";
-            AddFingerprintFile(hash, toolchain.SourceWriterProject, Path.GetFileName(toolchain.SourceWriterProject));
+    private static string BuildWriterSourceFingerprint(string sourceWriterProject)
+    {
+        try
+        {
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            var projectRoot = Path.GetDirectoryName(sourceWriterProject) ?? "";
+            AddNormalizedFingerprintFile(hash, sourceWriterProject, Path.GetFileName(sourceWriterProject));
             foreach (var directory in new[] { "Config", "Source" })
             {
                 var root = Path.Combine(projectRoot, directory);
@@ -633,7 +778,7 @@ public sealed class RegistryPluginService
                 foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
                     .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
                 {
-                    AddFingerprintFile(hash, file, Path.GetRelativePath(projectRoot, file));
+                    AddNormalizedFingerprintFile(hash, file, Path.GetRelativePath(projectRoot, file));
                 }
             }
             return Convert.ToHexString(hash.GetHashAndReset());
@@ -654,6 +799,14 @@ public sealed class RegistryPluginService
     {
         AddFingerprintText(hash, name.Replace('\\', '/'));
         hash.AppendData(File.ReadAllBytes(path));
+        hash.AppendData(new byte[] { 0 });
+    }
+
+    private static void AddNormalizedFingerprintFile(IncrementalHash hash, string path, string name)
+    {
+        AddFingerprintText(hash, name.Replace('\\', '/'));
+        var normalized = File.ReadAllText(path).Replace("\r\n", "\n").Replace('\r', '\n');
+        hash.AppendData(Encoding.UTF8.GetBytes(normalized));
         hash.AppendData(new byte[] { 0 });
     }
 

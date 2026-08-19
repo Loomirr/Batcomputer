@@ -42,8 +42,12 @@ It uses roughly 18 GB and can take several minutes.
 
 ## 5. Unreal Engine 5.6
 
-Select the UE 5.6 installation root. Batcomputer prepares its bundled registry-writer project and
-reuses the verified result until its source or the configured engine changes.
+Select the UE 5.6 installation root. Batcomputer verifies the bundled registry writer against that
+editor's `BuildId` and reuses it for later builds. A matching Epic UE 5.6 installation does not need
+to compile the writer.
+
+If the editor has a different `BuildId`, Batcomputer falls back to compiling the included source and
+reports any missing Visual Studio component by name.
 
 You can skip UE while browsing and assembling, but you need it to build a mod.
 
