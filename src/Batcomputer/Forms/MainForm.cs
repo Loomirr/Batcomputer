@@ -300,6 +300,13 @@ public sealed partial class MainForm : Form
         WireEvents();
         SetDefaults();
 
+        // WinForms applies its final DPI scale after Load on some systems. Fit the
+        // completed layout on Shown, then re-clamp it if the window crosses onto a
+        // monitor with a different scale. This prevents one oversized logical
+        // dimension from spanning two monitors.
+        Shown += (_, _) => BeginInvoke(() => FitWindowToCurrentScreen(recenter: true));
+        DpiChanged += (_, _) => BeginInvoke(() => FitWindowToCurrentScreen(recenter: false));
+
         // Project mutations notify the views through one shared refresh path.
         _session.Changed += (_, _) => RefreshAllViews();
     }
@@ -340,17 +347,117 @@ public sealed partial class MainForm : Form
         }
     }
 
-    private bool _diagnosticsCollapsed;
+    private const int CollapsedDiagnosticsLogicalHeight = 40;
+    private const int ExpandedDiagnosticsLogicalHeight = 186;
+    private const int MaximumStartupWindowWidth = 1800;
+    private const int MaximumStartupWindowHeight = 1000;
+    private bool _diagnosticsCollapsed = true;
+    private Button? _diagnosticsHeaderButton;
+
+    private void FitWindowToCurrentScreen(bool recenter)
+    {
+        if (WindowState == FormWindowState.Minimized)
+        {
+            return;
+        }
+
+        // Some display drivers expose two monitors as one very wide work area. A
+        // maximized startup window can therefore span both displays before WinForms
+        // raises Shown. Normalize it once, then apply a conservative physical-pixel
+        // cap so the authoring surface always opens as a normal desktop window.
+        if (WindowState == FormWindowState.Maximized)
+        {
+            if (!recenter)
+            {
+                return;
+            }
+            WindowState = FormWindowState.Normal;
+        }
+
+        var screen = recenter
+            ? Screen.FromPoint(Cursor.Position)
+            : Screen.FromRectangle(Bounds);
+        var workingArea = screen.WorkingArea;
+        var edgeGap = Math.Max(8, LogicalToDeviceUnits(12));
+        var requestedMinimum = new Size(
+            LogicalToDeviceUnits(960),
+            LogicalToDeviceUnits(640));
+        var fittedBounds = ConstrainWindowBoundsForTest(
+            Bounds,
+            workingArea,
+            requestedMinimum,
+            recenter,
+            edgeGap);
+        MinimumSize = new Size(
+            Math.Min(requestedMinimum.Width, fittedBounds.Width),
+            Math.Min(requestedMinimum.Height, fittedBounds.Height));
+
+        StartPosition = FormStartPosition.Manual;
+        Bounds = fittedBounds;
+        ApplyDiagnosticsLayout();
+    }
+
+    internal static Rectangle ConstrainWindowBoundsForTest(
+        Rectangle currentBounds,
+        Rectangle workingArea,
+        Size requestedMinimum,
+        bool recenter,
+        int edgeGap)
+    {
+        edgeGap = Math.Max(0, edgeGap);
+        var usable = Rectangle.FromLTRB(
+            workingArea.Left + edgeGap,
+            workingArea.Top + edgeGap,
+            Math.Max(workingArea.Left + edgeGap + 1, workingArea.Right - edgeGap),
+            Math.Max(workingArea.Top + edgeGap + 1, workingArea.Bottom - edgeGap));
+
+        var maximumWidth = Math.Max(1, Math.Min(usable.Width, MaximumStartupWindowWidth));
+        var maximumHeight = Math.Max(1, Math.Min(usable.Height, MaximumStartupWindowHeight));
+        var minimumWidth = Math.Max(1, Math.Min(requestedMinimum.Width, maximumWidth));
+        var minimumHeight = Math.Max(1, Math.Min(requestedMinimum.Height, maximumHeight));
+        var width = Math.Clamp(currentBounds.Width, minimumWidth, maximumWidth);
+        var height = Math.Clamp(currentBounds.Height, minimumHeight, maximumHeight);
+
+        var left = recenter
+            ? usable.Left + (usable.Width - width) / 2
+            : Math.Clamp(currentBounds.Left, usable.Left, usable.Right - width);
+        var top = recenter
+            ? usable.Top + (usable.Height - height) / 2
+            : Math.Clamp(currentBounds.Top, usable.Top, usable.Bottom - height);
+        return new Rectangle(left, top, width, height);
+    }
 
     /// <summary>Collapses/expands the diagnostics drawer - collapsed leaves just the toggle bar so
     /// the workspace gets the room; expanded restores the log to its normal height.</summary>
-    private void ToggleDiagnostics(Button header)
+    private void ToggleDiagnostics()
     {
         _diagnosticsCollapsed = !_diagnosticsCollapsed;
+        ApplyDiagnosticsLayout();
+    }
+
+    private void ApplyDiagnosticsLayout()
+    {
+        if (_mainRootLayout.RowStyles.Count < 2)
+        {
+            return;
+        }
+
+        _mainRootLayout.RowStyles[1].SizeType = SizeType.Absolute;
+        _mainRootLayout.RowStyles[1].Height = LogicalToDeviceUnits(
+            _diagnosticsCollapsed
+                ? CollapsedDiagnosticsLogicalHeight
+                : ExpandedDiagnosticsLogicalHeight);
+        _mainLogGroupBox.AutoSize = false;
+        _mainLogGroupBox.MinimumSize = Size.Empty;
+        _mainLogGroupBox.MaximumSize = Size.Empty;
         _diagnostics.Visible = !_diagnosticsCollapsed;
-        header.Text = _diagnosticsCollapsed ? "▸  Diagnostics" : "▾  Diagnostics";
-        // Row 1 of the root layout holds the log panel; collapsed leaves just the toggle bar.
-        _mainRootLayout.RowStyles[1].Height = _diagnosticsCollapsed ? 40 : 186;
+        if (_diagnosticsHeaderButton is not null)
+        {
+            _diagnosticsHeaderButton.Text = _diagnosticsCollapsed
+                ? "▸  Diagnostics"
+                : "▾  Diagnostics";
+        }
+        _mainRootLayout.PerformLayout();
     }
 
     /// <summary>The header's flat ground. Everything sitting on the bar clears to this.</summary>

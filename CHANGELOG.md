@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.9.0-beta.4 — 2026-08-20
+
+Display, extraction, registry-writer, and cape/glider fixes.
+
+- Keeps Batcomputer on one monitor at mixed or unusually high display scaling and restores a
+  compact, collapsed Diagnostics drawer at startup.
+- Expands the standard character refresh to include `Content/Models/Gadgets`, where wingsuit,
+  equipment, and related materials are stored, and keeps the previous extraction active if the
+  refresh is incomplete.
+- Retries the UE 5.6 writer with private build-only .NET Framework SDK metadata when an installed
+  editor lacks the optional legacy SDK registration, and surfaces the first useful compiler or
+  Rules error for other failures.
+- Keeps cosmetic capes separate from runtime glide visuals, preserves role-specific component
+  recipes, and carries the glider donor's traversal animation sets into custom suits.
+- Adds release regression checks plus a 41-surface UI capture audit used to verify the portable
+  build before publishing.
+
 ## 0.9.0-beta.3 — 2026-08-19
 
 Shared registry dependency diagnostics.

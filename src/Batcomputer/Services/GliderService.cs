@@ -315,8 +315,9 @@ public static class GliderService
     /// The donor character's glide ANIMATION sets for a glider preset, injected as parent
     /// sets so the body plays that character's glide pose. A cross-type glider (wingsuit on
     /// a cape base) needs this or the membrane collapses (invisible). Returns ("","") when
-    /// the character can't be resolved or is Batman/Batgirl (the minifig-default cape glide
-    /// - no injection needed). Paths follow the confirmed convention
+    /// the character can't be resolved. Batman and Batgirl are included: a custom base
+    /// does not necessarily inherit their traversal sets merely because the donor visual
+    /// did. Paths follow the confirmed convention
     /// LAS_Traversal_&lt;Char&gt; + MAS_Glide_&lt;Char&gt; (findings doc §12).
     /// </summary>
     public static (string Las, string Mas) GliderAnimSetsForPart(NativeSuitPartRecord part)
@@ -332,15 +333,12 @@ public static class GliderService
 
     /// <summary>
     /// The character whose glide animation a preset needs. Uses the source character folder
-    /// (the character who natively glides with this visual). Batman/Batgirl cape-glides are
-    /// the minifig default - their body already poses for a cape, so no anim injection.
+    /// (the character who natively glides with this visual).
     /// </summary>
     private static string GliderAnimCharacter(NativeSuitPartRecord part)
     {
         var chr = (part.CharacterFolder ?? "").Trim();
-        if (string.IsNullOrWhiteSpace(chr) ||
-            chr.Equals("Batman", StringComparison.OrdinalIgnoreCase) ||
-            chr.Equals("Batgirl", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(chr))
         {
             return "";
         }

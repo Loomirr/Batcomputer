@@ -302,7 +302,7 @@ public sealed class InspectorControl : UserControl
     {
         var footer = new Panel { Dock = DockStyle.Fill, BackColor = Theme.CardBg };
 
-        foreach (var (b, text) in new[] { (_refresh, "↻ Refresh"), (_copy, "Breakdown") })
+        foreach (var (b, text) in new[] { (_refresh, "Refresh"), (_copy, "Breakdown") })
         {
             b.Text = text;
             b.Height = 30;
@@ -321,12 +321,16 @@ public sealed class InspectorControl : UserControl
         footer.Controls.Add(_preflight);
         footer.Resize += (_, _) =>
         {
-            // Three even columns - scales down instead of clipping off the right edge.
+            // Give the longer Breakdown caption a little more room while keeping all
+            // three actions inside a narrow inspector.
             var gap = 5;
-            var w = Math.Max(40, (footer.Width - gap * 2) / 3);
-            _refresh.SetBounds(0, 2, w, 30);
-            _copy.SetBounds(w + gap, 2, w, 30);
-            _preflight.SetBounds((w + gap) * 2, 2, footer.Width - (w + gap) * 2, 30);
+            var usable = Math.Max(120, footer.Width - gap * 2);
+            var breakdownWidth = Math.Clamp((int)Math.Round(usable * 0.38), 84, 116);
+            var sideWidth = Math.Max(40, (usable - breakdownWidth) / 2);
+            var checkWidth = Math.Max(40, usable - breakdownWidth - sideWidth);
+            _refresh.SetBounds(0, 2, sideWidth, 30);
+            _copy.SetBounds(sideWidth + gap, 2, breakdownWidth, 30);
+            _preflight.SetBounds(sideWidth + gap + breakdownWidth + gap, 2, checkWidth, 30);
         };
 
         _root.Controls.Add(footer, 0, 4);

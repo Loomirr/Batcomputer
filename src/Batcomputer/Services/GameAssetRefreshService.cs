@@ -14,6 +14,7 @@ namespace Batcomputer;
 public sealed class GameAssetRefreshService
 {
     public const string RetocEngineVersion = "UE5_6";
+    public const string CharacterGadgetFilter = "Content/Models/Gadgets/";
 
     public enum RefreshProfile
     {
@@ -52,16 +53,20 @@ public sealed class GameAssetRefreshService
     //   StringTables - ST_TagNames/ST_UI are the donors StringTableGenService clones for a suit's
     //                  display name and description. Without them a packaged suit has no text.
     //   Animation    - MAS_Char/LAS_Char sets, needed by the equipment/custom-archetype anim graft.
+    //   Models/Gadgets - character equipment and glider meshes/materials. These live outside
+    //                    Content/Characters even though the character catalog exposes them.
     // Together they add a small amount to an ~18 GB extract, which is worth it to avoid a half-usable dump.
     public static IReadOnlyList<string> AllCharacterFilters { get; } = new[]
     {
         "Content/Characters/",
         "Content/Localization/StringTables/",
         "Content/Animation/",
+        CharacterGadgetFilter,
         // Keep the clean-install viewer self-sufficient without broadening this into
         // a Red Brick authoring or collectables extraction profile.
         ViewerBaseGameRedBrickPaletteService.RetocFilter,
-    }.Concat(TextureCookTemplateService.RetocFilters).ToArray();
+    }.Concat(TextureCookTemplateService.RetocFilters.Where(filter =>
+        !filter.StartsWith(CharacterGadgetFilter, StringComparison.OrdinalIgnoreCase))).ToArray();
 
     // Developer-only research profile. This is broader than the normal builder
     // refresh and may take substantially longer and consume more disk space. It
@@ -74,6 +79,7 @@ public sealed class GameAssetRefreshService
         "Content/Equipment/",
         "Content/Abilities/",
         "Content/Gameplay/",
+        CharacterGadgetFilter,
         "Content/UI/",
         "Content/Localization/StringTables/",
         "Content/Plugins/GameFeatures/",
@@ -256,6 +262,7 @@ public sealed class GameAssetRefreshService
         }
 
         var assets = Directory.EnumerateFiles(contentRoot, "*.uasset", SearchOption.AllDirectories).ToList();
+        ValidateProfileCoverage(profile, contentRoot, result);
         var pairs = assets.Count(path => File.Exists(Path.ChangeExtension(path, ".uexp")));
         result.ContentRoot = contentRoot;
         result.FiltersRun = filters.Count;
@@ -275,7 +282,8 @@ public sealed class GameAssetRefreshService
                 .StartsWith("Characters" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                 .ToList()
             : assets;
-        result.Logs.Add($"Validation scope: {assetsToValidate.Count} character asset(s) of {assets.Count} extracted asset(s).");
+        var validationKind = profile == RefreshProfile.DeveloperResearch ? "character" : "extracted";
+        result.Logs.Add($"Validation scope: {assetsToValidate.Count} {validationKind} asset(s) of {assets.Count} extracted asset(s).");
         progress?.Report(new Progress(78, "Validating", $"Parsing {assetsToValidate.Count} character assets with UAssetAPI..."));
         var validation = await Task.Run(
             () => ValidateAssets(contentRoot, assetsToValidate, cancellationToken),
@@ -419,6 +427,46 @@ public sealed class GameAssetRefreshService
 
     private static List<string> SplitLines(string text) =>
         text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).ToList();
+
+    private static void ValidateProfileCoverage(RefreshProfile profile, string contentRoot, Result result)
+    {
+        if (profile is not (RefreshProfile.AllCharacterAssets or RefreshProfile.DeveloperResearch))
+        {
+            return;
+        }
+
+        var gadgetRoot = Path.Combine(contentRoot, "Models", "Gadgets");
+        if (!Directory.Exists(gadgetRoot))
+        {
+            throw new InvalidDataException(
+                "retoc completed, but the character-supporting Content\\Models\\Gadgets folder was not extracted. " +
+                "The previous extracted dump remains active. Verify the original game Content\\Paks folder and retry the refresh.");
+        }
+
+        var gadgetAssets = Directory.EnumerateFiles(gadgetRoot, "*.uasset", SearchOption.AllDirectories).Count();
+        if (gadgetAssets == 0)
+        {
+            throw new InvalidDataException(
+                "retoc created Content\\Models\\Gadgets but extracted no gadget assets. " +
+                "The previous extracted dump remains active. Verify the original game Content\\Paks folder and retry the refresh.");
+        }
+
+        result.Logs.Add($"Character-supporting gadget assets={gadgetAssets}");
+
+        // This cataloged Nightwing material is a useful end-to-end sentinel: it is one of the
+        // assets that exposed the old incomplete refresh profile. Do not fail a future game build
+        // solely because it was renamed, but make the mismatch explicit in Diagnostics.
+        var wingsuitMaterial = Path.Combine(
+            gadgetRoot,
+            "GA_Wingsuit_NightWing",
+            "MI_DECAL_Wingsuit_Nightwing.uasset");
+        if (!File.Exists(wingsuitMaterial))
+        {
+            result.Warnings.Add(
+                "Supporting gadget assets were extracted, but MI_DECAL_Wingsuit_Nightwing was not found. " +
+                "The installed game build may not match Batcomputer's material catalog.");
+        }
+    }
 
     private static string? FindContentRoot(string outputRoot, bool requireCharacters = true)
     {

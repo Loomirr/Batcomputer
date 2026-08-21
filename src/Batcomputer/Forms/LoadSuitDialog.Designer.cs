@@ -37,8 +37,8 @@ partial class LoadSuitDialog
         _designerPreviewLabel.Text = "Load Saved Suit Dialog\r\n\r\nDesigner shell only. Runtime fills the saved suit list from SuitProjectService.";
         _designerPreviewLabel.TextAlign = ContentAlignment.MiddleCenter;
 
-        AutoScaleDimensions = new SizeF(7F, 15F);
-        AutoScaleMode = AutoScaleMode.Font;
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = Color.FromArgb(26, 29, 34);
         ClientSize = new Size(620, 460);
         Controls.Add(_designerPreviewLabel);

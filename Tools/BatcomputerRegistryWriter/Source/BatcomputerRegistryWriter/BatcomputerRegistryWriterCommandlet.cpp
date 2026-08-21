@@ -10,6 +10,11 @@
 #include "Serialization/ArrayWriter.h"
 #include "UObject/PrimaryAssetId.h"
 
+// Keep compiler-provided file names portable in the prebuilt release module.
+// UE_LOG expands __FILE__ into the binary, so without this mapping the helper
+// would retain the local account path used to produce the official build.
+#line 1 "BatcomputerRegistryWriterCommandlet.cpp"
+
 DEFINE_LOG_CATEGORY_STATIC(LogBatcomputerRegistryWriter, Log, All);
 
 namespace

@@ -21,7 +21,7 @@ partial class CharacterAssemblyControl
         //
         AutoScaleMode = AutoScaleMode.Inherit;
         Name = "CharacterAssemblyControl";
-        Size = new Size(1500, 840);
+        Size = new Size(1280, 760);
         ResumeLayout(false);
     }
 }

@@ -2764,8 +2764,9 @@ public sealed partial class MainForm
 
             // Cross-type glide: record the donor character's glide anim sets so the package
             // step injects them into the suit's LAS_Char/MAS_Char. Without the matching body
-            // glide pose the wingsuit membrane collapses (invisible). Empty for a same-style
-            // (cape) base - no injection needed. Runs for BOTH the click and drag paths.
+            // glide pose the wingsuit membrane collapses (invisible). This includes Batman
+            // and Batgirl donors because a custom base may not inherit their traversal set.
+            // Runs for BOTH the click and drag paths.
             var (gliderLas, gliderMas) = GliderService.GliderAnimSetsForPart(samplePart);
             _currentProject.GliderAnimLas = gliderLas;
             _currentProject.GliderAnimMas = gliderMas;
@@ -2775,7 +2776,7 @@ public sealed partial class MainForm
             }
             else
             {
-                AppendLog("Glider: no glide-animation change needed for this glider on this base (cape-style default).");
+                AppendLog("Glider: the donor character did not expose a resolvable glide-animation set.");
             }
             try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject); } catch { /* best effort */ }
         }

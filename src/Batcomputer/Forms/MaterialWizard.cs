@@ -526,8 +526,19 @@ public sealed partial class MaterialWizard : Form
         var diskPath = MainForm.ResolveMiDiskPath(picker.SelectedPackagePath, preferExport: false);
         if (diskPath is null)
         {
+            var activeRoot = AppSettings.Current.EffectiveExtractedContentRoot();
+            var supportingAsset = picker.SelectedPackagePath.StartsWith(
+                "/Game/Models/Gadgets/",
+                StringComparison.OrdinalIgnoreCase);
+            var guidance = supportingAsset
+                ? "This is a character equipment/glider material stored under Content\\Models\\Gadgets. " +
+                  "Run Build > Refresh game assets > Refresh all character assets with the current Batcomputer build, then choose it again."
+                : "Run Build > Refresh game assets > Refresh all character assets, then choose it again.";
             Dialog.Warn(this, "Material not extracted",
-                $"{picker.SelectedPackagePath} is in the game material catalog, but its cooked .uasset was not found under your extracted Content folder. Extract that character's files, then choose the material again.");
+                $"{picker.SelectedPackagePath} is in the game material catalog, but its cooked .uasset was not found in the active extraction.\n\n" +
+                guidance + "\n\n" +
+                $"Active extracted Content:\n{activeRoot}\n\n" +
+                "An ExtractedPakData folder beside Batcomputer is not used unless it is explicitly selected in Setup.");
             return;
         }
 

@@ -488,6 +488,29 @@ public sealed class RegistryPluginService
                 $"-Project={toolchain.WriterProject}", "-WaitMutex", "-NoHotReloadFromIDE",
             },
             log);
+        var compatibilityError = "";
+        IReadOnlyDictionary<string, string> buildEnvironment = new Dictionary<string, string>();
+        if (writerBuild.ExitCode != 0 &&
+            writerBuild.Output.Contains("Could not find NetFxSDK install dir", StringComparison.OrdinalIgnoreCase) &&
+            TryCreateInstalledEngineBuildEnvironment(toolchain.EngineRoot, out buildEnvironment, out compatibilityError))
+        {
+            log("The installed UE build is missing optional .NET Framework SDK metadata; retrying with Batcomputer's local build-only compatibility metadata.");
+            writerBuild = await RunProcessAsync(
+                Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe",
+                Path.GetDirectoryName(toolchain.BuildScript) ?? toolchain.EngineRoot,
+                new[]
+                {
+                    "/c", toolchain.BuildScript,
+                    "BatcomputerRegistryWriterEditor", "Win64", "Development",
+                    $"-Project={toolchain.WriterProject}", "-WaitMutex", "-NoHotReloadFromIDE",
+                },
+                log,
+                buildEnvironment);
+        }
+        else if (!string.IsNullOrWhiteSpace(compatibilityError))
+        {
+            log("Asset Registry writer compatibility retry was unavailable: " + compatibilityError);
+        }
         if (writerBuild.ExitCode != 0)
         {
             return new WriterEnsureResult(false, UsedCache: false,
@@ -697,9 +720,9 @@ public sealed class RegistryPluginService
     {
         if (output.Contains("Could not find NetFxSDK install dir", StringComparison.OrdinalIgnoreCase))
         {
-            return "The configured UE 5.6 build does not match Batcomputer's bundled registry writer, " +
-                   "and the fallback compile cannot find a .NET Framework SDK. In Visual Studio Installer, " +
-                   "add the .NET Framework 4.8 SDK and .NET Framework 4.8 targeting pack, then retry. " +
+            return "The installed UE 5.6 editor rejected the local Asset Registry writer because its " +
+                   ".NET Framework SDK metadata is unavailable, including Batcomputer's compatibility retry. " +
+                   "In Visual Studio Installer, add the .NET Framework 4.8 SDK and targeting pack, then retry. " +
                    $"UnrealBuildTool exited with code {exitCode}.";
         }
 
@@ -713,8 +736,86 @@ public sealed class RegistryPluginService
                    $"UnrealBuildTool exited with code {exitCode}.";
         }
 
-        return $"The Asset Registry writer build failed (exit {exitCode}). Check Diagnostics and " +
-               "UnrealBuildTool's log for the first RulesError or compiler error.";
+        var firstDiagnostic = FirstWriterBuildDiagnostic(output);
+        return string.IsNullOrWhiteSpace(firstDiagnostic)
+            ? $"The Asset Registry writer build failed (exit {exitCode}). Copy Diagnostics and include " +
+              "UnrealBuildTool's log when reporting the problem."
+            : $"The Asset Registry writer build failed (exit {exitCode}). First build error: {firstDiagnostic}";
+    }
+
+    internal static string DescribeWriterBuildFailureForTest(int exitCode, string output) =>
+        DescribeWriterBuildFailure(exitCode, output);
+
+    private static string FirstWriterBuildDiagnostic(string output)
+    {
+        var candidates = output
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(line =>
+                line.Contains("RulesError", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("fatal error", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains(": error ", StringComparison.OrdinalIgnoreCase) ||
+                line.StartsWith("error ", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("Unable to instantiate module", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("Could not find", StringComparison.OrdinalIgnoreCase))
+            .Select(line => line.Length <= 360 ? line : line[..357] + "...")
+            .ToArray();
+        return candidates.FirstOrDefault() ?? "";
+    }
+
+    /// <summary>
+    /// Epic's installed UE editor already ships a compiled SwarmInterface module, but
+    /// UnrealBuildTool still instantiates its rules and rejects machines without the
+    /// optional legacy NETFXSDK registry entry. Its own SDK lookup supports AutoSDK,
+    /// so provide the one marker it checks in a private, child-process-only folder.
+    /// This does not modify Windows, Visual Studio, Unreal Engine, or the user's
+    /// environment and is only used after the normal build reports that exact error.
+    /// </summary>
+    private static bool TryCreateInstalledEngineBuildEnvironment(
+        string engineRoot,
+        out IReadOnlyDictionary<string, string> environment,
+        out string error)
+    {
+        environment = new Dictionary<string, string>();
+        error = "";
+        try
+        {
+            var installedBuildMarker = Path.Combine(engineRoot, "Engine", "Build", "InstalledBuild.txt");
+            var prebuiltSwarm = Path.Combine(engineRoot, "Engine", "Binaries", "Win64", "UnrealEditor-SwarmInterface.dll");
+            if (!File.Exists(installedBuildMarker) || !File.Exists(prebuiltSwarm))
+            {
+                error = "the configured engine is not an installed editor build with a prebuilt SwarmInterface module";
+                return false;
+            }
+
+            var autoSdkRoot = Path.Combine(WriterWorkspaceRoot, "AutoSdk");
+            var netFxRoot = Path.Combine(
+                autoSdkRoot,
+                "HostWin64",
+                "Win64",
+                "Windows Kits",
+                "NETFXSDK",
+                "4.6.2");
+            var includeDirectory = Path.Combine(netFxRoot, "Include", "um");
+            var libraryDirectory = Path.Combine(netFxRoot, "Lib", "um", "x64");
+            Directory.CreateDirectory(includeDirectory);
+            Directory.CreateDirectory(libraryDirectory);
+            var marker = Path.Combine(includeDirectory, "mscoree.h");
+            if (!File.Exists(marker))
+            {
+                File.WriteAllText(marker, "// Batcomputer installed-build compatibility marker.\n");
+            }
+
+            environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["UE_SDKS_ROOT"] = autoSdkRoot,
+            };
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
     }
 
     private static string WriterWorkspaceRoot
@@ -814,7 +915,8 @@ public sealed class RegistryPluginService
         string fileName,
         string workingDirectory,
         IEnumerable<string> arguments,
-        Action<string> log)
+        Action<string> log,
+        IReadOnlyDictionary<string, string>? environment = null)
     {
         var psi = new ProcessStartInfo
         {
@@ -828,6 +930,13 @@ public sealed class RegistryPluginService
         foreach (var argument in arguments)
         {
             psi.ArgumentList.Add(argument);
+        }
+        if (environment is not null)
+        {
+            foreach (var (key, value) in environment)
+            {
+                psi.Environment[key] = value;
+            }
         }
 
         using var process = Process.Start(psi);

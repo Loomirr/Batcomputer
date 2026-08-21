@@ -53,7 +53,7 @@ partial class MainForm
         _mainRootLayout.RowCount = 2;
         _mainRootLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         _mainRootLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 180F));
-        _mainRootLayout.Size = new Size(1500, 1000);
+        _mainRootLayout.Size = new Size(1280, 800);
         _mainRootLayout.TabIndex = 0;
 
         // _mainWorkspaceHost
@@ -64,7 +64,7 @@ partial class MainForm
         _mainWorkspaceHost.Margin = new Padding(0);
         _mainWorkspaceHost.Name = "_mainWorkspaceHost";
         _mainWorkspaceHost.Padding = new Padding(6);
-        _mainWorkspaceHost.Size = new Size(1500, 840);
+        _mainWorkspaceHost.Size = new Size(1280, 620);
         _mainWorkspaceHost.TabIndex = 0;
 
         // _designerWorkspacePreview
@@ -82,7 +82,7 @@ partial class MainForm
         _designerWorkspacePreview.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
         _designerWorkspacePreview.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
         _designerWorkspacePreview.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        _designerWorkspacePreview.Size = new Size(1488, 828);
+        _designerWorkspacePreview.Size = new Size(1268, 608);
         _designerWorkspacePreview.TabIndex = 0;
 
         // _designerTitleLabel
@@ -92,7 +92,7 @@ partial class MainForm
         _designerTitleLabel.ForeColor = Color.FromArgb(240, 194, 48);
         _designerTitleLabel.Location = new Point(21, 18);
         _designerTitleLabel.Name = "_designerTitleLabel";
-        _designerTitleLabel.Size = new Size(1446, 38);
+        _designerTitleLabel.Size = new Size(1226, 38);
         _designerTitleLabel.TabIndex = 0;
         _designerTitleLabel.Text = "Batcomputer";
         _designerTitleLabel.TextAlign = ContentAlignment.MiddleLeft;
@@ -103,7 +103,7 @@ partial class MainForm
         _designerSubtitleLabel.ForeColor = Color.FromArgb(158, 166, 178);
         _designerSubtitleLabel.Location = new Point(21, 56);
         _designerSubtitleLabel.Name = "_designerSubtitleLabel";
-        _designerSubtitleLabel.Size = new Size(1446, 28);
+        _designerSubtitleLabel.Size = new Size(1226, 28);
         _designerSubtitleLabel.TabIndex = 1;
         _designerSubtitleLabel.Text = "Designer shell only. Runtime inserts the Toybox builder, Advanced fallback, and log textbox into these host panels.";
         _designerSubtitleLabel.TextAlign = ContentAlignment.MiddleLeft;
@@ -116,7 +116,7 @@ partial class MainForm
         _designerWorkspaceLabel.Location = new Point(21, 84);
         _designerWorkspaceLabel.Name = "_designerWorkspaceLabel";
         _designerWorkspaceLabel.Padding = new Padding(24);
-        _designerWorkspaceLabel.Size = new Size(1446, 723);
+        _designerWorkspaceLabel.Size = new Size(1226, 503);
         _designerWorkspaceLabel.TabIndex = 2;
         _designerWorkspaceLabel.Text = "Runtime workspace host\r\n\r\nEdit form size, colors, docking, row heights, and placeholder shell here. Runtime-only dynamic controls remain in MainForm.cs so package/build logic is untouched.";
         _designerWorkspaceLabel.TextAlign = ContentAlignment.MiddleCenter;
@@ -125,20 +125,20 @@ partial class MainForm
         _mainLogGroupBox.BackColor = Color.FromArgb(26, 29, 34);
         _mainLogGroupBox.Dock = DockStyle.Fill;
         _mainLogGroupBox.ForeColor = Color.FromArgb(158, 166, 178);
-        _mainLogGroupBox.Location = new Point(3, 843);
+        _mainLogGroupBox.Location = new Point(3, 623);
         _mainLogGroupBox.Name = "_mainLogGroupBox";
         _mainLogGroupBox.Padding = Padding.Empty;
-        _mainLogGroupBox.Size = new Size(1494, 154);
+        _mainLogGroupBox.Size = new Size(1274, 174);
         _mainLogGroupBox.TabIndex = 1;
 
         // MainForm
-        AutoScaleDimensions = new SizeF(7F, 15F);
-        AutoScaleMode = AutoScaleMode.Font;
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = Color.FromArgb(26, 29, 34);
-        ClientSize = new Size(1500, 1000);
+        ClientSize = new Size(1280, 800);
         Controls.Add(_mainRootLayout);
         ForeColor = Color.FromArgb(236, 238, 242);
-        MinimumSize = new Size(1180, 760);
+        MinimumSize = new Size(960, 640);
         Name = "MainForm";
         StartPosition = FormStartPosition.CenterScreen;
         Text = "Batcomputer — Suit Builder";

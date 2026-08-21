@@ -37,8 +37,8 @@ partial class BaseWizard
         _designerPreviewLabel.Text = "Set Base Suit Wizard\r\n\r\nDesigner shell only. Runtime builds the file rows and validation buttons from the existing constructor.";
         _designerPreviewLabel.TextAlign = ContentAlignment.MiddleCenter;
 
-        AutoScaleDimensions = new SizeF(7F, 15F);
-        AutoScaleMode = AutoScaleMode.Font;
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
         ClientSize = new Size(720, 340);
         Controls.Add(_designerPreviewLabel);
         MaximizeBox = false;

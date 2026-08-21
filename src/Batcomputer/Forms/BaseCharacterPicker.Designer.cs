@@ -37,8 +37,8 @@ partial class BaseCharacterPicker
         _designerPreviewLabel.Text = "Base Character Picker\r\n\r\nDesigner shell only. Runtime builds the searchable character list from GameDataService.";
         _designerPreviewLabel.TextAlign = ContentAlignment.MiddleCenter;
 
-        AutoScaleDimensions = new SizeF(7F, 15F);
-        AutoScaleMode = AutoScaleMode.Font;
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = Color.FromArgb(26, 29, 34);
         ClientSize = new Size(560, 560);
         Controls.Add(_designerPreviewLabel);

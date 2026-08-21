@@ -36,8 +36,8 @@ partial class DiagnosticsControl
         //
         // DiagnosticsControl
         //
-        AutoScaleDimensions = new SizeF(7f, 15f);
-        AutoScaleMode = AutoScaleMode.Font;
+        AutoScaleDimensions = new SizeF(96f, 96f);
+        AutoScaleMode = AutoScaleMode.Dpi;
         Controls.Add(_logText);
         Name = "DiagnosticsControl";
         Size = new Size(1500, 200);

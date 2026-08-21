@@ -37,8 +37,8 @@ partial class SettingsForm
         _designerPreviewLabel.Text = "Settings / First-time Setup\r\n\r\nDesigner shell only. Runtime builds path rows from AppSettings.";
         _designerPreviewLabel.TextAlign = ContentAlignment.MiddleCenter;
 
-        AutoScaleDimensions = new SizeF(7F, 15F);
-        AutoScaleMode = AutoScaleMode.Font;
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
         ClientSize = new Size(1040, 460);
         Controls.Add(_designerPreviewLabel);
         FormBorderStyle = FormBorderStyle.FixedDialog;

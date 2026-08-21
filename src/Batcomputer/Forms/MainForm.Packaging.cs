@@ -50,19 +50,19 @@ public sealed partial class MainForm
         diagnosticsHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         diagnosticsHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 104f));
         diagnosticsHeader.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-        var diagHeader = new Button
+        _diagnosticsHeaderButton = new Button
         {
             Dock = DockStyle.Fill,
-            Text = "▾  Diagnostics",
+            Text = _diagnosticsCollapsed ? "▸  Diagnostics" : "▾  Diagnostics",
             TextAlign = ContentAlignment.MiddleLeft,
             FlatStyle = FlatStyle.Flat,
             Padding = new Padding(6, 0, 0, 0),
             Cursor = Cursors.Hand,
             Margin = Padding.Empty,
         };
-        Theme.StyleSmallDarkButton(diagHeader);
-        diagHeader.Font = Theme.BodyStrong;
-        diagHeader.Click += (_, _) => ToggleDiagnostics(diagHeader);
+        Theme.StyleSmallDarkButton(_diagnosticsHeaderButton);
+        _diagnosticsHeaderButton.Font = Theme.BodyStrong;
+        _diagnosticsHeaderButton.Click += (_, _) => ToggleDiagnostics();
         var copyLog = new Button
         {
             Dock = DockStyle.Fill,
@@ -77,12 +77,13 @@ public sealed partial class MainForm
         {
             copyLog.Text = _diagnostics.TryCopyLogToClipboard() ? "Copied" : "Copy failed";
         };
-        diagnosticsHeader.Controls.Add(diagHeader, 0, 0);
+        diagnosticsHeader.Controls.Add(_diagnosticsHeaderButton, 0, 0);
         diagnosticsHeader.Controls.Add(copyLog, 1, 0);
         _diagnostics.Dock = DockStyle.Fill;
         _mainLogGroupBox.Controls.Add(_diagnostics);
         _mainLogGroupBox.Controls.Add(diagnosticsHeader);
         diagnosticsHeader.BringToFront();
+        ApplyDiagnosticsLayout();
         ResumeLayout(true);
     }
 
@@ -323,6 +324,26 @@ public sealed partial class MainForm
             }
 
             await EnsureTextureCookTemplatesAsync(projectRoot);
+        });
+        menu.Items.Add("Open active extracted Content", null, (_, _) =>
+        {
+            var contentRoot = AppSettings.Current.EffectiveExtractedContentRoot();
+            if (!Directory.Exists(contentRoot))
+            {
+                Dialog.Warn(this, "Extracted Content not found",
+                    $"Batcomputer's active extracted Content folder does not exist:\n\n{contentRoot}\n\n" +
+                    "Open Setup to correct the path, or run Refresh all character assets.");
+                return;
+            }
+
+            try
+            {
+                Process.Start(new ProcessStartInfo(contentRoot) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                Dialog.Error(this, "Could not open extracted Content", ex.Message);
+            }
         });
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Full refresh", null, (_, _) =>

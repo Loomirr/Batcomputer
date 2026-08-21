@@ -37,8 +37,8 @@ partial class MaterialWizard
         _designerPreviewLabel.Text = "Material Wizard\r\n\r\nDesigner shell only. Runtime builds the material clone inputs and parameter grid.";
         _designerPreviewLabel.TextAlign = ContentAlignment.MiddleCenter;
 
-        AutoScaleDimensions = new SizeF(7F, 15F);
-        AutoScaleMode = AutoScaleMode.Font;
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
         ClientSize = new Size(720, 520);
         Controls.Add(_designerPreviewLabel);
         MaximizeBox = false;

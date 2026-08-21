@@ -37,8 +37,8 @@ partial class UimdIconsDialog
         _designerPreviewLabel.Text = "Suit Icons / UIMD Dialog\r\n\r\nDesigner shell only. Runtime builds the icon path rows and validation.";
         _designerPreviewLabel.TextAlign = ContentAlignment.MiddleCenter;
 
-        AutoScaleDimensions = new SizeF(7F, 15F);
-        AutoScaleMode = AutoScaleMode.Font;
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = Color.FromArgb(26, 29, 34);
         ClientSize = new Size(760, 360);
         Controls.Add(_designerPreviewLabel);

@@ -21,7 +21,7 @@ partial class CommandBarControl
         //
         AutoScaleMode = AutoScaleMode.Inherit;
         Name = "CommandBarControl";
-        Size = new Size(1500, 62);
+        Size = new Size(1280, 80);
         ResumeLayout(false);
     }
 }

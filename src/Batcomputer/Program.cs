@@ -507,6 +507,30 @@ internal static class Program
                 args.Length >= 3 ? args[2] : null);
         }
 
+        if (args.Length >= 1 && args[0].Equals("--verify-release-regressions", StringComparison.OrdinalIgnoreCase))
+        {
+            return ReleaseRegressionChecks.Run(Console.Out);
+        }
+
+        if (args.Length >= 1 && args[0].Equals("--verify-registry-writer", StringComparison.OrdinalIgnoreCase))
+        {
+            var result = new RegistryPluginService()
+                .PrepareAsync(line => Console.WriteLine("registry: " + line))
+                .GetAwaiter()
+                .GetResult();
+            if (!string.IsNullOrWhiteSpace(result.VerificationLine))
+            {
+                Console.WriteLine("verification: " + result.VerificationLine);
+            }
+            if (!result.Succeeded)
+            {
+                Console.Error.WriteLine("ERROR: " + result.Error);
+                return 1;
+            }
+            Console.WriteLine($"registry writer: PASS ({(result.Rebuilt ? "rebuilt" : "cache verified")})");
+            return 0;
+        }
+
 
         if (args.Length >= 4 && args[0].Equals("--repath-namemap", StringComparison.OrdinalIgnoreCase))
         {

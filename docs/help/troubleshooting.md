@@ -20,6 +20,10 @@ a real `Characters` folder. Check:
 - Close FModel or other tools reading the same output.
 - Run the full character refresh again after a game update.
 - Confirm the final log reports parsed assets with zero errors before trusting the indexes.
+- Confirm Diagnostics reports a nonzero `Character-supporting gadget assets=` count. Equipment and
+  glider materials are stored under `Content/Models/Gadgets`, outside the main Characters folder.
+- Check the **active extracted Content** path in Setup. An empty `ExtractedPakData` folder from an
+  older portable layout is not used automatically.
 
 ## The 3D viewer is blank
 

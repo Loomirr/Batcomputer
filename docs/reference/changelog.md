@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.0-beta.4
+
+- Fixed oversized and multi-monitor startup layouts, including the Diagnostics drawer consuming
+  most of the window.
+- Added the character-supporting `Content/Models/Gadgets` assets to normal extraction and made an
+  incomplete refresh leave the previous extraction selected.
+- Added a private installed-engine compatibility retry for missing NetFxSDK metadata and clearer
+  first-error reporting for writer compilation failures.
+- Separated normal cape attachments from glide-only cape/wingsuit components and retained the
+  glider donor's traversal animation data.
+
 ## 0.9.0-beta.3
 
 - Missing shared-registry errors now list the exact absent files.

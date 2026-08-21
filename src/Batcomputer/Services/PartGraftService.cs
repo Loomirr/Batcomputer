@@ -128,16 +128,30 @@ public sealed class PartGraftService
         // conversion. Fall through to the ADD path (new static component on a peg) instead.
         if (slotExists)
         {
-            var kindCheckPart = playablePart ?? cutscenePart!;
-            if (!ExistingSlotMatchesPartKindLive(graftedContentRoot, project.TargetPackages.Playable, targetSlot, kindCheckPart, mappingsPath))
+            if (playablePart is not null &&
+                !ExistingSlotCanBeRepointedLive(
+                    graftedContentRoot,
+                    project.TargetPackages.Playable,
+                    targetSlot,
+                    playablePart,
+                    mappingsPath))
+            {
+                slotExists = false;
+            }
+            if (slotExists && cutscenePart is not null &&
+                !ExistingSlotCanBeRepointedLive(
+                    graftedContentRoot,
+                    project.TargetPackages.Cutscene,
+                    targetSlot,
+                    cutscenePart,
+                    mappingsPath))
             {
                 slotExists = false;
             }
         }
         if (slotExists)
         {
-            var repointPart = playablePart ?? cutscenePart!;
-            var repoint = RepointComponentToPart(project, targetSlot, repointPart);
+            var repoint = RepointComponentsToParts(project, targetSlot, playablePart, cutscenePart);
             batch.PackageResults.AddRange(repoint.PackageResults);
             batch.Status = repoint.PackageResults.Any(p => p.Success) ? "created" : "partial-failure";
             var repointReport = Path.Combine(GuiOutputRoot, project.SlotId, reportFileName);
@@ -235,11 +249,11 @@ public sealed class PartGraftService
     /// kind, e.g. static hair onto a base whose "Head" is a skeletal cowl). Fails open
     /// (returns true) only when the component can't be inspected, preserving old behaviour.
     /// </summary>
-    private static bool ExistingSlotMatchesPartKindLive(string contentRoot, string playablePackage, string slot, NativeSuitPartRecord part, string? mappingsPath)
+    private static bool ExistingSlotCanBeRepointedLive(string contentRoot, string packagePath, string slot, NativeSuitPartRecord part, string? mappingsPath)
     {
         try
         {
-            var targetBase = PackagePathToBasePath(contentRoot, playablePackage);
+            var targetBase = PackagePathToBasePath(contentRoot, packagePath);
             var inputUasset = targetBase + ".uasset";
             if (!File.Exists(inputUasset))
             {
@@ -257,7 +271,16 @@ public sealed class PartGraftService
             var compClass = comp.GetExportClassType().Value?.ToString() ?? "";
             var compIsStatic = compClass.Contains("StaticMesh", StringComparison.OrdinalIgnoreCase);
             var wantStatic = part.MeshKind.Equals("StaticMesh", StringComparison.OrdinalIgnoreCase);
-            return compIsStatic == wantStatic;
+            var componentTags = FindPropertyLive<ArrayPropertyData>(comp.Data, "ComponentTags")?.Value?
+                .OfType<NamePropertyData>()
+                .Select(tag => tag.Value.ToString())
+                .ToArray()
+                ?? Array.Empty<string>();
+            return CanRepointExistingComponentForTest(
+                compIsStatic,
+                wantStatic,
+                ComponentLooksLikeGlider(slot, componentTags),
+                GliderService.IsNativeGliderPart(part));
         }
         catch
         {
@@ -265,7 +288,35 @@ public sealed class PartGraftService
         }
     }
 
+    internal static bool CanRepointExistingComponentForTest(
+        bool existingIsStatic,
+        bool incomingIsStatic,
+        bool existingIsGlider,
+        bool incomingIsGlider) =>
+        existingIsStatic == incomingIsStatic && existingIsGlider == incomingIsGlider;
+
+    private static bool ComponentLooksLikeGlider(string slot, IEnumerable<string> tags)
+    {
+        if (tags.Any(tag =>
+                tag.Equals("Glider", StringComparison.OrdinalIgnoreCase) ||
+                tag.Equals("GlideCape", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        return slot.Contains("Glide", StringComparison.OrdinalIgnoreCase) ||
+               slot.Contains("Glider", StringComparison.OrdinalIgnoreCase) ||
+               slot.Contains("Wingsuit", StringComparison.OrdinalIgnoreCase);
+    }
+
     public PartGraftBatchResult RepointComponentToPart(NativeSuitProject project, string componentName, NativeSuitPartRecord part)
+        => RepointComponentsToParts(project, componentName, part, part);
+
+    private PartGraftBatchResult RepointComponentsToParts(
+        NativeSuitProject project,
+        string componentName,
+        NativeSuitPartRecord? playablePart,
+        NativeSuitPartRecord? cutscenePart)
     {
         var batch = new PartGraftBatchResult { Status = "created", CreatedUtc = DateTime.UtcNow };
         var graftedContentRoot = Path.Combine(GuiOutputRoot, project.SlotId, "GraftedPartStage", "LEGOBatmanLotDK", "Content");
@@ -283,6 +334,14 @@ public sealed class PartGraftService
             var pr = new PartGraftPackageResult { Role = role, TargetPackagePath = pkg, TargetSlot = componentName };
             try
             {
+                var part = role.Equals("playable", StringComparison.OrdinalIgnoreCase)
+                    ? playablePart ?? cutscenePart
+                    : cutscenePart ?? playablePart;
+                if (part is null)
+                {
+                    throw new InvalidOperationException($"No {role} donor recipe was available for '{componentName}'.");
+                }
+
                 var targetBase = PackagePathToBasePath(contentRoot, pkg);
                 pr.InputUasset = targetBase + ".uasset";
                 pr.OutputUasset = targetBase + ".uasset";
@@ -323,11 +382,6 @@ public sealed class PartGraftService
                 var existingTags = comp.Data.OfType<ArrayPropertyData>()
                     .FirstOrDefault(p => p.Name.ToString().Equals("ComponentTags", StringComparison.OrdinalIgnoreCase))
                     ?.Value?.OfType<NamePropertyData>().Select(t => t.Value.ToString()).ToList();
-                if (existingTags is { Count: > 0 })
-                {
-                    part.ComponentTags = existingTags;
-                }
-
                 // Only repoint when the existing component's class matches the part's
                 // mesh kind. We do NOT convert component classes (corruption risk):
                 // replacing a skeletal component with a static mesh (or vice versa)
@@ -343,7 +397,7 @@ public sealed class PartGraftService
                     continue;
                 }
 
-                SetComponentTemplateDataLive(asset, comp, part, meshImport, animImport, materialImports);
+                SetComponentTemplateDataLive(asset, comp, part, meshImport, animImport, materialImports, existingTags);
                 comp.CreateBeforeSerializationDependencies = BuildCreateBeforeSerializationDependenciesLive(meshImport, animImport, materialImports);
 
                 // For a GLIDER repoint, also move the SCS node's attach socket to the part's
@@ -352,7 +406,7 @@ public sealed class PartGraftService
                 // the swapped glider in the wrong place. Scoped to glider parts (tag "Glider")
                 // so ordinary component repoints (head/torso/etc.) are untouched. Only applied
                 // when the node actually has an AttachToName (root nodes don't).
-                var isGliderRepoint = part.ComponentTags.Any(t => t.Equals("Glider", StringComparison.OrdinalIgnoreCase));
+                var isGliderRepoint = GliderService.IsNativeGliderPart(part);
                 if (isGliderRepoint && !string.IsNullOrWhiteSpace(part.AttachSocket))
                 {
                     var nodeIndex = FindScsNodeBySlotLive(asset, componentName);
@@ -560,6 +614,14 @@ public sealed class PartGraftService
             newComponent.OuterIndex = FromExportNumber(classExportIndex);
             newComponent.Asset = asset;
             SetComponentTemplateDataLive(asset, newComponent, donorPart, meshImport, animImport, materialImports);
+            if (!GliderService.IsNativeGliderPart(donorPart))
+            {
+                // Cosmetic attachments must not inherit the hidden/deactivated
+                // defaults of a glide-only shell selected as a last-resort clone.
+                SetBoolPropertyIfPresentLive(newComponent.Data, "bHiddenInGame", false);
+                SetBoolPropertyIfPresentLive(newComponent.Data, "bVisible", true);
+                SetBoolPropertyIfPresentLive(newComponent.Data, "bAutoActivate", true);
+            }
             newComponent.SerializationBeforeSerializationDependencies = new List<FPackageIndex> { FromExportNumber(classExportIndex) };
             newComponent.CreateBeforeSerializationDependencies = BuildCreateBeforeSerializationDependenciesLive(meshImport, animImport, materialImports);
             newComponent.SerializationBeforeCreateDependencies = new List<FPackageIndex> { newComponent.ClassIndex, newComponent.TemplateIndex }.Where(x => !x.IsNull()).ToList();
@@ -702,6 +764,7 @@ public sealed class PartGraftService
             ? PartRecipeService.SemanticKind(donorPart)
             : donorPart.SemanticKind;
         var desiredTags = donorPart.ComponentTags.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var desiredIsGlider = GliderService.IsNativeGliderPart(donorPart);
         var bestIndex = 0;
         var bestScore = int.MinValue;
 
@@ -737,6 +800,7 @@ public sealed class PartGraftService
                 .Select(value => value.Value.ToString())
                 .ToHashSet(StringComparer.OrdinalIgnoreCase)
                 ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var candidateIsGlider = ComponentLooksLikeGlider(slot, tags);
 
             var score = 0;
             if (slot.Equals(preferredSlot, StringComparison.OrdinalIgnoreCase)) score += 80;
@@ -749,6 +813,9 @@ public sealed class PartGraftService
                 parent.Equals(donorPart.ParentComponentOrVariableName, StringComparison.OrdinalIgnoreCase)) score += 15;
 
             score += desiredTags.Count(tag => tags.Contains(tag)) * 18;
+            // A cosmetic cape and a runtime glide visual can both be named Cape,
+            // but their visibility/animation wiring is not interchangeable.
+            score += candidateIsGlider == desiredIsGlider ? 240 : -400;
             var candidateKind = PartRecipeService.SemanticKind(slot, "", "", tags);
             if (candidateKind.Equals(desiredKind, StringComparison.OrdinalIgnoreCase)) score += 30;
 
@@ -1095,7 +1162,8 @@ public sealed class PartGraftService
         NativeSuitPartRecord donorPart,
         FPackageIndex meshImport,
         FPackageIndex animImport,
-        List<FPackageIndex> materialImports)
+        List<FPackageIndex> materialImports,
+        IReadOnlyCollection<string>? componentTagsOverride = null)
     {
         if (!animImport.IsNull())
         {
@@ -1113,7 +1181,20 @@ public sealed class PartGraftService
         }
 
         SetObjectArrayPropertyLive(asset, component.Data, "OverrideMaterials", materialImports);
-        SetNameArrayPropertyLive(asset, component.Data, "ComponentTags", donorPart.ComponentTags);
+        SetNameArrayPropertyLive(
+            asset,
+            component.Data,
+            "ComponentTags",
+            (componentTagsOverride ?? donorPart.ComponentTags).ToList());
+    }
+
+    private static void SetBoolPropertyIfPresentLive(List<PropertyData> properties, string propertyName, bool value)
+    {
+        var property = FindPropertyLive<BoolPropertyData>(properties, propertyName);
+        if (property is not null)
+        {
+            property.Value = value;
+        }
     }
 
     private static FPackageIndex EnsureObjectImportLive(UAsset asset, string packagePath, string objectName, string classPackage, string className)
