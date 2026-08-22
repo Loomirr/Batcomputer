@@ -3365,7 +3365,7 @@ public sealed partial class MainForm
                     // A rebuild is packageable only after every declarative operation succeeds.
                     // Removing the marker first prevents an older good stage from masking a newer
                     // partial replay.
-                    File.Delete(Path.Combine(graftStage, CompletedGraftStageMarkerName));
+                    DeleteCompletedGraftStageMarkerIfPresent(graftStage);
                     if (Directory.Exists(graftStage))
                     {
                         Directory.Delete(graftStage, recursive: true);
@@ -3531,6 +3531,28 @@ public sealed partial class MainForm
             await FinalizeDeclarativeGraftStageAsync(project, projectRoot);
         }
         _session.RaiseChanged();
+    }
+
+    /// <summary>
+    /// Clears the certification marker only when its stage directory exists. A suit's first
+    /// declarative rebuild has no GraftedPartStage yet; calling File.Delete beneath that missing
+    /// parent throws DirectoryNotFoundException on Windows and incorrectly blocks the fresh stage.
+    /// </summary>
+    internal static bool DeleteCompletedGraftStageMarkerIfPresent(string graftStage)
+    {
+        if (!Directory.Exists(graftStage))
+        {
+            return false;
+        }
+
+        var marker = Path.Combine(graftStage, CompletedGraftStageMarkerName);
+        if (!File.Exists(marker))
+        {
+            return false;
+        }
+
+        File.Delete(marker);
+        return true;
     }
 
     private async Task FinalizeDeclarativeGraftStageAsync(

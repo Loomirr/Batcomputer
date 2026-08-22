@@ -292,6 +292,24 @@ internal static class ReleaseRegressionChecks
             "material/removal-only projects require a completed declarative stage",
             failures,
             output);
+        var neverCreatedGraftStage = Path.Combine(
+            Path.GetTempPath(),
+            "Batcomputer-never-created-graft-stage-" + Guid.NewGuid().ToString("N"));
+        var freshStageMarkerCleanupSucceeded = false;
+        try
+        {
+            freshStageMarkerCleanupSucceeded =
+                !MainForm.DeleteCompletedGraftStageMarkerIfPresent(neverCreatedGraftStage);
+        }
+        catch
+        {
+            freshStageMarkerCleanupSucceeded = false;
+        }
+        Check(
+            freshStageMarkerCleanupSucceeded,
+            "a suit's first declarative rebuild tolerates a not-yet-created graft stage",
+            failures,
+            output);
         var materialOwnershipProject = new NativeSuitProject
         {
             GeneratedMaterials =
