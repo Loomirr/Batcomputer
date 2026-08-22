@@ -28,6 +28,7 @@ public sealed class CustomStaticMeshImportDialog : Form
     public float RotationYaw => (float)_rotationYaw.Value;
     public float RotationRoll => (float)_rotationRoll.Value;
     public bool HideBaseHead => _hideBaseHead.Checked;
+    public bool DeleteRequested { get; private set; }
 
     public CustomStaticMeshImportDialog(CustomStaticMeshImport? existing = null, string? sourcePath = null)
     {
@@ -203,6 +204,19 @@ public sealed class CustomStaticMeshImportDialog : Form
         Theme.StyleDarkButton(cancel);
         footer.Controls.Add(save);
         footer.Controls.Add(cancel);
+        if (existing is not null)
+        {
+            var remove = new Button { Text = "Remove", Width = 94, Height = 32 };
+            Theme.StyleDarkButton(remove);
+            remove.ForeColor = Color.FromArgb(232, 96, 96);
+            remove.Click += (_, _) =>
+            {
+                DeleteRequested = true;
+                DialogResult = DialogResult.Cancel;
+                Close();
+            };
+            footer.Controls.Add(remove);
+        }
         root.Controls.Add(footer, 0, 2);
         AcceptButton = save;
         CancelButton = cancel;

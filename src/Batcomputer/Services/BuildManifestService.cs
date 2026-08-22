@@ -109,6 +109,88 @@ public sealed class BuildManifestService
         return (manifest, path);
     }
 
+    /// <summary>
+    /// Returns every expected package output that is absent or empty. Callers that delete the
+    /// exact prior outputs before invoking retoc can use an empty result as the minimum proof that
+    /// the current attempt produced a fresh complete trio.
+    /// </summary>
+    internal static List<string> FindMissingOrEmptyFiles(IEnumerable<string> expectedPaths) =>
+        expectedPaths
+            .Where(path => !File.Exists(path) || new FileInfo(path).Length == 0)
+            .ToList();
+
+    /// <summary>
+    /// Verifies that an in-memory successful build result still names the exact trio written for
+    /// that build ID. Call this immediately before install so an older or subsequently replaced
+    /// trio cannot be copied merely because files happen to exist in the output directory.
+    /// </summary>
+    public bool VerifyInstallableTrio(
+        Manifest manifest,
+        string expectedBuildId,
+        string expectedSlotId,
+        string expectedPackageBaseName,
+        string ioStoreDir,
+        out string error)
+    {
+        if (string.IsNullOrWhiteSpace(expectedBuildId) ||
+            !string.Equals(manifest.BuildId, expectedBuildId, StringComparison.Ordinal))
+        {
+            error = "The build manifest does not belong to this package attempt.";
+            return false;
+        }
+        if (!string.Equals(manifest.SlotId, expectedSlotId, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(manifest.PackageBaseName, expectedPackageBaseName, StringComparison.OrdinalIgnoreCase))
+        {
+            error = "The build manifest belongs to a different suit or package name.";
+            return false;
+        }
+        if (manifest.Validation.TryGetValue("errors", out var validationErrors) && validationErrors.Count > 0)
+        {
+            error = "The build manifest contains release-blocking validation errors.";
+            return false;
+        }
+
+        var expectedNames = new[] { ".pak", ".ucas", ".utoc" }
+            .Select(extension => expectedPackageBaseName + extension)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (manifest.TrioFiles.Count != expectedNames.Count ||
+            manifest.TrioFiles.Any(entry =>
+                !Path.GetFileName(entry.File).Equals(entry.File, StringComparison.Ordinal) ||
+                !expectedNames.Contains(entry.File)) ||
+            manifest.TrioFiles.Select(entry => entry.File).Distinct(StringComparer.OrdinalIgnoreCase).Count() != expectedNames.Count)
+        {
+            error = "The build manifest does not certify exactly one .pak, .ucas, and .utoc for this package.";
+            return false;
+        }
+
+        var outputRoot = Path.GetFullPath(ioStoreDir)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        foreach (var entry in manifest.TrioFiles)
+        {
+            var file = Path.GetFullPath(Path.Combine(outputRoot, entry.File));
+            if (!FileSystemPathUtil.IsWithinDirectory(file, outputRoot))
+            {
+                error = $"The certified trio path escapes its output directory: {entry.File}";
+                return false;
+            }
+            if (!File.Exists(file))
+            {
+                error = $"The freshly built trio file is missing: {entry.File}";
+                return false;
+            }
+
+            var (sha256, size) = HashFile(file);
+            if (size != entry.Size || !sha256.Equals(entry.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                error = $"The freshly built trio file changed after packaging: {entry.File}";
+                return false;
+            }
+        }
+
+        error = "";
+        return true;
+    }
+
     private static string RoleFromLeaf(string leaf)
     {
         if (leaf.StartsWith("MI_", StringComparison.OrdinalIgnoreCase) ||

@@ -1864,11 +1864,15 @@ public sealed partial class MainForm
     /// previously cooked output exists; packaging must never pick a newer donor or
     /// rewrite that asset on the user's behalf.
     /// </summary>
-    private bool StageGeneratedTexturesIntoContentRoot(NativeSuitProject project, string contentRootToPackage, out string error)
+    private bool StageGeneratedTexturesIntoContentRoot(
+        NativeSuitProject project,
+        string contentRootToPackage,
+        out string error,
+        bool persistProjectChanges = true)
     {
         error = "";
 
-        if (NormalizeGeneratedUimdIconRecipes(project))
+        if (NormalizeGeneratedUimdIconRecipes(project) && persistProjectChanges)
         {
             try
             {
@@ -1882,8 +1886,14 @@ public sealed partial class MainForm
 
         if (project.GeneratedTextures.Count == 0)
         {
-            ClearDedicatedGeneratedTextureStage(project, contentRootToPackage);
-            WriteGeneratedTextureStageManifest(project, new List<string>());
+            ClearDedicatedGeneratedTextureStage(
+                project,
+                contentRootToPackage,
+                throwOnFailure: !persistProjectChanges);
+            if (persistProjectChanges)
+            {
+                WriteGeneratedTextureStageManifest(project, new List<string>());
+            }
             return true;
         }
 
@@ -1905,7 +1915,10 @@ public sealed partial class MainForm
             return false;
         }
 
-        ClearDedicatedGeneratedTextureStage(project, contentRootToPackage);
+        ClearDedicatedGeneratedTextureStage(
+            project,
+            contentRootToPackage,
+            throwOnFailure: !persistProjectChanges);
         var copied = 0;
         var stagedRelativeFiles = new List<string>();
         foreach (var texture in project.GeneratedTextures)
@@ -1954,7 +1967,10 @@ public sealed partial class MainForm
             }
         }
 
-        WriteGeneratedTextureStageManifest(project, stagedRelativeFiles);
+        if (persistProjectChanges)
+        {
+            WriteGeneratedTextureStageManifest(project, stagedRelativeFiles);
+        }
         AppendLog($"Staged {copied} generated texture file(s) into the pack content root.");
         return true;
     }
@@ -2257,14 +2273,17 @@ public sealed partial class MainForm
         }
     }
 
-    private void ClearDedicatedGeneratedTextureStage(NativeSuitProject project, string contentRootToPackage)
+    private void ClearDedicatedGeneratedTextureStage(
+        NativeSuitProject project,
+        string contentRootToPackage,
+        bool throwOnFailure = false)
     {
         if (string.IsNullOrWhiteSpace(contentRootToPackage))
         {
             return;
         }
 
-        ClearGeneratedTextureStageManifestEntries(project, contentRootToPackage);
+        ClearGeneratedTextureStageManifestEntries(project, contentRootToPackage, throwOnFailure);
 
         var textureStage = Path.Combine(contentRootToPackage, "Mods", "Tex", "Textures");
         if (!Directory.Exists(textureStage))
@@ -2288,6 +2307,12 @@ public sealed partial class MainForm
         catch (Exception ex)
         {
             AppendLog($"Texture stage cleanup warning: {ex.Message}");
+            if (throwOnFailure)
+            {
+                throw new InvalidOperationException(
+                    "The disposable release stage could not clear stale generated textures.",
+                    ex);
+            }
         }
     }
 
@@ -2298,7 +2323,10 @@ public sealed partial class MainForm
         return Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "NativeSuitGuiProjects", slotId, "generated-textures-stage-manifest.json");
     }
 
-    private void ClearGeneratedTextureStageManifestEntries(NativeSuitProject project, string contentRootToPackage)
+    private void ClearGeneratedTextureStageManifestEntries(
+        NativeSuitProject project,
+        string contentRootToPackage,
+        bool throwOnFailure)
     {
         var manifestPath = GeneratedTextureStageManifestPath(project);
         if (!File.Exists(manifestPath))
@@ -2343,6 +2371,12 @@ public sealed partial class MainForm
         catch (Exception ex)
         {
             AppendLog($"Texture manifest cleanup warning: {ex.Message}");
+            if (throwOnFailure)
+            {
+                throw new InvalidOperationException(
+                    "The disposable release stage could not clear generated textures listed by the saved stage manifest.",
+                    ex);
+            }
         }
     }
 

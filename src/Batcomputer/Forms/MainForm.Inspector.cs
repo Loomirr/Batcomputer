@@ -20,16 +20,27 @@ public sealed partial class MainForm
         {
             return;
         }
+        RecordChange(_currentProject, category, target, detail, status);
+    }
+
+    /// <summary>Records a change against the project that was actually edited.</summary>
+    private void RecordChange(
+        NativeSuitProject project,
+        string category,
+        string target,
+        string detail,
+        string status = "applied")
+    {
         // Collapse duplicates: re-doing an idempotent action (re-picking the same base, re-grafting
         // the same hair, re-applying the same material) previously appended an identical card every
         // time - the review list filled with 8 identical "Base" entries. Drop any prior entry with
         // the same Category+Target+Detail so this one refreshes in place (updated time, moved to top)
         // instead of stacking. Genuinely distinct edits differ in Target or Detail and are kept.
-        _currentProject.Changes.RemoveAll(c =>
+        project.Changes.RemoveAll(c =>
             string.Equals(c.Category, category, StringComparison.Ordinal) &&
             string.Equals(c.Target, target, StringComparison.Ordinal) &&
             string.Equals(c.Detail, detail, StringComparison.Ordinal));
-        _currentProject.Changes.Add(new SavedChange
+        project.Changes.Add(new SavedChange
         {
             When = DateTime.Now.ToString("o"),
             Category = category,
@@ -39,7 +50,7 @@ public sealed partial class MainForm
         });
         try
         {
-            (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject);
+            (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(project);
         }
         catch { /* best effort — a save failure shouldn't break the edit */ }
         _session.RaiseChanged();

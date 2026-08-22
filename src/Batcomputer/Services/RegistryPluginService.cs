@@ -112,14 +112,14 @@ public sealed class RegistryPluginService
         return TryGetWriterToolchain(out var toolchain, out _) && !HasCurrentWriterCache(toolchain);
     }
 
-    public async Task<WriterPreparationResult> PrepareAsync(Action<string> log)
+    public async Task<WriterPreparationResult> PrepareAsync(Action<string> log, bool forceBuild = false)
     {
         if (!TryGetWriterToolchain(out var toolchain, out var error))
         {
             return new WriterPreparationResult { Error = error };
         }
 
-        var ensured = await EnsureWriterAsync(toolchain, log);
+        var ensured = await EnsureWriterAsync(toolchain, log, forceBuild);
         if (!ensured.Succeeded)
         {
             return new WriterPreparationResult { Error = ensured.Error };
@@ -189,6 +189,14 @@ public sealed class RegistryPluginService
 
             var asset = raw.AssetName;
             var primaryId = $"{raw.EffectivePrimaryAssetType}:{asset}";
+            if (!UnrealPathUtil.IsValidIdentifier(asset))
+            {
+                errors.Add($"Registry asset name must use only letters, numbers, and underscores and cannot begin with a number: '{asset}'.");
+            }
+            if (!UnrealPathUtil.IsValidIdentifier(raw.EffectivePrimaryAssetType))
+            {
+                errors.Add($"Registry primary asset type is not a valid Unreal identifier for '{package}': '{raw.EffectivePrimaryAssetType}'.");
+            }
             if (string.IsNullOrWhiteSpace(asset) || !primaryNames.Add(primaryId))
             {
                 errors.Add($"Registry primary asset ID collides: '{primaryId}'. Asset names must be unique within one primary-asset type.");
@@ -342,9 +350,6 @@ public sealed class RegistryPluginService
         verificationLine.Contains($"expected_primary_rows={rows.Count}", StringComparison.OrdinalIgnoreCase) &&
         verificationLine.Contains($"exact_primary_rows={rows.Count}", StringComparison.OrdinalIgnoreCase) &&
         verificationLine.Contains($"exact_primary_ids={rows.Count}", StringComparison.OrdinalIgnoreCase) &&
-        rows.All(row => verificationLine.Contains(
-            $"{row.EffectivePrimaryAssetType}:{row.AssetName}",
-            StringComparison.Ordinal)) &&
         verificationLine.Contains("all_expected_rows=yes", StringComparison.OrdinalIgnoreCase) &&
         verificationLine.Contains("all_expected_primary_ids=yes", StringComparison.OrdinalIgnoreCase) &&
         verificationLine.Contains("sentinel_enabled=yes", StringComparison.OrdinalIgnoreCase) &&
@@ -478,15 +483,15 @@ public sealed class RegistryPluginService
         log(forceBuild
             ? "Rebuilding the UE 5.6 Asset Registry writer..."
             : "Preparing the UE 5.6 Asset Registry writer (first build)...");
-        var writerBuild = await RunProcessAsync(
-            Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe",
+        var writerArguments = new[]
+        {
+            "BatcomputerRegistryWriterEditor", "Win64", "Development",
+            $"-Project={toolchain.WriterProject}", "-WaitMutex", "-NoHotReloadFromIDE",
+        };
+        var writerBuild = await RunBatchFileAsync(
+            toolchain.BuildScript,
             Path.GetDirectoryName(toolchain.BuildScript) ?? toolchain.EngineRoot,
-            new[]
-            {
-                "/c", toolchain.BuildScript,
-                "BatcomputerRegistryWriterEditor", "Win64", "Development",
-                $"-Project={toolchain.WriterProject}", "-WaitMutex", "-NoHotReloadFromIDE",
-            },
+            writerArguments,
             log);
         var compatibilityError = "";
         IReadOnlyDictionary<string, string> buildEnvironment = new Dictionary<string, string>();
@@ -495,15 +500,10 @@ public sealed class RegistryPluginService
             TryCreateInstalledEngineBuildEnvironment(toolchain.EngineRoot, out buildEnvironment, out compatibilityError))
         {
             log("The installed UE build is missing optional .NET Framework SDK metadata; retrying with Batcomputer's local build-only compatibility metadata.");
-            writerBuild = await RunProcessAsync(
-                Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe",
+            writerBuild = await RunBatchFileAsync(
+                toolchain.BuildScript,
                 Path.GetDirectoryName(toolchain.BuildScript) ?? toolchain.EngineRoot,
-                new[]
-                {
-                    "/c", toolchain.BuildScript,
-                    "BatcomputerRegistryWriterEditor", "Win64", "Development",
-                    $"-Project={toolchain.WriterProject}", "-WaitMutex", "-NoHotReloadFromIDE",
-                },
+                writerArguments,
                 log,
                 buildEnvironment);
         }
@@ -718,6 +718,14 @@ public sealed class RegistryPluginService
 
     private static string DescribeWriterBuildFailure(int exitCode, string output)
     {
+        if (output.Contains("'C:\\Program' is not recognized", StringComparison.OrdinalIgnoreCase) ||
+            output.Contains("'C:\\Program Files' is not recognized", StringComparison.OrdinalIgnoreCase))
+        {
+            return "The Asset Registry writer could not start because Windows split the Unreal Engine path at a space. " +
+                   "This Batcomputer build contains the quoted-path fix; restart Batcomputer and retry. " +
+                   $"The failed writer exited with code {exitCode}.";
+        }
+
         if (output.Contains("Could not find NetFxSDK install dir", StringComparison.OrdinalIgnoreCase))
         {
             return "The installed UE 5.6 editor rejected the local Asset Registry writer because its " +
@@ -943,6 +951,54 @@ public sealed class RegistryPluginService
         if (process is null)
         {
             return (-1, "Could not start the Asset Registry writer process.");
+        }
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        var output = await outputTask;
+        var error = await errorTask;
+        if (!string.IsNullOrWhiteSpace(output)) log(output.Trim());
+        if (!string.IsNullOrWhiteSpace(error)) log(error.Trim());
+        return (process.ExitCode, output + Environment.NewLine + error);
+    }
+
+    private static async Task<(int ExitCode, string Output)> RunBatchFileAsync(
+        string batchFile,
+        string workingDirectory,
+        IEnumerable<string> arguments,
+        Action<string> log,
+        IReadOnlyDictionary<string, string>? environment = null)
+    {
+        static string QuoteForCmd(string value) =>
+            "\"" + value.Replace("\"", "\"\"") + "\"";
+
+        // cmd.exe treats the first quoted token after /c specially. Wrapping the
+        // complete command in a second pair of quotes preserves a spaced Build.bat
+        // path on every Windows locale and shell configuration.
+        var command = "\"" + QuoteForCmd(batchFile) + " " +
+                      string.Join(" ", arguments.Select(QuoteForCmd)) + "\"";
+        var psi = new ProcessStartInfo
+        {
+            FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe",
+            Arguments = "/d /s /c " + command,
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+        if (environment is not null)
+        {
+            foreach (var (key, value) in environment)
+            {
+                psi.Environment[key] = value;
+            }
+        }
+
+        using var process = Process.Start(psi);
+        if (process is null)
+        {
+            return (-1, "Could not start the Asset Registry writer build process.");
         }
         var outputTask = process.StandardOutput.ReadToEndAsync();
         var errorTask = process.StandardError.ReadToEndAsync();

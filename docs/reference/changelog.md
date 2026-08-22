@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.9.0-beta.5
+
+- Cutscene visuals now always open the gameplay-donor picker, and Catwoman playables resolve their
+  Catwoman archetype instead of falling back to Batman.
+- Custom OBJ meshes can be edited or removed and are replayed with native parts, removals, and
+  materials after changing the base.
+- Custom-mesh transforms baked in the 3D viewer now remain in the live suit recipe when an unrelated
+  part removal triggers a clean rebuild.
+- Generated-file sharing violations receive bounded retries; incomplete playable/cutscene grafts
+  stop the rebuild and cannot be packaged as a partial suit.
+- Fixed registry-writer launches from spaced Unreal paths, structured registry verification, and
+  punctuation leaking from display names into Unreal identifiers.
+- Incompatible remote-controller families and unsupported regular-cape/glider combinations are
+  blocked with actionable guidance; Batman glide capes are called out in the Gliders browser.
+- Suit and mod outputs are prepared away from certified authoring stages, and only a fresh, complete
+  IoStore trio can be published or installed; failed installs restore the previous trio.
+
 ## 0.9.0-beta.4
 
 - Fixed oversized and multi-monitor startup layouts, including the Diagnostics drawer consuming

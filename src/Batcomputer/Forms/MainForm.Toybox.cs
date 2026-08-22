@@ -974,7 +974,7 @@ public sealed partial class MainForm
         // shared minifig body + a material, so a Talia playable painted with Joker's materials
         // IS a playable Joker.
         (string BodyMi, string FaceMi) villainVisual = ("", "");
-        var baseMachinery = AnimArchetypeGraftService.DetectDonor(playableDisk, extracted, null);
+        var baseMachinery = AnimArchetypeGraftService.DetectDonor(playableDisk, extracted, UiMappings());
         if (baseMachinery is null || !baseMachinery.Valid)
         {
             AppendLog($"'{UnrealPathUtil.AssetName(playablePackage)}' is a villain/NPC — its body and movement live in its NPC class, so it cannot become a playable directly. Applying its appearance to the tested playable base instead.");
@@ -994,7 +994,7 @@ public sealed partial class MainForm
             // Capture the villain's identity materials, then switch the staged base to the
             // DONOR's playable + cutscene (both reskinned via the material assignments below).
             var villainFolder = playablePackage.Split('/') is { Length: >= 2 } segs ? segs[^2] : "";
-            villainVisual = AnimArchetypeGraftService.ExtractCharacterMaterials(playableDisk, villainFolder, null);
+            villainVisual = AnimArchetypeGraftService.ExtractCharacterMaterials(playableDisk, villainFolder, UiMappings());
 
             playableDisk = donorPlayableDisk;
             _basePlayableText.Text = donorPlayableDisk;
@@ -1174,22 +1174,35 @@ public sealed partial class MainForm
             return;
         }
 
-        var gameplay = TemplateFromUasset(FindPlayableSiblingForVisual(visualDisk) ?? "", "playable", extracted);
+        var recommendedGameplay = TemplateFromUasset(
+            FindPlayableSiblingForVisual(visualDisk) ?? "",
+            "playable",
+            extracted);
+        var recommendedPackage = IsEligibleGameplayDonor(recommendedGameplay, extracted, out _)
+            ? recommendedGameplay!.PackagePath
+            : null;
+        if (!string.IsNullOrWhiteSpace(recommendedPackage))
+        {
+            AppendLog($"Recommended gameplay donor for '{visual.Stem}': {recommendedGameplay!.Stem}. Choose it or select a different playable.");
+        }
+        else
+        {
+            AppendLog($"Visual source '{visual.Stem}' needs a separate gameplay donor.");
+        }
+
+        // A cutscene visual never silently chooses machinery. Authors can deliberately
+        // combine any visual character with any eligible playable donor.
+        var donorPackage = PromptForMachineryDonor(recommendedPackage);
+        if (string.IsNullOrWhiteSpace(donorPackage))
+        {
+            AppendLog("Visual base not staged. Pick a gameplay donor to provide movement, equipment, and runtime behavior.");
+            return;
+        }
+        var gameplay = TemplateFromUasset(PackageToExtractedUasset(donorPackage, extracted), "playable", extracted);
         if (!IsEligibleGameplayDonor(gameplay, extracted, out var donorDetail))
         {
-            AppendLog($"Visual source '{visual.Stem}' needs a gameplay donor: {donorDetail}");
-            var donorPackage = PromptForMachineryDonor();
-            if (string.IsNullOrWhiteSpace(donorPackage))
-            {
-                AppendLog("Visual base not staged. Pick a gameplay donor to provide movement, equipment, and runtime behavior.");
-                return;
-            }
-            gameplay = TemplateFromUasset(PackageToExtractedUasset(donorPackage, extracted), "playable", extracted);
-            if (!IsEligibleGameplayDonor(gameplay, extracted, out donorDetail))
-            {
-                AppendLog($"The selected gameplay donor cannot be used: {donorDetail}");
-                return;
-            }
+            AppendLog($"The selected gameplay donor cannot be used: {donorDetail}");
+            return;
         }
 
         var dcmdDisk = FindDcmdSiblingForPlayable(gameplay!.Uasset);
@@ -2454,7 +2467,7 @@ public sealed partial class MainForm
                 MenuFactory = () =>
                 {
                     var menu = new ContextMenuStrip();
-                    menu.Items.Add("Remove this change", null, (_, _) => RemoveReviewChange(c));
+                    menu.Items.Add("Remove this change", null, async (_, _) => await RemoveReviewChangeAsync(c));
                     return menu;
                 },
             };
@@ -2472,7 +2485,7 @@ public sealed partial class MainForm
     /// the next package won't re-apply it. A visual revert of already-staged geometry
     /// needs a re-stage (Pick base character) - noted in the log.
     /// </summary>
-    private void RemoveReviewChange(SavedChange change)
+    private async Task RemoveReviewChangeAsync(SavedChange change)
     {
         if (_currentProject is null)
         {
@@ -2486,7 +2499,21 @@ public sealed partial class MainForm
             return;
         }
 
+        NativeSuitProject previousProjectSnapshot;
+        try
+        {
+            previousProjectSnapshot = JsonSerializer.Deserialize<NativeSuitProject>(
+                JsonSerializer.Serialize(_currentProject))
+                ?? throw new InvalidOperationException("Could not snapshot the suit before removing the change.");
+        }
+        catch (Exception ex)
+        {
+            AppendLog("Remove change stopped before staging: " + ex.Message);
+            return;
+        }
+
         _currentProject.Changes.Remove(change);
+        var requiresCleanRebuild = false;
 
         // Best-effort revert of the persisted intent by category.
         switch (change.Category)
@@ -2498,10 +2525,12 @@ public sealed partial class MainForm
                 _currentProject.GliderGrafted = false;
                 _currentProject.GliderAnimLas = "";
                 _currentProject.GliderAnimMas = "";
-                AppendLog("Cleared glider intent (visual + glide-animation injection). Re-pick base to fully rebuild the stage if the glide component was already repointed.");
+                requiresCleanRebuild = true;
+                AppendLog("Cleared glider intent (visual + glide-animation injection); rebuilding the stage from the clean base.");
                 break;
             case "Equipment":
                 _currentProject.EquipmentSlots.Clear();
+                requiresCleanRebuild = true;
                 AppendLog("Cleared equipment intent — re-add gadgets you still want.");
                 break;
             case "Materials":
@@ -2512,12 +2541,52 @@ public sealed partial class MainForm
                     change.Target.Contains(m.Component, StringComparison.OrdinalIgnoreCase));
                 if (_currentProject.MaterialAssignments.Count != before)
                 {
-                    ApplySavedMaterials(_currentProject, logIfNone: false);
+                    requiresCleanRebuild = true;
                 }
                 break;
         }
 
-        try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject); } catch { /* best effort */ }
+        var projectRoot = _projectRootText.Text.Trim();
+        var projectSaved = false;
+        try
+        {
+            if (requiresCleanRebuild)
+            {
+                await RebuildGraftStageFromDeclarativeAsync(persistProject: false);
+            }
+            await RunWithFileLockRetryAsync(
+                () => (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(_currentProject),
+                "save the removed review change");
+            projectSaved = true;
+            if (requiresCleanRebuild)
+            {
+                await FinalizeDeclarativeGraftStageAsync(_currentProject, projectRoot);
+            }
+        }
+        catch (Exception ex)
+        {
+            if (!projectSaved)
+            {
+                _currentProject = previousProjectSnapshot;
+                ApplyProjectToFields(_currentProject);
+                UpdateSelectedLabels();
+            }
+            AppendLog(projectSaved
+                ? "The change removal was saved, but its rebuilt stage could not be certified: " + ex.Message
+                : "Remove change failed; the prior saved project was kept: " + ex.Message);
+            Dialog.Error(
+                this,
+                projectSaved ? "Change saved; stage incomplete" : "Remove change failed",
+                (projectSaved
+                    ? "The project change was saved, but packaging remains blocked until the generated stage can be certified."
+                    : "The change could not be removed and rebuilt safely. The prior saved project remains active.") +
+                "\n\n" + ex.Message);
+            _session.RaiseChanged();
+            RefreshInspector();
+            RefreshToyboxTiles();
+            return;
+        }
+
         AppendLog($"Removed change: {change.Category} · {change.Target}");
         _session.RaiseChanged();
         RefreshToyboxTiles();
@@ -2618,6 +2687,18 @@ public sealed partial class MainForm
         var hasMontageAnims = !string.IsNullOrEmpty(eq.MontageAnimSet);
         var hasGraft = hasLayerAnims || hasMontageAnims;
         var customArchetype = _currentProject?.UseCustomArchetype == true;
+        var requiredFamily = profile.RequiredGameplayFamily;
+        var currentFamily = _currentProject?.BaseProfile?.GameplayFamily;
+        if (string.IsNullOrWhiteSpace(currentFamily) && _currentProject is not null)
+        {
+            currentFamily = GameDataService.Instance
+                .FamilyForBasePath(_currentProject.PlayableTemplate?.PackagePath ?? "")?
+                .Name;
+        }
+        var controllerFamilyMismatch =
+            profile.Support == EquipmentSupportKind.Controller &&
+            !string.IsNullOrWhiteSpace(requiredFamily) &&
+            !string.Equals(requiredFamily, currentFamily, StringComparison.OrdinalIgnoreCase);
 
         var model = new Dialog.Model
         {
@@ -2631,6 +2712,7 @@ public sealed partial class MainForm
             {
                 EquipmentSupportKind.Native => Dialog.Level.Good,
                 EquipmentSupportKind.CrossFamily => Dialog.Level.Info,
+                EquipmentSupportKind.Controller when controllerFamilyMismatch => Dialog.Level.Crit,
                 EquipmentSupportKind.Controller => Dialog.Level.Warn,
                 EquipmentSupportKind.FamilyOnly => Dialog.Level.Warn,
                 _ => Dialog.Level.Crit
@@ -2682,17 +2764,15 @@ public sealed partial class MainForm
         switch (profile.Support)
         {
             case EquipmentSupportKind.Controller:
-                var requiredFamily = profile.RequiredGameplayFamily;
-                var currentFamily = _currentProject?.BaseProfile?.GameplayFamily;
-                if (!string.IsNullOrWhiteSpace(requiredFamily) &&
-                    !string.Equals(requiredFamily, currentFamily, StringComparison.OrdinalIgnoreCase))
+                if (controllerFamilyMismatch)
                 {
                     model.CalloutTitle = $"Requires a {requiredFamily} gameplay base";
                     model.CalloutDetail =
                         $"{eq.Name} controls a remote pawn. It is confirmed to work only with a {requiredFamily} gameplay donor, " +
-                        $"not {(string.IsNullOrWhiteSpace(currentFamily) ? "this base" : currentFamily)}. You can record it, " +
-                        "but the controller will not function in-game until the gameplay base is changed.";
-                    model.PrimaryText = "Add anyway";
+                        $"not {(string.IsNullOrWhiteSpace(currentFamily) ? "this base" : currentFamily)}. " +
+                        $"Re-select the visual base, choose a {requiredFamily} playable donor, then add this gadget.";
+                    model.PrimaryText = "Close";
+                    model.SecondaryText = "";
                 }
                 else
                 {
@@ -2741,6 +2821,11 @@ public sealed partial class MainForm
         }
 
         if (!Dialog.Show(this, model))
+        {
+            return;
+        }
+
+        if (controllerFamilyMismatch)
         {
             return;
         }
@@ -3081,7 +3166,443 @@ public sealed partial class MainForm
         }
     }
 
+    private static List<(CustomStaticMeshImport Mesh, string SourcePath)> CaptureCustomMeshSources(
+        NativeSuitProject project,
+        string projectOutputDirectory)
+    {
+        var outputRoot = Path.GetFullPath(projectOutputDirectory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var captured = new List<(CustomStaticMeshImport Mesh, string SourcePath)>();
+        foreach (var mesh in project.CustomStaticMeshes)
+        {
+            if (string.IsNullOrWhiteSpace(mesh.SourceObjRelativePath))
+            {
+                throw new InvalidOperationException($"Custom mesh '{mesh.DisplayName}' has no project-owned OBJ source.");
+            }
+            var source = Path.GetFullPath(Path.Combine(outputRoot, mesh.SourceObjRelativePath));
+            if (!source.StartsWith(outputRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"Custom mesh '{mesh.DisplayName}' points outside its suit project.");
+            }
+            if (!File.Exists(source))
+            {
+                throw new FileNotFoundException($"The saved OBJ for custom mesh '{mesh.DisplayName}' is missing.", source);
+            }
+            captured.Add((mesh, source));
+        }
+        return captured;
+    }
+
+    private sealed record BaseStageDirectorySnapshot(
+        string Name,
+        string StagePath,
+        string BackupPath,
+        bool Existed);
+
+    private sealed class BaseStageFilesystemSnapshot
+    {
+        public required string SlotRoot { get; init; }
+        public required string BackupRoot { get; init; }
+        public required IReadOnlyList<BaseStageDirectorySnapshot> Stages { get; init; }
+        public required string IncompleteMarkerPath { get; init; }
+        public required bool IncompleteMarkerExisted { get; init; }
+        public byte[]? IncompleteMarkerContents { get; init; }
+        public required string ProjectPath { get; init; }
+        public required bool ProjectFileExisted { get; init; }
+        public string? ProjectFileContents { get; init; }
+    }
+
+    private static void CopyBaseStageDirectory(string sourceDirectory, string destinationDirectory)
+    {
+        var source = Path.GetFullPath(sourceDirectory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var destination = Path.GetFullPath(destinationDirectory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (!Directory.Exists(source))
+        {
+            throw new DirectoryNotFoundException($"Generated stage snapshot source was not found: {source}");
+        }
+        if (source.Equals(destination, StringComparison.OrdinalIgnoreCase) ||
+            FileSystemPathUtil.IsWithinDirectory(destination, source))
+        {
+            throw new InvalidOperationException("Refused to copy a generated stage into itself.");
+        }
+
+        Directory.CreateDirectory(destination);
+        var files = Directory.EnumerateFiles(source, "*", SearchOption.TopDirectoryOnly).ToList();
+        foreach (var file in files.Where(file =>
+                     !Path.GetFileName(file).Equals(CompletedGraftStageMarkerName, StringComparison.OrdinalIgnoreCase)))
+        {
+            if ((File.GetAttributes(file) & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new InvalidOperationException($"Generated stage snapshots do not follow reparse-point files: {file}");
+            }
+            File.Copy(file, Path.Combine(destination, Path.GetFileName(file)), overwrite: true);
+        }
+        foreach (var directory in Directory.EnumerateDirectories(source, "*", SearchOption.TopDirectoryOnly))
+        {
+            if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new InvalidOperationException($"Generated stage snapshots do not follow reparse-point directories: {directory}");
+            }
+            CopyBaseStageDirectory(directory, Path.Combine(destination, Path.GetFileName(directory)));
+        }
+        // A completion marker is a commit record, not ordinary payload. Copy it only after the
+        // complete subtree has succeeded so an interrupted restore can never expose a partial
+        // GraftedPartStage as packageable.
+        foreach (var marker in files.Where(file =>
+                     Path.GetFileName(file).Equals(CompletedGraftStageMarkerName, StringComparison.OrdinalIgnoreCase)))
+        {
+            if ((File.GetAttributes(marker) & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new InvalidOperationException($"Generated stage snapshots do not follow reparse-point files: {marker}");
+            }
+            File.Copy(marker, Path.Combine(destination, Path.GetFileName(marker)), overwrite: true);
+        }
+    }
+
+    private async Task<BaseStageFilesystemSnapshot> CaptureBaseStageFilesystemAsync(
+        string projectRoot,
+        string slotId)
+    {
+        slotId = (slotId ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(slotId) ||
+            slotId is "." or ".." ||
+            slotId.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+            !Path.GetFileName(slotId).Equals(slotId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Refused to stage an unsafe slot ID: '{slotId}'.");
+        }
+
+        var guiOutputRoot = Path.GetFullPath(Path.Combine(
+            AppSettings.GeneratedRootFor(projectRoot),
+            "NativeSuitGuiProjects"));
+        Directory.CreateDirectory(guiOutputRoot);
+        var slotRoot = Path.GetFullPath(Path.Combine(guiOutputRoot, slotId));
+        if (!FileSystemPathUtil.IsWithinDirectory(slotRoot, guiOutputRoot))
+        {
+            throw new InvalidOperationException("Refused to snapshot a generated stage outside NativeSuitGuiProjects.");
+        }
+
+        var backupContainer = Path.GetFullPath(Path.Combine(guiOutputRoot, ".base-stage-backups"));
+        var backupRoot = Path.GetFullPath(Path.Combine(backupContainer, Guid.NewGuid().ToString("N")));
+        if (!FileSystemPathUtil.IsWithinDirectory(backupContainer, guiOutputRoot) ||
+            !FileSystemPathUtil.IsWithinDirectory(backupRoot, backupContainer))
+        {
+            throw new InvalidOperationException("Refused to create a base-stage backup outside the generated output root.");
+        }
+
+        var stageNames = new[]
+        {
+            "UnpatchedStage",
+            "PatchedNameMapStage",
+            "GraftedPartStage",
+            "GraftedTorso2Stage",
+        };
+        var stages = stageNames.Select(name =>
+        {
+            var stagePath = Path.GetFullPath(Path.Combine(slotRoot, name));
+            var backupPath = Path.GetFullPath(Path.Combine(backupRoot, name));
+            if (!FileSystemPathUtil.IsWithinDirectory(stagePath, slotRoot) ||
+                !FileSystemPathUtil.IsWithinDirectory(backupPath, backupRoot))
+            {
+                throw new InvalidOperationException($"Refused unsafe generated stage path for '{name}'.");
+            }
+            return new BaseStageDirectorySnapshot(
+                name,
+                stagePath,
+                backupPath,
+                Directory.Exists(stagePath));
+        }).ToList();
+        var incompleteMarkerPath = Path.Combine(slotRoot, IncompleteDeclarativeStageMarkerName);
+        var incompleteMarkerExisted = File.Exists(incompleteMarkerPath);
+        var incompleteMarkerContents = incompleteMarkerExisted
+            ? File.ReadAllBytes(incompleteMarkerPath)
+            : null;
+        var projectPath = Path.GetFullPath(
+            new SuitProjectService(projectRoot).ProjectPathForSlot(slotId));
+        if (!FileSystemPathUtil.IsWithinDirectory(projectPath, guiOutputRoot) ||
+            !projectPath.EndsWith(".native-suit-project.json", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Refused to snapshot a suit project outside NativeSuitGuiProjects.");
+        }
+        var projectFileExisted = File.Exists(projectPath);
+        var projectFileContents = projectFileExisted ? File.ReadAllText(projectPath) : null;
+
+        try
+        {
+            await RunWithFileLockRetryAsync(
+                () =>
+                {
+                    Directory.CreateDirectory(backupRoot);
+                    foreach (var stage in stages.Where(stage => stage.Existed))
+                    {
+                        // A copy retry starts from an empty destination so a partial first copy
+                        // can never masquerade as a complete snapshot.
+                        if (Directory.Exists(stage.BackupPath))
+                        {
+                            Directory.Delete(stage.BackupPath, recursive: true);
+                        }
+                        CopyBaseStageDirectory(stage.StagePath, stage.BackupPath);
+                    }
+                    return true;
+                },
+                $"snapshot generated stages for slot '{slotId}'");
+        }
+        catch
+        {
+            try
+            {
+                if (Directory.Exists(backupRoot))
+                {
+                    Directory.Delete(backupRoot, recursive: true);
+                }
+            }
+            catch
+            {
+                // The source stages were never changed. A partial backup can be safely left for
+                // manual cleanup if another process keeps it locked.
+            }
+            throw;
+        }
+
+        return new BaseStageFilesystemSnapshot
+        {
+            SlotRoot = slotRoot,
+            BackupRoot = backupRoot,
+            Stages = stages,
+            IncompleteMarkerPath = incompleteMarkerPath,
+            IncompleteMarkerExisted = incompleteMarkerExisted,
+            IncompleteMarkerContents = incompleteMarkerContents,
+            ProjectPath = projectPath,
+            ProjectFileExisted = projectFileExisted,
+            ProjectFileContents = projectFileContents,
+        };
+    }
+
+    private async Task ClearBaseStageFilesystemAsync(BaseStageFilesystemSnapshot snapshot)
+    {
+        foreach (var stage in snapshot.Stages)
+        {
+            if (!FileSystemPathUtil.IsWithinDirectory(stage.StagePath, snapshot.SlotRoot))
+            {
+                throw new InvalidOperationException($"Refused to clear unsafe generated stage path: {stage.StagePath}");
+            }
+            await RunWithFileLockRetryAsync(
+                () =>
+                {
+                    File.Delete(Path.Combine(stage.StagePath, CompletedGraftStageMarkerName));
+                    if (Directory.Exists(stage.StagePath))
+                    {
+                        Directory.Delete(stage.StagePath, recursive: true);
+                    }
+                    return true;
+                },
+                $"clear {stage.Name} for the new base");
+        }
+    }
+
+    private async Task RestoreBaseStageFilesystemAsync(BaseStageFilesystemSnapshot snapshot)
+    {
+        var restoreErrors = new List<Exception>();
+        foreach (var stage in snapshot.Stages)
+        {
+            try
+            {
+                await RunWithFileLockRetryAsync(
+                    () =>
+                    {
+                        // Invalidate a newly-built stage before any destructive restore work. If
+                        // another file stays locked, packaging still cannot accept the partial tree.
+                        File.Delete(Path.Combine(stage.StagePath, CompletedGraftStageMarkerName));
+                        if (Directory.Exists(stage.StagePath))
+                        {
+                            Directory.Delete(stage.StagePath, recursive: true);
+                        }
+                        if (stage.Existed)
+                        {
+                            if (!Directory.Exists(stage.BackupPath))
+                            {
+                                throw new DirectoryNotFoundException(
+                                    $"Base-stage backup is missing for {stage.Name}: {stage.BackupPath}");
+                            }
+                            CopyBaseStageDirectory(stage.BackupPath, stage.StagePath);
+                        }
+                        return true;
+                    },
+                    $"restore previous {stage.Name}");
+            }
+            catch (Exception ex)
+            {
+                restoreErrors.Add(new InvalidOperationException(
+                    $"Could not restore the previous {stage.Name}.", ex));
+            }
+        }
+
+        var projectFileRestored = false;
+        try
+        {
+            await RunWithFileLockRetryAsync(
+                () =>
+                {
+                    if (snapshot.ProjectFileExisted)
+                    {
+                        AtomicFileUtil.WriteAllText(
+                            snapshot.ProjectPath,
+                            snapshot.ProjectFileContents ?? string.Empty);
+                    }
+                    else
+                    {
+                        File.Delete(snapshot.ProjectPath);
+                    }
+                    return true;
+                },
+                "restore the previous suit project file");
+            projectFileRestored = true;
+        }
+        catch (Exception ex)
+        {
+            restoreErrors.Add(new InvalidOperationException(
+                "Could not restore the previous suit project file.", ex));
+        }
+
+        try
+        {
+            if (projectFileRestored && restoreErrors.Count == 0)
+            {
+                await RunWithFileLockRetryAsync(
+                    () =>
+                    {
+                        if (snapshot.IncompleteMarkerExisted)
+                        {
+                            File.WriteAllBytes(
+                                snapshot.IncompleteMarkerPath,
+                                snapshot.IncompleteMarkerContents ?? Array.Empty<byte>());
+                        }
+                        else
+                        {
+                            File.Delete(snapshot.IncompleteMarkerPath);
+                        }
+                        return true;
+                    },
+                    "restore the previous declarative-stage transaction marker");
+            }
+            else
+            {
+                // Never reinstate a prior packageable marker state when any stage or project
+                // rollback failed. A base-only project has no graft completion marker to protect
+                // it, so this root sentinel is the final fail-closed guard for every stage kind.
+                await RunWithFileLockRetryAsync(
+                    () =>
+                    {
+                        Directory.CreateDirectory(snapshot.SlotRoot);
+                        File.WriteAllText(
+                            snapshot.IncompleteMarkerPath,
+                            DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+                        return true;
+                    },
+                    "retain an incomplete marker after failed base-stage rollback");
+            }
+        }
+        catch (Exception ex)
+        {
+            restoreErrors.Add(new InvalidOperationException(
+                "Could not restore the previous declarative-stage transaction marker.", ex));
+        }
+
+        if (restoreErrors.Count > 0)
+        {
+            throw new AggregateException(
+                $"One or more previous generated stages could not be restored. Backup retained at {snapshot.BackupRoot}",
+                restoreErrors);
+        }
+
+        await DiscardBaseStageFilesystemBackupAsync(snapshot, logFailure: true);
+    }
+
+    private async Task<bool> DiscardBaseStageFilesystemBackupAsync(
+        BaseStageFilesystemSnapshot snapshot,
+        bool logFailure)
+    {
+        try
+        {
+            await RunWithFileLockRetryAsync(
+                () =>
+                {
+                    if (Directory.Exists(snapshot.BackupRoot))
+                    {
+                        Directory.Delete(snapshot.BackupRoot, recursive: true);
+                    }
+                    return true;
+                },
+                "discard completed base-stage backup");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            if (logFailure)
+            {
+                AppendLog($"  warning: base-stage backup could not be removed and was left at {snapshot.BackupRoot}: {ex.Message}");
+            }
+            return false;
+        }
+    }
+
+    private void RestoreAfterFailedBaseChange(NativeSuitProject snapshot)
+    {
+        _currentProject = snapshot;
+        ApplyProjectToFields(snapshot);
+        _basePlayableText.Text = snapshot.PlayableTemplate?.Uasset ?? "";
+        _baseCutsceneText.Text = snapshot.CutsceneTemplate?.Uasset ?? "";
+        _baseDcmdText.Text = snapshot.DcmdTemplate?.Uasset ?? "";
+        UpdateSelectedLabels();
+        _detectedLabel.ForeColor = Theme.Warn;
+        _detectedLabel.Text = "Base change did not complete; the previous saved project was kept.";
+        _session.RaiseChanged();
+        RefreshInspector();
+        RefreshToyboxTiles();
+    }
+
+    private bool _useAsBaseInProgress;
+
     private async Task<bool> UseAsBase()
+    {
+        if (_useAsBaseInProgress)
+        {
+            AppendLog("A base change is already running; the second request was ignored.");
+            return false;
+        }
+
+        _useAsBaseInProgress = true;
+        var workspaceWasEnabled = _mainWorkspaceHost.Enabled;
+        _mainWorkspaceHost.Enabled = false;
+        var gateHeld = false;
+        try
+        {
+            // Own the rebuild gate before EnsureProject or any shared project/UI mutation. The
+            // disabled workspace prevents another edit from changing _currentProject while an
+            // awaited copy/retry yields back to the WinForms message loop.
+            await RebuildGate.WaitAsync();
+            gateHeld = true;
+            return await UseAsBaseCore();
+        }
+        catch (Exception ex)
+        {
+            AppendLog("Use-as-base stopped before its stage transaction could complete: " + ex.Message);
+            return false;
+        }
+        finally
+        {
+            if (gateHeld)
+            {
+                RebuildGate.Release();
+            }
+            _mainWorkspaceHost.Enabled = workspaceWasEnabled;
+            _useAsBaseInProgress = false;
+        }
+    }
+
+    private async Task<bool> UseAsBaseCore()
     {
         EnsureProject();
         if (_currentProject is null || _projectService is null)
@@ -3115,6 +3636,24 @@ public sealed partial class MainForm
             return false;
         }
 
+        var projectRoot = _projectRootText.Text.Trim();
+        NativeSuitProject previousProjectSnapshot;
+        List<(CustomStaticMeshImport Mesh, string SourcePath)> previousMeshSources;
+        try
+        {
+            previousProjectSnapshot = JsonSerializer.Deserialize<NativeSuitProject>(
+                JsonSerializer.Serialize(_currentProject))
+                ?? throw new InvalidOperationException("Could not snapshot the current suit before changing its base.");
+            previousMeshSources = CaptureCustomMeshSources(
+                _currentProject,
+                _projectService.ProjectOutputDirectory(_currentProject));
+        }
+        catch (Exception ex)
+        {
+            AppendLog("Base not staged: " + ex.Message);
+            return false;
+        }
+
         var previousSlotId = _currentProject.SlotId;
         var previousProjectPath = _projectService.ProjectPathForSlot(previousSlotId);
         _currentProject.PlayableTemplate = playable;
@@ -3137,82 +3676,157 @@ public sealed partial class MainForm
         ReadFieldsIntoProject(_currentProject);
         if (!ValidateUseAsBaseTargetPackages(_currentProject))
         {
+            RestoreAfterFailedBaseChange(previousProjectSnapshot);
             RefreshInspector();
             return false;
+        }
+        if (!previousSlotId.Equals(_currentProject.SlotId, StringComparison.OrdinalIgnoreCase))
+        {
+            var destinationProjectPath = _projectService.ProjectPathForSlot(_currentProject.SlotId);
+            var destinationOutputDirectory = _projectService.ProjectOutputDirectory(_currentProject);
+            var destinationHasProject = File.Exists(destinationProjectPath);
+            var destinationHasOwnedFiles = Directory.Exists(destinationOutputDirectory) &&
+                                           Directory.EnumerateFileSystemEntries(destinationOutputDirectory).Any();
+            if (destinationHasProject || destinationHasOwnedFiles)
+            {
+                AppendLog(
+                    $"Base not staged: slot '{_currentProject.SlotId}' already belongs to another saved/generated suit. " +
+                    "Choose a different suit identity or remove that project explicitly; Batcomputer will not overwrite its JSON, stages, or ImportedMeshes.");
+                RestoreAfterFailedBaseChange(previousProjectSnapshot);
+                return false;
+            }
+        }
+        if (!previousSlotId.Equals(_currentProject.SlotId, StringComparison.OrdinalIgnoreCase) &&
+            previousMeshSources.Count > 0)
+        {
+            try
+            {
+                var importer = new CustomStaticMeshImportService();
+                foreach (var (mesh, sourcePath) in previousMeshSources)
+                {
+                    importer.CopySourceIntoProject(projectRoot, _currentProject, mesh, sourcePath);
+                }
+                AppendLog($"Copied {previousMeshSources.Count} project-owned custom OBJ source(s) into the new suit slot '{_currentProject.SlotId}'.");
+            }
+            catch (Exception ex)
+            {
+                AppendLog("Base not staged: custom mesh sources could not be copied into the new suit slot. " + ex.Message);
+                RestoreAfterFailedBaseChange(previousProjectSnapshot);
+                return false;
+            }
         }
         ApplyProjectToFields(_currentProject);
         UpdateSelectedLabels();
 
+        BaseStageFilesystemSnapshot? stageFilesystemSnapshot = null;
         try
         {
-            // Serialize the staging pass so package reads and writes cannot race.
-            await RebuildGate.WaitAsync();
-            try
-            {
-            // Rebuild part grafts from a clean stage after changing the base.
-            var staleGraftStage = Path.Combine(
-                AppSettings.GeneratedRootFor(_projectRootText.Text.Trim()), "NativeSuitGuiProjects",
-                _currentProject.SlotId, "GraftedPartStage");
-            if (Directory.Exists(staleGraftStage))
-            {
+            stageFilesystemSnapshot = await CaptureBaseStageFilesystemAsync(
+                    projectRoot,
+                    _currentProject.SlotId);
                 try
                 {
-                    Directory.Delete(staleGraftStage, recursive: true);
-                    AppendLog("  cleared stale GraftedPartStage (fresh base → fresh graft stage).");
-                }
-                catch (Exception cleanupEx)
-                {
-                    AppendLog($"  ⚠ could not clear old GraftedPartStage: {cleanupEx.Message}");
-                }
-            }
+                    // Base-only suits need the same durable crash guard as declarative suits.
+                    // Write it before clearing any stage; Finalize removes it only after the new
+                    // project JSON and all generated outputs form one committed unit.
+                    await MarkDeclarativeStageIncompleteAsync(_currentProject, projectRoot);
+                    // Start the new base from clean generated stages. ImportedMeshes is a sibling
+                    // project-owned source directory and is deliberately outside this transaction.
+                    await ClearBaseStageFilesystemAsync(stageFilesystemSnapshot);
+                    AppendLog("  snapshotted and cleared UnpatchedStage, PatchedNameMapStage, GraftedPartStage, and legacy GraftedTorso2Stage for the base change.");
 
-            _projectService.CreateUnpatchedStage(_currentProject);
-            AppendLog($"Staged base: {playable.Stem} + {cutscene.Stem}{(_currentProject.DcmdTemplate is null ? " (no DCMD)" : " + DCMD")}");
-            if (!PatchNameMapsWithUAssetApi())
-            {
-                AppendLog("Base stage did not complete, so its components cannot be edited yet. Fix the patch error above, then set the base again.");
-                RefreshInspector();
-                return false;
-            }
-            var savedProjectPath = _projectService.SaveProject(_currentProject);
-            if (!previousSlotId.Equals(_currentProject.SlotId, StringComparison.OrdinalIgnoreCase))
-            {
-                var relinked = ModService.RelinkSuitReferences(
-                    previousSlotId,
-                    previousProjectPath,
-                    _currentProject,
-                    savedProjectPath);
-                if (relinked > 0)
-                {
-                    AppendLog($"Updated {relinked} mod suit reference(s) for '{_currentProject.SlotId}'.");
+                    _projectService.CreateUnpatchedStage(_currentProject);
+                    AppendLog($"Staged base: {playable.Stem} + {cutscene.Stem}{(_currentProject.DcmdTemplate is null ? " (no DCMD)" : " + DCMD")}");
+                    if (!PatchNameMapsWithUAssetApi())
+                    {
+                        throw new InvalidOperationException(
+                            "Base stage did not complete. Fix the patch error logged above, then set the base again.");
+                    }
+
+                    // Replay every declarative edit after changing the base. Custom meshes and
+                    // material/removal-only suits used to disappear here because only native
+                    // PartGrafts triggered this pass.
+                    if (ProjectRequiresCompletedGraftStage(_currentProject))
+                    {
+                        await RebuildGraftStageCoreAsync(persistProject: false);
+                    }
+
+                    // Commit the project identity only after the new base and every declarative
+                    // edit have staged successfully. Until here the previous project JSON, stage
+                    // directories, and mod links remain recoverable.
+                    var savedProjectPath = _projectService.SaveProject(_currentProject);
+                    await FinalizeDeclarativeGraftStageAsync(_currentProject, projectRoot);
+                    if (!previousSlotId.Equals(_currentProject.SlotId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        try
+                        {
+                            var relinked = ModService.RelinkSuitReferences(
+                                previousSlotId,
+                                previousProjectPath,
+                                _currentProject,
+                                savedProjectPath);
+                            if (relinked > 0)
+                            {
+                                AppendLog($"Updated {relinked} mod suit reference(s) for '{_currentProject.SlotId}'.");
+                            }
+                            _projectService.DeleteSavedProjectFile(previousProjectPath);
+                            AppendLog($"Replaced the temporary project ID '{previousSlotId}' with '{_currentProject.SlotId}'.");
+                        }
+                        catch (Exception migrationError)
+                        {
+                            // The new-slot JSON and its stages are already a consistent, valid
+                            // unit. Keep that unit (an orphan is recoverable) and leave the old
+                            // slot untouched instead of rolling the new stages back underneath the
+                            // newly saved JSON.
+                            AppendLog(
+                                $"  warning: the new slot was staged and saved, but old-slot/mod-reference cleanup did not finish: {migrationError.Message}");
+                        }
+                    }
+
+                    // Backup cleanup is bounded and best effort. If an external process locks the
+                    // backup itself, the completed new stage remains authoritative and the backup
+                    // path is logged for later cleanup.
+                    await DiscardBaseStageFilesystemBackupAsync(stageFilesystemSnapshot, logFailure: true);
+                    stageFilesystemSnapshot = null;
                 }
-                _projectService.DeleteSavedProjectFile(previousProjectPath);
-                AppendLog($"Replaced the temporary project ID '{previousSlotId}' with '{_currentProject.SlotId}'.");
-            }
-            _detectedLabel.ForeColor = Color.SeaGreen;
-            _detectedLabel.Text = $"Base set → {_targetPlayableText.Text.Trim()} + _Cutscene. Now go to step 2 (Materials) or step 3 (Parts).";
-            AppendLog("Base ready.");
-            // Replay declared parts after changing the base.
-            if (_currentProject.PartGrafts.Count > 0)
-            {
-                await RebuildGraftStageCoreAsync();
-            }
-            SelectComboValue(_toyboxCategoryCombo, "Base");
-            PopulateToyboxSlots();
-            RefreshInspector();
-            RefreshToyboxTiles();
-            }
-            finally
-            {
-                RebuildGate.Release();
-            }
+                catch (Exception stageFailure)
+                {
+                    if (stageFilesystemSnapshot is not null)
+                    {
+                        var recoveryBackupRoot = stageFilesystemSnapshot.BackupRoot;
+                        try
+                        {
+                            await RestoreBaseStageFilesystemAsync(stageFilesystemSnapshot);
+                            AppendLog("  restored the previous generated stages after the failed base change.");
+                            stageFilesystemSnapshot = null;
+                        }
+                        catch (Exception restoreFailure)
+                        {
+                            throw new AggregateException(
+                                $"The base change failed and its previous generated stages could not be fully restored. " +
+                                $"Recovery backup: {recoveryBackupRoot}",
+                                stageFailure,
+                                restoreFailure);
+                        }
+                    }
+                    throw;
+                }
         }
         catch (Exception ex)
         {
             AppendLog("Use-as-base failed:");
             AppendLog(ex.ToString());
+            RestoreAfterFailedBaseChange(previousProjectSnapshot);
             return false;
         }
+
+        _detectedLabel.ForeColor = Color.SeaGreen;
+        _detectedLabel.Text = $"Base set → {_targetPlayableText.Text.Trim()} + _Cutscene. Now go to step 2 (Materials) or step 3 (Parts).";
+        AppendLog("Base ready.");
+        SelectComboValue(_toyboxCategoryCombo, "Base");
+        PopulateToyboxSlots();
+        RefreshInspector();
+        RefreshToyboxTiles();
         return true;
     }
 

@@ -147,7 +147,42 @@ public sealed class ComponentRemoveService
         string cutscenePackagePath,
         string componentName,
         bool applyToPlayable = true,
-        bool applyToCutscene = true)
+        bool applyToCutscene = true) =>
+        RemoveCore(
+            slotId,
+            playablePackagePath,
+            cutscenePackagePath,
+            componentName,
+            applyToPlayable,
+            applyToCutscene,
+            stageContentRootOverride: null);
+
+    /// <summary>Removes an SCS component only inside an explicit disposable Content root.</summary>
+    public ComponentRemoveResult RemoveFromContentRoot(
+        string stageContentRoot,
+        string slotId,
+        string playablePackagePath,
+        string cutscenePackagePath,
+        string componentName,
+        bool applyToPlayable = true,
+        bool applyToCutscene = true) =>
+        RemoveCore(
+            slotId,
+            playablePackagePath,
+            cutscenePackagePath,
+            componentName,
+            applyToPlayable,
+            applyToCutscene,
+            stageContentRoot);
+
+    private ComponentRemoveResult RemoveCore(
+        string slotId,
+        string playablePackagePath,
+        string cutscenePackagePath,
+        string componentName,
+        bool applyToPlayable,
+        bool applyToCutscene,
+        string? stageContentRootOverride)
     {
         var result = new ComponentRemoveResult
         {
@@ -157,11 +192,15 @@ public sealed class ComponentRemoveService
 
         try
         {
-            var stageRoot = ResolveStageContentRoot(slotId);
-            if (stageRoot is null)
+            var stageRoot = string.IsNullOrWhiteSpace(stageContentRootOverride)
+                ? ResolveStageContentRoot(slotId)
+                : Path.GetFullPath(stageContentRootOverride);
+            if (stageRoot is null || !Directory.Exists(stageRoot))
             {
                 result.Status = "no-stage";
-                result.Error = "No staged content found. Set a base suit / create a stage first.";
+                result.Error = string.IsNullOrWhiteSpace(stageContentRootOverride)
+                    ? "No staged content found. Set a base suit / create a stage first."
+                    : $"The explicit package-preparation Content root does not exist: {stageRoot}";
                 return result;
             }
 
@@ -178,6 +217,7 @@ public sealed class ComponentRemoveService
                 result.Files.Add(RemoveFromAsset("cutscene", stageRoot, cutscenePackagePath, componentName, mappings));
             }
 
+            result.TransientFileLock = result.Files.Any(file => file.TransientFileLock);
             result.Status = result.Files.Any(file => file.Success)
                 ? "removed"
                 : "no-change";
@@ -187,6 +227,7 @@ public sealed class ComponentRemoveService
         {
             result.Status = "error";
             result.Error = ex.ToString();
+            result.TransientFileLock = FileLockUtil.IsTransient(ex);
             return result;
         }
     }
@@ -203,7 +244,42 @@ public sealed class ComponentRemoveService
         string cutscenePackagePath,
         string componentName,
         bool applyToPlayable = true,
-        bool applyToCutscene = true)
+        bool applyToCutscene = true) =>
+        RestoreScsReferencesCore(
+            slotId,
+            playablePackagePath,
+            cutscenePackagePath,
+            componentName,
+            applyToPlayable,
+            applyToCutscene,
+            stageContentRootOverride: null);
+
+    /// <summary>Restores SCS references only inside an explicit disposable Content root.</summary>
+    public ComponentRemoveResult RestoreScsReferencesInContentRoot(
+        string stageContentRoot,
+        string slotId,
+        string playablePackagePath,
+        string cutscenePackagePath,
+        string componentName,
+        bool applyToPlayable = true,
+        bool applyToCutscene = true) =>
+        RestoreScsReferencesCore(
+            slotId,
+            playablePackagePath,
+            cutscenePackagePath,
+            componentName,
+            applyToPlayable,
+            applyToCutscene,
+            stageContentRoot);
+
+    private ComponentRemoveResult RestoreScsReferencesCore(
+        string slotId,
+        string playablePackagePath,
+        string cutscenePackagePath,
+        string componentName,
+        bool applyToPlayable,
+        bool applyToCutscene,
+        string? stageContentRootOverride)
     {
         var result = new ComponentRemoveResult
         {
@@ -213,11 +289,15 @@ public sealed class ComponentRemoveService
 
         try
         {
-            var stageRoot = ResolveStageContentRoot(slotId);
-            if (stageRoot is null)
+            var stageRoot = string.IsNullOrWhiteSpace(stageContentRootOverride)
+                ? ResolveStageContentRoot(slotId)
+                : Path.GetFullPath(stageContentRootOverride);
+            if (stageRoot is null || !Directory.Exists(stageRoot))
             {
                 result.Status = "no-stage";
-                result.Error = "No staged content found. Set a base suit / create a stage first.";
+                result.Error = string.IsNullOrWhiteSpace(stageContentRootOverride)
+                    ? "No staged content found. Set a base suit / create a stage first."
+                    : $"The explicit package-preparation Content root does not exist: {stageRoot}";
                 return result;
             }
 
@@ -234,6 +314,7 @@ public sealed class ComponentRemoveService
                 result.Files.Add(RestoreScsReferencesInAsset("cutscene", stageRoot, cutscenePackagePath, componentName, mappings));
             }
 
+            result.TransientFileLock = result.Files.Any(file => file.TransientFileLock);
             result.Status = result.Files.Any(file => file.Success && file.RestoredNodeReferences > 0)
                 ? "restored"
                 : result.Files.Any(file => file.ComponentFound)
@@ -245,6 +326,7 @@ public sealed class ComponentRemoveService
         {
             result.Status = "error";
             result.Error = ex.ToString();
+            result.TransientFileLock = FileLockUtil.IsTransient(ex);
             return result;
         }
     }
@@ -286,7 +368,10 @@ public sealed class ComponentRemoveService
                     return fileResult;
                 }
 
-                fileResult.Error = $"Component/SCS slot '{componentName}' was not found in {role}.";
+                // The desired state for a persisted removal is already satisfied in this role.
+                // Keep this separate from Success so the interactive Remove command can still
+                // distinguish "changed a package" from "there was nothing to remove".
+                fileResult.AlreadyRemoved = true;
                 return fileResult;
             }
 
@@ -304,7 +389,7 @@ public sealed class ComponentRemoveService
 
             if (removedReferences <= 0)
             {
-                fileResult.Error = $"SCS node '{componentName}' was found, but it was not referenced by RootNodes/AllNodes/ChildNodes.";
+                fileResult.AlreadyRemoved = true;
                 return fileResult;
             }
 
@@ -322,6 +407,7 @@ public sealed class ComponentRemoveService
         catch (Exception ex)
         {
             fileResult.Error = ex.ToString();
+            fileResult.TransientFileLock = FileLockUtil.IsTransient(ex);
             return fileResult;
         }
     }
@@ -398,6 +484,7 @@ public sealed class ComponentRemoveService
         catch (Exception ex)
         {
             fileResult.Error = ex.ToString();
+            fileResult.TransientFileLock = FileLockUtil.IsTransient(ex);
             return fileResult;
         }
     }
@@ -648,6 +735,7 @@ public sealed class ComponentRemoveResult
     public string Component { get; set; } = "";
     public string StageContentRoot { get; set; } = "";
     public string? Error { get; set; }
+    public bool TransientFileLock { get; set; }
     public List<ComponentRemoveFileResult> Files { get; set; } = new();
 }
 
@@ -657,6 +745,8 @@ public sealed class ComponentRemoveFileResult
     public string TargetPackagePath { get; set; } = "";
     public string Path { get; set; } = "";
     public bool Success { get; set; }
+    public bool AlreadyRemoved { get; set; }
+    public bool TransientFileLock { get; set; }
     public bool ComponentFound { get; set; }
     public int ScsNodeExportIndex { get; set; }
     public int ComponentTemplateExportIndex { get; set; }

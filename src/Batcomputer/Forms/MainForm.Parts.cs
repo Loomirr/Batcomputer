@@ -13,6 +13,9 @@ namespace Batcomputer;
 /// </summary>
 public sealed partial class MainForm
 {
+    private const string CompletedGraftStageMarkerName = ".batcomputer-stage-complete";
+    private const string IncompleteDeclarativeStageMarkerName = ".batcomputer-declarative-stage-incomplete";
+
     /// <summary>Right-click menu for a part tile (drag-only; menu exposes select/apply).</summary>
     private ContextMenuStrip BuildPartTileMenu(NativeSuitPartRecord part)
     {
@@ -233,9 +236,8 @@ public sealed partial class MainForm
         _matAssignSlotText.Text = "0";
         _matAssignMiText.Text = materialPath;
         SelectComboValue(_matAssignContextCombo, "both");
-        ApplyMaterialAssignment();
+        await ApplyMaterialAssignmentAsync();
 
-        await Task.CompletedTask;
         _session.RaiseChanged();
     }
 
@@ -382,13 +384,33 @@ public sealed partial class MainForm
         return project.MaterialAssignments.Count != before;
     }
 
-    private void RestoreProtectedGliderComponent(NativeSuitProject project, string glideComponent)
+    private DeclarativeReplayOutcome RestoreProtectedGliderComponent(
+        NativeSuitProject project,
+        string glideComponent,
+        string? projectRootOverride = null,
+        string? stageContentRootOverride = null)
     {
-        var result = new ComponentRemoveService(_projectRootText.Text.Trim()).RestoreScsReferences(
-            project.SlotId,
-            project.TargetPackages.Playable,
-            project.TargetPackages.Cutscene,
-            glideComponent);
+        var outcome = new DeclarativeReplayOutcome();
+        var projectRoot = string.IsNullOrWhiteSpace(projectRootOverride)
+            ? _projectRootText.Text.Trim()
+            : projectRootOverride;
+        var service = new ComponentRemoveService(projectRoot);
+        var result = RunWithStructuredFileLockRetry(
+            () => string.IsNullOrWhiteSpace(stageContentRootOverride)
+                ? service.RestoreScsReferences(
+                    project.SlotId,
+                    project.TargetPackages.Playable,
+                    project.TargetPackages.Cutscene,
+                    glideComponent)
+                : service.RestoreScsReferencesInContentRoot(
+                    stageContentRootOverride,
+                    project.SlotId,
+                    project.TargetPackages.Playable,
+                    project.TargetPackages.Cutscene,
+                    glideComponent),
+            restoreResult => restoreResult.TransientFileLock ||
+                             restoreResult.Files.Any(file => file.TransientFileLock),
+            $"restore protected glider component '{glideComponent}'");
 
         if (!string.IsNullOrWhiteSpace(result.Error))
         {
@@ -406,6 +428,32 @@ public sealed partial class MainForm
                 AppendLog($"Glider: could not restore '{glideComponent}' in {file.Role}: {file.Error}");
             }
         }
+
+        foreach (var required in new[]
+                 {
+                     (Role: "playable", Package: project.TargetPackages.Playable),
+                     (Role: "cutscene", Package: project.TargetPackages.Cutscene),
+                 })
+        {
+            if (string.IsNullOrWhiteSpace(required.Package))
+            {
+                outcome.Failures.Add($"{glideComponent}/{required.Role}: target package path is empty");
+                continue;
+            }
+
+            var file = result.Files.FirstOrDefault(candidate =>
+                candidate.Role.Equals(required.Role, StringComparison.OrdinalIgnoreCase));
+            if (file is not null && file.Success && file.ComponentFound)
+            {
+                continue;
+            }
+
+            outcome.Failures.Add(
+                $"{glideComponent}/{required.Role}: {file?.Error ?? result.Error ?? "no restore result was returned"}");
+            outcome.TransientFileLock |= file?.TransientFileLock == true || result.TransientFileLock;
+        }
+
+        return outcome;
     }
 
     private async Task ApplyNativeGliderPresetAsync(NativeSuitPartRecord part, string? materialOverride = null)
@@ -423,6 +471,20 @@ public sealed partial class MainForm
         }
 
         ReadFieldsIntoProject(project);
+
+        var capeGlideContract = new AnimArchetypeGraftService().BaseCapeGlideContract(project);
+        if (GliderService.HasAdditiveCapeAndGliderCombination(
+                project,
+                capeGlideContract,
+                addingGlider: true))
+        {
+            Dialog.Error(this,
+                "Custom Cape and glider are not compatible",
+                "This suit has a custom static mesh attached to Cape. Custom meshes are additive components and are not driven by the playable base's native cape/glider visibility wiring, even on a native two-cape base.\n\n" +
+                "Remove the custom Cape attachment before applying a glider preset.",
+                windowTitle: "Gliders");
+            return;
+        }
 
         var glideComponent = new AnimArchetypeGraftService().BaseGlideVisualComponent(project);
         if (string.IsNullOrWhiteSpace(glideComponent))
@@ -988,44 +1050,16 @@ public sealed partial class MainForm
 
         AppendLog($"Removing {label} ({component} slot {slot}) from staged playable/cutscene assets…");
 
-        ComponentRemoveResult result;
+        NativeSuitProject previousProjectSnapshot;
         try
         {
-            result = await Task.Run(() => new ComponentRemoveService(_projectRootText.Text.Trim()).Remove(
-                _currentProject.SlotId,
-                _currentProject.TargetPackages.Playable,
-                _currentProject.TargetPackages.Cutscene,
-                component));
+            previousProjectSnapshot = JsonSerializer.Deserialize<NativeSuitProject>(
+                JsonSerializer.Serialize(_currentProject))
+                ?? throw new InvalidOperationException("Could not snapshot the suit before removing the part.");
         }
         catch (Exception ex)
         {
-            AppendLog("Remove/hide failed:");
-            AppendLog(ex.ToString());
-            return;
-        }
-
-        AppendLog($"Remove component status: {result.Status}");
-        if (!string.IsNullOrWhiteSpace(result.StageContentRoot))
-        {
-            AppendLog($"Edited stage: {result.StageContentRoot}");
-        }
-        if (!string.IsNullOrWhiteSpace(result.Error))
-        {
-            AppendLog(result.Error);
-        }
-
-        foreach (var file in result.Files)
-        {
-            AppendLog($"{file.Role}: success={file.Success} componentFound={file.ComponentFound} scsNode={file.ScsNodeExportIndex} template={file.ComponentTemplateExportIndex} removedRefs={file.RemovedNodeReferences}");
-            if (!file.Success && !string.IsNullOrWhiteSpace(file.Error))
-            {
-                AppendLog(file.Error);
-            }
-        }
-
-        if (!result.Files.Any(file => file.Success))
-        {
-            AppendLog("No staged asset was changed, so the part remains visible in Your Character.");
+            AppendLog("Remove/hide failed before staging: " + ex.Message);
             return;
         }
 
@@ -1040,7 +1074,7 @@ public sealed partial class MainForm
             Kind = "remove-component",
             SourcePackage = _targetPlayableText.Text.Trim(),
             TargetComponent = key,
-            Notes = $"Removed from staged SCS construction arrays for {label} ({component} slot {slot}). Stage: {result.StageContentRoot}"
+            Notes = $"Removed declaratively from both staged SCS construction arrays for {label} ({component} slot {slot})."
         });
 
         // If the removed component was a DECLARATIVE part graft, drop its entry so a rebuild
@@ -1061,15 +1095,73 @@ public sealed partial class MainForm
             AppendLog($"  cleared the declarative part graft for '{component}' — it won't be re-added on rebuild.");
         }
 
-        (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject);
+        try
+        {
+            // Rebuild from the clean patched base instead of editing the current stage in place.
+            // The completion marker is written only after BOTH playable and cutscene replays pass,
+            // so a locked role can never leave a packageable half-removal behind.
+            await RebuildGraftStageFromDeclarativeAsync(persistProject: false);
+        }
+        catch (Exception ex)
+        {
+            _currentProject = previousProjectSnapshot;
+            ApplyProjectToFields(_currentProject);
+            UpdateSelectedLabels();
+            AppendLog("Remove/hide failed; the saved project was left unchanged:");
+            AppendLog(ex.ToString());
+            _session.RaiseChanged();
+            RefreshInspector();
+            RefreshToyboxTiles();
+            return;
+        }
+
+        var projectSaved = false;
+        try
+        {
+            await RunWithFileLockRetryAsync(
+                () => (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim()))
+                    .SaveProject(_currentProject),
+                "save the completed part removal");
+            projectSaved = true;
+            await FinalizeDeclarativeGraftStageAsync(_currentProject, _projectRootText.Text.Trim());
+        }
+        catch (Exception ex)
+        {
+            if (!projectSaved)
+            {
+                _currentProject = previousProjectSnapshot;
+                ApplyProjectToFields(_currentProject);
+                UpdateSelectedLabels();
+            }
+            AppendLog(projectSaved
+                ? "The part removal was saved, but its completed stage could not be certified:"
+                : "The part was removed from both temporary staged roles, but the suit project could not be saved:");
+            AppendLog(ex.ToString());
+            Dialog.Error(
+                this,
+                projectSaved ? "Part saved; stage incomplete" : "Part removed but not saved",
+                (projectSaved
+                    ? "The project was saved, but Batcomputer could not certify its generated stage. Packaging remains blocked until the declarative stage rebuild succeeds."
+                    : "The playable and cutscene temporary stages were updated, but the suit project file could not be saved. The prior saved project remains active and packaging stays blocked until the edit is rebuilt.") +
+                "\n\n" + ex.Message);
+            _session.RaiseChanged();
+            RefreshInspector();
+            RefreshToyboxTiles();
+            return;
+        }
+
         RecordChange("Parts", $"{component} slot {slot}", $"removed SCS part {label}");
-        AppendLog($"Removed {label} from staged SCS arrays. Package the current stage to test it in-game.");
+        AppendLog($"Removed {label} from both staged character roles. Package the current stage to test it in-game.");
         _session.RaiseChanged();
         RefreshToyboxTiles();
     }
 
-    private void ApplySavedComponentRemovals(NativeSuitProject project, bool logNoRemovals)
+    private DeclarativeReplayOutcome ApplySavedComponentRemovals(
+        NativeSuitProject project,
+        bool logNoRemovals,
+        string? stageContentRootOverride = null)
     {
+        var outcome = new DeclarativeReplayOutcome();
         var removals = project.Requirements
             .Where(requirement => requirement.Kind.Equals("remove-component", StringComparison.OrdinalIgnoreCase))
             .Select(requirement => requirement.TargetComponent)
@@ -1083,7 +1175,7 @@ public sealed partial class MainForm
             {
                 AppendLog("No saved component removals to apply.");
             }
-            return;
+            return outcome;
         }
 
         var protectedGliderComponent = ActiveGliderVisualComponent(project);
@@ -1103,19 +1195,67 @@ public sealed partial class MainForm
                 continue;
             }
 
-            var result = new ComponentRemoveService(_projectRootText.Text.Trim()).Remove(
-                project.SlotId,
-                project.TargetPackages.Playable,
-                project.TargetPackages.Cutscene,
-                component);
+            var service = new ComponentRemoveService(_projectRootText.Text.Trim());
+            var result = RunWithStructuredFileLockRetry(
+                () => string.IsNullOrWhiteSpace(stageContentRootOverride)
+                    ? service.Remove(
+                        project.SlotId,
+                        project.TargetPackages.Playable,
+                        project.TargetPackages.Cutscene,
+                        component)
+                    : service.RemoveFromContentRoot(
+                        stageContentRootOverride,
+                        project.SlotId,
+                        project.TargetPackages.Playable,
+                        project.TargetPackages.Cutscene,
+                        component),
+                removalResult => removalResult.TransientFileLock ||
+                                 removalResult.Files.Any(file => file.TransientFileLock),
+                $"re-apply saved removal '{removal}'");
+
+            var requiredRoles = new[]
+            {
+                (Role: "playable", Package: project.TargetPackages.Playable),
+                (Role: "cutscene", Package: project.TargetPackages.Cutscene),
+            };
+            var satisfiedRoles = 0;
+            foreach (var required in requiredRoles)
+            {
+                if (string.IsNullOrWhiteSpace(required.Package))
+                {
+                    outcome.Failures.Add($"{removal}/{required.Role}: target package path is empty");
+                    continue;
+                }
+
+                var file = result.Files.FirstOrDefault(candidate =>
+                    candidate.Role.Equals(required.Role, StringComparison.OrdinalIgnoreCase));
+                if (file is not null && (file.Success || file.AlreadyRemoved))
+                {
+                    satisfiedRoles++;
+                    continue;
+                }
+
+                var error = file?.Error ?? result.Error ?? "no result was returned";
+                outcome.Failures.Add($"{removal}/{required.Role}: {error}");
+                if (file?.TransientFileLock == true || result.TransientFileLock)
+                {
+                    outcome.TransientFileLock = true;
+                }
+            }
 
             var successes = result.Files.Count(file => file.Success);
+            var alreadyRemoved = result.Files.Count(file => file.AlreadyRemoved);
             var changedRefs = result.Files.Sum(file => file.RemovedNodeReferences);
-            if (successes > 0 || changedRefs > 0)
+            if (satisfiedRoles == requiredRoles.Length)
             {
-                AppendLog($"Re-applied saved remove-component {removal}: files={successes} removedRefs={changedRefs} status={result.Status}");
+                AppendLog($"Re-applied saved remove-component {removal}: files={successes} alreadyRemoved={alreadyRemoved} removedRefs={changedRefs} status={result.Status}");
+            }
+            else
+            {
+                AppendLog($"  ERROR saved remove-component {removal} was incomplete ({satisfiedRoles}/{requiredRoles.Length} roles satisfied).");
             }
         }
+        return outcome;
     }
 
     private void UpdateSlotDots()
@@ -1321,10 +1461,72 @@ public sealed partial class MainForm
                 Subtitle = $"{attachment.Label} · scale {current.Scale:0.###}\noffset {current.OffsetX:0.##}, {current.OffsetY:0.##}, {current.OffsetZ:0.##}",
                 Accent = Theme.Parts,
                 OnClick = () => _ = OpenCustomStaticMeshDialogAsync(current),
-                ToolTip = $"Project OBJ: {current.SourceObjRelativePath}\nSocket: {attachment.AttachSocket}\n\nClick to change the attachment slot, scale, or local XYZ offset, then rebuild this static attachment."
+                ToolTip = $"Project OBJ: {current.SourceObjRelativePath}\nSocket: {attachment.AttachSocket}\n\nClick to edit. Right-click to edit or remove this mesh from the suit.",
+                MenuFactory = () => BuildCustomStaticMeshTileMenu(current),
             });
         }
         return tiles;
+    }
+
+    private ContextMenuStrip BuildCustomStaticMeshTileMenu(CustomStaticMeshImport mesh)
+    {
+        var menu = new ContextMenuStrip();
+        menu.Items.Add("Edit custom mesh", null, (_, _) => _ = OpenCustomStaticMeshDialogAsync(mesh));
+        menu.Items.Add("Remove from suit", null, (_, _) => _ = RemoveCustomStaticMeshAsync(mesh));
+        return menu;
+    }
+
+    private async Task RemoveCustomStaticMeshAsync(CustomStaticMeshImport mesh)
+    {
+        var project = _currentProject;
+        if (project is null || !project.CustomStaticMeshes.Contains(mesh))
+        {
+            return;
+        }
+        if (!Dialog.Confirm(
+                this,
+                "Remove custom mesh",
+                $"Remove '{mesh.DisplayName}' from this suit?\n\nIts project-owned OBJ copy will also be deleted."))
+        {
+            return;
+        }
+
+        var projectRoot = _projectRootText.Text.Trim();
+        var outputDirectory = new SuitProjectService(projectRoot).ProjectOutputDirectory(project);
+        if (!string.IsNullOrWhiteSpace(mesh.SourceObjRelativePath))
+        {
+            try
+            {
+                var outputFull = Path.GetFullPath(outputDirectory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                var sourceFull = Path.GetFullPath(Path.Combine(outputDirectory, mesh.SourceObjRelativePath));
+                if (sourceFull.StartsWith(outputFull, StringComparison.OrdinalIgnoreCase) && File.Exists(sourceFull))
+                {
+                    File.Delete(sourceFull);
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"Custom mesh: could not delete the project OBJ copy for '{mesh.DisplayName}': {ex.Message}");
+            }
+        }
+
+        project.CustomStaticMeshes.Remove(mesh);
+        var componentName = CustomStaticMeshImportService.ComponentNameFor(mesh);
+        if (!string.IsNullOrWhiteSpace(componentName))
+        {
+            project.MaterialAssignments.RemoveAll(assignment =>
+                assignment.Component.Equals(componentName, StringComparison.OrdinalIgnoreCase));
+            project.PreviewPartPlacements.RemoveAll(placement =>
+                placement.Component.Equals(componentName, StringComparison.OrdinalIgnoreCase));
+        }
+        SyncCustomStaticMeshHeadRemoval(project);
+        (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(project);
+        await RebuildGraftStageFromDeclarativeAsync();
+        RecordChange("Parts", mesh.DisplayName, "removed custom mesh", status: "removed");
+        AppendLog($"Custom mesh: removed '{mesh.DisplayName}' from the suit.");
+        _session.RaiseChanged();
+        RefreshToyboxTiles();
+        RefreshInspector();
     }
 
     private async Task AdoptLegacyStaticMeshAsync(CustomStaticMeshImportService.LegacyObjProof legacy)
@@ -1389,9 +1591,32 @@ public sealed partial class MainForm
             ? ""
             : Path.Combine(new SuitProjectService(projectRoot).ProjectOutputDirectory(project), existing.SourceObjRelativePath);
         using var dialog = new CustomStaticMeshImportDialog(existing, sourcePath);
-        if (dialog.ShowDialog(this) != DialogResult.OK)
+        var dialogResult = dialog.ShowDialog(this);
+        if (dialog.DeleteRequested && existing is not null)
+        {
+            await RemoveCustomStaticMeshAsync(existing);
+            return;
+        }
+        if (dialogResult != DialogResult.OK)
         {
             return;
+        }
+
+        if (dialog.AttachmentSlot.Id.Equals("Cape", StringComparison.OrdinalIgnoreCase))
+        {
+            var capeGlideContract = new AnimArchetypeGraftService().BaseCapeGlideContract(project);
+            if (GliderService.HasAdditiveCapeAndGliderCombination(
+                    project,
+                    capeGlideContract,
+                    addingCustomCape: true))
+            {
+                Dialog.Error(this,
+                    "Custom Cape and glider are not compatible",
+                    "A custom static mesh attached to Cape is an additive component and is not driven by the playable base's native cape/glider visibility wiring, even on a native two-cape base.\n\n" +
+                    "Remove the glider before attaching this mesh to Cape.",
+                    windowTitle: "Parts");
+                return;
+            }
         }
 
         var mesh = existing ?? new CustomStaticMeshImport();
@@ -1459,7 +1684,18 @@ public sealed partial class MainForm
         var errors = new List<string>();
         foreach (var mesh in project.CustomStaticMeshes)
         {
-            var result = await Task.Run(() => service.Stage(project, projectRoot, mesh));
+            var result = await RunWithFileLockRetryAsync(
+                () =>
+                {
+                    var staged = service.Stage(project, projectRoot, mesh);
+                    if (staged.TransientFileLock)
+                    {
+                        throw new TransientFileLockException(
+                            staged.Error ?? "A generated custom-mesh file is temporarily locked.");
+                    }
+                    return staged;
+                },
+                $"stage custom mesh '{mesh.DisplayName}'");
             if (!result.Status.Equals("created", StringComparison.OrdinalIgnoreCase))
             {
                 AppendLog($"  custom mesh '{mesh.DisplayName}' was not staged: {result.Error}");
@@ -1501,6 +1737,82 @@ public sealed partial class MainForm
         Compatible,
         Unknown,
         Incompatible,
+    }
+
+    private async Task<T> RunWithFileLockRetryAsync<T>(Func<T> action, string operation)
+    {
+        const int attempts = 3;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await Task.Run(action);
+            }
+            catch (Exception ex) when (attempt < attempts && FileLockUtil.IsTransient(ex))
+            {
+                AppendLog($"  {operation}: a generated file is temporarily locked; retrying ({attempt}/{attempts - 1})…");
+                await Task.Delay(180 * attempt);
+            }
+        }
+    }
+
+    private T RunWithStructuredFileLockRetry<T>(
+        Func<T> action,
+        Func<T, bool> hasTransientFileLock,
+        string operation)
+    {
+        const int attempts = 3;
+        for (var attempt = 1; ; attempt++)
+        {
+            T result;
+            try
+            {
+                result = action();
+            }
+            catch (Exception ex) when (attempt < attempts && FileLockUtil.IsTransient(ex))
+            {
+                AppendLog($"  {operation}: a generated file is temporarily locked; retrying ({attempt}/{attempts - 1})…");
+                Thread.Sleep(180 * attempt);
+                continue;
+            }
+
+            if (!hasTransientFileLock(result) || attempt >= attempts)
+            {
+                return result;
+            }
+
+            AppendLog($"  {operation}: a generated file is temporarily locked; retrying ({attempt}/{attempts - 1})…");
+            Thread.Sleep(180 * attempt);
+        }
+    }
+
+    private sealed class DeclarativeReplayOutcome
+    {
+        public List<string> Failures { get; } = [];
+        public bool TransientFileLock { get; set; }
+        public bool Success => Failures.Count == 0;
+
+        public string Summary => Failures.Count == 0
+            ? "complete"
+            : string.Join(" | ", Failures);
+    }
+
+    private static void RequireCompleteDeclarativeReplay(
+        DeclarativeReplayOutcome outcome,
+        string operation)
+    {
+        if (outcome.Success)
+        {
+            return;
+        }
+
+        var message = $"{operation} did not succeed for every required character package. {outcome.Summary}";
+        if (outcome.TransientFileLock)
+        {
+            throw new TransientFileLockException(message);
+        }
+
+        throw new InvalidOperationException(message);
     }
 
     private sealed record FaceTarget(string Label, string Component, int Slot, string MeshPackagePath);
@@ -1853,7 +2165,7 @@ public sealed partial class MainForm
             }
             ShowVirtualTiles(
                 tiles,
-                header: "Native glide visuals only: glide capes, wingsuits, and character gliders. Cosmetic back capes stay in Parts. Click for the mount, animation blueprint, native materials, and pose dependencies before applying.",
+                header: "Native glide visuals only: glide capes, wingsuits, and character gliders. Batman glide capes are selectable here under Filter → Source → Batman; cosmetic back capes stay in Parts. Click for mount, animation, materials, and pose details.",
                 emptyMessage: "No native glide visuals matched the current search. Rebuild the part index if you recently extracted more characters.");
             return;
         }
@@ -2717,6 +3029,46 @@ public sealed partial class MainForm
         // That component is named "Cape" on some characters but "Torso" on Batman -
         // retarget to it so we replace the real glide visual instead of adding a stray.
         var isGliderPart = IsGliderVisualPart(samplePart);
+        var isCosmeticCape = GliderService.IsCosmeticCapeAttachment(samplePart);
+        var contract = isGliderPart || isCosmeticCape
+            ? new AnimArchetypeGraftService().BaseCapeGlideContract(_currentProject)
+            : AnimArchetypeGraftService.CapeGlideContractStatus.Unknown;
+        var additiveCapeConflict =
+            (isGliderPart || isCosmeticCape) &&
+            GliderService.HasAdditiveCapeAndGliderCombination(
+                _currentProject,
+                contract,
+                addingGlider: isGliderPart);
+        if (additiveCapeConflict)
+        {
+            Dialog.Error(this,
+                "Custom Cape and glider are not compatible",
+                "This suit has a custom static mesh attached to Cape. Custom meshes are additive components and are not driven by the playable base's native cape/glider visibility wiring, even on a native two-cape base.\n\n" +
+                "Remove the custom Cape attachment or the glider before adding this part.",
+                windowTitle: "Parts");
+            return;
+        }
+        var wouldCombineCapeAndGlider =
+            (isGliderPart || isCosmeticCape) &&
+            GliderService.HasCapeAndGliderCombination(
+                _currentProject,
+                contract,
+                addingCosmeticCape: isCosmeticCape,
+                addingGlider: isGliderPart);
+        if (wouldCombineCapeAndGlider)
+        {
+            if (contract != AnimArchetypeGraftService.CapeGlideContractStatus.Paired &&
+                contract != AnimArchetypeGraftService.CapeGlideContractStatus.Unknown)
+            {
+                Dialog.Error(this,
+                    "Cape and glider are not compatible with this base",
+                    "This playable base does not natively own separate regular-cape and glide-visual components. " +
+                    "Adding both would leave the regular cape visible during gliding.\n\n" +
+                    "Pick the visual base again, choose a playable donor with the native two-cape setup, then add the cape and glider again.",
+                    windowTitle: "Parts");
+                return;
+            }
+        }
         if (isGliderPart)
         {
             if (!_currentProject.UseCustomArchetype)
@@ -2956,7 +3308,8 @@ public sealed partial class MainForm
     // (UseAsBase) must call RebuildGraftStageCoreAsync directly to avoid deadlocking on this.
     private async Task RebuildGraftStageFromDeclarativeAsync(
         NativeSuitProject? projectOverride = null,
-        string? projectRootOverride = null)
+        string? projectRootOverride = null,
+        bool persistProject = true)
     {
         var project = projectOverride ?? _currentProject;
         if (project is null)
@@ -2966,7 +3319,7 @@ public sealed partial class MainForm
         await RebuildGate.WaitAsync();
         try
         {
-            await RebuildGraftStageCoreAsync(project, projectRootOverride);
+            await RebuildGraftStageCoreAsync(project, projectRootOverride, persistProject);
         }
         finally
         {
@@ -2978,7 +3331,8 @@ public sealed partial class MainForm
     // above, or by UseAsBase which holds it across its whole staging pass).
     private async Task RebuildGraftStageCoreAsync(
         NativeSuitProject? projectOverride = null,
-        string? projectRootOverride = null)
+        string? projectRootOverride = null,
+        bool persistProject = true)
     {
         var project = projectOverride ?? _currentProject;
         if (project is null)
@@ -2993,16 +3347,74 @@ public sealed partial class MainForm
         // PatchedNameMapStage (its first graft call copies patched→grafted only when absent).
         var graftStage = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "NativeSuitGuiProjects",
             project.SlotId, "GraftedPartStage");
+        var projectStageRoot = Directory.GetParent(graftStage)?.FullName
+            ?? throw new InvalidOperationException("Could not resolve the generated suit stage root.");
+        var incompleteMarker = Path.Combine(projectStageRoot, IncompleteDeclarativeStageMarkerName);
         try
         {
-            if (Directory.Exists(graftStage))
-            {
-                Directory.Delete(graftStage, recursive: true);
-            }
+            await RunWithFileLockRetryAsync(
+                () =>
+                {
+                    // Establish a durable fail-closed state before touching any package. This
+                    // sentinel is outside GraftedPartStage, so clearing/replacing that directory
+                    // can never accidentally make an interrupted replay packageable.
+                    Directory.CreateDirectory(projectStageRoot);
+                    File.WriteAllText(
+                        incompleteMarker,
+                        DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+                    // A rebuild is packageable only after every declarative operation succeeds.
+                    // Removing the marker first prevents an older good stage from masking a newer
+                    // partial replay.
+                    File.Delete(Path.Combine(graftStage, CompletedGraftStageMarkerName));
+                    if (Directory.Exists(graftStage))
+                    {
+                        Directory.Delete(graftStage, recursive: true);
+                    }
+                    return true;
+                },
+                "clear generated graft stage");
         }
         catch (Exception ex)
         {
-            AppendLog($"  ⚠ could not clear graft stage before rebuild: {ex.Message}");
+            if (FileLockUtil.IsTransient(ex))
+            {
+                throw new TransientFileLockException(
+                    "Could not clear the previous generated stage because one of its files stayed locked. " +
+                    "Close any FModel/UAsset viewer opened on this suit and retry.",
+                    ex);
+            }
+            throw new InvalidOperationException(
+                "Could not clear the previous generated stage before rebuilding it.", ex);
+        }
+
+        // Removals and material assignments are just as declarative as part/custom-mesh grafts.
+        // Always replay them in their own generated stage, seeded from the clean name-map output,
+        // so failures cannot mutate PatchedNameMapStage or silently fall back to a base-only build.
+        if (ProjectRequiresCompletedGraftStage(project))
+        {
+            var patchedContentRoot = Path.Combine(
+                AppSettings.GeneratedRootFor(projectRoot),
+                "NativeSuitGuiProjects",
+                project.SlotId,
+                "PatchedNameMapStage",
+                "LEGOBatmanLotDK",
+                "Content");
+            var graftedContentRoot = Path.Combine(graftStage, "LEGOBatmanLotDK", "Content");
+            if (!Directory.Exists(patchedContentRoot))
+            {
+                throw new DirectoryNotFoundException(
+                    "The clean PatchedNameMapStage is missing. Set the base again before replaying saved edits. " +
+                    patchedContentRoot);
+            }
+
+            await RunWithFileLockRetryAsync(
+                () =>
+                {
+                    Directory.CreateDirectory(graftedContentRoot);
+                    CopyDirectoryContents(patchedContentRoot, graftedContentRoot, overwrite: true);
+                    return true;
+                },
+                "seed the declarative stage from the clean patched base");
         }
 
         AppendLog($"  replaying {project.PartGrafts.Count} declared part(s) onto a clean base…");
@@ -3010,18 +3422,39 @@ public sealed partial class MainForm
         {
             var playable = ResolveLivePart(pg.Playable);
             var cutscene = ResolveLivePart(pg.Cutscene);
-            if (playable is null && cutscene is null)
+            var missingPlayable = pg.Playable is not null && playable is null;
+            var missingCutscene = pg.Cutscene is not null && cutscene is null;
+            if ((pg.Playable is null && pg.Cutscene is null) || missingPlayable || missingCutscene)
             {
-                AppendLog($"  ⚠ part '{pg.Label}' (slot {pg.Slot}) couldn't be resolved from the part index — skipped. Rebuild the part index if this persists.");
-                continue;
+                var missing = string.Join(" and ", new[]
+                {
+                    missingPlayable ? "playable donor" : "",
+                    missingCutscene ? "cutscene donor" : "",
+                    pg.Playable is null && pg.Cutscene is null ? "saved donor record" : "",
+                }.Where(value => !string.IsNullOrWhiteSpace(value)));
+                throw new InvalidOperationException(
+                    $"Part '{pg.Label}' (slot {pg.Slot}) could not resolve its {missing} from the part index. " +
+                    "Rebuild the part index and retry; packaging is blocked until the declarative stage is complete.");
             }
             var sample = playable ?? cutscene!;
             var cloneSlot = GuessCloneSlot(sample);
             var attachSocket = GuessAttachSocket(sample);
             try
             {
-                var result = await Task.Run(() => new PartGraftService(projectRoot).CreateSelectedPartGraftedStage(
-                    project, playable, cutscene, pg.Slot, cloneSlot, attachSocket));
+                var result = await RunWithFileLockRetryAsync(
+                    () =>
+                    {
+                        var graft = new PartGraftService(projectRoot).CreateSelectedPartGraftedStage(
+                            project, playable, cutscene, pg.Slot, cloneSlot, attachSocket);
+                        var locked = graft.PackageResults.FirstOrDefault(package => package.TransientFileLock);
+                        if (locked is not null)
+                        {
+                            throw new TransientFileLockException(
+                                locked.Error ?? "A generated character package is temporarily locked.");
+                        }
+                        return graft;
+                    },
+                    $"replay part '{pg.Label}'");
                 foreach (var package in result.PackageResults)
                 {
                     AppendLog($"  {pg.Slot}/{package.Role}: slot={package.TargetSlot} success={package.Success} addedExports={package.AddedExports} componentExport={package.NewComponentExportIndex}");
@@ -3029,6 +3462,15 @@ public sealed partial class MainForm
                     {
                         AppendLog($"    {package.Error}");
                     }
+                }
+                var failedPackages = result.PackageResults.Where(package => !package.Success).ToList();
+                if (failedPackages.Count > 0)
+                {
+                    var failureSummary = string.Join(" | ", failedPackages.Select(package =>
+                        $"{package.Role}: {(!string.IsNullOrWhiteSpace(package.Error) ? package.Error : "unknown graft error")}"));
+                    throw new InvalidOperationException(
+                        $"Part '{pg.Label}' could not be replayed for every required character package. " +
+                        $"The rebuild stopped before producing a partial suit. {failureSummary}");
                 }
                 if (result.PackageResults.Any(p => p.Success))
                 {
@@ -3058,7 +3500,18 @@ public sealed partial class MainForm
             }
             catch (Exception ex)
             {
-                AppendLog($"  ⚠ replay of part '{pg.Label}' (slot {pg.Slot}) failed: {ex.Message}");
+                AppendLog($"  ERROR replay of part '{pg.Label}' (slot {pg.Slot}) failed: {ex.Message}");
+                var detail = FileLockUtil.IsTransient(ex)
+                    ? $"Part '{pg.Label}' could not be replayed because its generated asset stayed locked. " +
+                      "Close FModel or any asset viewer using this suit, then retry."
+                    : $"Part '{pg.Label}' could not be replayed for the playable and cutscene packages.";
+                if (FileLockUtil.IsTransient(ex))
+                {
+                    throw new TransientFileLockException(
+                        detail + " The rebuild stopped before producing a partial suit.", ex);
+                }
+                throw new InvalidOperationException(
+                    detail + " The rebuild stopped before producing a partial suit.", ex);
             }
         }
 
@@ -3066,10 +3519,74 @@ public sealed partial class MainForm
         await StageCustomStaticMeshesAsync(project);
 
         // Re-apply the rest of the suit's declarative edits onto the freshly grafted stage.
-        ApplySavedComponentRemovals(project, logNoRemovals: false);
-        ApplySavedMaterials(project, logIfNone: false);
-        try { (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(project); } catch { /* best effort */ }
+        var removalReplay = ApplySavedComponentRemovals(project, logNoRemovals: false);
+        RequireCompleteDeclarativeReplay(removalReplay, "Saved component removal replay");
+        var materialReplay = ApplySavedMaterials(project, logIfNone: false);
+        RequireCompleteDeclarativeReplay(materialReplay, "Saved material replay");
+        if (persistProject)
+        {
+            await RunWithFileLockRetryAsync(
+                () => new SuitProjectService(projectRoot).SaveProject(project),
+                "save the completed declarative stage");
+            await FinalizeDeclarativeGraftStageAsync(project, projectRoot);
+        }
         _session.RaiseChanged();
+    }
+
+    private async Task FinalizeDeclarativeGraftStageAsync(
+        NativeSuitProject project,
+        string projectRoot)
+    {
+        var projectStageRoot = Path.Combine(
+            AppSettings.GeneratedRootFor(projectRoot),
+            "NativeSuitGuiProjects",
+            project.SlotId);
+        var graftStage = Path.Combine(projectStageRoot, "GraftedPartStage");
+        var incompleteMarker = Path.Combine(projectStageRoot, IncompleteDeclarativeStageMarkerName);
+
+        if (Directory.Exists(graftStage))
+        {
+            await RunWithFileLockRetryAsync(
+                () =>
+                {
+                    File.WriteAllText(
+                        Path.Combine(graftStage, CompletedGraftStageMarkerName),
+                        DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+                    return true;
+                },
+                "mark generated graft stage complete");
+        }
+
+        // Delete the fail-closed sentinel last. If this step is interrupted, packaging remains
+        // blocked even when a completion marker was already written.
+        await RunWithFileLockRetryAsync(
+            () =>
+            {
+                File.Delete(incompleteMarker);
+                return true;
+            },
+            "certify the completed declarative stage");
+    }
+
+    private async Task MarkDeclarativeStageIncompleteAsync(
+        NativeSuitProject project,
+        string projectRoot)
+    {
+        var projectStageRoot = Path.Combine(
+            AppSettings.GeneratedRootFor(projectRoot),
+            "NativeSuitGuiProjects",
+            project.SlotId);
+        var incompleteMarker = Path.Combine(projectStageRoot, IncompleteDeclarativeStageMarkerName);
+        await RunWithFileLockRetryAsync(
+            () =>
+            {
+                Directory.CreateDirectory(projectStageRoot);
+                File.WriteAllText(
+                    incompleteMarker,
+                    DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+                return true;
+            },
+            "mark the generated suit stages incomplete");
     }
 
     private void UpdateSelectedPartLabels()

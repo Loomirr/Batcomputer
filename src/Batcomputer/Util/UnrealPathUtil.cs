@@ -5,6 +5,53 @@ using UAssetAPI.UnrealTypes;
 
 internal static class UnrealPathUtil
 {
+    /// <summary>
+    /// Produces a conservative Unreal/FName-safe identifier. Display names may contain
+    /// punctuation, but generated package, object, and primary-asset names may not.
+    /// </summary>
+    public static string SanitizeIdentifier(string? value, string fallback = "Custom")
+    {
+        var source = value?.Trim() ?? "";
+        var result = new System.Text.StringBuilder(source.Length);
+        var pendingSeparator = false;
+        foreach (var character in source)
+        {
+            if (char.IsAsciiLetterOrDigit(character) || character == '_')
+            {
+                if (pendingSeparator && result.Length > 0 && result[^1] != '_')
+                {
+                    result.Append('_');
+                }
+                result.Append(character);
+                pendingSeparator = false;
+            }
+            else
+            {
+                pendingSeparator = result.Length > 0;
+            }
+        }
+
+        var clean = result.ToString().Trim('_');
+        if (string.IsNullOrWhiteSpace(clean))
+        {
+            clean = fallback;
+        }
+        if (char.IsDigit(clean[0]))
+        {
+            clean = "_" + clean;
+        }
+        return clean;
+    }
+
+    public static bool IsValidIdentifier(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || char.IsDigit(value[0]))
+        {
+            return false;
+        }
+        return value.All(character => char.IsAsciiLetterOrDigit(character) || character == '_');
+    }
+
     public static string NormalizePackagePath(string? value)
     {
         var path = ExtractPath(value);

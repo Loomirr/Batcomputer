@@ -78,6 +78,28 @@ public static class EquipmentDependencyService
                 new[] { "BP_RemoteKitten_Inst", "BP_LaserPointer_Weapon" })
         };
 
+    /// <summary>
+    /// Returns the release-blocking reason a persisted equipment change cannot be emitted into
+    /// the generated DCMD, or <see langword="null"/> when its required ETA is resolvable.
+    /// </summary>
+    public static string? SavedChangeResolutionError(
+        EquipmentSlotChange change,
+        GameDataEquipment? equipment)
+    {
+        var gadget = string.IsNullOrWhiteSpace(change.Gadget) ? "(empty gadget name)" : change.Gadget;
+        var prefix = $"Equipment slot {change.Slot + 1} '{gadget}'";
+        if (equipment is null)
+        {
+            return prefix + " is not present in the active equipment catalog.";
+        }
+        if (string.IsNullOrWhiteSpace(equipment.EtaPackage))
+        {
+            return prefix + $" resolves to '{equipment.Name}' but has no DA_ETA package.";
+        }
+
+        return null;
+    }
+
     public static EquipmentDependencyProfile Analyze(GameDataEquipment equipment, string? donorFamily)
     {
         var native = !string.IsNullOrWhiteSpace(donorFamily) &&

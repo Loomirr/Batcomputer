@@ -337,12 +337,16 @@ public sealed partial class MainForm
     /// assets. Called after the name-map stage is rebuilt (which wipes staged
     /// edits) and on load, so materials stick across sessions and regenerates.
     /// </summary>
-    private void ApplySavedMaterials(NativeSuitProject project, bool logIfNone)
+    private DeclarativeReplayOutcome ApplySavedMaterials(
+        NativeSuitProject project,
+        bool logIfNone,
+        string? stageContentRootOverride = null)
     {
+        var outcome = new DeclarativeReplayOutcome();
         if (project.MaterialAssignments.Count == 0)
         {
             if (logIfNone) AppendLog("  no saved material assignments to re-apply.");
-            return;
+            return outcome;
         }
 
         var slotId = project.SlotId;
@@ -354,23 +358,78 @@ public sealed partial class MainForm
         {
             if (string.IsNullOrWhiteSpace(m.Component) || !m.MiPackagePath.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
             {
+                outcome.Failures.Add(
+                    $"{m.Component}:{m.Slot}: saved material component/path is invalid ({m.MiPackagePath})");
                 continue;
             }
+
+            var context = (m.Context ?? "").Trim();
+            var applyToPlayable = context.Equals("both", StringComparison.OrdinalIgnoreCase) ||
+                                  context.Equals("playable", StringComparison.OrdinalIgnoreCase);
+            var applyToCutscene = context.Equals("both", StringComparison.OrdinalIgnoreCase) ||
+                                  context.Equals("cutscene", StringComparison.OrdinalIgnoreCase);
+            if (!applyToPlayable && !applyToCutscene)
+            {
+                outcome.Failures.Add($"{m.Component}:{m.Slot}: saved material context '{m.Context}' is invalid");
+                continue;
+            }
+
             var assignment = new MaterialReplaceService.Assignment
             {
                 Component = m.Component,
                 Slot = m.Slot,
                 MiPackagePath = m.MiPackagePath,
-                ApplyToPlayable = m.Context is "both" or "playable",
-                ApplyToCutscene = m.Context is "both" or "cutscene",
+                ApplyToPlayable = applyToPlayable,
+                ApplyToCutscene = applyToCutscene,
             };
-            var result = service.Apply(slotId, playablePkg, cutscenePkg, assignment);
-            if (result.Files.Any(f => f.Success))
+            var result = RunWithStructuredFileLockRetry(
+                () => string.IsNullOrWhiteSpace(stageContentRootOverride)
+                    ? service.Apply(slotId, playablePkg, cutscenePkg, assignment)
+                    : service.ApplyToContentRoot(
+                        stageContentRootOverride,
+                        slotId,
+                        playablePkg,
+                        cutscenePkg,
+                        assignment),
+                materialResult => materialResult.TransientFileLock ||
+                                  materialResult.Files.Any(file => file.TransientFileLock),
+                $"re-apply material '{m.Component}:{m.Slot}'");
+
+            var requiredRoles = new[]
+            {
+                (Role: "playable", Required: applyToPlayable, Package: playablePkg),
+                (Role: "cutscene", Required: applyToCutscene, Package: cutscenePkg),
+            };
+            var assignmentComplete = true;
+            foreach (var required in requiredRoles.Where(role => role.Required))
+            {
+                if (string.IsNullOrWhiteSpace(required.Package))
+                {
+                    outcome.Failures.Add($"{m.Component}:{m.Slot}/{required.Role}: target package path is empty");
+                    assignmentComplete = false;
+                    continue;
+                }
+
+                var file = result.Files.FirstOrDefault(candidate =>
+                    candidate.Role.Equals(required.Role, StringComparison.OrdinalIgnoreCase));
+                if (file?.Success == true)
+                {
+                    continue;
+                }
+
+                var error = file?.Error ?? result.Error ?? "no result was returned";
+                outcome.Failures.Add($"{m.Component}:{m.Slot}/{required.Role}: {error}");
+                outcome.TransientFileLock |= file?.TransientFileLock == true || result.TransientFileLock;
+                assignmentComplete = false;
+            }
+
+            if (assignmentComplete)
             {
                 reapplied++;
             }
         }
         AppendLog($"  re-applied {reapplied}/{project.MaterialAssignments.Count} saved material assignment(s).");
+        return outcome;
     }
 
     /// <summary>
@@ -778,13 +837,13 @@ public sealed partial class MainForm
         return removed;
     }
 
-    private void ApplyToyboxMaterial(string miPath)
+    private async void ApplyToyboxMaterial(string miPath)
     {
         _matAssignComponentText.Text = _toyboxComponent;
         _matAssignSlotText.Text = _toyboxSlot.ToString();
         _matAssignMiText.Text = miPath;
         SelectComboValue(_matAssignContextCombo, "both");
-        ApplyMaterialAssignment();
+        await ApplyMaterialAssignmentAsync();
     }
 
     private void PickAndApplyCatalogMaterial()
@@ -911,7 +970,7 @@ public sealed partial class MainForm
         assign.Controls.Add(_matAssignContextCombo, 5, 0);
         _matApplyButton.Text = "Apply material to stage";
         _matApplyButton.Dock = DockStyle.Fill;
-        _matApplyButton.Click += (_, _) => ApplyMaterialAssignment();
+        _matApplyButton.Click += async (_, _) => await ApplyMaterialAssignmentAsync();
         assign.Controls.Add(_matApplyButton, 6, 0);
 
         return box;
@@ -1002,13 +1061,11 @@ public sealed partial class MainForm
         }
     }
 
-    private void ApplyMaterialAssignment()
+    private async Task ApplyMaterialAssignmentAsync()
     {
         var slotId = _slotIdText.Text.Trim();
         var component = _matAssignComponentText.Text.Trim();
         var mi = _matAssignMiText.Text.Trim();
-        var playablePkg = _targetPlayableText.Text.Trim();
-        var cutscenePkg = _targetCutsceneText.Text.Trim();
 
         if (string.IsNullOrWhiteSpace(slotId)) { AppendLog("Slot ID is empty."); return; }
         if (string.IsNullOrWhiteSpace(component)) { AppendLog("Component is empty."); return; }
@@ -1016,66 +1073,114 @@ public sealed partial class MainForm
         if (!int.TryParse(_matAssignSlotText.Text.Trim(), out var slot) || slot < 0) { AppendLog("Slot must be a non-negative integer."); return; }
 
         var context = _matAssignContextCombo.SelectedItem?.ToString() ?? "both";
-        var assignment = new MaterialReplaceService.Assignment
+        EnsureProject();
+        if (_currentProject is null)
+        {
+            return;
+        }
+
+        var projectRoot = _projectRootText.Text.Trim();
+        var patchedContentRoot = Path.Combine(
+            AppSettings.GeneratedRootFor(projectRoot),
+            "NativeSuitGuiProjects",
+            slotId,
+            "PatchedNameMapStage",
+            "LEGOBatmanLotDK",
+            "Content");
+        if (!Directory.Exists(patchedContentRoot))
+        {
+            if (!HasCurrentSuitBase())
+            {
+                AppendLog("Apply material stopped: set a base character before assigning materials.");
+                return;
+            }
+            try
+            {
+                await MarkDeclarativeStageIncompleteAsync(_currentProject, projectRoot);
+                if (!PatchNameMapsWithUAssetApi())
+                {
+                    AppendLog("Apply material stopped: no clean editable base stage could be created.");
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendLog("Apply material stopped while creating the clean editable stage: " + ex.Message);
+                Dialog.Error(this, "Material stage failed", ex.Message);
+                return;
+            }
+        }
+
+        NativeSuitProject previousProjectSnapshot;
+        try
+        {
+            previousProjectSnapshot = JsonSerializer.Deserialize<NativeSuitProject>(
+                JsonSerializer.Serialize(_currentProject))
+                ?? throw new InvalidOperationException("Could not snapshot the suit before applying the material.");
+        }
+        catch (Exception ex)
+        {
+            AppendLog("Apply material stopped before staging: " + ex.Message);
+            return;
+        }
+
+        _currentProject.MaterialAssignments.RemoveAll(m =>
+            m.Component.Equals(component, StringComparison.OrdinalIgnoreCase) &&
+            m.Slot == slot &&
+            m.Context.Equals(context, StringComparison.OrdinalIgnoreCase));
+        _currentProject.MaterialAssignments.Add(new SavedMaterialAssignment
         {
             Component = component,
             Slot = slot,
             MiPackagePath = mi,
-            ApplyToPlayable = context is "both" or "playable",
-            ApplyToCutscene = context is "both" or "cutscene"
-        };
-
-        var materialService = new MaterialReplaceService(_projectRootText.Text.Trim());
-        var result = materialService.Apply(slotId, playablePkg, cutscenePkg, assignment);
-        if (result.Status.Equals("no-stage", StringComparison.OrdinalIgnoreCase) &&
-            _currentProject is not null && HasCurrentSuitBase())
+            Context = context
+        });
+        // A custom static mesh also stores its base component material declaratively. Keep that
+        // source of truth aligned with a normal "both" slot-0 assignment so rebuilding the mesh
+        // cannot silently restore the donor material after the user already changed it.
+        if (slot == 0 && context.Equals("both", StringComparison.OrdinalIgnoreCase) &&
+            FindCustomStaticMeshForComponent(_currentProject, component) is { } customMesh)
         {
-            AppendLog("No editable stage was found. Recreating it from the selected base…");
-            if (PatchNameMapsWithUAssetApi())
+            customMesh.MaterialPath = UnrealPathUtil.NormalizePackagePath(mi);
+        }
+
+        var projectSaved = false;
+        try
+        {
+            await RebuildGraftStageFromDeclarativeAsync(persistProject: false);
+            await RunWithFileLockRetryAsync(
+                () => (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(_currentProject),
+                "save the completed material assignment");
+            projectSaved = true;
+            await FinalizeDeclarativeGraftStageAsync(_currentProject, projectRoot);
+        }
+        catch (Exception ex)
+        {
+            if (!projectSaved)
             {
-                result = materialService.Apply(slotId, playablePkg, cutscenePkg, assignment);
+                _currentProject = previousProjectSnapshot;
+                ApplyProjectToFields(_currentProject);
+                UpdateSelectedLabels();
             }
+            AppendLog(projectSaved
+                ? "The material assignment was saved, but its generated stage could not be certified: " + ex.Message
+                : "Apply material failed; the prior saved project was kept: " + ex.Message);
+            Dialog.Error(
+                this,
+                projectSaved ? "Material saved; stage incomplete" : "Material apply failed",
+                (projectSaved
+                    ? "The assignment was saved, but packaging remains blocked until its declarative stage rebuild can be certified."
+                    : "The material could not be applied to every required character package. The prior saved project remains active.") +
+                "\n\n" + ex.Message);
+            _session.RaiseChanged();
+            RefreshInspector();
+            PopulateToyboxSlots();
+            return;
         }
 
-        AppendLog($"Apply material [{component} slot {slot}] = {mi}: {result.Status}");
-        if (result.Files.Any(f => f.Success))
-        {
-            var miName = mi[(mi.LastIndexOf('/') + 1)..];
-            RecordChange("Materials", $"{component} slot {slot}", $"{miName} ({context})");
-
-            // Persist so it survives stage rebuilds and reloads.
-            EnsureProject();
-            _currentProject!.MaterialAssignments.RemoveAll(m =>
-                m.Component.Equals(component, StringComparison.OrdinalIgnoreCase) &&
-                m.Slot == slot &&
-                m.Context.Equals(context, StringComparison.OrdinalIgnoreCase));
-            _currentProject.MaterialAssignments.Add(new SavedMaterialAssignment
-            {
-                Component = component, Slot = slot, MiPackagePath = mi, Context = context
-            });
-            // A custom static mesh also stores its base component material declaratively. Keep that
-            // source of truth aligned with a normal "both" slot-0 assignment so rebuilding the mesh
-            // cannot silently restore the donor material after the user already changed it.
-            if (slot == 0 && context.Equals("both", StringComparison.OrdinalIgnoreCase) &&
-                FindCustomStaticMeshForComponent(_currentProject, component) is { } customMesh)
-            {
-                customMesh.MaterialPath = UnrealPathUtil.NormalizePackagePath(mi);
-            }
-            (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject);
-        }
-        if (!string.IsNullOrWhiteSpace(result.StageContentRoot))
-        {
-            AppendLog($"  stage: {result.StageContentRoot}");
-        }
-        foreach (var f in result.Files)
-        {
-            AppendLog($"  {f.Role}: success={f.Success} componentFound={f.ComponentFound} createdOverrideArray={f.CreatedOverrideArray}{(string.IsNullOrWhiteSpace(f.Error) ? "" : " error=" + f.Error)}");
-        }
-        if (!string.IsNullOrWhiteSpace(result.Error))
-        {
-            AppendLog(result.Error);
-        }
-
+        var miName = mi[(mi.LastIndexOf('/') + 1)..];
+        RecordChange("Materials", $"{component} slot {slot}", $"{miName} ({context})");
+        AppendLog($"Applied material [{component} slot {slot}] = {mi} to the completed declarative stage.");
         RefreshInspector();
         PopulateToyboxSlots();
     }
@@ -1106,34 +1211,79 @@ public sealed partial class MainForm
     private void StageGeneratedMaterialsIntoContentRoot(NativeSuitProject project, string contentRootToPackage)
     {
         var mod = ExtractModFolder(project.TargetPackages?.Playable);
-        if (string.IsNullOrWhiteSpace(mod))
+        var copied = 0;
+        if (!string.IsNullOrWhiteSpace(mod))
         {
-            return;
+            var dst = Path.Combine(contentRootToPackage, "Mods", mod);
+            var src = Path.Combine(AppSettings.Current.EffectiveExportContentRoot(), "Mods", mod);
+            if (Directory.Exists(src))
+            {
+                foreach (var file in Directory.EnumerateFiles(src, "*", SearchOption.AllDirectories))
+                {
+                    var relative = file.Substring(src.Length).TrimStart('\\', '/');
+                    // Never overwrite the patched/grafted BP assets.
+                    if (relative.StartsWith("Characters", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var destination = Path.Combine(dst, relative);
+                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                    File.Copy(file, destination, overwrite: true);
+                    copied++;
+                }
+            }
+
+            AppendLog(copied > 0
+                ? $"Staged {copied} generated Mods\\{mod} asset file(s) into the pack content root."
+                : $"No generated Mods\\{mod} assets to stage.");
         }
 
-        var dst = Path.Combine(contentRootToPackage, "Mods", mod);
-        var copied = 0;
-        var src = Path.Combine(AppSettings.Current.EffectiveExportContentRoot(), "Mods", mod);
-        if (Directory.Exists(src))
+        var missing = MissingReferencedGeneratedMaterialFiles(project, contentRootToPackage);
+        if (missing.Count > 0)
         {
-            foreach (var file in Directory.EnumerateFiles(src, "*", SearchOption.AllDirectories))
-            {
-                var relative = file.Substring(src.Length).TrimStart('\\', '/');
-                // Never overwrite the patched/grafted BP assets.
-                if (relative.StartsWith("Characters", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
+            throw new InvalidOperationException(
+                "Project-generated material staging is incomplete. Missing or empty cooked package files: " +
+                string.Join("; ", missing));
+        }
+    }
 
-                var destination = Path.Combine(dst, relative);
-                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                File.Copy(file, destination, overwrite: true);
-                copied++;
+    internal static IReadOnlyList<string> ReferencedGeneratedMaterialPackagesForRelease(
+        NativeSuitProject project)
+    {
+        var generatedPackages = (project.GeneratedMaterials ?? new List<GeneratedMaterialEntry>())
+            .Select(entry => UnrealPathUtil.NormalizePackagePath(entry.PackagePath))
+            .Where(package => !string.IsNullOrWhiteSpace(package))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return (project.MaterialAssignments ?? new List<SavedMaterialAssignment>())
+            .Select(assignment => UnrealPathUtil.NormalizePackagePath(assignment.MiPackagePath))
+            .Where(package => generatedPackages.Contains(package))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(package => package, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static List<string> MissingReferencedGeneratedMaterialFiles(
+        NativeSuitProject project,
+        string contentRoot)
+    {
+        var missing = new List<string>();
+        foreach (var package in ReferencedGeneratedMaterialPackagesForRelease(project))
+        {
+            var packageBase = PackagePathToContentPath(contentRoot, package);
+            var missingExtensions = new[] { ".uasset", ".uexp" }
+                .Where(extension =>
+                {
+                    var path = packageBase + extension;
+                    return !File.Exists(path) || new FileInfo(path).Length == 0;
+                })
+                .ToList();
+            if (missingExtensions.Count > 0)
+            {
+                missing.Add($"{package} ({string.Join(", ", missingExtensions)})");
             }
         }
-
-        AppendLog(copied > 0
-            ? $"Staged {copied} generated Mods\\{mod} asset file(s) into the pack content root."
-            : $"No generated Mods\\{mod} assets to stage.");
+        return missing;
     }
 }

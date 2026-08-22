@@ -132,6 +132,7 @@ public sealed class CustomStaticMeshImportService
     {
         public string Status { get; set; } = "";
         public string? Error { get; set; }
+        public bool TransientFileLock { get; set; }
         public string MeshPackagePath { get; set; } = "";
         public string ResolvedComponent { get; set; } = "";
         public List<string> Log { get; set; } = [];
@@ -234,12 +235,31 @@ public sealed class CustomStaticMeshImportService
                 componentSlot,
                 cloneSlot: playablePart.TemplateSlot,
                 attachSocket: attachment.AttachSocket);
-            if (!graft.PackageResults.Any(package => package.Success))
+            if (graft.PackageResults.Any(package => package.TransientFileLock))
             {
-                var errors = string.Join(" | ", graft.PackageResults
+                var lockError = graft.PackageResults
+                    .First(package => package.TransientFileLock).Error;
+                throw new TransientFileLockException(
+                    "A generated character package was temporarily locked while grafting the custom mesh. " + lockError);
+            }
+            if (!HasCompleteCharacterGraft(graft.PackageResults))
+            {
+                var errors = graft.PackageResults
                     .Where(package => !string.IsNullOrWhiteSpace(package.Error))
-                    .Select(package => package.Error));
-                throw new InvalidOperationException("The custom static mesh component could not be grafted. " + errors);
+                    .Select(package => $"{package.Role}: {package.Error}")
+                    .ToList();
+                if (!graft.PackageResults.Any(package =>
+                        package.Role.Equals("playable", StringComparison.OrdinalIgnoreCase)))
+                {
+                    errors.Add("playable: no graft result");
+                }
+                if (!graft.PackageResults.Any(package =>
+                        package.Role.Equals("cutscene", StringComparison.OrdinalIgnoreCase)))
+                {
+                    errors.Add("cutscene: no graft result");
+                }
+                throw new InvalidOperationException(
+                    "The custom static mesh component could not be grafted. " + string.Join(" | ", errors));
             }
 
             var mesh = new StaticMeshObjProbeService().CreateObjHeadProbe(new StaticMeshObjProbeService.Request
@@ -259,6 +279,11 @@ public sealed class CustomStaticMeshImportService
             });
             if (!mesh.Status.Equals("created", StringComparison.OrdinalIgnoreCase))
             {
+                if (mesh.TransientFileLock)
+                {
+                    throw new TransientFileLockException(
+                        "The generated custom mesh asset was temporarily locked. " + mesh.Error);
+                }
                 throw new InvalidOperationException("The OBJ mesh could not be generated. " + mesh.Error);
             }
 
@@ -278,8 +303,19 @@ public sealed class CustomStaticMeshImportService
         {
             result.Status = "error";
             result.Error = ex.Message;
+            result.TransientFileLock = FileLockUtil.IsTransient(ex);
         }
         return result;
+    }
+
+    internal static bool HasCompleteCharacterGraft(IEnumerable<PartGraftPackageResult> packages)
+    {
+        var results = packages.ToList();
+        return results.Any(package =>
+                   package.Role.Equals("playable", StringComparison.OrdinalIgnoreCase) && package.Success) &&
+               results.Any(package =>
+                   package.Role.Equals("cutscene", StringComparison.OrdinalIgnoreCase) && package.Success) &&
+               results.All(package => package.Success);
     }
 
     private static NativeSuitPartRecord CreateStaticAttachmentPart(

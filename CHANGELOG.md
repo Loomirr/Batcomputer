@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.9.0-beta.5 — 2026-08-22
+
+Donor selection, declarative staging, and registry reliability fixes.
+
+- Always asks for an explicit gameplay donor after choosing a cutscene visual, recommends the
+  matching playable without silently committing it, and recognizes Catwoman's nonstandard native
+  archetype instead of falling back to Batman.
+- Adds Edit and Remove actions for project-owned OBJ meshes and replays custom meshes, native
+  grafts, removals, and materials after a base change.
+- Keeps 3D-viewer custom-mesh bakes on the editor's live suit recipe, so removing an unrelated part
+  no longer restores the mesh's old scale, position, or rotation during the clean rebuild.
+- Retries transient generated-file sharing violations, requires complete playable/cutscene custom
+  mesh grafts, and blocks packaging when a declarative stage did not finish rebuilding.
+- Quotes the UE 5.6 writer correctly under paths such as `C:\Program Files`, validates structured
+  writer counts, and keeps display punctuation out of generated Unreal identifiers.
+- Blocks remote-controller gadgets on incompatible gameplay families and prevents unsupported
+  regular-cape plus glide-visual combinations on bases without the native paired visibility setup.
+- Makes Batman glide capes explicit in the Gliders browser and preserves the selected glider
+  donor's traversal animation sets.
+- Builds package and mod outputs in disposable attempts, publishes only complete nonempty IoStore
+  trios, and installs the certified trio transactionally with rollback on failure.
+
 ## 0.9.0-beta.4 — 2026-08-20
 
 Display, extraction, registry-writer, and cape/glider fixes.

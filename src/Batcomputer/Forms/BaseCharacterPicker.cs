@@ -27,15 +27,17 @@ public sealed partial class BaseCharacterPicker : Form
     public bool BrowseManuallyRequested { get; private set; }
 
     private readonly bool _playablesOnly;
+    private readonly string _preferredPackage;
 
-    public BaseCharacterPicker() : this(false) { }
+    public BaseCharacterPicker() : this(false, null) { }
 
     /// <param name="playablesOnly">
     /// When true, show only real _Playable characters for gameplay inheritance.
     /// </param>
-    public BaseCharacterPicker(bool playablesOnly)
+    public BaseCharacterPicker(bool playablesOnly, string? preferredPackage = null)
     {
         _playablesOnly = playablesOnly;
+        _preferredPackage = UnrealPathUtil.NormalizePackagePath(preferredPackage);
         InitializeComponent();
         AutoScaleMode = AutoScaleMode.Dpi;
         if (WinFormsDesignerSupport.IsInDesigner())
@@ -123,7 +125,13 @@ public sealed partial class BaseCharacterPicker : Form
         _list.EndUpdate();
         if (_list.Items.Count > 0)
         {
-            _list.SelectedIndex = 0;
+            var preferredIndex = string.IsNullOrWhiteSpace(_preferredPackage)
+                ? -1
+                : _view.FindIndex(asset =>
+                    UnrealPathUtil.NormalizePackagePath(asset.Path).Equals(
+                        _preferredPackage,
+                        StringComparison.OrdinalIgnoreCase));
+            _list.SelectedIndex = preferredIndex >= 0 ? preferredIndex : 0;
         }
     }
 

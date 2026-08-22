@@ -514,8 +514,10 @@ internal static class Program
 
         if (args.Length >= 1 && args[0].Equals("--verify-registry-writer", StringComparison.OrdinalIgnoreCase))
         {
+            var forceBuild = args.Skip(1).Any(argument =>
+                argument.Equals("--force-build", StringComparison.OrdinalIgnoreCase));
             var result = new RegistryPluginService()
-                .PrepareAsync(line => Console.WriteLine("registry: " + line))
+                .PrepareAsync(line => Console.WriteLine("registry: " + line), forceBuild)
                 .GetAwaiter()
                 .GetResult();
             if (!string.IsNullOrWhiteSpace(result.VerificationLine))
@@ -548,6 +550,28 @@ internal static class Program
             var comp = new AnimArchetypeGraftService().BaseGlideVisualComponent(proj);
             Console.WriteLine($"glide-visual component: {(comp ?? "<none>")}");
             return 0;
+        }
+
+        if (args.Length >= 2 && args[0].Equals("--detect-cape-glide-contract", StringComparison.OrdinalIgnoreCase))
+        {
+            var proj = new NativeSuitProject { PlayableTemplate = new TemplateRecord { Uasset = args[1] } };
+            var status = new AnimArchetypeGraftService().BaseCapeGlideContract(proj);
+            Console.WriteLine($"cape/glide contract: {status}");
+            return status == AnimArchetypeGraftService.CapeGlideContractStatus.Unknown ? 1 : 0;
+        }
+
+        if (args.Length >= 3 && args[0].Equals("--detect-gameplay-donor", StringComparison.OrdinalIgnoreCase))
+        {
+            // --detect-gameplay-donor <basePlayable.uasset> <extractedContentRoot> [usmapPath]
+            var usmapPath = args.Length >= 4 ? args[3] : AppSettings.Current.EffectiveUsmapPath();
+            Usmap? mappings = !string.IsNullOrWhiteSpace(usmapPath) && File.Exists(usmapPath)
+                ? MappingsCache.Load(usmapPath)
+                : null;
+            var donor = AnimArchetypeGraftService.DetectDonor(args[1], args[2], mappings);
+            Console.WriteLine(donor is null
+                ? "gameplay donor: <unreadable>"
+                : $"gameplay donor: valid={donor.Valid} family={donor.Family} archetype={donor.ArchetypePackage} mas={donor.MasCharPackage} las={donor.LasCharPackage} dprd={donor.DprdPackage}");
+            return donor is { Valid: true } ? 0 : 1;
         }
 
         if (args.Length >= 5 && args[0].Equals("--fix-cape-attach", StringComparison.OrdinalIgnoreCase))

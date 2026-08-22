@@ -58,7 +58,8 @@ public sealed class StageValidationService
         CheckPawnTag(project, findings);
         CheckGliderAnimInjection(project, findings);
         CheckRequiredAbilitySets(project, findings);
-        CheckExperimentalDependencies(project, findings);
+        CheckEquipmentDependencies(project, findings);
+        CheckGliderDependencies(project, findings);
         return findings;
     }
 
@@ -324,7 +325,7 @@ public sealed class StageValidationService
         }
     }
 
-    private static void CheckExperimentalDependencies(NativeSuitProject project, List<Finding> findings)
+    private static void CheckEquipmentDependencies(NativeSuitProject project, List<Finding> findings)
     {
         if (project.EquipmentSlots.Count == 0)
         {
@@ -332,15 +333,27 @@ public sealed class StageValidationService
         }
 
         var donorFamily = project.BaseProfile?.GameplayFamily;
+        if (string.IsNullOrWhiteSpace(donorFamily))
+        {
+            donorFamily = GameDataService.Instance
+                .FamilyForBasePath(project.PlayableTemplate?.PackagePath ?? "")?
+                .Name;
+        }
         foreach (var change in project.EquipmentSlots)
         {
             var equipment = GameDataService.Instance.FindEquipment(change.Gadget);
-            if (equipment is null)
+            var resolutionError = EquipmentDependencyService.SavedChangeResolutionError(change, equipment);
+            if (resolutionError is not null)
             {
+                findings.Add(new("ERROR",
+                    resolutionError +
+                    " Refresh the game-data catalog or choose a resolvable gadget before packaging."));
                 continue;
             }
 
-            var profile = EquipmentDependencyService.Analyze(equipment, donorFamily);
+            // SavedChangeResolutionError established that this catalog record has its required ETA.
+            var resolvedEquipment = equipment!;
+            var profile = EquipmentDependencyService.Analyze(resolvedEquipment, donorFamily);
             if (profile.Support == EquipmentSupportKind.Controller)
             {
                 var actors = profile.RuntimeActors.Count == 0
@@ -349,29 +362,62 @@ public sealed class StageValidationService
                 if (!string.IsNullOrWhiteSpace(profile.RequiredGameplayFamily) &&
                     !string.Equals(profile.RequiredGameplayFamily, donorFamily, StringComparison.OrdinalIgnoreCase))
                 {
-                    findings.Add(new("WARN",
-                        $"Equipment '{equipment.Name}' only works from a {profile.RequiredGameplayFamily} gameplay base. " +
-                        $"The current donor is {donorFamily ?? "not set"}; its remote pawn will not operate in-game.{actors}"));
+                    findings.Add(new("ERROR",
+                        $"Equipment '{resolvedEquipment.Name}' only works from a {profile.RequiredGameplayFamily} gameplay base. " +
+                        $"The current donor is {donorFamily ?? "not set"}; its remote pawn will not operate in-game. " +
+                        $"Choose a {profile.RequiredGameplayFamily} playable when selecting the visual base, then add this gadget again.{actors}"));
                 }
                 else
                 {
                     findings.Add(new("WARN",
-                        $"Equipment '{equipment.Name}' is a controller setup. The tool stages its ability set, but controller spawn and recall behavior still needs an in-game check.{actors}"));
+                        $"Equipment '{resolvedEquipment.Name}' is a controller setup. The tool stages its ability set, but controller spawn and recall behavior still needs an in-game check.{actors}"));
                 }
             }
             else if (profile.Support is EquipmentSupportKind.Experimental or EquipmentSupportKind.FamilyOnly)
             {
                 findings.Add(new("WARN",
-                    $"Equipment '{equipment.Name}' is {profile.SupportLabel.ToLowerInvariant()}: {profile.Summary}"));
+                    $"Equipment '{resolvedEquipment.Name}' is {profile.SupportLabel.ToLowerInvariant()}: {profile.Summary}"));
             }
         }
+    }
 
+    /// <summary>
+    /// Glider safety is independent of the equipment list. Keeping these checks outside
+    /// <see cref="CheckEquipmentDependencies"/> ensures a suit with no gadgets cannot
+    /// bypass the package-blocking cape/glider compatibility rules.
+    /// </summary>
+    private static void CheckGliderDependencies(NativeSuitProject project, List<Finding> findings)
+    {
         if (project.PartGrafts.Any(graft => graft.IsGlider) &&
             (!string.IsNullOrWhiteSpace(project.GliderAnimLas) || !string.IsNullOrWhiteSpace(project.GliderAnimMas)) &&
             !project.UseCustomArchetype)
         {
             findings.Add(new("ERROR",
                 "This glider needs a donor glide pose, but the custom archetype is off so its animation sets cannot be injected. Re-apply the glider preset."));
+        }
+
+        var capeGlideContract = new AnimArchetypeGraftService().BaseCapeGlideContract(project);
+        if (GliderService.HasAdditiveCapeAndGliderCombination(project, capeGlideContract))
+        {
+            findings.Add(new("ERROR",
+                "This suit combines a custom static mesh attached to Cape with a glide visual. " +
+                "Custom static meshes are additive components and are not controlled by the playable base's native cape/glider visibility wiring, " +
+                "so the custom cape would remain visible while gliding. Remove the custom Cape attachment or the glider before packaging."));
+        }
+        else if (GliderService.HasCapeAndGliderCombination(project, capeGlideContract))
+        {
+            if (capeGlideContract == AnimArchetypeGraftService.CapeGlideContractStatus.Unknown)
+            {
+                findings.Add(new("WARN",
+                    "This suit combines a regular cape with a glide visual, but Batcomputer could not inspect the playable base's cape visibility contract. " +
+                    "Refresh the character assets and run the build check again."));
+            }
+            else if (capeGlideContract != AnimArchetypeGraftService.CapeGlideContractStatus.Paired)
+            {
+                findings.Add(new("ERROR",
+                    "This suit combines a regular cape with a glide visual, but its playable base does not natively own separate cosmetic-cape and glider components. " +
+                    "The regular cape would remain visible while gliding. Re-select the visual base and choose a playable donor with the native two-cape visibility setup, then re-apply both parts."));
+            }
         }
     }
 

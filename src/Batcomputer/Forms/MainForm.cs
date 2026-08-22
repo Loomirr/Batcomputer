@@ -975,13 +975,13 @@ public sealed partial class MainForm : Form
 
     /// <summary>Shows the playables-only picker for choosing a machinery donor (a hero to
     /// inherit abilities/equipment/animation/cutscene from). Returns its /Game package or null.</summary>
-    private string? PromptForMachineryDonor()
+    private string? PromptForMachineryDonor(string? preferredPackage = null)
     {
         if (!GameDataService.Instance.HasCatalog)
         {
             return null;
         }
-        using var picker = new BaseCharacterPicker(playablesOnly: true);
+        using var picker = new BaseCharacterPicker(playablesOnly: true, preferredPackage: preferredPackage);
         if (picker.ShowDialog(this) != DialogResult.OK || picker.BrowseManuallyRequested)
         {
             return null;
@@ -1950,7 +1950,33 @@ public sealed partial class MainForm : Form
         _saveProjectButton.Click += (_, _) => SaveProject();
         _createPatchPlanButton.Click += (_, _) => CreatePatchPlan();
         _stageButton.Click += (_, _) => StageUnpatchedFiles();
-        _uassetNameMapPatchButton.Click += (_, _) => PatchNameMapsWithUAssetApi();
+        _uassetNameMapPatchButton.Click += async (_, _) =>
+        {
+            EnsureProject();
+            if (_currentProject is null)
+            {
+                return;
+            }
+
+            await RebuildGate.WaitAsync();
+            try
+            {
+                await MarkDeclarativeStageIncompleteAsync(_currentProject, _projectRootText.Text.Trim());
+                if (PatchNameMapsWithUAssetApi())
+                {
+                    await RebuildGraftStageCoreAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendLog("Name-map rebuild failed: " + ex.Message);
+                Dialog.Error(this, "Name-map rebuild failed", ex.Message);
+            }
+            finally
+            {
+                RebuildGate.Release();
+            }
+        };
         _graftTorso2Button.Click += async (_, _) => await GraftTorso2Async();
         _graftSelectedPartButton.Click += async (_, _) => await GraftSelectedPartsAsync();
         _packagePatchedIoStoreButton.Click += async (_, _) => await BuildModForCurrentSuitAsync();
@@ -1987,7 +2013,14 @@ public sealed partial class MainForm : Form
             return;
         }
 
-        var words = suit.Split(new[] { ' ', '_', '-' }, StringSplitOptions.RemoveEmptyEntries).ToList();
+        var words = System.Text.RegularExpressions.Regex
+            .Matches(suit, "[A-Za-z0-9]+")
+            .Select(match => match.Value)
+            .ToList();
+        if (words.Count == 0)
+        {
+            words.Add("Custom");
+        }
         var slug = string.Join("_", words.Select(w => w.ToLowerInvariant()));
         if (words.Count > 1 && words[^1].Equals("Suit", StringComparison.OrdinalIgnoreCase))
         {
@@ -2002,12 +2035,13 @@ public sealed partial class MainForm : Form
         var family = TargetFamilyNameForProject(_currentProject);
         _displayNameText.Text = suit;
         _slotIdText.Text = $"{family.ToLowerInvariant()}_{slug}";
-        var basePath = $"/Game/Mods/{mod}/Characters";
+        var safeMod = UnrealPathUtil.SanitizeIdentifier(mod, "CustomMod");
+        var basePath = $"/Game/Mods/{safeMod}/Characters";
         _targetPlayableText.Text = $"{basePath}/BP_{family}_{stem}_Playable";
         _targetCutsceneText.Text = $"{basePath}/BP_{family}_{stem}_Cutscene";
         _targetDcmdText.Text = $"{basePath}/DA_DCMD_{family}_{stem}_Playable";
 
-        var derivedMaterialOutputPackage = $"/Game/Mods/{mod}/Materials/MI_{family}_{stem}_Body";
+        var derivedMaterialOutputPackage = $"/Game/Mods/{safeMod}/Materials/MI_{family}_{stem}_Body";
         if (string.IsNullOrWhiteSpace(_matOutputText.Text) ||
             string.Equals(_matOutputText.Text.Trim(), _lastAutoMaterialOutputPackage, StringComparison.OrdinalIgnoreCase))
         {
@@ -2392,28 +2426,10 @@ public sealed partial class MainForm : Form
                 return false;
             }
 
-            // The name-map stage was just rebuilt from clean donors, wiping any
-            // staged edits - replay persisted materials + component removals so the
-            // suit's saved changes survive the regenerate.
-            ApplySavedMaterials(_currentProject, logIfNone: false);
-            ApplySavedComponentRemovals(_currentProject, logNoRemovals: false);
-
-            // Custom-archetype equipment anim graft (clones MAS_Char/LAS_Char, injects
-            // foreign gadget anim blocks, repoints the archetype). No-op unless the
-            // custom archetype is on and a foreign gadget was added.
-            var animGraft = new AnimArchetypeGraftService().Graft(_currentProject, result.PatchedContentRoot);
-            if (animGraft.Status != "skipped")
-            {
-                AppendLog($"Equipment anim graft: {animGraft.Status}");
-                foreach (var line in animGraft.Log)
-                {
-                    AppendLog("  " + line);
-                }
-                if (!string.IsNullOrWhiteSpace(animGraft.Error))
-                {
-                    AppendLog("  " + animGraft.Error);
-                }
-            }
+            // PatchedNameMapStage is the immutable replay baseline. Materials, removals,
+            // custom parts, and archetype/animation work belong in GraftedPartStage or the
+            // final package pass; mutating this clean stage would make later deletes unable
+            // to restore the donor state.
             return true;
         }
         catch (Exception ex)
@@ -2604,11 +2620,22 @@ public sealed partial class MainForm : Form
                     _basePlayableText.Text = project.PlayableTemplate?.Uasset ?? "";
                     _baseCutsceneText.Text = project.CutsceneTemplate?.Uasset ?? "";
                     _baseDcmdText.Text = project.DcmdTemplate?.Uasset ?? "";
-                    svc.SaveProject(project);
 
                     // 2. Re-stage from the new base, 3. package, 4. install.
+                    // Do not persist the rebased template paths here. UseAsBase owns the
+                    // project/stage transaction and commits the JSON only after staging succeeds.
                     progress.Report("Re-staging from the new base…");
-                    await UseAsBase();
+                    if (!await UseAsBase())
+                    {
+                        failed.Add($"{summary.DisplayName}: base re-staging failed");
+                        AppendLog("  ✗ base re-staging failed — package and install skipped.");
+                        var restored = svc.LoadProject(summary.Path);
+                        if (restored is not null)
+                        {
+                            LoadProjectIntoUi(restored);
+                        }
+                        continue;
+                    }
 
                     // UseAsBase → DeriveOutputs can re-derive the pak name. Re-assert this suit's
                     // own name so it never builds/installs under another suit's (or a derived) name.
@@ -2618,10 +2645,32 @@ public sealed partial class MainForm : Form
                         _packageBaseNameText.Text = pinnedPak;
                     }
 
-                    await PackagePatchedIoStoreAsync();
+                    var packageResult = await PackagePatchedIoStoreAsync();
+                    if (!packageResult.Success)
+                    {
+                        failed.Add($"{summary.DisplayName}: package failed");
+                        AppendLog("  ✗ package failed — install skipped. " + packageResult.FailureDetail);
+                        continue;
+                    }
 
                     progress.Report($"Installing {pinnedPak} into the game…");
-                    InstallTrio();
+                    if (!InstallFreshlyBuiltTrio(packageResult, out var destinationConsistent))
+                    {
+                        failed.Add($"{summary.DisplayName}: fresh package could not be installed");
+                        AppendLog("  ✗ fresh package install failed.");
+                        if (!destinationConsistent)
+                        {
+                            foreach (var skipped in chosen.Skip(done + 1))
+                            {
+                                failed.Add($"{skipped.DisplayName}: not attempted after incomplete install rollback");
+                            }
+                            AppendLog(
+                                "  ✗ update-all aborted: the previous game-folder trio could not be fully restored. " +
+                                "Recovery backups were retained; resolve the reported file lock or disk error before continuing.");
+                            break;
+                        }
+                        continue;
+                    }
 
                     okCount++;
                     AppendLog($"  ✓ {summary.DisplayName} updated.");

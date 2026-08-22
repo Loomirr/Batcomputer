@@ -13,6 +13,31 @@ namespace Batcomputer;
 /// </summary>
 public sealed partial class MainForm
 {
+    private sealed record PackageBuildResult(
+        bool Success,
+        string BuildId,
+        string SlotId,
+        string PackageBaseName,
+        string IoStoreDirectory,
+        BuildManifestService.Manifest? Manifest,
+        string FailureDetail)
+    {
+        public static PackageBuildResult Failed(string detail) =>
+            new(false, "", "", "", "", null, detail);
+
+        public static PackageBuildResult Completed(
+            BuildManifestService.Manifest manifest,
+            string ioStoreDirectory) =>
+            new(
+                true,
+                manifest.BuildId,
+                manifest.SlotId,
+                manifest.PackageBaseName,
+                ioStoreDirectory,
+                manifest,
+                "");
+    }
+
     private void BuildLayout()
     {
         SuspendLayout();
@@ -374,12 +399,12 @@ public sealed partial class MainForm
         AppendLog("These files are NOT game-ready yet. They still need UAssetAPI internal package/class/name-map rewriting.");
     }
 
-    private async Task PackagePatchedIoStoreAsync()
+    private async Task<PackageBuildResult> PackagePatchedIoStoreAsync()
     {
         EnsureProject();
         if (_currentProject is null)
         {
-            return;
+            return PackageBuildResult.Failed("No suit is open.");
         }
 
         // In batch mode the bulk operation owns the progress window (one per suit would flicker).
@@ -387,7 +412,7 @@ public sealed partial class MainForm
         _packageProgress = progress ?? _packageProgress;
         try
         {
-            await PackagePatchedIoStoreCoreAsync();
+            return await PackagePatchedIoStoreCoreAsync();
         }
         finally
         {
@@ -404,11 +429,11 @@ public sealed partial class MainForm
         AppendLog(detail);
     }
 
-    private async Task PackagePatchedIoStoreCoreAsync()
+    private async Task<PackageBuildResult> PackagePatchedIoStoreCoreAsync()
     {
         if (_currentProject is null)
         {
-            return;
+            return PackageBuildResult.Failed("No suit is open.");
         }
 
         ReadFieldsIntoProject(_currentProject);
@@ -425,25 +450,84 @@ public sealed partial class MainForm
         try { (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(_currentProject); } catch { /* best effort */ }
         var script = Path.Combine(projectRoot, "tools", "Build-NativeSuitGuiPatchedIoStore.ps1");
 
-        var packageGliderComponent = ActiveGliderVisualComponent(_currentProject);
-        if (!string.IsNullOrWhiteSpace(packageGliderComponent))
-        {
-            if (RemoveSavedRemovalForComponent(_currentProject, packageGliderComponent))
-            {
-                AppendLog($"Package: removed stale remove-component rule for active glider component '{packageGliderComponent}'.");
-                try { (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(_currentProject); } catch { /* best effort */ }
-            }
-
-            RestoreProtectedGliderComponent(_currentProject, packageGliderComponent);
-        }
-
-        ApplySavedComponentRemovals(_currentProject, logNoRemovals: false);
-        var contentRootToPackage = CurrentPackageContentRoot(_currentProject);
         if (!File.Exists(script))
         {
             AppendLog($"IoStore packaging script not found: {script}");
-            return;
+            return PackageBuildResult.Failed("The IoStore packaging script was not found.");
         }
+
+        var authoringContentRoot = CurrentPackageContentRoot(_currentProject);
+        if (IsIncompleteDeclarativeGraftStage(_currentProject, authoringContentRoot))
+        {
+            const string message =
+                "The current grafted-part stage did not finish rebuilding, so packaging was stopped before a partial suit could be emitted. " +
+                "Close any asset viewer holding this suit's generated files, then edit/reapply a part or base to rebuild the stage.";
+            AppendLog("IoStore package aborted: " + message);
+            Dialog.Error(this, "Incomplete generated stage", message);
+            return PackageBuildResult.Failed(message);
+        }
+
+        NativeSuitProject packageProject;
+        PackagePreparationStage preparationStage;
+        try
+        {
+            packageProject = CloneProjectForPackagePreparation(_currentProject);
+            preparationStage = await CreatePackagePreparationStageAsync(packageProject, projectRoot);
+        }
+        catch (Exception ex)
+        {
+            var message =
+                "Batcomputer could not create an isolated package-preparation copy, so the certified authoring stage was left untouched. " +
+                ex.Message;
+            AppendLog("IoStore package aborted: " + message);
+            Dialog.Error(this, "Package preparation failed", message);
+            return PackageBuildResult.Failed(message);
+        }
+
+        var contentRootToPackage = preparationStage.ContentRoot;
+        try
+        {
+            AppendLog($"Package preparation copy: {contentRootToPackage}");
+            var packageGliderComponent = ActiveGliderVisualComponent(packageProject);
+            if (!string.IsNullOrWhiteSpace(packageGliderComponent))
+            {
+                var gliderRestore = RestoreProtectedGliderComponent(
+                    packageProject,
+                    packageGliderComponent,
+                    projectRoot,
+                    contentRootToPackage);
+                if (!gliderRestore.Success)
+                {
+                    var message =
+                        $"The active glider component '{packageGliderComponent}' could not be restored in every required character package, so packaging was stopped. " +
+                        gliderRestore.Summary;
+                    AppendLog("IoStore package aborted: " + message);
+                    Dialog.Error(this, "Incomplete glider restoration", message);
+                    return PackageBuildResult.Failed(message);
+                }
+
+                // Package preparation owns a snapshot of the authoring declaration. Suppress a
+                // stale glider removal only in that snapshot; do not rewrite the saved project or
+                // falsely certify its authoring stage during a release build.
+                if (RemoveSavedRemovalForComponent(packageProject, packageGliderComponent))
+                {
+                    AppendLog($"Package: ignored stale remove-component rule for active glider component '{packageGliderComponent}' in the disposable preparation copy.");
+                }
+            }
+
+            var removalReplay = ApplySavedComponentRemovals(
+                packageProject,
+                logNoRemovals: false,
+                stageContentRootOverride: contentRootToPackage);
+            if (!removalReplay.Success)
+            {
+                var message =
+                    "Saved component removals did not apply to every required character package, so packaging was stopped. " +
+                    removalReplay.Summary;
+                AppendLog("IoStore package aborted: " + message);
+                Dialog.Error(this, "Incomplete component replay", message);
+                return PackageBuildResult.Failed(message);
+            }
 
         AppendLog("Packaging IoStore trio…");
         AppendLog($"Content root: {contentRootToPackage}");
@@ -454,53 +538,107 @@ public sealed partial class MainForm
         // the content root so they get bundled into the pak (otherwise materials
         // resolve to null at runtime and render grey).
         _packageProgress?.Report("Staging materials and textures…");
-        StageGeneratedMaterialsIntoContentRoot(_currentProject, contentRootToPackage);
-        if (!StageGeneratedTexturesIntoContentRoot(_currentProject, contentRootToPackage, out var textureStageError))
+        StageGeneratedMaterialsIntoContentRoot(packageProject, contentRootToPackage);
+        if (!StageGeneratedTexturesIntoContentRoot(
+                packageProject,
+                contentRootToPackage,
+                out var textureStageError,
+                persistProjectChanges: false))
         {
             AppendLog("IoStore package aborted: " + textureStageError);
-            return;
+            return PackageBuildResult.Failed(textureStageError);
         }
 
         // Every suit needs its own DCMD (points to the menu icon + equipment + the
         // generated pawn/cutscene classes). Generate it into the pack content root.
         _packageProgress?.Report("Generating DCMD / UIMD metadata…");
-        StageGeneratedDcmdIntoContentRoot(_currentProject, contentRootToPackage);
+        StageGeneratedDcmdIntoContentRoot(
+            packageProject,
+            contentRootToPackage,
+            persistAutoAssignedIcons: false,
+            requireSuccess: true);
 
         // Stage library-owned cooked animations (preserve-path/proven-clone/
         // imported) that this suit's overrides reference. external/base-game anims are NOT shipped
         // (they live in the modder's own pak or the base game).
-        StageLibraryAnimsIntoContentRoot(_currentProject, contentRootToPackage);
+        StageLibraryAnimsIntoContentRoot(packageProject, contentRootToPackage);
 
         // Apply the custom-archetype pipeline (clone archetype + reparent playable/
         // cutscene + anim/equipment/visual graft) to the ACTUAL packaged root - the
         // grafted-parts stage diverges from the name-map stage, so this must run here
         // or archetype suits with grafted parts package without their animations.
-        if (_currentProject.UseCustomArchetype)
+        if (packageProject.UseCustomArchetype)
         {
             _packageProgress?.Report("Applying custom archetype + animation pipeline…");
-            var archAnim = new AnimArchetypeGraftService().ApplyToPackagedRoot(_currentProject, contentRootToPackage);
+            var archAnim = new AnimArchetypeGraftService().ApplyToPackagedRoot(packageProject, contentRootToPackage);
             AppendLog($"Custom archetype pipeline: {archAnim.Status}");
             foreach (var line in archAnim.Log) AppendLog("  " + line);
             if (!string.IsNullOrWhiteSpace(archAnim.Error)) AppendLog("  " + archAnim.Error.Split('\n')[0]);
+            if (string.Equals(archAnim.Status, "error", StringComparison.OrdinalIgnoreCase) ||
+                !string.IsNullOrWhiteSpace(archAnim.Error))
+            {
+                var message = archAnim.Error ?? "Custom archetype preparation failed.";
+                AppendLog("IoStore package aborted: " + message);
+                Dialog.Error(this, "Custom archetype failed", message);
+                return PackageBuildResult.Failed(message);
+            }
         }
 
         // Re-apply saved material assignments to the FINAL packaged stage. A part/
         // glider graft can rebuild the stage from the base playable (dropping the
         // materials), so without this the pak ships with base-game materials instead
         // of the suit's (e.g. Batman face/body instead of the chosen ThomasWayne ones).
-        ApplySavedMaterials(_currentProject, logIfNone: false);
+        var materialReplay = ApplySavedMaterials(
+            packageProject,
+            logIfNone: false,
+            stageContentRootOverride: contentRootToPackage);
+        if (!materialReplay.Success)
+        {
+            var message =
+                "Saved materials did not apply to every required character package, so packaging was stopped. " +
+                materialReplay.Summary;
+            AppendLog("IoStore package aborted: " + message);
+            Dialog.Error(this, "Incomplete material replay", message);
+            return PackageBuildResult.Failed(message);
+        }
 
-        var runtimeJsonPath = StageRuntimeV2SuitJson(_currentProject, buildId);
+        var runtimeJsonPath = StageRuntimeV2SuitJson(packageProject, buildId);
         AppendLog($"Runtime V2 suit JSON: {runtimeJsonPath}");
         _packageProgress?.Report("Checking the package…");
-        if (!RunV2PackagePreflight(_currentProject, contentRootToPackage, runtimeJsonPath, logHeader: true,
+        if (!RunV2PackagePreflight(packageProject, contentRootToPackage, runtimeJsonPath, logHeader: true,
                 out var preflightErrors, out var preflightWarnings))
         {
             AppendLog("Package check failed; nothing was sent to retoc.");
             _packageProgress?.Report("Package check failed.");
-            return;
+            return PackageBuildResult.Failed("Package preflight failed.");
         }
         _packageProgress?.Report($"Building IoStore trio ({packageBaseName})…");
+
+        var outputRoot = Path.Combine(
+            AppSettings.GeneratedRootFor(projectRoot),
+            "NativeSuitGuiProjects",
+            slotId,
+            "IoStore");
+        var expectedTrioPaths = new[] { ".pak", ".ucas", ".utoc" }
+            .Select(extension => Path.Combine(outputRoot, packageBaseName + extension))
+            .ToList();
+        try
+        {
+            Directory.CreateDirectory(outputRoot);
+            // Remove only this package's previous certified outputs. A successful retoc exit can
+            // now be trusted only when all three files reappear during this attempt.
+            foreach (var previousOutput in expectedTrioPaths)
+            {
+                File.Delete(previousOutput);
+            }
+            File.Delete(Path.Combine(outputRoot, "build-manifest.json"));
+        }
+        catch (Exception ex)
+        {
+            var message = "The previous package output could not be cleared, so Batcomputer cannot prove that the next trio is fresh. " + ex.Message;
+            AppendLog("IoStore package aborted: " + message);
+            return PackageBuildResult.Failed(message);
+        }
 
         _packagePatchedIoStoreButton.Enabled = false;
         try
@@ -532,7 +670,7 @@ public sealed partial class MainForm
             if (process is null)
             {
                 AppendLog("Failed to start powershell.");
-                return;
+                return PackageBuildResult.Failed("PowerShell could not be started for IoStore packaging.");
             }
 
             var stdoutTask = process.StandardOutput.ReadToEndAsync();
@@ -552,23 +690,119 @@ public sealed partial class MainForm
             }
 
             AppendLog($"IoStore packaging exit code: {process.ExitCode}");
-            if (process.ExitCode == 0)
+            if (process.ExitCode != 0)
             {
-                var outputRoot = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "NativeSuitGuiProjects", slotId, "IoStore");
-                AppendLog($"Copy the generated .pak/.ucas/.utoc from: {outputRoot}");
-                WriteBuildManifest(_currentProject, buildId, contentRootToPackage, outputRoot,
-                    packageBaseName, preflightErrors, preflightWarnings);
+                return PackageBuildResult.Failed($"IoStore packaging exited with code {process.ExitCode}.");
             }
+
+            var missingOrEmpty = BuildManifestService.FindMissingOrEmptyFiles(expectedTrioPaths)
+                .Select(Path.GetFileName)
+                .ToList();
+            if (missingOrEmpty.Count > 0)
+            {
+                var message =
+                    "IoStore reported success but did not freshly produce a complete trio: " +
+                    string.Join(", ", missingOrEmpty);
+                AppendLog("IoStore package failed: " + message);
+                return PackageBuildResult.Failed(message);
+            }
+
+            AppendLog($"Copy the generated .pak/.ucas/.utoc from: {outputRoot}");
+            var manifest = WriteBuildManifest(packageProject, buildId, contentRootToPackage, outputRoot,
+                packageBaseName, preflightErrors, preflightWarnings);
+            if (manifest is null)
+            {
+                return PackageBuildResult.Failed(
+                    "The trio was built, but its build-ID manifest could not be written; automatic install was refused.");
+            }
+
+            var completed = PackageBuildResult.Completed(manifest, outputRoot);
+            if (!new BuildManifestService().VerifyInstallableTrio(
+                    manifest,
+                    completed.BuildId,
+                    completed.SlotId,
+                    completed.PackageBaseName,
+                    completed.IoStoreDirectory,
+                    out var certificationError))
+            {
+                AppendLog("IoStore package failed certification: " + certificationError);
+                return PackageBuildResult.Failed(certificationError);
+            }
+
+            return completed;
         }
         catch (Exception ex)
         {
             AppendLog("IoStore packaging failed:");
             AppendLog(ex.ToString());
+            return PackageBuildResult.Failed(ex.Message);
         }
         finally
         {
             _packagePatchedIoStoreButton.Enabled = true;
         }
+        }
+        finally
+        {
+            await CleanupPackagePreparationStageAsync(preparationStage);
+        }
+    }
+
+    /// <summary>
+    /// Installs only the exact trio certified by the successful package attempt returned to the
+    /// caller. Unlike the legacy manual install command, this cannot discover and copy an older
+    /// trio merely because it is still present in the slot's output directory.
+    /// </summary>
+    private bool InstallFreshlyBuiltTrio(PackageBuildResult build) =>
+        InstallFreshlyBuiltTrio(build, out _);
+
+    private bool InstallFreshlyBuiltTrio(
+        PackageBuildResult build,
+        out bool destinationConsistent)
+    {
+        destinationConsistent = true;
+        if (!build.Success || build.Manifest is null)
+        {
+            AppendLog("Fresh package install refused: no successful certified build was provided.");
+            return false;
+        }
+
+        var manifestService = new BuildManifestService();
+        if (!manifestService.VerifyInstallableTrio(
+                build.Manifest,
+                build.BuildId,
+                build.SlotId,
+                build.PackageBaseName,
+                build.IoStoreDirectory,
+                out var verificationError))
+        {
+            AppendLog("Fresh package install refused: " + verificationError);
+            return false;
+        }
+
+        var destination = AppSettings.Current.EffectiveGamePaksModFolder();
+        var installFiles = build.Manifest.TrioFiles
+            .Select(entry => new TrioInstallTransactionService.FileSpec(
+                Path.Combine(build.IoStoreDirectory, entry.File),
+                entry.File,
+                entry.Sha256,
+                entry.Size))
+            .ToList();
+        var installResult = new TrioInstallTransactionService().Install(installFiles, destination);
+        destinationConsistent = installResult.DestinationConsistent;
+        foreach (var warning in installResult.Warnings)
+        {
+            AppendLog("Fresh package install warning: " + warning);
+        }
+        if (!installResult.Success)
+        {
+            AppendLog("Fresh package install failed: " + installResult.Detail);
+            return false;
+        }
+
+        AppendLog(
+            $"Installed freshly built trio {build.PackageBaseName} (build {build.BuildId}) to {destination}.");
+        return true;
     }
 
     private string CurrentPackageContentRoot(NativeSuitProject project)
@@ -578,11 +812,69 @@ public sealed partial class MainForm
         var defaultPatchedContentRoot = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "NativeSuitGuiProjects", slotId, "PatchedNameMapStage", "LEGOBatmanLotDK", "Content");
         var genericGraftedContentRoot = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "NativeSuitGuiProjects", slotId, "GraftedPartStage", "LEGOBatmanLotDK", "Content");
         var graftedContentRoot = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "NativeSuitGuiProjects", slotId, "GraftedTorso2Stage", "LEGOBatmanLotDK", "Content");
-        return Directory.Exists(genericGraftedContentRoot)
+        // A declarative project must never fall back to an older base-only stage. If its
+        // graft stage was removed by a failed rebuild, return the expected (missing) root so
+        // every caller fails closed instead of packaging PatchedNameMapStage/GraftedTorso2Stage.
+        return ProjectRequiresCompletedGraftStage(project) || Directory.Exists(genericGraftedContentRoot)
             ? genericGraftedContentRoot
             : Directory.Exists(graftedContentRoot)
                 ? graftedContentRoot
                 : defaultPatchedContentRoot;
+    }
+
+    private bool IsIncompleteDeclarativeGraftStage(NativeSuitProject project, string contentRoot)
+    {
+        var projectStageRoot = Path.Combine(
+            AppSettings.GeneratedRootFor(_projectRootText.Text.Trim()),
+            "NativeSuitGuiProjects",
+            project.SlotId);
+        if (File.Exists(Path.Combine(projectStageRoot, IncompleteDeclarativeStageMarkerName)))
+        {
+            return true;
+        }
+
+        // A failed declarative rebuild can remove GraftedPartStage before aborting. In that
+        // state CurrentPackageContentRoot falls back to PatchedNameMapStage/GraftedTorso2Stage,
+        // so inspecting only the selected root would let a suit silently package without its
+        // saved grafts or custom meshes. Derive the required stage from project state instead.
+        if (ProjectRequiresCompletedGraftStage(project))
+        {
+            var expectedContentRoot = DeclarativeGraftContentRoot(project);
+            var expectedStageRoot = Directory.GetParent(expectedContentRoot)?.Parent;
+            return !Directory.Exists(expectedContentRoot) ||
+                   expectedStageRoot is null ||
+                   !File.Exists(Path.Combine(expectedStageRoot.FullName, CompletedGraftStageMarkerName));
+        }
+
+        var legoBatmanRoot = Directory.GetParent(contentRoot);
+        var stageRoot = legoBatmanRoot?.Parent;
+        return stageRoot is not null &&
+               stageRoot.Name.Equals("GraftedPartStage", StringComparison.OrdinalIgnoreCase) &&
+               (!Directory.Exists(contentRoot) ||
+                !File.Exists(Path.Combine(stageRoot.FullName, CompletedGraftStageMarkerName)));
+    }
+
+    internal static bool ProjectRequiresCompletedGraftStage(NativeSuitProject project) =>
+        project.PartGrafts is { Count: > 0 } ||
+        project.CustomStaticMeshes is { Count: > 0 } ||
+        project.MaterialAssignments is { Count: > 0 } ||
+        project.UseCustomArchetype ||
+        project.EquipmentSlots is { Count: > 0 } ||
+        project.GliderGrafted ||
+        !string.IsNullOrWhiteSpace(project.GliderType) ||
+        project.Requirements.Any(requirement =>
+            requirement.Kind.Equals("remove-component", StringComparison.OrdinalIgnoreCase));
+
+    private string DeclarativeGraftContentRoot(NativeSuitProject project)
+    {
+        var projectRoot = _projectRootText.Text.Trim();
+        return Path.Combine(
+            AppSettings.GeneratedRootFor(projectRoot),
+            "NativeSuitGuiProjects",
+            project.SlotId,
+            "GraftedPartStage",
+            "LEGOBatmanLotDK",
+            "Content");
     }
 
     /// <summary>
@@ -633,7 +925,7 @@ public sealed partial class MainForm
     /// called out. Duplicates are the silent failure: IoStore mount priority picks a winner, so the
     /// game can load another suit's asset while the tool and FModel both look correct.
     /// </summary>
-    private void ShowPackageContentsPreview()
+    private async void ShowPackageContentsPreview()
     {
         EnsureProject();
         if (_currentProject is null)
@@ -642,24 +934,34 @@ public sealed partial class MainForm
         }
 
         ReadFieldsIntoProject(_currentProject);
-        var contentRoot = CurrentPackageContentRoot(_currentProject);
-        StageGeneratedMaterialsIntoContentRoot(_currentProject, contentRoot);
-        if (!StageGeneratedTexturesIntoContentRoot(_currentProject, contentRoot, out var textureStageError))
+        var projectRoot = _projectRootText.Text.Trim();
+        var preparation = await PrepareSuitForReleaseAsync(
+            _currentProject,
+            new SuitProjectService(projectRoot));
+        if (preparation.Prepared is null)
         {
-            Dialog.Warn(this, "Package contents preview", textureStageError);
+            AppendLog("Package preview failed: " + preparation.Error);
+            Dialog.Warn(this, "Package contents preview", preparation.Error);
             return;
         }
-        StageGeneratedDcmdIntoContentRoot(_currentProject, contentRoot);
 
-        PackageContentPreviewService.Preview preview;
+        var prepared = preparation.Prepared;
+        PackageContentPreviewService.Preview? preview = null;
         try
         {
-            preview = new PackageContentPreviewService(_projectRootText.Text.Trim())
-                .Build(contentRoot, _currentProject.SlotId);
+            preview = new PackageContentPreviewService(projectRoot)
+                .Build(prepared.Stage.ContentRoot, prepared.Project.SlotId);
         }
         catch (Exception ex)
         {
             AppendLog($"Package preview failed: {ex.Message}");
+        }
+        finally
+        {
+            await CleanupPackagePreparationStageAsync(prepared.Stage);
+        }
+        if (preview is null)
+        {
             return;
         }
 
@@ -760,7 +1062,7 @@ public sealed partial class MainForm
         dlg.ShowDialog(this);
     }
 
-    private void RunV2PreflightFromUi()
+    private async void RunV2PreflightFromUi()
     {
         EnsureProject();
         if (_currentProject is null)
@@ -769,16 +1071,34 @@ public sealed partial class MainForm
         }
 
         ReadFieldsIntoProject(_currentProject);
-        var contentRoot = CurrentPackageContentRoot(_currentProject);
-        StageGeneratedMaterialsIntoContentRoot(_currentProject, contentRoot);
-        if (!StageGeneratedTexturesIntoContentRoot(_currentProject, contentRoot, out var textureStageError))
+        var projectRoot = _projectRootText.Text.Trim();
+        var preparation = await PrepareSuitForReleaseAsync(
+            _currentProject,
+            new SuitProjectService(projectRoot));
+        if (preparation.Prepared is null)
         {
-            AppendLog("Package check failed: " + textureStageError);
+            AppendLog("Package check failed: " + preparation.Error);
             return;
         }
-        StageGeneratedDcmdIntoContentRoot(_currentProject, contentRoot);
-        var runtimeJson = StageRuntimeV2SuitJson(_currentProject);
-        RunV2PackagePreflight(_currentProject, contentRoot, runtimeJson, logHeader: true);
+
+        var prepared = preparation.Prepared;
+        try
+        {
+            var runtimeJson = StageRuntimeV2SuitJson(prepared.Project);
+            RunV2PackagePreflight(
+                prepared.Project,
+                prepared.Stage.ContentRoot,
+                runtimeJson,
+                logHeader: true);
+        }
+        catch (Exception ex)
+        {
+            AppendLog("Package check failed: " + ex.Message);
+        }
+        finally
+        {
+            await CleanupPackagePreparationStageAsync(prepared.Stage);
+        }
     }
 
     private bool RunV2PackagePreflight(NativeSuitProject project, string contentRootToPackage, string runtimeJsonPath, bool logHeader) =>
@@ -795,6 +1115,10 @@ public sealed partial class MainForm
         if (logHeader)
         {
             AppendLog("Checking the package…");
+        }
+        if (IsIncompleteDeclarativeGraftStage(project, contentRootToPackage))
+        {
+            errors.Add("The grafted-part stage is incomplete; rebuild the declarative part stage before packaging.");
         }
 
         if (string.IsNullOrWhiteSpace(project.SlotId))
@@ -1034,21 +1358,30 @@ public sealed partial class MainForm
         return slash > 0 ? rest[..slash] : rest;
     }
 
-    private void StageGeneratedDcmdIntoContentRoot(NativeSuitProject project, string contentRootToPackage)
+    private void StageGeneratedDcmdIntoContentRoot(
+        NativeSuitProject project,
+        string contentRootToPackage,
+        bool persistAutoAssignedIcons = true,
+        bool requireSuccess = false)
     {
         var dcmdPkg = project.TargetPackages?.Dcmd;
         var playablePkg = project.TargetPackages?.Playable;
         var cutscenePkg = project.TargetPackages?.Cutscene;
         if (string.IsNullOrWhiteSpace(dcmdPkg) || string.IsNullOrWhiteSpace(playablePkg) || string.IsNullOrWhiteSpace(cutscenePkg))
         {
-            AppendLog("Skipping DCMD generation — target packages not set (use a base suit first).");
+            const string message = "DCMD generation cannot run because the target packages are not set (use a base suit first).";
+            AppendLog(message);
+            if (requireSuccess)
+            {
+                throw new InvalidOperationException(message);
+            }
             return;
         }
 
         // Generate the suit's own UIMD (icon + description) first, then the DCMD
         // that points at it. Icons currently inherit the Batman defaults; retarget
         // to modder icon textures is a follow-up.
-        if (AutoAssignGeneratedUiIconSlots(project))
+        if (AutoAssignGeneratedUiIconSlots(project) && persistAutoAssignedIcons)
         {
             try
             {
@@ -1090,6 +1423,11 @@ public sealed partial class MainForm
         if (!string.IsNullOrWhiteSpace(uimdResult.Error))
         {
             AppendLog("  " + uimdResult.Error);
+            if (requireSuccess)
+            {
+                throw new InvalidOperationException(
+                    $"Required UIMD generation failed ({uimdResult.Status}): {uimdResult.Error}");
+            }
         }
         else
         {
@@ -1118,11 +1456,16 @@ public sealed partial class MainForm
         if (!string.IsNullOrWhiteSpace(result.Error))
         {
             AppendLog("  " + result.Error);
+            if (requireSuccess)
+            {
+                throw new InvalidOperationException(
+                    $"Required DCMD generation failed ({result.Status}): {result.Error}");
+            }
         }
         else
         {
             AppendLog($"  wrote {Path.GetFileName(result.OutputUasset)} ({result.Repointed.Count} name(s) repointed, UIMetaData -> {uimdPkg})");
-            InjectStagedEquipment(project, result.OutputUasset);
+            InjectStagedEquipment(project, result.OutputUasset, requireSuccess);
         }
 
         void AddIconOverride(string source, string target)
@@ -1141,7 +1484,10 @@ public sealed partial class MainForm
     /// freshly-written DCMD's EquipmentList. Resolves each gadget's DA_ETA package
     /// (and its upgrade set when present) from the shipped catalog.
     /// </summary>
-    private void InjectStagedEquipment(NativeSuitProject project, string dcmdUasset)
+    private void InjectStagedEquipment(
+        NativeSuitProject project,
+        string dcmdUasset,
+        bool requireSuccess = false)
     {
         if (project.EquipmentSlots.Count == 0)
         {
@@ -1150,16 +1496,34 @@ public sealed partial class MainForm
 
         var gd = GameDataService.Instance;
         var refs = new List<DcmdGenService.EquipmentSlotRef>();
+        var unresolved = new List<string>();
         foreach (var change in project.EquipmentSlots.OrderBy(s => s.Slot))
         {
             var eq = gd.FindEquipment(change.Gadget);
-            if (eq is null || string.IsNullOrWhiteSpace(eq.EtaPackage))
+            var resolutionError = EquipmentDependencyService.SavedChangeResolutionError(change, eq);
+            if (resolutionError is not null)
             {
-                AppendLog($"  equipment slot {change.Slot + 1} '{change.Gadget}': no catalog ETA — skipped");
+                AppendLog("  " + resolutionError + " — skipped");
+                unresolved.Add(resolutionError);
                 continue;
             }
-            var upgrade = string.IsNullOrWhiteSpace(eq.UpgradePackage) ? null : eq.UpgradePackage;
-            refs.Add(new DcmdGenService.EquipmentSlotRef(change.Slot, eq.Name, eq.EtaPackage, upgrade));
+            // SavedChangeResolutionError established both the catalog record and required ETA.
+            var resolvedEquipment = eq!;
+            var upgrade = string.IsNullOrWhiteSpace(resolvedEquipment.UpgradePackage)
+                ? null
+                : resolvedEquipment.UpgradePackage;
+            refs.Add(new DcmdGenService.EquipmentSlotRef(
+                change.Slot,
+                resolvedEquipment.Name,
+                resolvedEquipment.EtaPackage,
+                upgrade));
+        }
+
+        if (requireSuccess && unresolved.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "Required DCMD equipment injection could not resolve every saved change: " +
+                string.Join(" | ", unresolved));
         }
 
         if (refs.Count == 0)
@@ -1172,6 +1536,11 @@ public sealed partial class MainForm
         if (!string.IsNullOrWhiteSpace(r.Error))
         {
             AppendLog("  " + r.Error);
+            if (requireSuccess)
+            {
+                throw new InvalidOperationException(
+                    $"Required DCMD equipment injection failed ({r.Status}): {r.Error}");
+            }
         }
     }
 
@@ -1242,10 +1611,10 @@ public sealed partial class MainForm
     }
 
     /// <summary>
-    /// Writes the build manifest beside the freshly-packaged IoStore trio. Best-effort:
-    /// a manifest failure never fails an otherwise-successful package.
+    /// Writes the build-ID manifest beside the freshly-packaged IoStore trio. Returning null keeps
+    /// callers from treating an unverified trio as eligible for automatic install.
     /// </summary>
-    private void WriteBuildManifest(NativeSuitProject project, string buildId, string contentRootPacked,
+    private BuildManifestService.Manifest? WriteBuildManifest(NativeSuitProject project, string buildId, string contentRootPacked,
         string ioStoreDir, string packageBaseName, IReadOnlyList<string> errors, IReadOnlyList<string> warnings)
     {
         try
@@ -1267,10 +1636,12 @@ public sealed partial class MainForm
             AppendLog($"Build manifest: {manifestPath}");
             AppendLog($"  build_id {manifest.BuildId} · {manifest.ShippedPackages.Count} included package(s) · {manifest.TrioFiles.Count} trio file(s) · {warnings.Count} warning(s)");
             ShowPackageSuccessDialog(manifest, ioStoreDir);
+            return manifest;
         }
         catch (Exception ex)
         {
             AppendLog($"  ⚠ could not write build manifest: {ex.Message}");
+            return null;
         }
     }
 
@@ -1353,7 +1724,11 @@ public sealed partial class MainForm
         };
         var install = new Button { Text = "Install now", Width = 110, Height = 30 };
         Theme.StyleGoldButton(install);
-        install.Click += (_, _) => { dlg.Close(); InstallTrio(); };
+        install.Click += (_, _) =>
+        {
+            dlg.Close();
+            InstallFreshlyBuiltTrio(PackageBuildResult.Completed(manifest, ioStoreDir));
+        };
         buttons.Controls.Add(close);
         buttons.Controls.Add(install);
         buttons.Controls.Add(openFolder);

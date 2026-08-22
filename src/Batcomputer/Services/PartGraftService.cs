@@ -113,51 +113,90 @@ public sealed class PartGraftService
         };
 
         var mappingsPath = FindDefaultMappingsPath();
+        var packageSnapshots = CapturePackageSnapshots(
+            graftedContentRoot,
+            project,
+            includePlayable: playablePart is not null,
+            includeCutscene: cutscenePart is not null);
 
         // If a component with this exact slot already exists (native, like Cape, or a
         // prior graft), REPLACE it - repoint its mesh/anim/materials - instead of
         // adding a numbered duplicate (Head_2 / Cape_2). Swapping a skeletal mesh
         // also swaps all its built-in LODs at once. Only genuinely-new slots are added.
-        var slotExists = new ComponentRemoveService(ProjectRoot)
+        var componentService = new ComponentRemoveService(ProjectRoot);
+        var playableSlotExists = playablePart is not null && componentService
             .ListScsComponentNames(project.SlotId, project.TargetPackages.Playable, targetSlot)
-            .Any(n => n.Equals(targetSlot, StringComparison.OrdinalIgnoreCase));
+            .Any(name => name.Equals(targetSlot, StringComparison.OrdinalIgnoreCase));
+        var cutsceneSlotExists = cutscenePart is not null && componentService
+            .ListScsComponentNames(project.SlotId, project.TargetPackages.Cutscene, targetSlot)
+            .Any(name => name.Equals(targetSlot, StringComparison.OrdinalIgnoreCase));
         // Repoint (replace-in-place) is only valid when the existing slot component is the
         // SAME mesh kind as the incoming part (skeletal cape → skeletal wingsuit). A STATIC
         // hair/hat landing on a slot whose existing component is SKELETAL (e.g. Batman's
         // skeletal "Head" cowl) must NOT replace it - that hits the banned cross-kind
         // conversion. Fall through to the ADD path (new static component on a peg) instead.
-        if (slotExists)
+        var playableCanRepoint = !playableSlotExists || playablePart is null ||
+            ExistingSlotCanBeRepointedLive(
+                graftedContentRoot,
+                project.TargetPackages.Playable,
+                targetSlot,
+                playablePart,
+                mappingsPath);
+        var cutsceneCanRepoint = !cutsceneSlotExists || cutscenePart is null ||
+            ExistingSlotCanBeRepointedLive(
+                graftedContentRoot,
+                project.TargetPackages.Cutscene,
+                targetSlot,
+                cutscenePart,
+                mappingsPath);
+
+        // A retry can arrive after the playable write succeeded but the cutscene package was
+        // locked. In that state only the playable owns the requested slot. Repoint the role that
+        // already exists and ADD the missing role under the same name; deciding from playable
+        // alone would incorrectly try to repoint a cutscene component that is not there.
+        if ((playableSlotExists || cutsceneSlotExists) && playableCanRepoint && cutsceneCanRepoint)
         {
-            if (playablePart is not null &&
-                !ExistingSlotCanBeRepointedLive(
-                    graftedContentRoot,
-                    project.TargetPackages.Playable,
+            if (playableSlotExists || cutsceneSlotExists)
+            {
+                var repoint = RepointComponentsToParts(
+                    project,
                     targetSlot,
                     playablePart,
-                    mappingsPath))
-            {
-                slotExists = false;
+                    cutscenePart,
+                    applyToPlayable: playableSlotExists,
+                    applyToCutscene: cutsceneSlotExists);
+                batch.PackageResults.AddRange(repoint.PackageResults);
             }
-            if (slotExists && cutscenePart is not null &&
-                !ExistingSlotCanBeRepointedLive(
+
+            if (playablePart is not null && !playableSlotExists)
+            {
+                batch.PackageResults.Add(ApplyPartGraftToPackage(
+                    "playable",
+                    graftedContentRoot,
+                    project.TargetPackages.Playable,
+                    playablePart,
+                    targetSlot,
+                    cloneSlot,
+                    attachSocket,
+                    mappingsPath));
+            }
+            if (cutscenePart is not null && !cutsceneSlotExists)
+            {
+                batch.PackageResults.Add(ApplyPartGraftToPackage(
+                    "cutscene",
                     graftedContentRoot,
                     project.TargetPackages.Cutscene,
-                    targetSlot,
                     cutscenePart,
-                    mappingsPath))
-            {
-                slotExists = false;
+                    targetSlot,
+                    cloneSlot,
+                    attachSocket,
+                    mappingsPath));
             }
-        }
-        if (slotExists)
-        {
-            var repoint = RepointComponentsToParts(project, targetSlot, playablePart, cutscenePart);
-            batch.PackageResults.AddRange(repoint.PackageResults);
-            batch.Status = repoint.PackageResults.Any(p => p.Success) ? "created" : "partial-failure";
+
+            RollBackTargetPackagesAfterTransientFailure(batch, packageSnapshots);
+            SetBatchStatus(batch);
             var repointReport = Path.Combine(GuiOutputRoot, project.SlotId, reportFileName);
-            Directory.CreateDirectory(Path.GetDirectoryName(repointReport)!);
-            File.WriteAllText(repointReport, JsonSerializer.Serialize(batch, ReportJsonOptions));
-            batch.ReportPath = repointReport;
+            batch.ReportPath = TryWriteBatchReport(repointReport, batch);
             return batch;
         }
 
@@ -209,6 +248,34 @@ public sealed class PartGraftService
                 mappingsPath: mappingsPath));
         }
 
+        RollBackTargetPackagesAfterTransientFailure(batch, packageSnapshots);
+        SetBatchStatus(batch);
+
+        var reportPath = Path.Combine(GuiOutputRoot, project.SlotId, reportFileName);
+        batch.ReportPath = TryWriteBatchReport(reportPath, batch);
+        return batch;
+    }
+
+    private static string TryWriteBatchReport(string reportPath, PartGraftBatchResult batch)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(reportPath)!);
+            File.WriteAllText(reportPath, JsonSerializer.Serialize(batch, ReportJsonOptions));
+            return reportPath;
+        }
+        catch (Exception ex)
+        {
+            // The report is diagnostic only. Package writes have already succeeded or been
+            // rolled back; failing the whole operation here would retry a completed graft and
+            // could allocate a second suffixed component name.
+            Console.Error.WriteLine($"Part graft report could not be written: {ex.Message}");
+            return "";
+        }
+    }
+
+    private static void SetBatchStatus(PartGraftBatchResult batch)
+    {
         var playableResult = batch.PackageResults.FirstOrDefault(result =>
             result.Role.Equals("playable", StringComparison.OrdinalIgnoreCase));
         if (batch.PackageResults.Count == 0)
@@ -227,12 +294,174 @@ public sealed class PartGraftService
         {
             batch.Status = "partial-failure";
         }
+    }
 
-        var reportPath = Path.Combine(GuiOutputRoot, project.SlotId, reportFileName);
-        Directory.CreateDirectory(Path.GetDirectoryName(reportPath)!);
-        File.WriteAllText(reportPath, JsonSerializer.Serialize(batch, ReportJsonOptions));
-        batch.ReportPath = reportPath;
-        return batch;
+    internal static bool ShouldRollbackTransientBatchForTest(
+        IEnumerable<PartGraftPackageResult> packageResults)
+    {
+        return packageResults.Any(result => result.TransientFileLock);
+    }
+
+    internal static IReadOnlyList<string> GetTransientBatchRollbackRolesForTest(
+        IEnumerable<PartGraftPackageResult> packageResults,
+        IEnumerable<string> targetedRoles)
+    {
+        if (!ShouldRollbackTransientBatchForTest(packageResults))
+        {
+            return Array.Empty<string>();
+        }
+
+        return targetedRoles
+            .Where(role => !string.IsNullOrWhiteSpace(role))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private sealed class PackageSnapshot
+    {
+        private static readonly string[] PackageExtensions =
+            [".uasset", ".uexp", ".ubulk", ".uptnl", ".m.ubulk"];
+
+        public required string Role { get; init; }
+        public required Dictionary<string, byte[]?> Files { get; init; }
+
+        public void Restore()
+        {
+            foreach (var (path, bytes) in Files)
+            {
+                if (bytes is null)
+                {
+                    File.Delete(path);
+                }
+                else
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                    File.WriteAllBytes(path, bytes);
+                }
+            }
+        }
+
+        public static PackageSnapshot Capture(string role, string packageBasePath)
+        {
+            return new PackageSnapshot
+            {
+                Role = role,
+                Files = PackageExtensions.ToDictionary(
+                    extension => packageBasePath + extension,
+                    extension =>
+                    {
+                        var path = packageBasePath + extension;
+                        return File.Exists(path) ? File.ReadAllBytes(path) : null;
+                    },
+                    StringComparer.OrdinalIgnoreCase),
+            };
+        }
+    }
+
+    private static IReadOnlyDictionary<string, PackageSnapshot> CapturePackageSnapshots(
+        string contentRoot,
+        NativeSuitProject project,
+        bool includePlayable,
+        bool includeCutscene)
+    {
+        var snapshots = new Dictionary<string, PackageSnapshot>(StringComparer.OrdinalIgnoreCase);
+        if (includePlayable && !string.IsNullOrWhiteSpace(project.TargetPackages.Playable))
+        {
+            snapshots["playable"] = PackageSnapshot.Capture(
+                "playable",
+                PackagePathToBasePath(contentRoot, project.TargetPackages.Playable));
+        }
+        if (includeCutscene && !string.IsNullOrWhiteSpace(project.TargetPackages.Cutscene))
+        {
+            snapshots["cutscene"] = PackageSnapshot.Capture(
+                "cutscene",
+                PackagePathToBasePath(contentRoot, project.TargetPackages.Cutscene));
+        }
+        return snapshots;
+    }
+
+    private static void RollBackTargetPackagesAfterTransientFailure(
+        PartGraftBatchResult batch,
+        IReadOnlyDictionary<string, PackageSnapshot> packageSnapshots)
+    {
+        var rollbackRoles = GetTransientBatchRollbackRolesForTest(
+            batch.PackageResults,
+            packageSnapshots.Keys);
+        if (rollbackRoles.Count == 0)
+        {
+            return;
+        }
+
+        var restoredRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var restoreFailures = new List<(string Role, Exception Error)>();
+        foreach (var role in rollbackRoles)
+        {
+            if (!packageSnapshots.TryGetValue(role, out var snapshot))
+            {
+                restoreFailures.Add((role, new InvalidOperationException(
+                    $"Could not roll back the partial {role} graft because its package snapshot is missing.")));
+                continue;
+            }
+
+            const int restoreAttempts = 3;
+            for (var attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    snapshot.Restore();
+                    restoredRoles.Add(role);
+                    break;
+                }
+                catch (Exception ex) when (attempt < restoreAttempts && FileLockUtil.IsTransient(ex))
+                {
+                    Thread.Sleep(180 * attempt);
+                }
+                catch (Exception ex)
+                {
+                    // Keep restoring the other targets before surfacing the failure. A lock on
+                    // one package must never prevent its successfully-written sibling from being
+                    // returned to the same pre-graft snapshot.
+                    restoreFailures.Add((role, ex));
+                    break;
+                }
+            }
+        }
+
+        foreach (var result in batch.PackageResults.Where(result => restoredRoles.Contains(result.Role)))
+        {
+            if (result.Success)
+            {
+                result.Success = false;
+                result.Error =
+                    "This package write succeeded, but the whole graft batch was rolled back because a required role was temporarily locked.";
+            }
+            else if (result.TransientFileLock)
+            {
+                result.Error = string.IsNullOrWhiteSpace(result.Error)
+                    ? "The transiently locked package was restored to its pre-graft snapshot."
+                    : result.Error + Environment.NewLine +
+                      "Any partial package write was restored to its pre-graft snapshot.";
+            }
+        }
+
+        if (restoreFailures.Count == 0)
+        {
+            return;
+        }
+
+        var failedRoles = string.Join(", ", restoreFailures.Select(failure => failure.Role));
+        var transientRestoreFailure = restoreFailures.FirstOrDefault(failure =>
+            FileLockUtil.IsTransient(failure.Error));
+        if (transientRestoreFailure.Error is not null)
+        {
+            throw new TransientFileLockException(
+                $"The {failedRoles} package snapshot(s) could not be restored after a transient graft failure.",
+                transientRestoreFailure.Error);
+        }
+
+        throw new InvalidOperationException(
+            $"The {failedRoles} package snapshot(s) could not be restored after a partial graft.",
+            restoreFailures[0].Error);
     }
 
     /// <summary>
@@ -316,7 +545,9 @@ public sealed class PartGraftService
         NativeSuitProject project,
         string componentName,
         NativeSuitPartRecord? playablePart,
-        NativeSuitPartRecord? cutscenePart)
+        NativeSuitPartRecord? cutscenePart,
+        bool applyToPlayable = true,
+        bool applyToCutscene = true)
     {
         var batch = new PartGraftBatchResult { Status = "created", CreatedUtc = DateTime.UtcNow };
         var graftedContentRoot = Path.Combine(GuiOutputRoot, project.SlotId, "GraftedPartStage", "LEGOBatmanLotDK", "Content");
@@ -329,14 +560,18 @@ public sealed class PartGraftService
         var mappingsPath = FindDefaultMappingsPath();
         var exportName = componentName + "_GEN_VARIABLE";
 
-        foreach (var (role, pkg) in new[] { ("playable", project.TargetPackages.Playable), ("cutscene", project.TargetPackages.Cutscene) })
+        foreach (var (role, pkg, enabled) in new[]
+                 {
+                     (role: "playable", pkg: project.TargetPackages.Playable, enabled: applyToPlayable),
+                     (role: "cutscene", pkg: project.TargetPackages.Cutscene, enabled: applyToCutscene),
+                 }.Where(entry => entry.enabled))
         {
             var pr = new PartGraftPackageResult { Role = role, TargetPackagePath = pkg, TargetSlot = componentName };
             try
             {
                 var part = role.Equals("playable", StringComparison.OrdinalIgnoreCase)
-                    ? playablePart ?? cutscenePart
-                    : cutscenePart ?? playablePart;
+                    ? playablePart
+                    : cutscenePart;
                 if (part is null)
                 {
                     throw new InvalidOperationException($"No {role} donor recipe was available for '{componentName}'.");
@@ -429,6 +664,7 @@ public sealed class PartGraftService
             {
                 pr.Success = false;
                 pr.Error = ex.ToString();
+                pr.TransientFileLock = FileLockUtil.IsTransient(ex);
             }
             batch.PackageResults.Add(pr);
         }
@@ -678,6 +914,7 @@ public sealed class PartGraftService
         {
             result.Success = false;
             result.Error = ex.ToString();
+            result.TransientFileLock = FileLockUtil.IsTransient(ex);
         }
 
         return result;

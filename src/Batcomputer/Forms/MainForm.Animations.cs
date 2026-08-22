@@ -375,8 +375,9 @@ public sealed partial class MainForm
         if (_currentProject is null) { AppendLog("Set a base suit first."); return; }
 
         var gd = GameDataService.Instance;
+        var currentFamily = TargetFamilyNameForProject(_currentProject);
         var families = gd.FamiliesWithAnimCategory(category)
-            .Where(f => !f.Equals("Batman", StringComparison.OrdinalIgnoreCase))
+            .Where(f => !f.Equals(currentFamily, StringComparison.OrdinalIgnoreCase))
             .ToList();
         if (families.Count == 0) { AppendLog($"No other families have a '{category}' set."); return; }
 
@@ -467,6 +468,11 @@ public sealed partial class MainForm
             foreach (var entry in shippable)
             {
                 var staged = svc.StageInto(entry, contentRootToPackage);
+                if (staged <= 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Referenced library animation '{entry.Name}' has no cached cooked files to stage for {entry.PackagePath}.");
+                }
                 total += staged;
                 AppendLog($"  library anim '{entry.Name}' ({entry.SourceMode}): staged {staged} file(s) → {entry.PackagePath}");
             }
@@ -474,7 +480,10 @@ public sealed partial class MainForm
         }
         catch (Exception ex)
         {
-            AppendLog($"  ⚠ could not stage library animations: {ex.Message}");
+            AppendLog($"  could not stage required library animations: {ex.Message}");
+            throw new InvalidOperationException(
+                "Required library animation staging failed; release preparation was stopped.",
+                ex);
         }
     }
 }

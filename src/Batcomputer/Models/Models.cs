@@ -662,4 +662,5 @@ public sealed class PartGraftPackageResult
     public int NewComponentExportIndex { get; set; }
     public int NewScsNodeExportIndex { get; set; }
     public string? Error { get; set; }
+    public bool TransientFileLock { get; set; }
 }

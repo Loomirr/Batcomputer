@@ -38,6 +38,7 @@ public sealed class MaterialReplaceService
         public string Role { get; set; } = "";
         public string Path { get; set; } = "";
         public bool Success { get; set; }
+        public bool TransientFileLock { get; set; }
         public bool ComponentFound { get; set; }
         public bool CreatedOverrideArray { get; set; }
         public string? Error { get; set; }
@@ -47,11 +48,33 @@ public sealed class MaterialReplaceService
     {
         public string Status { get; set; } = "";
         public string? Error { get; set; }
+        public bool TransientFileLock { get; set; }
         public string StageContentRoot { get; set; } = "";
         public List<FileResult> Files { get; set; } = new();
     }
 
-    public Result Apply(string slotId, string playablePackagePath, string cutscenePackagePath, Assignment assignment)
+    public Result Apply(string slotId, string playablePackagePath, string cutscenePackagePath, Assignment assignment) =>
+        ApplyCore(slotId, playablePackagePath, cutscenePackagePath, assignment, stageContentRootOverride: null);
+
+    /// <summary>
+    /// Applies an assignment to an explicit disposable package-preparation Content root.
+    /// This bypasses authoring-stage discovery so release preparation can never rewrite a
+    /// certified GraftedPartStage/PatchedNameMapStage in place.
+    /// </summary>
+    public Result ApplyToContentRoot(
+        string stageContentRoot,
+        string slotId,
+        string playablePackagePath,
+        string cutscenePackagePath,
+        Assignment assignment) =>
+        ApplyCore(slotId, playablePackagePath, cutscenePackagePath, assignment, stageContentRoot);
+
+    private Result ApplyCore(
+        string slotId,
+        string playablePackagePath,
+        string cutscenePackagePath,
+        Assignment assignment,
+        string? stageContentRootOverride)
     {
         var result = new Result();
         try
@@ -68,11 +91,15 @@ public sealed class MaterialReplaceService
                 return result;
             }
 
-            var stageRoot = ResolveStageContentRoot(slotId);
-            if (stageRoot is null)
+            var stageRoot = string.IsNullOrWhiteSpace(stageContentRootOverride)
+                ? ResolveStageContentRoot(slotId)
+                : Path.GetFullPath(stageContentRootOverride);
+            if (stageRoot is null || !Directory.Exists(stageRoot))
             {
                 result.Status = "no-stage";
-                result.Error = "No staged content found (run graft / name-map patch first).";
+                result.Error = string.IsNullOrWhiteSpace(stageContentRootOverride)
+                    ? "No staged content found (run graft / name-map patch first)."
+                    : $"The explicit package-preparation Content root does not exist: {stageRoot}";
                 return result;
             }
             result.StageContentRoot = stageRoot;
@@ -88,6 +115,7 @@ public sealed class MaterialReplaceService
                 result.Files.Add(ApplyToAsset("cutscene", stageRoot, cutscenePackagePath, assignment, mappings));
             }
 
+            result.TransientFileLock = result.Files.Any(file => file.TransientFileLock);
             result.Status = result.Files.Any(f => f.Success) ? "applied" : "no-change";
             return result;
         }
@@ -95,6 +123,7 @@ public sealed class MaterialReplaceService
         {
             result.Status = "error";
             result.Error = ex.ToString();
+            result.TransientFileLock = FileLockUtil.IsTransient(ex);
             return result;
         }
     }
@@ -333,6 +362,7 @@ public sealed class MaterialReplaceService
         catch (Exception ex)
         {
             fileResult.Error = ex.ToString();
+            fileResult.TransientFileLock = FileLockUtil.IsTransient(ex);
             return fileResult;
         }
     }

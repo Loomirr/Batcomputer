@@ -64,6 +64,7 @@ public sealed class StaticMeshObjProbeService
     {
         public string Status { get; set; } = "";
         public string? Error { get; set; }
+        public bool TransientFileLock { get; set; }
         public string SourcePackagePath { get; set; } = DonorPackagePath;
         public string SourceObjPath { get; set; } = "";
         public string OutputPackagePath { get; set; } = "";
@@ -262,6 +263,7 @@ public sealed class StaticMeshObjProbeService
         {
             result.Status = "error";
             result.Error = ex.Message;
+            result.TransientFileLock = FileLockUtil.IsTransient(ex);
         }
         finally
         {

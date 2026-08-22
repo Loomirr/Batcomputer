@@ -101,6 +101,64 @@ public sealed class AnimArchetypeGraftService
     public enum GlideVisualStatus { Unknown, Present, Absent }
 
     /// <summary>
+    /// Describes the two-part cape contract used by characters whose normal cape is hidden while
+    /// their separate glide visual is shown. A character with only a Glider component cannot safely
+    /// accept an additional cosmetic cape: the gameplay Blueprint has no proven visibility wiring
+    /// for that newly-added cape, so both meshes can remain visible during flight.
+    /// </summary>
+    public enum CapeGlideContractStatus { Unknown, Paired, GlideOnly, CapeOnly, Neither }
+
+    public CapeGlideContractStatus BaseCapeGlideContract(NativeSuitProject project)
+    {
+        var playable = ResolveTemplateUasset(
+            project.PlayableTemplate,
+            AppSettings.Current.EffectiveExtractedContentRoot());
+        if (string.IsNullOrWhiteSpace(playable) || !File.Exists(playable))
+        {
+            return CapeGlideContractStatus.Unknown;
+        }
+
+        try
+        {
+            var asset = new UAsset(
+                playable,
+                EngineVersion.VER_UE5_6,
+                LoadMappings(),
+                CustomSerializationFlags.SkipPreloadDependencyLoading);
+            var hasCosmeticCape = false;
+            var hasGlider = false;
+            foreach (var exp in asset.Exports.OfType<NormalExport>())
+            {
+                var tags = exp.Data.OfType<UAssetAPI.PropertyTypes.Objects.ArrayPropertyData>()
+                    .FirstOrDefault(p => p.Name.ToString() == "ComponentTags")?
+                    .Value?.OfType<UAssetAPI.PropertyTypes.Objects.NamePropertyData>()
+                    .Select(tag => tag.Value.ToString())
+                    .ToList() ?? [];
+                var isGlider = tags.Any(tag =>
+                    tag.Equals("Glider", StringComparison.OrdinalIgnoreCase));
+                var isCape = tags.Any(tag =>
+                    tag.Equals("Cape", StringComparison.OrdinalIgnoreCase) ||
+                    tag.Equals("TtCharacterAsset.Cape", StringComparison.OrdinalIgnoreCase));
+
+                hasGlider |= isGlider;
+                hasCosmeticCape |= isCape && !isGlider;
+            }
+
+            return (hasCosmeticCape, hasGlider) switch
+            {
+                (true, true) => CapeGlideContractStatus.Paired,
+                (false, true) => CapeGlideContractStatus.GlideOnly,
+                (true, false) => CapeGlideContractStatus.CapeOnly,
+                _ => CapeGlideContractStatus.Neither
+            };
+        }
+        catch
+        {
+            return CapeGlideContractStatus.Unknown;
+        }
+    }
+
+    /// <summary>
     /// Looks for a glide visual on the base. Returns <see cref="GlideVisualStatus.Unknown"/> when the
     /// base asset can't be read at all - callers must not report that as "no glide visual".
     /// </summary>
@@ -314,8 +372,7 @@ public sealed class AnimArchetypeGraftService
             var playable = new UAsset(playableUasset, EngineVersion.VER_UE5_6, mappings, NameMapOnly);
             var archPkg = playable.Imports
                 .Select(i => i.ObjectName.ToString())
-                .FirstOrDefault(n => n.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase) &&
-                                     n.Contains("/BP_CAT_Archetype_", StringComparison.OrdinalIgnoreCase));
+                .FirstOrDefault(IsCharacterArchetypePackage);
             if (archPkg is null) return null;
 
             var info = new DonorInfo
@@ -370,6 +427,26 @@ public sealed class AnimArchetypeGraftService
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Playable families normally inherit from BP_CAT_Archetype_*, but Catwoman's
+    /// native parent is the differently named BP_Catwoman_Archetype. Keep that
+    /// exception explicit so boss/NPC assets such as BP_Firefly_Boss_Archetype do
+    /// not become eligible gameplay donors merely because their names contain
+    /// "Archetype".
+    /// </summary>
+    internal static bool IsCharacterArchetypePackage(string? packagePath)
+    {
+        var package = UnrealPathUtil.NormalizePackagePath(packagePath);
+        if (!package.StartsWith("/Game/Characters/Minifig/", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var name = UnrealPathUtil.AssetName(package);
+        return name.StartsWith("BP_CAT_Archetype_", StringComparison.OrdinalIgnoreCase) ||
+               name.Equals("BP_Catwoman_Archetype", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>The base playable's actual parent class package (a /BP_Master/ base class like

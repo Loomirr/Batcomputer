@@ -278,10 +278,14 @@ public sealed partial class MainForm
         var activeSuitCount = activeMod?.Suits.Count(entry => entry.Enabled) ?? 0;
         var activeContentCount = activeSuitCount;
         var hasActiveMod = activeSummary is not null && activeMod is not null;
-        var hasBuild = hasActiveMod && File.Exists(Path.Combine(ModBuildRoot(activeSummary!.ModId), activeMod!.PackageBaseName + ".utoc"));
-        var hasInstalledRelease = hasBuild && File.Exists(Path.Combine(
-            AppSettings.Current.EffectiveGamePaksModFolder(),
-            activeMod!.PackageBaseName + ".utoc"));
+        var hasBuild = hasActiveMod && BuildManifestService.FindMissingOrEmptyFiles(
+            ExpectedModTrioPaths(
+                ModBuildRoot(activeSummary!.ModId),
+                activeMod!.PackageBaseName)).Count == 0;
+        var hasInstalledRelease = hasBuild && BuildManifestService.FindMissingOrEmptyFiles(
+            ExpectedModTrioPaths(
+                AppSettings.Current.EffectiveGamePaksModFolder(),
+                activeMod!.PackageBaseName)).Count == 0;
 
         var hero = new VirtualTilePanel.HeroModel
         {
@@ -738,6 +742,11 @@ public sealed partial class MainForm
 
     private enum ModInstallStatus { Complete, Partial, Failed }
 
+    private static List<string> ExpectedModTrioPaths(string outputRoot, string packageBaseName) =>
+        new[] { ".pak", ".ucas", ".utoc" }
+            .Select(extension => Path.Combine(outputRoot, packageBaseName + extension))
+            .ToList();
+
     private sealed class ModInstallResult
     {
         public ModInstallStatus Status;
@@ -789,11 +798,17 @@ public sealed partial class MainForm
             BuildOutput = outRoot,
             TrioDestination = AppSettings.Current.EffectiveGamePaksModFolder(),
         };
-        if (!File.Exists(trioBase + ".utoc"))
+        var expectedTrioPaths = ExpectedModTrioPaths(outRoot, mod.PackageBaseName);
+        var incompleteTrio = BuildManifestService.FindMissingOrEmptyFiles(expectedTrioPaths);
+        if (incompleteTrio.Count > 0)
         {
-            AppendLog($"Install mod: no built trio for '{mod.ModId}'. Right-click → Build mod first.");
+            AppendLog(
+                $"Install mod: built trio for '{mod.ModId}' is missing or empty: " +
+                string.Join(", ", incompleteTrio.Select(Path.GetFileName)));
             result.Status = ModInstallStatus.Failed;
-            result.Detail = "No built release trio was found. Build the mod first.";
+            result.Detail =
+                "No complete nonempty release trio was found. Build the mod again before installing. Missing or empty: " +
+                string.Join(", ", incompleteTrio.Select(Path.GetFileName));
             return result;
         }
 
@@ -836,15 +851,11 @@ public sealed partial class MainForm
             var slotDest = result.TrioDestination;
             ModReleaseStep("Copying the IoStore release files…");
             Directory.CreateDirectory(slotDest);
-            foreach (var ext in new[] { ".pak", ".ucas", ".utoc" })
+            foreach (var src in expectedTrioPaths)
             {
-                var src = trioBase + ext;
-                if (File.Exists(src))
-                {
-                    File.Copy(src, Path.Combine(slotDest, mod.PackageBaseName + ext), overwrite: true);
-                    installed++;
-                    trioFilesCopied++;
-                }
+                File.Copy(src, Path.Combine(slotDest, Path.GetFileName(src)), overwrite: true);
+                installed++;
+                trioFilesCopied++;
             }
             AppendLog($"  trio → {slotDest}");
 
@@ -1067,9 +1078,10 @@ public sealed partial class MainForm
 
         void AddRequired(string source, string archivePath)
         {
-            if (!File.Exists(source))
+            if (!File.Exists(source) || new FileInfo(source).Length == 0)
             {
-                throw new FileNotFoundException("A required built release file is missing.", source);
+                throw new InvalidDataException(
+                    "A required built release file is missing or empty: " + source);
             }
             files.Add((source, archivePath.Replace('\\', '/')));
         }
@@ -1463,9 +1475,6 @@ public sealed partial class MainForm
             return false;
         }
 
-        var outRoot = ModBuildRoot(mod.ModId);
-        Directory.CreateDirectory(outRoot);
-
         var projectRoot = _projectRootText.Text.Trim();
         var svc = new SuitProjectService(projectRoot);
         var tagRows = new List<PawnTagConfigService.TagRow>();
@@ -1513,6 +1522,16 @@ public sealed partial class MainForm
 
         if (tagRows.Count == 0) { AppendLog("Build mod: nothing to build."); return false; }
 
+        var publishedOutputRoot = ModBuildRoot(mod.ModId);
+        var attemptBoundary = Path.Combine(
+            Path.GetDirectoryName(publishedOutputRoot)!,
+            ".BuildAttempts",
+            mod.ModId);
+        var outRoot = Path.Combine(
+            attemptBoundary,
+            DateTime.UtcNow.ToString("yyyyMMddHHmmssfff") + "-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outRoot);
+
         // Fresh stage each build so a removed suit's assets don't linger in the trio.
         var stageRoot = Path.Combine(outRoot, "Stage");
         try
@@ -1528,21 +1547,36 @@ public sealed partial class MainForm
                 "Batcomputer could not clear the previous build stage. Close programs using generated files, then build again. " + ex.Message);
             _lastModReleaseFailure = new ModReleaseFailure(mod.DisplayName, preflight.Result);
             AppendLog($"Build mod ABORTED: could not clear old stage: {ex.Message}");
+            await CleanupModBuildAttemptAsync(outRoot, attemptBoundary);
             return false;
         }
 
         // 1) StringTable ST_<ModId>.
         ModReleaseStep("Generating the mod StringTable…");
         var stBase = Path.Combine(outRoot, "Stage", "LEGOBatmanLotDK", "Content", "Mods", mod.ModId, "Localization", $"ST_{mod.ModId}");
-        var st = new StringTableGenService(_projectRootText.Text.Trim()).Generate(stBase, mod.ModId, stEntries);
+        StringTableGenService.GenResult st;
+        try
+        {
+            st = new StringTableGenService(_projectRootText.Text.Trim())
+                .Generate(stBase, mod.ModId, stEntries);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Build mod: StringTable failed: {ex.Message}");
+            await CleanupModBuildAttemptAsync(outRoot, attemptBoundary);
+            return false;
+        }
         if (st.Status != "created")
         {
             AppendLog($"Build mod: StringTable failed: {st.Error}");
+            await CleanupModBuildAttemptAsync(outRoot, attemptBoundary);
             return false;
         }
         AppendLog($"  StringTable: {st.EntryCount} entries (namespace {st.TableNamespace}) -> {st.OutputUasset}");
 
         var modJsonPath = Path.Combine(outRoot, "mod.json");
+
+        IReadOnlyList<string>? retocAttemptOutputs = null;
 
         // 2) Combined IoStore trio: prepare each suit's current authoring stage,
         //    merge it with the mod StringTable (no rebasing - distinct /Game roots),
@@ -1578,20 +1612,29 @@ public sealed partial class MainForm
                 }
 
                 ModReleaseStep($"Preparing {suit.DisplayName} for the shared release…");
-                if (!PrepareSuitForMod(suit, svc, out var suitContentRoot, out var prepareError))
+                var preparation = await PrepareSuitForReleaseAsync(suit, svc);
+                if (preparation.Prepared is null)
                 {
-                    preflight.Result.AddError("texture staging", prepareError, suit.SlotId);
+                    preflight.Result.AddError("suit preparation", preparation.Error, suit.SlotId);
                     _lastModReleaseFailure = new ModReleaseFailure(mod.DisplayName, preflight.Result);
-                    AppendLog($"Build mod ABORTED: could not prepare '{suit.DisplayName}': {prepareError}");
+                    AppendLog($"Build mod ABORTED: could not prepare '{suit.DisplayName}': {preparation.Error}");
                     return false;
                 }
 
-                AppendLog($"  prepared '{suit.DisplayName}': playable + cutscene + DCMD + UIMD");
-                MergeContentRoot(suitContentRoot, stageContent);
-                RepatchStagedSuitText(stageContent, suit, entry.SuitId, stObjectPath, mappings);
-                preparedSuits.Add(suit);
-                mergedSuits++;
-                AppendLog($"  bundled suit '{suit.DisplayName}' ({entry.SuitId}) → {suit.TargetPackages!.Dcmd}");
+                var prepared = preparation.Prepared;
+                try
+                {
+                    AppendLog($"  prepared '{suit.DisplayName}': playable + cutscene + DCMD + UIMD");
+                    MergeContentRoot(prepared.Stage.ContentRoot, stageContent);
+                    RepatchStagedSuitText(stageContent, prepared.Project, entry.SuitId, stObjectPath, mappings);
+                    preparedSuits.Add(prepared.Project);
+                    mergedSuits++;
+                    AppendLog($"  bundled suit '{suit.DisplayName}' ({entry.SuitId}) → {prepared.Project.TargetPackages!.Dcmd}");
+                }
+                finally
+                {
+                    await CleanupPackagePreparationStageAsync(prepared.Stage);
+                }
             }
 
             var tagConfigPath = string.Empty;
@@ -1705,24 +1748,79 @@ public sealed partial class MainForm
             AppendLog($"  mod.json: {manifestSuits.Count} suit(s) -> {modJsonPath}");
 
             var trioBase = Path.Combine(outRoot, mod.PackageBaseName);
+            var expectedTrioPaths = new[] { ".pak", ".ucas", ".utoc" }
+                .Select(extension => trioBase + extension)
+                .ToList();
+            try
+            {
+                await RunWithFileLockRetryAsync(
+                    () =>
+                    {
+                        foreach (var previousOutput in expectedTrioPaths)
+                        {
+                            File.Delete(previousOutput);
+                        }
+                        return true;
+                    },
+                    "clear the previous mod IoStore trio");
+            }
+            catch (Exception ex)
+            {
+                var message =
+                    "The previous mod package output could not be cleared, so Batcomputer cannot prove that the next trio is fresh. " +
+                    ex.Message;
+                preflight.Result.AddError("IoStore output", message);
+                _lastModReleaseFailure = new ModReleaseFailure(mod.DisplayName, preflight.Result);
+                AppendLog("Build mod ABORTED: " + message);
+                return false;
+            }
+            retocAttemptOutputs = expectedTrioPaths;
+
             ModReleaseStep($"Packing {mod.PackageBaseName} into an IoStore trio…");
             AppendLog($"Packing combined trio ({mod.PackageBaseName}) with retoc…");
             var retocExit = await RunRetocToZenAsync(stageRoot, trioBase + ".utoc");
             if (retocExit != 0)
             {
+                await CleanupFailedModTrioAsync(
+                    expectedTrioPaths,
+                    $"retoc exited with code {retocExit}");
                 AppendLog($"Build mod: retoc to-zen failed (exit {retocExit}). Loose files are valid; trio not produced.");
                 return false;
             }
 
+            var missingOrEmpty = BuildManifestService.FindMissingOrEmptyFiles(expectedTrioPaths);
+            if (missingOrEmpty.Count > 0)
+            {
+                var message =
+                    "retoc reported success but did not freshly produce a complete nonempty trio: " +
+                    string.Join(", ", missingOrEmpty.Select(Path.GetFileName));
+                preflight.Result.AddError("IoStore output", message);
+                _lastModReleaseFailure = new ModReleaseFailure(mod.DisplayName, preflight.Result);
+                AppendLog("Build mod ABORTED: " + message);
+                await CleanupFailedModTrioAsync(
+                    expectedTrioPaths,
+                    "retoc returned an incomplete trio");
+                return false;
+            }
+
+            await PublishModBuildAttemptAsync(outRoot, publishedOutputRoot, attemptBoundary);
+            retocAttemptOutputs = null;
+            var publishedTrioBase = Path.Combine(publishedOutputRoot, mod.PackageBaseName);
             AppendLog($"Build mod '{mod.DisplayName}' COMPLETE — installable trio for {mergedSuits} suit(s):");
-            AppendLog($"  {trioBase}.pak / .ucas / .utoc");
-            AppendLog($"  {mod.ModId}Tags.ini is staged for LEGOBatmanLotDK/Config/Tags; mod.json is under {outRoot}");
+            AppendLog($"  {publishedTrioBase}.pak / .ucas / .utoc");
+            AppendLog($"  {mod.ModId}Tags.ini is staged for LEGOBatmanLotDK/Config/Tags; mod.json is under {publishedOutputRoot}");
             AppendLog($"  Install: trio -> ~mods/Expanded, tags -> Config/Tags, mod.json -> ue4ss/{LotdkExpandedLayout.ModuleId}/Mods/{mod.ModId}/");
             RefreshWorkspaceAfterModChange();
             return true;
         }
         catch (Exception ex)
         {
+            if (retocAttemptOutputs is not null)
+            {
+                await CleanupFailedModTrioAsync(
+                    retocAttemptOutputs,
+                    "an exception interrupted the retoc package attempt");
+            }
             AppendLog($"Build mod failed during trio packaging: {ex.Message}");
             // Packaging produced nothing shippable - say so rather than looking like it worked.
             if (!_batchMode && _modReleaseProgress is null)
@@ -1732,6 +1830,10 @@ public sealed partial class MainForm
                     "No pak was written, so nothing was installed. The log has the full sequence.");
             }
             return false;
+        }
+        finally
+        {
+            await CleanupModBuildAttemptAsync(outRoot, attemptBoundary);
         }
     }
 
@@ -1751,45 +1853,66 @@ public sealed partial class MainForm
     /// Materializes one suit's current saved authoring state into the stage that will
     /// be merged into a mod. Only the aggregate mod owns a final retoc export.
     /// </summary>
-    private bool PrepareSuitForMod(NativeSuitProject suit, SuitProjectService projectService,
-        out string contentRoot, out string error)
+    private sealed class PreparedSuitForRelease
     {
-        contentRoot = "";
-        error = "";
+        public required NativeSuitProject Project { get; init; }
+        public required PackagePreparationStage Stage { get; init; }
+    }
+
+    private async Task<(PreparedSuitForRelease? Prepared, string Error)> PrepareSuitForReleaseAsync(
+        NativeSuitProject authoringSuit,
+        SuitProjectService projectService)
+    {
+        PackagePreparationStage? preparationStage = null;
         try
         {
+            var suit = CloneProjectForPackagePreparation(authoringSuit);
+            preparationStage = await CreatePackagePreparationStageAsync(suit, projectService.ProjectRoot);
+            var contentRoot = preparationStage.ContentRoot;
+            AppendLog($"  isolated preparation copy for '{suit.DisplayName}': {contentRoot}");
+
             if (EnsureCrossKindHeadGraftHidesBaseHead(suit))
             {
-                projectService.SaveProject(suit);
-                AppendLog($"  saved Head:0 removal for '{suit.DisplayName}' cross-kind head graft.");
+                AppendLog($"  applied Head:0 removal for '{suit.DisplayName}' cross-kind head graft in the disposable preparation copy.");
             }
 
             var gliderComponent = ActiveGliderVisualComponent(suit);
             if (!string.IsNullOrWhiteSpace(gliderComponent))
             {
+                RequireCompleteDeclarativeReplay(
+                    RestoreProtectedGliderComponent(
+                        suit,
+                        gliderComponent,
+                        projectService.ProjectRoot,
+                        contentRoot),
+                    $"Active glider restoration for '{suit.DisplayName}'");
                 if (RemoveSavedRemovalForComponent(suit, gliderComponent))
                 {
-                    projectService.SaveProject(suit);
-                    AppendLog($"  removed stale remove-component rule for '{suit.DisplayName}' glider '{gliderComponent}'.");
+                    AppendLog($"  ignored stale remove-component rule for '{suit.DisplayName}' glider '{gliderComponent}' in the disposable preparation copy.");
                 }
-                RestoreProtectedGliderComponent(suit, gliderComponent);
             }
 
-            ApplySavedComponentRemovals(suit, logNoRemovals: false);
-            contentRoot = CurrentPackageContentRoot(suit);
-            if (!Directory.Exists(contentRoot))
-            {
-                error = "no staged content exists. Set a base and let the tool build its editable stage first.";
-                return false;
-            }
+            RequireCompleteDeclarativeReplay(
+                ApplySavedComponentRemovals(
+                    suit,
+                    logNoRemovals: false,
+                    stageContentRootOverride: contentRoot),
+                "Saved component removal replay");
 
             StageGeneratedMaterialsIntoContentRoot(suit, contentRoot);
-            if (!StageGeneratedTexturesIntoContentRoot(suit, contentRoot, out var textureStageError))
+            if (!StageGeneratedTexturesIntoContentRoot(
+                    suit,
+                    contentRoot,
+                    out var textureStageError,
+                    persistProjectChanges: false))
             {
-                error = textureStageError;
-                return false;
+                throw new InvalidOperationException(textureStageError);
             }
-            StageGeneratedDcmdIntoContentRoot(suit, contentRoot);
+            StageGeneratedDcmdIntoContentRoot(
+                suit,
+                contentRoot,
+                persistAutoAssignedIcons: false,
+                requireSuccess: true);
             StageLibraryAnimsIntoContentRoot(suit, contentRoot);
 
             if (suit.UseCustomArchetype)
@@ -1799,14 +1922,19 @@ public sealed partial class MainForm
                 if (string.Equals(archetype.Status, "error", StringComparison.OrdinalIgnoreCase) ||
                     !string.IsNullOrWhiteSpace(archetype.Error))
                 {
-                    error = archetype.Error ?? "custom archetype preparation failed.";
-                    return false;
+                    throw new InvalidOperationException(
+                        archetype.Error ?? "custom archetype preparation failed.");
                 }
             }
 
             // Grafting can replace the stage from the donor, so material bindings must
             // be applied after the last possible stage rebuild.
-            ApplySavedMaterials(suit, logIfNone: false);
+            RequireCompleteDeclarativeReplay(
+                ApplySavedMaterials(
+                    suit,
+                    logIfNone: false,
+                    stageContentRootOverride: contentRoot),
+                "Saved material replay");
 
             var requiredPackages = new[]
             {
@@ -1822,15 +1950,23 @@ public sealed partial class MainForm
                 .ToList();
             if (missing.Count > 0)
             {
-                error = "required staged assets are missing: " + string.Join(", ", missing);
-                return false;
+                throw new InvalidOperationException(
+                    "required staged assets are missing: " + string.Join(", ", missing));
             }
-            return true;
+
+            return (new PreparedSuitForRelease
+            {
+                Project = suit,
+                Stage = preparationStage,
+            }, "");
         }
         catch (Exception ex)
         {
-            error = ex.Message;
-            return false;
+            if (preparationStage is not null)
+            {
+                await CleanupPackagePreparationStageAsync(preparationStage);
+            }
+            return (null, ex.Message);
         }
     }
 
@@ -1838,6 +1974,205 @@ public sealed partial class MainForm
     {
         var basePath = PackagePathToContentPath(contentRoot, packagePath);
         return File.Exists(basePath + ".uasset") && File.Exists(basePath + ".uexp");
+    }
+
+    private async Task CleanupFailedModTrioAsync(
+        IReadOnlyList<string> exactTrioPaths,
+        string failureContext)
+    {
+        var cleanupErrors = new List<string>();
+        foreach (var path in exactTrioPaths)
+        {
+            try
+            {
+                await RunWithFileLockRetryAsync(
+                    () =>
+                    {
+                        File.Delete(path);
+                        return true;
+                    },
+                    "remove incomplete mod IoStore output " + Path.GetFileName(path));
+            }
+            catch (Exception ex)
+            {
+                cleanupErrors.Add(Path.GetFileName(path) + ": " + ex.Message);
+            }
+        }
+
+        var retained = exactTrioPaths.Where(File.Exists).ToList();
+        if (retained.Count == 0)
+        {
+            AppendLog($"  removed incomplete mod trio after {failureContext}.");
+            return;
+        }
+
+        AppendLog(
+            $"  warning: incomplete mod output remained after {failureContext}: " +
+            string.Join(", ", retained));
+        foreach (var cleanupError in cleanupErrors)
+        {
+            AppendLog("  cleanup error: " + cleanupError);
+        }
+    }
+
+    private async Task CleanupModBuildAttemptAsync(string attemptRoot, string attemptBoundary)
+    {
+        if (!Directory.Exists(attemptRoot))
+        {
+            return;
+        }
+
+        try
+        {
+            await RunWithFileLockRetryAsync(
+                () =>
+                {
+                    EnsureModBuildAttemptPath(attemptRoot, attemptBoundary);
+                    if (Directory.Exists(attemptRoot))
+                    {
+                        Directory.Delete(attemptRoot, recursive: true);
+                    }
+                    return true;
+                },
+                "clean disposable mod-build attempt");
+        }
+        catch (Exception ex)
+        {
+            AppendLog(
+                $"  warning: disposable mod-build attempt remained at {attemptRoot}: {ex.Message}");
+        }
+    }
+
+    private async Task PublishModBuildAttemptAsync(
+        string attemptRoot,
+        string publishedOutputRoot,
+        string attemptBoundary)
+    {
+        EnsureModBuildAttemptPath(attemptRoot, attemptBoundary);
+        if (!Directory.Exists(attemptRoot))
+        {
+            throw new DirectoryNotFoundException(
+                "The completed disposable mod-build attempt disappeared before publication: " + attemptRoot);
+        }
+
+        var publishedRoot = Path.GetFullPath(publishedOutputRoot);
+        var publishParent = Directory.GetParent(publishedRoot)?.FullName
+            ?? throw new InvalidOperationException("The mod build output has no safe parent directory.");
+        var backupRoot = Path.Combine(
+            publishParent,
+            "." + Path.GetFileName(publishedRoot) + ".previous-" + Guid.NewGuid().ToString("N"));
+        if (!FileSystemPathUtil.IsWithinDirectory(backupRoot, publishParent))
+        {
+            throw new InvalidOperationException(
+                "Refused to create a mod-release backup outside the generated output parent.");
+        }
+        var previousMoved = false;
+        var publicationSucceeded = false;
+        try
+        {
+            if (Directory.Exists(publishedRoot))
+            {
+                await RunWithFileLockRetryAsync(
+                    () =>
+                    {
+                        if (Directory.Exists(publishedRoot))
+                        {
+                            Directory.Move(publishedRoot, backupRoot);
+                        }
+                        return true;
+                    },
+                    "move the previous certified mod release aside");
+                previousMoved = Directory.Exists(backupRoot);
+            }
+
+            try
+            {
+                await RunWithFileLockRetryAsync(
+                    () =>
+                    {
+                        if (Directory.Exists(attemptRoot))
+                        {
+                            Directory.Move(attemptRoot, publishedRoot);
+                        }
+                        if (!Directory.Exists(publishedRoot))
+                        {
+                            throw new IOException("The completed mod release was not published.");
+                        }
+                        return true;
+                    },
+                    "publish the completed mod release");
+                publicationSucceeded = true;
+            }
+            catch (Exception publishError)
+            {
+                Exception? rollbackError = null;
+                if (previousMoved && Directory.Exists(backupRoot))
+                {
+                    try
+                    {
+                        await RunWithFileLockRetryAsync(
+                            () =>
+                            {
+                                if (!Directory.Exists(publishedRoot) && Directory.Exists(backupRoot))
+                                {
+                                    Directory.Move(backupRoot, publishedRoot);
+                                }
+                                return true;
+                            },
+                            "restore the previous certified mod release");
+                    }
+                    catch (Exception ex)
+                    {
+                        rollbackError = ex;
+                    }
+                }
+
+                throw new InvalidOperationException(
+                    rollbackError is null
+                        ? previousMoved
+                            ? "The completed mod release could not be published; the previous certified release was restored."
+                            : "The completed mod release could not be published; no previous release was changed."
+                        : $"The completed mod release could not be published, and the previous release remains recoverable at {backupRoot}: {rollbackError.Message}",
+                    publishError);
+            }
+        }
+        finally
+        {
+            if (publicationSucceeded && Directory.Exists(backupRoot) && Directory.Exists(publishedRoot))
+            {
+                try
+                {
+                    await RunWithFileLockRetryAsync(
+                        () =>
+                        {
+                            if (Directory.Exists(backupRoot))
+                            {
+                                Directory.Delete(backupRoot, recursive: true);
+                            }
+                            return true;
+                        },
+                        "clean the previous mod-release backup");
+                }
+                catch (Exception ex)
+                {
+                    AppendLog(
+                        $"  warning: previous certified mod-release backup was retained at {backupRoot}: {ex.Message}");
+                }
+            }
+        }
+    }
+
+    private static void EnsureModBuildAttemptPath(string attemptRoot, string attemptBoundary)
+    {
+        var boundary = Path.GetFullPath(attemptBoundary)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var root = Path.GetFullPath(attemptRoot);
+        if (!root.StartsWith(boundary, StringComparison.OrdinalIgnoreCase) ||
+            root.Equals(boundary.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Refused to modify a disposable mod-build directory outside its generated boundary.");
+        }
     }
 
     /// <summary>Checks the aggregate stage matches the schema-3 mod registration contract.</summary>

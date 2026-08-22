@@ -18,6 +18,7 @@ public sealed partial class MainForm
     private Control? _viewerPanel;
     private int _viewerLoadGeneration;
     private NativeSuitProject? _viewerProject;
+    private bool _viewerCustomMeshBakeInProgress;
 
     /// <summary>Builds the viewer once and hosts it in the dedicated full-width workspace.</summary>
     private void ShowViewerPanel()
@@ -249,15 +250,20 @@ public sealed partial class MainForm
         }
         if (entry.Origin == CharacterCatalogService.Source.CustomSuit)
         {
-            var project = string.IsNullOrWhiteSpace(entry.ProjectPath)
+            var loadedProject = string.IsNullOrWhiteSpace(entry.ProjectPath)
                 ? null
                 : new SuitProjectService(AppSettings.Current.EffectiveProjectRoot()).LoadProject(entry.ProjectPath);
-            if (project is null)
+            if (loadedProject is null)
             {
                 _viewerStatus!.Text = $"{entry.Name}: the saved suit project could not be read.";
                 _viewer?.ShowMessage("Could not read this suit project.");
                 return;
             }
+            // The dedicated viewer reads projects from disk, while the editor keeps the selected
+            // suit in memory. Reuse that live instance when both represent the same saved slot.
+            // Otherwise a viewer bake can update one object and a later part removal can save the
+            // stale editor object over it, restoring the custom mesh's old transform.
+            var project = ResolveViewerProjectForEdit(loadedProject, _currentProject)!;
             ShowCharacterInViewer(string.Empty, entry.Name, project);
             return;
         }
@@ -360,7 +366,7 @@ public sealed partial class MainForm
         }
     }
 
-    private void SaveViewerPlacement(PreviewPlacementSaveRequestedEventArgs args)
+    private async void SaveViewerPlacement(PreviewPlacementSaveRequestedEventArgs args)
     {
         var component = args.Component.Trim();
         if (component.Length == 0 || string.IsNullOrWhiteSpace(args.LayoutKey))
@@ -368,15 +374,42 @@ public sealed partial class MainForm
             return;
         }
 
-        var project = _viewerProject ?? _currentProject;
-        var customMesh = project?.CustomStaticMeshes.FirstOrDefault(mesh =>
-            (!string.IsNullOrWhiteSpace(args.CustomMeshId) &&
-             mesh.Id.Equals(args.CustomMeshId, StringComparison.OrdinalIgnoreCase)) ||
-            (!string.IsNullOrWhiteSpace(mesh.ResolvedComponent) &&
-             mesh.ResolvedComponent.Equals(component, StringComparison.OrdinalIgnoreCase)));
-        if (customMesh is not null)
+        if (args.CustomMeshTransform is not null)
         {
-            _ = SaveCustomStaticMeshPlacementAsync(project!, customMesh, args);
+            if (_viewerCustomMeshBakeInProgress && !args.CustomMeshBakeRequested)
+            {
+                // Ignore debounced/pagehide drafts emitted after Bake has begun. The bake request
+                // already carries the authoritative transform and is rebuilding from that recipe.
+                return;
+            }
+            var viewedProject = _viewerProject;
+            if (viewedProject is null ||
+                !args.LayoutKey.Equals(
+                    ViewerLayoutService.SuitKey(viewedProject),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                // A retiring WebView can deliver a delayed pagehide/draft message after another
+                // character has started loading. Never apply it to the newly selected project.
+                return;
+            }
+
+            var project = ResolveViewerProjectForEdit(viewedProject, _currentProject)!;
+            var customMesh = !string.IsNullOrWhiteSpace(args.CustomMeshId)
+                ? project.CustomStaticMeshes.FirstOrDefault(mesh =>
+                    mesh.Id.Equals(args.CustomMeshId, StringComparison.OrdinalIgnoreCase))
+                : project.CustomStaticMeshes.FirstOrDefault(mesh =>
+                    !string.IsNullOrWhiteSpace(mesh.ResolvedComponent) &&
+                    mesh.ResolvedComponent.Equals(component, StringComparison.OrdinalIgnoreCase));
+            if (customMesh is null)
+            {
+                _viewerStatus!.Text = "That custom mesh is no longer part of this suit.";
+                return;
+            }
+            await SaveCustomStaticMeshPlacementAsync(
+                project!,
+                customMesh,
+                args,
+                _viewerLoadGeneration);
             return;
         }
 
@@ -404,26 +437,37 @@ public sealed partial class MainForm
     private async Task SaveCustomStaticMeshPlacementAsync(
         NativeSuitProject project,
         CustomStaticMeshImport mesh,
-        PreviewPlacementSaveRequestedEventArgs args)
+        PreviewPlacementSaveRequestedEventArgs args,
+        int expectedViewerGeneration)
     {
         if (args.CustomMeshTransform is not { } transform)
         {
             return;
         }
 
-        mesh.Scale = transform.Scale;
-        mesh.OffsetX = transform.OffsetX;
-        mesh.OffsetY = transform.OffsetY;
-        mesh.OffsetZ = transform.OffsetZ;
-        mesh.RotationPitch = transform.RotationPitch;
-        mesh.RotationYaw = transform.RotationYaw;
-        mesh.RotationRoll = transform.RotationRoll;
+        var isBake = args.CustomMeshBakeRequested;
+        if (isBake && _viewerCustomMeshBakeInProgress)
+        {
+            return;
+        }
+        var workspaceWasEnabled = _mainWorkspaceHost.Enabled;
+        if (isBake)
+        {
+            _viewerCustomMeshBakeInProgress = true;
+            _mainWorkspaceHost.Enabled = false;
+        }
+
+        ApplyViewerCustomMeshTransform(mesh, transform);
 
         try
         {
             var projectService = _projectService ??= new SuitProjectService(_projectRootText.Text.Trim());
             projectService.SaveProject(project);
-            if (!args.CustomMeshBakeRequested)
+            // Keep subsequent viewer messages and editor actions on the same declarative recipe.
+            // This assignment is especially important when the viewer initially loaded a disk
+            // clone before ResolveViewerProjectForEdit selected the active editor instance.
+            _viewerProject = project;
+            if (!isBake)
             {
                 _viewerStatus!.Text = $"{mesh.DisplayName}: preview transform saved. Use Bake to game before testing it in-game.";
                 return;
@@ -432,16 +476,64 @@ public sealed partial class MainForm
             _viewerStatus!.Text = $"{mesh.DisplayName}: baking its transform, then rebuilding the custom mesh…";
             await RebuildGraftStageFromDeclarativeAsync(project, projectService.ProjectRoot);
             projectService.SaveProject(project);
-            RecordChange("Parts", mesh.DisplayName,
+            RecordChange(project, "Parts", mesh.DisplayName,
                 $"custom mesh scale {mesh.Scale:0.###}; position {mesh.OffsetX:0.###}, {mesh.OffsetY:0.###}, {mesh.OffsetZ:0.###}; rotation {mesh.RotationPitch:0.###}, {mesh.RotationYaw:0.###}, {mesh.RotationRoll:0.###}",
                 status: "staged");
-            _viewerStatus.Text = $"{mesh.DisplayName}: transform baked to the suit. Reloading preview…";
-            ShowCharacterInViewer(string.Empty, project.DisplayName, project);
+            if (expectedViewerGeneration == _viewerLoadGeneration &&
+                ReferenceEquals(_viewerProject, project))
+            {
+                _viewerStatus.Text = $"{mesh.DisplayName}: transform baked to the suit. Reloading preview…";
+                ShowCharacterInViewer(string.Empty, project.DisplayName, project);
+            }
         }
         catch (Exception ex)
         {
             _viewerStatus!.Text = $"Could not save {mesh.DisplayName}: {ex.Message.Split('\n')[0]}";
         }
+        finally
+        {
+            if (isBake)
+            {
+                _viewerCustomMeshBakeInProgress = false;
+                _mainWorkspaceHost.Enabled = workspaceWasEnabled;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns the live editor object when the viewer's disk-loaded object represents the same
+    /// saved suit. SlotId is the persisted project identity because SuitProjectService derives the
+    /// project JSON path and generated-stage directory from it.
+    /// </summary>
+    internal static NativeSuitProject? ResolveViewerProjectForEdit(
+        NativeSuitProject? viewerProject,
+        NativeSuitProject? activeProject)
+    {
+        if (viewerProject is null)
+        {
+            return null;
+        }
+        if (activeProject is not null &&
+            (ReferenceEquals(viewerProject, activeProject) ||
+             (!string.IsNullOrWhiteSpace(viewerProject.SlotId) &&
+              viewerProject.SlotId.Equals(activeProject.SlotId, StringComparison.OrdinalIgnoreCase))))
+        {
+            return activeProject;
+        }
+        return viewerProject;
+    }
+
+    internal static void ApplyViewerCustomMeshTransform(
+        CustomStaticMeshImport mesh,
+        PreviewCustomMeshTransform transform)
+    {
+        mesh.Scale = transform.Scale;
+        mesh.OffsetX = transform.OffsetX;
+        mesh.OffsetY = transform.OffsetY;
+        mesh.OffsetZ = transform.OffsetZ;
+        mesh.RotationPitch = transform.RotationPitch;
+        mesh.RotationYaw = transform.RotationYaw;
+        mesh.RotationRoll = transform.RotationRoll;
     }
 
     /// <summary>Jumps to the viewer tab and loads the current suit with its saved edits.</summary>

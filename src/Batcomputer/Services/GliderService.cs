@@ -75,6 +75,77 @@ public static class GliderService
                part.MeshPackagePath.Contains("/Cape/", StringComparison.OrdinalIgnoreCase);
     }
 
+    public static bool IsCosmeticCapeAttachment(SavedPartGraftDonor? donor)
+    {
+        if (donor is null)
+        {
+            return false;
+        }
+
+        var hasGliderTag = donor.ComponentTags.Any(tag =>
+            tag.Equals("Glider", StringComparison.OrdinalIgnoreCase));
+        if (hasGliderTag)
+        {
+            return false;
+        }
+
+        return donor.ComponentTags.Any(tag =>
+                   tag.Equals("Cape", StringComparison.OrdinalIgnoreCase) ||
+                   tag.Equals("TtCharacterAsset.Cape", StringComparison.OrdinalIgnoreCase)) ||
+               donor.MeshObjectPath.Contains("Cape", StringComparison.OrdinalIgnoreCase) ||
+               donor.Stem.Contains("Cape", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool ProjectHasNativeCosmeticCapeGraft(NativeSuitProject project) =>
+        project.PartGrafts.Any(graft =>
+            !graft.IsGlider &&
+            (IsCosmeticCapeAttachment(graft.Playable) || IsCosmeticCapeAttachment(graft.Cutscene)));
+
+    /// <summary>
+    /// Custom static meshes are additive component shells. Unlike a native cape graft, they do not
+    /// repoint the playable base's existing visibility-wired cosmetic-cape component.
+    /// </summary>
+    public static bool ProjectHasAdditiveCustomCape(NativeSuitProject project) =>
+        project.CustomStaticMeshes.Any(mesh =>
+            string.Equals(mesh.Target?.Trim(), "Cape", StringComparison.OrdinalIgnoreCase));
+
+    public static bool ProjectHasCosmeticCape(NativeSuitProject project) =>
+        ProjectHasNativeCosmeticCapeGraft(project) || ProjectHasAdditiveCustomCape(project);
+
+    private static bool ProjectHasGlider(
+        NativeSuitProject project,
+        AnimArchetypeGraftService.CapeGlideContractStatus baseContract,
+        bool addingGlider = false) =>
+        baseContract is AnimArchetypeGraftService.CapeGlideContractStatus.Paired or
+            AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly ||
+        addingGlider ||
+        project.GliderGrafted ||
+        (!string.IsNullOrWhiteSpace(project.GliderType) &&
+         !project.GliderType.Trim().Equals("base", StringComparison.OrdinalIgnoreCase)) ||
+        project.PartGrafts.Any(graft => graft.IsGlider);
+
+    internal static bool HasAdditiveCapeAndGliderCombination(
+        NativeSuitProject project,
+        AnimArchetypeGraftService.CapeGlideContractStatus baseContract,
+        bool addingCustomCape = false,
+        bool addingGlider = false) =>
+        (addingCustomCape || ProjectHasAdditiveCustomCape(project)) &&
+        ProjectHasGlider(project, baseContract, addingGlider);
+
+    internal static bool HasCapeAndGliderCombination(
+        NativeSuitProject project,
+        AnimArchetypeGraftService.CapeGlideContractStatus baseContract,
+        bool addingCosmeticCape = false,
+        bool addingGlider = false)
+    {
+        var baseHasCosmeticCape = baseContract is
+            AnimArchetypeGraftService.CapeGlideContractStatus.Paired or
+            AnimArchetypeGraftService.CapeGlideContractStatus.CapeOnly;
+        var hasCosmeticCape = baseHasCosmeticCape || addingCosmeticCape || ProjectHasCosmeticCape(project);
+        var hasGlider = ProjectHasGlider(project, baseContract, addingGlider);
+        return hasCosmeticCape && hasGlider;
+    }
+
     public static IEnumerable<NativeSuitPartRecord> NativeGliderParts(NativeSuitPartIndex? partIndex, string search)
     {
         if (partIndex is null)
