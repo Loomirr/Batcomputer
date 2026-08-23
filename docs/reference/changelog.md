@@ -1,15 +1,5 @@
 # Changelog
 
-## 0.9.0-beta.6
-
-- Fixed the first declarative rebuild on a fresh suit when no graft-stage folder exists yet.
-- Replacement gliders now have to use a proven paired-cape visibility controller before they can be
-  combined with a separate regular cape.
-- Batman and Batgirl glide-cape controllers remain supported; wingsuits and other glide-only
-  visuals are supported when the regular `Cape` is explicitly removed.
-- Existing unsafe or unverified cape/glider projects are blocked during packaging with actionable
-  guidance, including older saved projects without controller metadata.
-
 ## 0.9.0-beta.5
 
 - Cutscene visuals now always open the gameplay-donor picker, and Catwoman playables resolve their
@@ -20,10 +10,15 @@
   part removal triggers a clean rebuild.
 - Generated-file sharing violations receive bounded retries; incomplete playable/cutscene grafts
   stop the rebuild and cannot be packaged as a partial suit.
+- Fixed the first declarative rebuild on a fresh suit when no graft-stage folder exists yet.
 - Fixed registry-writer launches from spaced Unreal paths, structured registry verification, and
   punctuation leaking from display names into Unreal identifiers.
 - Incompatible remote-controller families and unsupported regular-cape/glider combinations are
-  blocked with actionable guidance; Batman glide capes are called out in the Gliders browser.
+  blocked with actionable guidance. Replacement gliders must use a verified paired-cape controller,
+  while wingsuits and other glide-only visuals require the regular `Cape` to be removed; older saved
+  projects receive the same package-time check.
+- Batman and Batgirl glide-cape controllers remain supported, Batman glide capes are called out in
+  the Gliders browser, and the selected donor's controller identity is preserved.
 - Suit and mod outputs are prepared away from certified authoring stages, and only a fresh, complete
   IoStore trio can be published or installed; failed installs restore the previous trio.
 

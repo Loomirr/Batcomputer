@@ -1,23 +1,8 @@
 # Changelog
 
-## 0.9.0-beta.6 — 2026-08-22
-
-Fresh-suit rebuild and cape/glider compatibility hotfixes.
-
-- Fixes the first declarative rebuild of a fresh suit failing when its generated graft stage does
-  not exist yet.
-- Verifies the replacement glider's animation controller, not just the base component layout,
-  before pairing it with a separate regular cape.
-- Supports the proven Batman and Batgirl glide-cape visibility controllers, which hide the regular
-  cape during gliding and restore it after landing.
-- Allows wingsuits and other glide-only visuals when the regular `Cape` is explicitly removed, and
-  blocks glide-only or unverified controllers when that cape remains.
-- Persists controller identity in new part-graft recipes, safely classifies older projects, and
-  prevents a rejected glider selection from changing the suit.
-
 ## 0.9.0-beta.5 — 2026-08-22
 
-Donor selection, declarative staging, and registry reliability fixes.
+Donor selection, declarative staging, cape/glider safety, and registry reliability fixes.
 
 - Always asks for an explicit gameplay donor after choosing a cutscene visual, recommends the
   matching playable without silently committing it, and recognizes Catwoman's nonstandard native
@@ -28,12 +13,16 @@ Donor selection, declarative staging, and registry reliability fixes.
   no longer restores the mesh's old scale, position, or rotation during the clean rebuild.
 - Retries transient generated-file sharing violations, requires complete playable/cutscene custom
   mesh grafts, and blocks packaging when a declarative stage did not finish rebuilding.
+- Fixes the first declarative rebuild of a fresh suit when its generated graft-stage folder does not
+  exist yet.
 - Quotes the UE 5.6 writer correctly under paths such as `C:\Program Files`, validates structured
   writer counts, and keeps display punctuation out of generated Unreal identifiers.
-- Blocks remote-controller gadgets on incompatible gameplay families and prevents unsupported
-  regular-cape plus glide-visual combinations on bases without the native paired visibility setup.
+- Blocks remote-controller gadgets on incompatible gameplay families and verifies a replacement
+  glider's own visibility controller before pairing it with a separate regular cape.
+- Supports the proven Batman and Batgirl glide-cape controllers; wingsuits and other glide-only
+  visuals require the regular `Cape` to be removed. Older saved projects receive the same check.
 - Makes Batman glide capes explicit in the Gliders browser and preserves the selected glider
-  donor's traversal animation sets.
+  donor's controller identity and traversal animation sets.
 - Builds package and mod outputs in disposable attempts, publishes only complete nonempty IoStore
   trios, and installs the certified trio transactionally with rollback on failure.
 
