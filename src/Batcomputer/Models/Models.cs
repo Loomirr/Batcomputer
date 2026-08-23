@@ -492,6 +492,12 @@ public sealed class SavedPartGraftDonor
     public string Slot { get; set; } = "";
     public string Context { get; set; } = "";         // playable | cutscene
     public string MeshObjectPath { get; set; } = "";  // disambiguates parts sharing a slot
+    // The glide component's AnimBlueprint is part of its runtime visibility contract, not
+    // merely a preview detail. Persist it so a saved project can reject glide-only drivers
+    // that cannot hide a separate regular cape, even when the live part index is unavailable.
+    public string AnimClassObjectName { get; set; } = "";
+    public string AnimClassPackagePath { get; set; } = "";
+    public string AnimClassObjectPath { get; set; } = "";
     public string Stem { get; set; } = "";
     public string MeshKind { get; set; } = "";
     public string SemanticKind { get; set; } = "";

@@ -207,7 +207,9 @@ public sealed class AnimArchetypeGraftService
             // The glide visual is a component tagged "Glider" - a glide-ONLY skeletal
             // mesh (e.g. Catwoman "Cape" = SK_GA_Wingsuit; Batman "Torso" = SK_CAPE_Glide
             // + ABP_Cape_Glide), separate from the body (CharacterMesh0, never Glider-
-            // tagged), hidden until glide. Repointing it to the wingsuit is safe.
+            // tagged), hidden until glide. Repointing preserves this component identity, but a
+            // replacement is compatible with a separate regular Cape only when its AnimBlueprint
+            // implements the paired visibility contract; GliderService enforces that separately.
             // Prefer a "Cape"-named one; otherwise take the first Glider-tagged one.
             string? fallback = null;
             foreach (var exp in asset.Exports.OfType<NormalExport>())

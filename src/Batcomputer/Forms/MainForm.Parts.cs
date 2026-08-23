@@ -497,13 +497,6 @@ public sealed partial class MainForm
             LoadPartIndexAndRefreshGrid(logIfMissing: false);
         }
 
-        // A glider material takes precedence over old component overrides.
-        if (!string.IsNullOrWhiteSpace(glideComponent) &&
-            ClearMaterialAssignmentsForComponent(project, glideComponent))
-        {
-            AppendLog($"Glider: cleared saved material override on glide component '{glideComponent}' (the glider provides its own material; recolor via the glider decal).");
-        }
-
         var playable = part.Context.Equals("playable", StringComparison.OrdinalIgnoreCase)
             ? part
             : FindCounterpartPart(part, "playable");
@@ -515,6 +508,24 @@ public sealed partial class MainForm
         {
             AppendLog("Glider: no playable or cutscene donor could be matched for that native glider preset.");
             return;
+        }
+
+        if (BlockUnsupportedCapeGliderPairing(
+                project,
+                capeGlideContract,
+                incomingGlider: playable ?? cutscene,
+                addingCosmeticCape: false,
+                windowTitle: "Gliders"))
+        {
+            return;
+        }
+
+        // A glider material takes precedence over old component overrides. Do this only after all
+        // compatibility rejection paths so selecting a blocked preset cannot mutate the project.
+        if (!string.IsNullOrWhiteSpace(glideComponent) &&
+            ClearMaterialAssignmentsForComponent(project, glideComponent))
+        {
+            AppendLog($"Glider: cleared saved material override on glide component '{glideComponent}' (the glider provides its own material; recolor via the glider decal).");
         }
 
         if (!string.IsNullOrWhiteSpace(materialOverride))
@@ -3006,6 +3017,66 @@ public sealed partial class MainForm
         return GliderService.IsNativeGliderPart(part);
     }
 
+    /// <summary>
+    /// A base having separate Cape + Glider components is necessary but not sufficient: the
+    /// replacement glider's AnimBlueprint must also emit the paired-cape visibility signal.
+    /// Wingsuit/Talia/Gordon drivers animate themselves but leave the regular Cape visible.
+    /// Unknown drivers are rejected until their runtime contract is proven.
+    /// </summary>
+    private bool BlockUnsupportedCapeGliderPairing(
+        NativeSuitProject project,
+        AnimArchetypeGraftService.CapeGlideContractStatus baseContract,
+        NativeSuitPartRecord? incomingGlider,
+        bool addingCosmeticCape,
+        string windowTitle)
+    {
+        if (!GliderService.HasCapeAndGliderCombination(
+                project,
+                baseContract,
+                addingCosmeticCape: addingCosmeticCape,
+                addingGlider: incomingGlider is not null))
+        {
+            return false;
+        }
+
+        if (baseContract != AnimArchetypeGraftService.CapeGlideContractStatus.Paired)
+        {
+            var detail = baseContract == AnimArchetypeGraftService.CapeGlideContractStatus.Unknown
+                ? "Batcomputer could not verify that this playable base owns the native two-component cape visibility setup. Refresh the character assets and run the build check before pairing a regular cape with a glider."
+                : "This playable base does not natively own separate regular-cape and glide-visual components. Adding both would leave the regular cape visible during gliding.";
+            Dialog.Error(this,
+                "Cape and glider are not compatible with this base",
+                detail + "\n\nPick the visual base again and choose a verified two-cape playable, or remove the regular Cape before adding this glider.",
+                windowTitle: windowTitle);
+            return true;
+        }
+
+        var hasReplacementGlider = incomingGlider is not null ||
+                                   GliderService.ProjectHasReplacementGlider(project);
+        if (!hasReplacementGlider)
+        {
+            // The untouched glider on a base classified Paired already owns the proven driver.
+            return false;
+        }
+
+        var driver = incomingGlider is not null
+            ? GliderService.PairedCapeDriverForPart(incomingGlider)
+            : GliderService.ProjectReplacementGliderDriver(project);
+        if (driver == PairedCapeVisibilityDriver.PairedCapable)
+        {
+            return false;
+        }
+
+        var driverDetail = driver == PairedCapeVisibilityDriver.GlideOnly
+            ? "This glider uses a glide-only animation blueprint. It animates the glide visual, but it does not send the hide/show signal for a separate regular Cape, so both would appear while gliding."
+            : "Batcomputer could not prove that this glider's animation blueprint drives a separate regular Cape. Unknown visibility drivers are blocked to prevent a double-cape build.";
+        Dialog.Error(this,
+            "Glider cannot hide the regular Cape",
+            driverDetail + "\n\nUse a native glide cape driven by ABP_Cape_Glide (including Batgirl Party), or remove the regular Cape before using this glider.",
+            windowTitle: windowTitle);
+        return true;
+    }
+
     private async Task GraftSelectedPartsAsync()
     {
         EnsureProject();
@@ -3048,26 +3119,15 @@ public sealed partial class MainForm
                 windowTitle: "Parts");
             return;
         }
-        var wouldCombineCapeAndGlider =
-            (isGliderPart || isCosmeticCape) &&
-            GliderService.HasCapeAndGliderCombination(
+        if ((isGliderPart || isCosmeticCape) &&
+            BlockUnsupportedCapeGliderPairing(
                 _currentProject,
                 contract,
+                incomingGlider: isGliderPart ? samplePart : null,
                 addingCosmeticCape: isCosmeticCape,
-                addingGlider: isGliderPart);
-        if (wouldCombineCapeAndGlider)
+                windowTitle: "Parts"))
         {
-            if (contract != AnimArchetypeGraftService.CapeGlideContractStatus.Paired &&
-                contract != AnimArchetypeGraftService.CapeGlideContractStatus.Unknown)
-            {
-                Dialog.Error(this,
-                    "Cape and glider are not compatible with this base",
-                    "This playable base does not natively own separate regular-cape and glide-visual components. " +
-                    "Adding both would leave the regular cape visible during gliding.\n\n" +
-                    "Pick the visual base again, choose a playable donor with the native two-cape setup, then add the cape and glider again.",
-                    windowTitle: "Parts");
-                return;
-            }
+            return;
         }
         if (isGliderPart)
         {
@@ -3245,6 +3305,9 @@ public sealed partial class MainForm
             Slot = part.Slot,
             Context = string.IsNullOrWhiteSpace(part.Context) ? context : part.Context,
             MeshObjectPath = part.MeshObjectPath,
+            AnimClassObjectName = part.AnimClassObjectName,
+            AnimClassPackagePath = part.AnimClassPackagePath,
+            AnimClassObjectPath = part.AnimClassObjectPath,
             Stem = part.Stem,
             MeshKind = part.MeshKind,
             SemanticKind = part.SemanticKind,
@@ -3257,6 +3320,10 @@ public sealed partial class MainForm
             ComponentTags = part.ComponentTags.ToList(),
         };
     }
+
+    internal static SavedPartGraftDonor? PartToDonorForTest(
+        NativeSuitPartRecord? part,
+        string context) => PartToDonor(part, context);
 
     /// <summary>
     /// Re-resolves a saved donor back to a live <see cref="NativeSuitPartRecord"/> from the loaded
@@ -3299,9 +3366,40 @@ public sealed partial class MainForm
         if (!string.IsNullOrWhiteSpace(donor.TemplateComponentClass)) resolved.TemplateComponentClass = donor.TemplateComponentClass;
         if (!string.IsNullOrWhiteSpace(donor.ParentComponentOrVariableName)) resolved.ParentComponentOrVariableName = donor.ParentComponentOrVariableName;
         if (!string.IsNullOrWhiteSpace(donor.AttachSocket)) resolved.AttachSocket = donor.AttachSocket;
+        if (!string.IsNullOrWhiteSpace(donor.AnimClassObjectName)) resolved.AnimClassObjectName = donor.AnimClassObjectName;
+        if (!string.IsNullOrWhiteSpace(donor.AnimClassPackagePath)) resolved.AnimClassPackagePath = donor.AnimClassPackagePath;
+        if (!string.IsNullOrWhiteSpace(donor.AnimClassObjectPath)) resolved.AnimClassObjectPath = donor.AnimClassObjectPath;
         if (donor.ComponentTags is { Count: > 0 }) resolved.ComponentTags = donor.ComponentTags.ToList();
         resolved.RecipeKey = PartRecipeService.BuildRecipeKey(resolved);
         return resolved;
+    }
+
+    /// <summary>
+    /// Projects saved before AnimClass became part of the declarative donor record can recover it
+    /// from the live index during their next successful replay. This makes the package-time cape
+    /// visibility guard independent of a future index refresh.
+    /// </summary>
+    private static void BackfillSavedDonorAnimClass(
+        SavedPartGraftDonor? donor,
+        NativeSuitPartRecord? resolved)
+    {
+        if (donor is null || resolved is null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(donor.AnimClassObjectName))
+        {
+            donor.AnimClassObjectName = resolved.AnimClassObjectName;
+        }
+        if (string.IsNullOrWhiteSpace(donor.AnimClassPackagePath))
+        {
+            donor.AnimClassPackagePath = resolved.AnimClassPackagePath;
+        }
+        if (string.IsNullOrWhiteSpace(donor.AnimClassObjectPath))
+        {
+            donor.AnimClassObjectPath = resolved.AnimClassObjectPath;
+        }
     }
 
     // Public entry: acquire the gate, then run the rebuild. Callers that already hold the gate
@@ -3422,6 +3520,8 @@ public sealed partial class MainForm
         {
             var playable = ResolveLivePart(pg.Playable);
             var cutscene = ResolveLivePart(pg.Cutscene);
+            BackfillSavedDonorAnimClass(pg.Playable, playable);
+            BackfillSavedDonorAnimClass(pg.Cutscene, cutscene);
             var missingPlayable = pg.Playable is not null && playable is null;
             var missingCutscene = pg.Cutscene is not null && cutscene is null;
             if ((pg.Playable is null && pg.Cutscene is null) || missingPlayable || missingCutscene)

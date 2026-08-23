@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.0-beta.6
+
+- Fixed the first declarative rebuild on a fresh suit when no graft-stage folder exists yet.
+- Replacement gliders now have to use a proven paired-cape visibility controller before they can be
+  combined with a separate regular cape.
+- Batman and Batgirl glide-cape controllers remain supported; wingsuits and other glide-only
+  visuals are supported when the regular `Cape` is explicitly removed.
+- Existing unsafe or unverified cape/glider projects are blocked during packaging with actionable
+  guidance, including older saved projects without controller metadata.
+
 ## 0.9.0-beta.5
 
 - Cutscene visuals now always open the gameplay-donor picker, and Catwoman playables resolve their

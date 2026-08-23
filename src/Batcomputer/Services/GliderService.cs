@@ -7,6 +7,18 @@ public enum GliderVisualKind
     CharacterGlider
 }
 
+/// <summary>
+/// Whether a glide component's AnimBlueprint participates in the game's paired regular-cape
+/// visibility contract. Glide-only drivers can animate their own mesh, but do not hide a separate
+/// cosmetic Cape when gliding starts.
+/// </summary>
+public enum PairedCapeVisibilityDriver
+{
+    Unknown,
+    PairedCapable,
+    GlideOnly
+}
+
 public enum GliderMaterialCompatibility
 {
     NativeMatch,
@@ -96,10 +108,146 @@ public static class GliderService
                donor.Stem.Contains("Cape", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Classifies the runtime visibility driver from the indexed donor record. The two confirmed
+    /// paired-capable AnimBlueprints are the shared ABP_Cape_Glide family (including the dedicated
+    /// Batgirl Party variant). Wingsuits and the Talia/Gordon character gliders are glide-only.
+    /// Anything else remains unknown so callers can fail conservatively.
+    /// </summary>
+    public static PairedCapeVisibilityDriver PairedCapeDriverForPart(NativeSuitPartRecord? part)
+    {
+        if (part is null)
+        {
+            return PairedCapeVisibilityDriver.Unknown;
+        }
+
+        var fromAnimClass = ClassifyPairedCapeDriver(
+            part.AnimClassObjectName,
+            part.AnimClassPackagePath,
+            part.AnimClassObjectPath);
+        if (fromAnimClass != PairedCapeVisibilityDriver.Unknown)
+        {
+            return fromAnimClass;
+        }
+
+        // Legacy/synthesized index rows can lack AnimClass metadata. Mesh and donor package
+        // identity provide a conservative fallback for the five native glide families.
+        return ClassifyLegacyPairedCapeDriver(
+            part.MeshObjectName,
+            part.MeshPackagePath,
+            part.MeshObjectPath,
+            part.CharacterFolder,
+            part.SourcePackagePath,
+            part.Stem);
+    }
+
+    /// <summary>Saved-project form of <see cref="PairedCapeDriverForPart"/>.</summary>
+    public static PairedCapeVisibilityDriver PairedCapeDriverForDonor(SavedPartGraftDonor? donor)
+    {
+        if (donor is null)
+        {
+            return PairedCapeVisibilityDriver.Unknown;
+        }
+
+        var fromAnimClass = ClassifyPairedCapeDriver(
+            donor.AnimClassObjectName,
+            donor.AnimClassPackagePath,
+            donor.AnimClassObjectPath);
+        if (fromAnimClass != PairedCapeVisibilityDriver.Unknown)
+        {
+            return fromAnimClass;
+        }
+
+        return ClassifyLegacyPairedCapeDriver(
+            donor.MeshObjectPath,
+            donor.SourcePackagePath,
+            donor.Stem,
+            donor.TemplatePackagePath,
+            donor.TemplateUasset);
+    }
+
+    /// <summary>
+    /// True when the project replaces the gameplay donor's native glide component rather than
+    /// simply retaining a proven native paired setup.
+    /// </summary>
+    public static bool ProjectHasReplacementGlider(NativeSuitProject project) =>
+        project.PartGrafts.Any(graft => graft.IsGlider) ||
+        project.GliderGrafted ||
+        (!string.IsNullOrWhiteSpace(project.GliderType) &&
+         !project.GliderType.Trim().Equals("base", StringComparison.OrdinalIgnoreCase)) ||
+        !string.IsNullOrWhiteSpace(project.GliderAnimLas) ||
+        !string.IsNullOrWhiteSpace(project.GliderAnimMas);
+
+    /// <summary>
+    /// Resolves the saved replacement glider's paired-cape driver. New projects use persisted
+    /// AnimClass identity; old projects fall back to their donor mesh and glider recipe strings.
+    /// </summary>
+    public static PairedCapeVisibilityDriver ProjectReplacementGliderDriver(NativeSuitProject project)
+    {
+        // Declarative rebuild and the UI treat the last saved glider as active. Legacy projects
+        // can contain duplicates, so validate the same record that will actually be replayed.
+        var graft = project.PartGrafts.LastOrDefault(candidate => candidate.IsGlider);
+        if (graft?.Playable is not null)
+        {
+            // Runtime traversal uses the playable BP. Do not let a cutscene donor make an unknown
+            // playable driver look safe, and do not promote it from a display-name fallback.
+            return PairedCapeDriverForDonor(graft.Playable);
+        }
+        if (graft?.Cutscene is not null)
+        {
+            return PairedCapeDriverForDonor(graft.Cutscene);
+        }
+
+        // Very old projects can express glider intent without a saved donor record.
+        return ClassifyLegacyPairedCapeDriver(
+            project.GliderType,
+            project.GliderAnimLas,
+            project.GliderAnimMas);
+    }
+
+    /// <summary>Whether a declarative remove-component rule targets a component, with or without
+    /// the UI's material-slot suffix (for example Cape and Cape:0).</summary>
+    public static bool ProjectExplicitlyRemovesComponent(NativeSuitProject project, string component)
+    {
+        if (string.IsNullOrWhiteSpace(component))
+        {
+            return false;
+        }
+
+        return project.Requirements.Any(requirement =>
+        {
+            if (!requirement.Kind.Equals("remove-component", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var target = requirement.TargetComponent?.Trim() ?? "";
+            var colon = target.LastIndexOf(':');
+            if (colon > 0)
+            {
+                target = target[..colon];
+            }
+            return target.Equals(component.Trim(), StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
     public static bool ProjectHasNativeCosmeticCapeGraft(NativeSuitProject project) =>
         project.PartGrafts.Any(graft =>
-            !graft.IsGlider &&
-            (IsCosmeticCapeAttachment(graft.Playable) || IsCosmeticCapeAttachment(graft.Cutscene)));
+        {
+            if (graft.IsGlider ||
+                (!IsCosmeticCapeAttachment(graft.Playable) && !IsCosmeticCapeAttachment(graft.Cutscene)))
+            {
+                return false;
+            }
+
+            var component = !string.IsNullOrWhiteSpace(graft.ResolvedComponent)
+                ? graft.ResolvedComponent
+                : !string.IsNullOrWhiteSpace(graft.Slot)
+                    ? graft.Slot
+                    : graft.Playable?.Slot ?? graft.Cutscene?.Slot ?? "";
+            return string.IsNullOrWhiteSpace(component) ||
+                   !ProjectExplicitlyRemovesComponent(project, component);
+        });
 
     /// <summary>
     /// Custom static meshes are additive component shells. Unlike a native cape graft, they do not
@@ -138,12 +286,77 @@ public static class GliderService
         bool addingCosmeticCape = false,
         bool addingGlider = false)
     {
-        var baseHasCosmeticCape = baseContract is
+        var baseHasCosmeticCape = (baseContract is
             AnimArchetypeGraftService.CapeGlideContractStatus.Paired or
-            AnimArchetypeGraftService.CapeGlideContractStatus.CapeOnly;
+            AnimArchetypeGraftService.CapeGlideContractStatus.CapeOnly) &&
+            !ProjectExplicitlyRemovesComponent(project, "Cape");
         var hasCosmeticCape = baseHasCosmeticCape || addingCosmeticCape || ProjectHasCosmeticCape(project);
         var hasGlider = ProjectHasGlider(project, baseContract, addingGlider);
         return hasCosmeticCape && hasGlider;
+    }
+
+    private static PairedCapeVisibilityDriver ClassifyPairedCapeDriver(params string?[] values)
+    {
+        var identities = values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(IdentityLeaf)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .ToList();
+        var paired = identities.Any(identity =>
+            identity.Equals("ABP_Cape_Glide", StringComparison.OrdinalIgnoreCase) ||
+            identity.Equals("ABP_Cape_Glide_C", StringComparison.OrdinalIgnoreCase) ||
+            identity.Equals("ABP_Cape_Glide_Batgirl_Party", StringComparison.OrdinalIgnoreCase) ||
+            identity.Equals("ABP_Cape_Glide_Batgirl_Party_C", StringComparison.OrdinalIgnoreCase));
+        var glideOnly = identities.Any(identity =>
+            identity.Equals("ABP_Wingsuit", StringComparison.OrdinalIgnoreCase) ||
+            identity.Equals("ABP_Wingsuit_C", StringComparison.OrdinalIgnoreCase) ||
+            identity.Equals("ABP_TaliaGlider", StringComparison.OrdinalIgnoreCase) ||
+            identity.Equals("ABP_TaliaGlider_C", StringComparison.OrdinalIgnoreCase) ||
+            identity.Equals("ABP_GordonGlider", StringComparison.OrdinalIgnoreCase) ||
+            identity.Equals("ABP_GordonGlider_C", StringComparison.OrdinalIgnoreCase));
+        if (paired && !glideOnly)
+        {
+            return PairedCapeVisibilityDriver.PairedCapable;
+        }
+        if (glideOnly && !paired)
+        {
+            return PairedCapeVisibilityDriver.GlideOnly;
+        }
+        return PairedCapeVisibilityDriver.Unknown;
+    }
+
+    private static string IdentityLeaf(string? value)
+    {
+        var identity = value?.Trim().Trim('\'', '"') ?? "";
+        var dot = identity.LastIndexOf('.');
+        var slash = Math.Max(identity.LastIndexOf('/'), identity.LastIndexOf('\\'));
+        var separator = Math.Max(dot, slash);
+        if (separator >= 0 && separator + 1 < identity.Length)
+        {
+            identity = identity[(separator + 1)..];
+        }
+        return identity.Trim().Trim('\'', '"');
+    }
+
+    private static PairedCapeVisibilityDriver ClassifyLegacyPairedCapeDriver(params string?[] values)
+    {
+        var identity = string.Join(" ", values.Where(value => !string.IsNullOrWhiteSpace(value)));
+        if (identity.Contains("Wingsuit", StringComparison.OrdinalIgnoreCase) ||
+            identity.Contains("Talia", StringComparison.OrdinalIgnoreCase) ||
+            identity.Contains("Gordon", StringComparison.OrdinalIgnoreCase) ||
+            identity.Contains("Catwoman", StringComparison.OrdinalIgnoreCase) ||
+            identity.Contains("CatWoman", StringComparison.OrdinalIgnoreCase) ||
+            identity.Contains("Nightwing", StringComparison.OrdinalIgnoreCase))
+        {
+            return PairedCapeVisibilityDriver.GlideOnly;
+        }
+        if (identity.Contains("CAPE_Glide", StringComparison.OrdinalIgnoreCase) ||
+            identity.Contains("glide cape", StringComparison.OrdinalIgnoreCase) ||
+            identity.Contains("Batgirl Party", StringComparison.OrdinalIgnoreCase))
+        {
+            return PairedCapeVisibilityDriver.PairedCapable;
+        }
+        return PairedCapeVisibilityDriver.Unknown;
     }
 
     public static IEnumerable<NativeSuitPartRecord> NativeGliderParts(NativeSuitPartIndex? partIndex, string search)

@@ -63,6 +63,9 @@ internal static class ReleaseRegressionChecks
             MeshKind = "SkeletalMesh",
             MeshObjectName = "SK_GA_Wingsuit_Nightwing",
             MeshPackagePath = "/Game/Models/Gadgets/GA_Wingsuit_Nightwing/SK_GA_Wingsuit_Nightwing",
+            AnimClassObjectName = "ABP_Wingsuit_C",
+            AnimClassPackagePath = "/Game/Models/Gadgets/GA_Wingsuit/ABP_Wingsuit",
+            AnimClassObjectPath = "/Game/Models/Gadgets/GA_Wingsuit/ABP_Wingsuit.ABP_Wingsuit_C",
             ComponentTags = new List<string> { "Glider" },
         };
         Check(
@@ -73,6 +76,90 @@ internal static class ReleaseRegressionChecks
         Check(
             GliderService.IsNativeGliderPart(wingsuit) && !GliderService.IsCosmeticCapeAttachment(wingsuit),
             "a wingsuit remains a runtime glider visual",
+            failures,
+            output);
+        var sharedCapeDriver = new NativeSuitPartRecord
+        {
+            AnimClassObjectName = "ABP_Cape_Glide_C"
+        };
+        var batgirlPartyCapeDriver = new NativeSuitPartRecord
+        {
+            AnimClassObjectName = "ABP_Cape_Glide_Batgirl_Party_C"
+        };
+        Check(
+            GliderService.PairedCapeDriverForPart(sharedCapeDriver) == PairedCapeVisibilityDriver.PairedCapable &&
+            GliderService.PairedCapeDriverForPart(batgirlPartyCapeDriver) == PairedCapeVisibilityDriver.PairedCapable &&
+            GliderService.PairedCapeDriverForPart(wingsuit) == PairedCapeVisibilityDriver.GlideOnly &&
+            GliderService.PairedCapeDriverForPart(new NativeSuitPartRecord { AnimClassObjectName = "ABP_TaliaGlider_C" }) == PairedCapeVisibilityDriver.GlideOnly &&
+            GliderService.PairedCapeDriverForPart(new NativeSuitPartRecord { AnimClassObjectName = "ABP_GordonGlider_C" }) == PairedCapeVisibilityDriver.GlideOnly &&
+            GliderService.PairedCapeDriverForPart(new NativeSuitPartRecord { AnimClassObjectName = "ABP_UnverifiedGlider_C" }) == PairedCapeVisibilityDriver.Unknown &&
+            GliderService.PairedCapeDriverForPart(new NativeSuitPartRecord { AnimClassObjectName = "ABP_Cape_Glide_Experimental_C" }) == PairedCapeVisibilityDriver.Unknown &&
+            GliderService.PairedCapeDriverForPart(new NativeSuitPartRecord
+            {
+                AnimClassPackagePath = "/Game/Mods/ABP_Cape_Glide/ABP_Experimental",
+                AnimClassObjectPath = "/Game/Mods/ABP_Cape_Glide/ABP_Experimental.ABP_Experimental_C"
+            }) == PairedCapeVisibilityDriver.Unknown,
+            "paired-cape visibility drivers allow only the proven shared and Batgirl Party cape AnimBlueprints",
+            failures,
+            output);
+        var savedWingsuitDonor = MainForm.PartToDonorForTest(wingsuit, "playable");
+        Check(
+            savedWingsuitDonor is not null &&
+            savedWingsuitDonor.AnimClassObjectName == wingsuit.AnimClassObjectName &&
+            savedWingsuitDonor.AnimClassPackagePath == wingsuit.AnimClassPackagePath &&
+            savedWingsuitDonor.AnimClassObjectPath == wingsuit.AnimClassObjectPath &&
+            GliderService.PairedCapeDriverForDonor(savedWingsuitDonor) == PairedCapeVisibilityDriver.GlideOnly,
+            "saved part grafts persist the AnimClass identity needed for cape/glider release safety",
+            failures,
+            output);
+        Check(
+            GliderService.PairedCapeDriverForDonor(new SavedPartGraftDonor
+            {
+                MeshObjectPath = "/Game/Models/Gadgets/GA_Wingsuit_CatWoman/SK_GA_Wingsuit_CatWoman.SK_GA_Wingsuit_CatWoman"
+            }) == PairedCapeVisibilityDriver.GlideOnly &&
+            GliderService.PairedCapeDriverForDonor(new SavedPartGraftDonor
+            {
+                MeshObjectPath = "/Game/Characters/Attachments/Cape/SK_CAPE_Glide.SK_CAPE_Glide"
+            }) == PairedCapeVisibilityDriver.PairedCapable,
+            "legacy saved gliders recover a conservative visibility-driver classification from mesh identity",
+            failures,
+            output);
+        var duplicateGliderProject = new NativeSuitProject
+        {
+            PartGrafts =
+            [
+                new SavedPartGraft
+                {
+                    IsGlider = true,
+                    Playable = new SavedPartGraftDonor { AnimClassObjectName = "ABP_Wingsuit_C" }
+                },
+                new SavedPartGraft
+                {
+                    IsGlider = true,
+                    Playable = new SavedPartGraftDonor { AnimClassObjectName = "ABP_Cape_Glide_C" }
+                }
+            ]
+        };
+        Check(
+            GliderService.ProjectReplacementGliderDriver(duplicateGliderProject) == PairedCapeVisibilityDriver.PairedCapable,
+            "legacy duplicate glider lists validate the last graft replayed by the declarative rebuild",
+            failures,
+            output);
+        var unverifiedDonorProject = new NativeSuitProject
+        {
+            GliderType = "native:Unverified glide cape",
+            PartGrafts =
+            [
+                new SavedPartGraft
+                {
+                    IsGlider = true,
+                    Playable = new SavedPartGraftDonor { AnimClassObjectName = "ABP_UnverifiedGlider_C" }
+                }
+            ]
+        };
+        Check(
+            GliderService.ProjectReplacementGliderDriver(unverifiedDonorProject) == PairedCapeVisibilityDriver.Unknown,
+            "an unverified saved donor cannot be promoted to paired-capable by a glider display label",
             failures,
             output);
         var savedCapeProject = new NativeSuitProject
@@ -362,6 +449,36 @@ internal static class ReleaseRegressionChecks
             "native and grafted cape/glider combinations use the same compatibility gate",
             failures,
             output);
+        var pairedBaseWithRemovedCape = new NativeSuitProject
+        {
+            Requirements =
+            [
+                new NativeSuitRequirement
+                {
+                    Kind = "remove-component",
+                    TargetComponent = "Cape:0"
+                }
+            ],
+            PartGrafts =
+            [
+                new SavedPartGraft
+                {
+                    IsGlider = true,
+                    Playable = new SavedPartGraftDonor
+                    {
+                        MeshObjectPath = "/Game/Models/Gadgets/GA_Wingsuit_CatWoman/SK_GA_Wingsuit_CatWoman.SK_GA_Wingsuit_CatWoman"
+                    }
+                }
+            ]
+        };
+        Check(
+            GliderService.ProjectExplicitlyRemovesComponent(pairedBaseWithRemovedCape, "Cape") &&
+            !GliderService.HasCapeAndGliderCombination(
+                pairedBaseWithRemovedCape,
+                AnimArchetypeGraftService.CapeGlideContractStatus.Paired),
+            "an explicitly removed native Cape permits a glide-only replacement without a double-cape false positive",
+            failures,
+            output);
         var additiveCapeOnPairedBase = new NativeSuitProject
         {
             CustomStaticMeshes = [new CustomStaticMeshImport { Target = "Cape" }]
@@ -428,6 +545,56 @@ internal static class ReleaseRegressionChecks
                 finding.Severity == "ERROR" &&
                 finding.Message.Contains("custom static mesh attached to Cape", StringComparison.Ordinal)),
             "release validation blocks an additive custom Cape combined with a grafted glider",
+            failures,
+            output);
+        var legacyDoubleCapeProject = new NativeSuitProject
+        {
+            PawnTag = "Pawns.Playable.Batcomputer.LegacyDoubleCapeRegression",
+            UseCustomArchetype = true,
+            PartGrafts =
+            [
+                new SavedPartGraft
+                {
+                    Slot = "Cape",
+                    Playable = new SavedPartGraftDonor
+                    {
+                        Slot = "Cape",
+                        ComponentTags = ["TtCharacterAsset.Cape", "Cape"]
+                    }
+                },
+                new SavedPartGraft
+                {
+                    Slot = "Torso",
+                    IsGlider = true,
+                    // Deliberately omits the new AnimClass fields to exercise the saved-project
+                    // fallback used by beta-era recipes.
+                    Playable = new SavedPartGraftDonor
+                    {
+                        MeshObjectPath = "/Game/Models/Gadgets/GA_Wingsuit_CatWoman/SK_GA_Wingsuit_CatWoman.SK_GA_Wingsuit_CatWoman"
+                    }
+                }
+            ]
+        };
+        var legacyDoubleCapeFindings = new StageValidationService(Path.GetTempPath(), null)
+            .Validate(legacyDoubleCapeProject);
+        Check(
+            legacyDoubleCapeFindings.Any(finding =>
+                finding.Severity == "ERROR" &&
+                finding.Message.Contains("animation blueprint is glide-only", StringComparison.Ordinal)),
+            "release validation package-blocks legacy saved wingsuit projects that retain a regular Cape",
+            failures,
+            output);
+        legacyDoubleCapeProject.Requirements.Add(new NativeSuitRequirement
+        {
+            Kind = "remove-component",
+            TargetComponent = "Cape:0"
+        });
+        var removedLegacyCapeFindings = new StageValidationService(Path.GetTempPath(), null)
+            .Validate(legacyDoubleCapeProject);
+        Check(
+            !removedLegacyCapeFindings.Any(finding =>
+                finding.Message.Contains("animation blueprint is glide-only", StringComparison.Ordinal)),
+            "release validation accepts the legacy glide-only project once its native Cape is explicitly removed",
             failures,
             output);
         var gliderWithoutEquipment = new NativeSuitProject

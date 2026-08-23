@@ -406,11 +406,28 @@ public sealed class StageValidationService
         }
         else if (GliderService.HasCapeAndGliderCombination(project, capeGlideContract))
         {
-            if (capeGlideContract == AnimArchetypeGraftService.CapeGlideContractStatus.Unknown)
+            var replacementDriver = GliderService.ProjectHasReplacementGlider(project)
+                ? GliderService.ProjectReplacementGliderDriver(project)
+                : PairedCapeVisibilityDriver.PairedCapable;
+            if (replacementDriver == PairedCapeVisibilityDriver.GlideOnly)
             {
-                findings.Add(new("WARN",
-                    "This suit combines a regular cape with a glide visual, but Batcomputer could not inspect the playable base's cape visibility contract. " +
-                    "Refresh the character assets and run the build check again."));
+                findings.Add(new("ERROR",
+                    "This suit combines a regular Cape with a replacement glider whose animation blueprint is glide-only. " +
+                    "It animates the glide visual but does not hide a separate regular Cape, so both would appear while gliding. " +
+                    "Use an ABP_Cape_Glide visual (including Batgirl Party), or explicitly remove the regular Cape before packaging."));
+            }
+            else if (replacementDriver == PairedCapeVisibilityDriver.Unknown)
+            {
+                findings.Add(new("ERROR",
+                    "This suit combines a regular Cape with a replacement glider whose paired-cape visibility driver could not be verified. " +
+                    "Packaging is blocked conservatively to prevent a double-cape build. Re-apply a current indexed glider preset, " +
+                    "use an ABP_Cape_Glide visual, or explicitly remove the regular Cape."));
+            }
+            else if (capeGlideContract == AnimArchetypeGraftService.CapeGlideContractStatus.Unknown)
+            {
+                findings.Add(new("ERROR",
+                    "This suit combines a regular Cape with a glide visual, but Batcomputer could not inspect the playable base's cape visibility contract. " +
+                    "Packaging is blocked until the character assets are refreshed and the base is verified."));
             }
             else if (capeGlideContract != AnimArchetypeGraftService.CapeGlideContractStatus.Paired)
             {

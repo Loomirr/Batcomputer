@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.0-beta.6 — 2026-08-22
+
+Fresh-suit rebuild and cape/glider compatibility hotfixes.
+
+- Fixes the first declarative rebuild of a fresh suit failing when its generated graft stage does
+  not exist yet.
+- Verifies the replacement glider's animation controller, not just the base component layout,
+  before pairing it with a separate regular cape.
+- Supports the proven Batman and Batgirl glide-cape visibility controllers, which hide the regular
+  cape during gliding and restore it after landing.
+- Allows wingsuits and other glide-only visuals when the regular `Cape` is explicitly removed, and
+  blocks glide-only or unverified controllers when that cape remains.
+- Persists controller identity in new part-graft recipes, safely classifies older projects, and
+  prevents a rejected glider selection from changing the suit.
+
 ## 0.9.0-beta.5 — 2026-08-22
 
 Donor selection, declarative staging, and registry reliability fixes.

@@ -10,6 +10,9 @@
 - Game-material templates and face tools.
 - Character, mask, normal/packed, and verified UI texture cooking.
 - Supported equipment, glider, and animation-data grafting.
+- A separate regular cape plus a replacement glide cape when the indexed animation controller uses
+  the game's verified paired-cape visibility contract. Glide-only wingsuits and character gliders
+  are supported when the regular `Cape` is removed.
 - Custom OBJ static-mesh attachments.
 - Direct installation, build checks, and installable ZIPs.
 
@@ -20,6 +23,8 @@
 - Arbitrary new gameplay powers or code-driven character mechanics.
 - Physical collectible placement in levels.
 - Perfect shader/lighting parity between the 3D viewer and the game.
+- Combining a separate regular cape with a wingsuit or other glide-only controller. Those
+  controllers animate their glide visual but cannot hide and restore another cape.
 
 ## Content that needs extra testing
 
