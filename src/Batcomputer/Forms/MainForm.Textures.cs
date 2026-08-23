@@ -1803,7 +1803,7 @@ public sealed partial class MainForm
             return textures[0];
         }
 
-        using var form = new Form
+        using var form = new AdaptiveDialogForm
         {
             Text = "Pick generated texture",
             StartPosition = FormStartPosition.CenterParent,

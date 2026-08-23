@@ -1,7 +1,7 @@
 namespace Batcomputer;
 
 /// <summary>Edits a project-owned OBJ static attachment before it is staged.</summary>
-public sealed class CustomStaticMeshImportDialog : Form
+public sealed class CustomStaticMeshImportDialog : AdaptiveForm
 {
     private readonly TextBox _name = new();
     private readonly TextBox _source = new() { ReadOnly = true };
@@ -105,7 +105,9 @@ public sealed class CustomStaticMeshImportDialog : Form
 
         var fields = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill,
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 3,
             RowCount = 12,
             BackColor = Color.Transparent,
@@ -124,7 +126,7 @@ public sealed class CustomStaticMeshImportDialog : Form
         fields.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         fields.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         fields.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
-        fields.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        fields.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         card.Controls.Add(fields);
 
         _name.Text = existing?.DisplayName ?? "";

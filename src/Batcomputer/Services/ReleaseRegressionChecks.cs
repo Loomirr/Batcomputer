@@ -809,6 +809,7 @@ internal static class ReleaseRegressionChecks
             new Rectangle(-1000, -400, 5200, 2600),
             new Rectangle(0, 0, 1920, 1080),
             new Size(1440, 960),
+            new Size(1800, 1000),
             recenter: true,
             edgeGap: 12);
         Check(
@@ -821,11 +822,44 @@ internal static class ReleaseRegressionChecks
             new Rectangle(0, 0, 5000, 1800),
             new Rectangle(0, 0, 3840, 1080),
             new Size(1440, 960),
+            new Size(1800, 1000),
             recenter: true,
             edgeGap: 12);
         Check(
             spannedDesktop.Width <= 1800 && spannedDesktop.Height <= 1000,
             "combined-monitor work areas cannot create a two-screen window",
+            failures,
+            output);
+        var highDpiDesktop = MainForm.ConstrainWindowBoundsForTest(
+            new Rectangle(80, 80, 3200, 1700),
+            new Rectangle(0, 0, 3840, 2160),
+            new Size(1920, 1280),
+            new Size(3600, 2000),
+            recenter: true,
+            edgeGap: 24);
+        Check(
+            highDpiDesktop.Width >= 1920 && highDpiDesktop.Height >= 1280,
+            "startup caps remain DPI-scaled above the logical minimum",
+            failures,
+            output);
+
+        Check(
+            AdaptiveWindowManager.ResizableBorderStyleForTest(FormBorderStyle.FixedDialog) == FormBorderStyle.Sizable &&
+            AdaptiveWindowManager.ResizableBorderStyleForTest(FormBorderStyle.FixedSingle) == FormBorderStyle.Sizable &&
+            AdaptiveWindowManager.ResizableBorderStyleForTest(FormBorderStyle.FixedToolWindow) == FormBorderStyle.SizableToolWindow,
+            "fixed app dialogs are upgraded to resizable window chrome",
+            failures,
+            output);
+        var compactWindow = AdaptiveWindowManager.ConstrainWindowBoundsForTest(
+            new Rectangle(-200, -100, 1500, 1100),
+            new Rectangle(0, 0, 800, 600),
+            new Size(920, 700),
+            edgeGap: 12);
+        Check(
+            new Rectangle(0, 0, 800, 600).Contains(compactWindow.Bounds) &&
+            compactWindow.MinimumSize.Width <= compactWindow.Bounds.Width &&
+            compactWindow.MinimumSize.Height <= compactWindow.Bounds.Height,
+            "resizable windows lower oversized minimums to fit a small display",
             failures,
             output);
 

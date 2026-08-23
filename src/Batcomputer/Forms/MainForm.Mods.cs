@@ -1186,7 +1186,7 @@ public sealed partial class MainForm
             return Array.Empty<string>();
         }
 
-        using var dlg = new System.Windows.Forms.Form
+        using var dlg = new AdaptiveDialogForm
         {
             Text = $"Suits in {modId}",
             Width = 460,

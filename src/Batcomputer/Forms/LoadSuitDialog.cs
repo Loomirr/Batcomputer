@@ -1,7 +1,7 @@
 namespace Batcomputer;
 
 /// <summary>Modal picker listing saved suit projects to reopen.</summary>
-public sealed partial class LoadSuitDialog : Form
+public sealed partial class LoadSuitDialog : AdaptiveForm
 {
     private readonly ListView _list = new();
     private readonly List<SuitProjectService.ProjectSummary> _projects = new();
@@ -72,6 +72,13 @@ public sealed partial class LoadSuitDialog : Form
         _count.Font = Theme.BodyStrong;
         _count.ForeColor = Theme.OnDarkMuted;
         header.Controls.AddRange(new Control[] { rail, overline, title, subtitle, _count });
+        header.ClientSizeChanged += (_, _) =>
+        {
+            var countWidth = Math.Clamp(header.ClientSize.Width / 3, 110, 190);
+            _count.SetBounds(Math.Max(14, header.ClientSize.Width - countWidth), 15, countWidth, 28);
+            title.Width = Math.Max(80, _count.Left - title.Left - 8);
+            subtitle.Width = Math.Max(80, header.ClientSize.Width - subtitle.Left);
+        };
         root.Controls.Add(header, 0, 0);
 
         _search.Dock = DockStyle.Fill;
@@ -96,7 +103,17 @@ public sealed partial class LoadSuitDialog : Form
         _list.MouseDown += OnListMouseDown;
         root.Controls.Add(_list, 0, 2);
 
-        var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(0, 8, 0, 0) };
+        var buttons = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 3,
+            RowCount = 1,
+            Padding = new Padding(0, 8, 0, 0),
+        };
+        buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 128));
+        buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 98));
+        buttons.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         var cancel = new Button { Text = "Close", Width = 90, Height = 30, DialogResult = DialogResult.Cancel };
         Theme.StyleDarkButton(cancel);
         var open = new Button { Text = "Open suit", Width = 120, Height = 30 };
@@ -104,12 +121,17 @@ public sealed partial class LoadSuitDialog : Form
         open.Click += (_, _) => Accept();
         var hint = new Label
         {
-            AutoSize = false, Width = 390, Height = 24, Margin = new Padding(0, 4, 0, 0),
+            AutoSize = false, Dock = DockStyle.Fill, Height = 24, Margin = new Padding(0, 4, 8, 0),
+            AutoEllipsis = true,
             Text = "Right-click a suit to delete it from the tool or game.", Font = Theme.Caption, ForeColor = Theme.OnDarkMuted,
         };
-        buttons.Controls.Add(cancel);
-        buttons.Controls.Add(open);
-        buttons.Controls.Add(hint);
+        open.Dock = DockStyle.Fill;
+        open.Margin = new Padding(4, 0, 4, 0);
+        cancel.Dock = DockStyle.Fill;
+        cancel.Margin = Padding.Empty;
+        buttons.Controls.Add(hint, 0, 0);
+        buttons.Controls.Add(open, 1, 0);
+        buttons.Controls.Add(cancel, 2, 0);
         root.Controls.Add(buttons, 0, 3);
         CancelButton = cancel;
         AcceptButton = open;

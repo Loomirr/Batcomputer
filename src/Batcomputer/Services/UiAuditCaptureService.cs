@@ -118,8 +118,8 @@ internal static class UiAuditCaptureService
                 }), 150),
                 ("Asset refresh", () => new AssetRefreshProgressForm(), 150),
                 ("Asset refresh - first run", () => new AssetRefreshProgressForm(firstRun: true), 150),
-                ("Base character picker", () => new BaseCharacterPicker(), 200),
-                ("Gameplay donor picker", () => new BaseCharacterPicker(playablesOnly: true), 200),
+                ("Base character picker", () => new BaseCharacterPicker(), 800),
+                ("Gameplay donor picker", () => new BaseCharacterPicker(playablesOnly: true), 400),
                 ("Manual base wizard", () => new BaseWizard("UI Audit Suit", "UiAudit", "C:\\Audit\\Playable.uasset", "C:\\Audit\\Cutscene.uasset", "C:\\Audit\\DCMD.uasset"), 150),
                 ("Custom mesh - import", () => new CustomStaticMeshImportDialog(null, "C:\\Audit\\sample-cowl.obj"), 150),
                 ("Custom mesh - edit", () => new CustomStaticMeshImportDialog(sampleMesh, "C:\\Audit\\sample-cowl.obj"), 150),
@@ -198,6 +198,7 @@ internal static class UiAuditCaptureService
                 form.SelectUiAuditSurface(surface);
                 Settle(180);
                 CaptureVisibleForm(form, $"Main - {surface}", outputRoot, captures, findings);
+                ValidateResizeBehavior(form, $"Main - {surface}", findings);
             }
             catch (Exception ex)
             {
@@ -223,6 +224,7 @@ internal static class UiAuditCaptureService
             form.SelectUiAuditTab(index);
             Settle(100);
             CaptureVisibleForm(form, $"Settings - {name}", outputRoot, captures, findings);
+            ValidateResizeBehavior(form, $"Settings - {name}", findings);
         }
         form.Close();
         Settle(60);
@@ -246,6 +248,7 @@ internal static class UiAuditCaptureService
             ShowAndSettle(form, waitMs);
             Console.WriteLine($"UI audit: {name} - capturing");
             CaptureVisibleForm(form, name, outputRoot, captures, findings);
+            ValidateResizeBehavior(form, name, findings);
             form.Close();
             Settle(60);
             Console.WriteLine($"UI audit: {name} - complete");
@@ -263,7 +266,7 @@ internal static class UiAuditCaptureService
         List<AuditFinding> findings,
         ISet<Type> capturedFormTypes)
     {
-        using var owner = new Form
+        using var owner = new AdaptiveDialogForm
         {
             StartPosition = FormStartPosition.Manual,
             Location = new Point(20, 20),
@@ -271,13 +274,17 @@ internal static class UiAuditCaptureService
             ShowInTaskbar = false,
             Opacity = 0.01,
         };
+        AdaptiveWindowManager.Prepare(owner);
         owner.Show();
+        AdaptiveWindowManager.Configure(owner);
         Settle(40);
         using var progress = new ProgressDialog(owner, "Packaging UI Audit Mod", 4);
+        AdaptiveWindowManager.Configure(progress);
         capturedFormTypes.Add(typeof(ProgressDialog));
         progress.Advance(2, "Staging representative assets…");
         Settle(150);
         CaptureVisibleForm(progress, "Progress dialog", outputRoot, captures, findings);
+        ValidateResizeBehavior(progress, "Progress dialog", findings);
         progress.Close();
         owner.Close();
         Settle(60);
@@ -288,7 +295,11 @@ internal static class UiAuditCaptureService
         var working = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
         form.StartPosition = FormStartPosition.Manual;
         form.Location = new Point(working.Left + 12, working.Top + 12);
+        // Match AdaptiveForm's two-phase setup: chrome before handle creation, then monitor/DPI
+        // fitting after WinForms has scaled the controls.
+        AdaptiveWindowManager.Prepare(form);
         form.Show();
+        AdaptiveWindowManager.Configure(form);
         form.Activate();
         form.PerformLayout();
         PerformLayoutRecursive(form);
@@ -296,6 +307,8 @@ internal static class UiAuditCaptureService
         form.PerformLayout();
         PerformLayoutRecursive(form);
         Settle(60);
+        form.Invalidate(true);
+        form.Update();
     }
 
     private static void Settle(int milliseconds)
@@ -385,25 +398,36 @@ internal static class UiAuditCaptureService
 
     private static void ValidateLayout(Form form, string windowName, ICollection<AuditFinding> findings)
     {
+        if (!AdaptiveWindowManager.IsResizableBorderForTest(form.FormBorderStyle))
+        {
+            findings.Add(new AuditFinding(windowName, "ERROR", $"Window border is not resizable ({form.FormBorderStyle})."));
+        }
+        if (form.ControlBox && !form.MaximizeBox)
+        {
+            findings.Add(new AuditFinding(windowName, "ERROR", "Resizable window does not expose a maximize action."));
+        }
+
         var formClient = new Rectangle(Point.Empty, form.ClientSize);
         var buttons = Descendants(form).OfType<Button>().Where(IsActuallyVisible).ToList();
         foreach (var button in buttons)
         {
-            if (HasAutoScrollAncestor(button))
+            if (ScrollableAncestors(button).Count > 0)
             {
-                continue;
+                ValidateScrollReachability(button, windowName, findings);
             }
-
-            var rect = form.RectangleToClient(button.RectangleToScreen(button.ClientRectangle));
-            if (rect.Width < 1 || rect.Height < 1 || !formClient.IntersectsWith(rect))
+            else
             {
-                findings.Add(new AuditFinding(windowName, "ERROR", $"Button '{button.Text}' is outside the visible client area ({rect})."));
-                continue;
-            }
+                var rect = form.RectangleToClient(button.RectangleToScreen(button.ClientRectangle));
+                if (rect.Width < 1 || rect.Height < 1 || !formClient.IntersectsWith(rect))
+                {
+                    findings.Add(new AuditFinding(windowName, "ERROR", $"Button '{button.Text}' is outside the visible client area ({rect})."));
+                    continue;
+                }
 
-            if (rect.Left < -1 || rect.Top < -1 || rect.Right > formClient.Right + 1 || rect.Bottom > formClient.Bottom + 1)
-            {
-                findings.Add(new AuditFinding(windowName, "ERROR", $"Button '{button.Text}' is clipped by the window edge ({rect}; client {formClient})."));
+                if (rect.Left < -1 || rect.Top < -1 || rect.Right > formClient.Right + 1 || rect.Bottom > formClient.Bottom + 1)
+                {
+                    findings.Add(new AuditFinding(windowName, "ERROR", $"Button '{button.Text}' is clipped by the window edge ({rect}; client {formClient})."));
+                }
             }
 
             if (!string.IsNullOrWhiteSpace(button.Text))
@@ -416,8 +440,99 @@ internal static class UiAuditCaptureService
             }
         }
 
+        foreach (var label in Descendants(form).OfType<Label>().Where(IsActuallyVisible))
+        {
+            ValidateWrappedLabel(label, windowName, findings);
+        }
+
         ValidateDialogButton(form, form.AcceptButton, "default", windowName, formClient, findings);
         ValidateDialogButton(form, form.CancelButton, "cancel", windowName, formClient, findings);
+    }
+
+    private static void ValidateWrappedLabel(
+        Label label,
+        string windowName,
+        ICollection<AuditFinding> findings)
+    {
+        if (label.AutoSize || label.AutoEllipsis || string.IsNullOrWhiteSpace(label.Text) ||
+            label.ClientSize.Width <= label.Padding.Horizontal ||
+            label.ClientSize.Height < label.Font.Height * 2)
+        {
+            return;
+        }
+
+        var available = new Size(
+            Math.Max(1, label.ClientSize.Width - label.Padding.Horizontal),
+            Math.Max(1, label.ClientSize.Height - label.Padding.Vertical));
+        var measured = TextRenderer.MeasureText(
+            label.Text,
+            label.Font,
+            new Size(available.Width, int.MaxValue),
+            TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+        if (measured.Height > available.Height + 2)
+        {
+            findings.Add(new AuditFinding(windowName, "ERROR",
+                $"Label '{CompactAuditText(label.Text)}' needs {measured.Height}px but has {available.Height}px."));
+        }
+    }
+
+    private static string CompactAuditText(string value)
+    {
+        var compact = string.Join(" ", value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return compact.Length <= 64 ? compact : compact[..61] + "...";
+    }
+
+    private static void ValidateResizeBehavior(Form form, string windowName, ICollection<AuditFinding> findings)
+    {
+        if (form.WindowState != FormWindowState.Normal)
+        {
+            return;
+        }
+
+        var original = form.Size;
+        var minimum = new Size(
+            Math.Max(1, form.MinimumSize.Width),
+            Math.Max(1, form.MinimumSize.Height));
+        var working = Screen.FromControl(form).WorkingArea;
+        var maximum = new Size(
+            Math.Max(1, working.Width - 24),
+            Math.Max(1, working.Height - 24));
+        var candidates = new[]
+        {
+            ("minimum", minimum),
+            ("compact", new Size(
+                Math.Max(minimum.Width, original.Width - 140),
+                Math.Max(minimum.Height, original.Height - 90))),
+            ("expanded", new Size(
+                Math.Min(maximum.Width, original.Width + 140),
+                Math.Min(maximum.Height, original.Height + 90))),
+        };
+
+        try
+        {
+            foreach (var (label, requested) in candidates.Where(candidate => candidate.Item2 != original).Distinct())
+            {
+                form.Size = requested;
+                form.PerformLayout();
+                PerformLayoutRecursive(form);
+                Settle(30);
+                if (Math.Abs(form.Size.Width - requested.Width) > 2 ||
+                    Math.Abs(form.Size.Height - requested.Height) > 2)
+                {
+                    findings.Add(new AuditFinding(windowName, "ERROR",
+                        $"Window did not accept its {label} resize (requested {requested}, got {form.Size})."));
+                    continue;
+                }
+                ValidateLayout(form, $"{windowName} ({label})", findings);
+            }
+        }
+        finally
+        {
+            form.Size = original;
+            form.PerformLayout();
+            PerformLayoutRecursive(form);
+            Settle(30);
+        }
     }
 
     private static void ValidateDialogButton(
@@ -433,8 +548,19 @@ internal static class UiAuditCaptureService
             return;
         }
 
+        if (!IsActuallyVisible(control))
+        {
+            findings.Add(new AuditFinding(windowName, "ERROR", $"The {role} action '{control.Text}' is not visible."));
+            return;
+        }
+
+        if (ScrollableAncestors(control).Count > 0)
+        {
+            return;
+        }
+
         var rect = form.RectangleToClient(control.RectangleToScreen(control.ClientRectangle));
-        if (!IsActuallyVisible(control) || !formClient.IntersectsWith(rect))
+        if (!formClient.IntersectsWith(rect))
         {
             findings.Add(new AuditFinding(windowName, "ERROR", $"The {role} action '{control.Text}' is not visible."));
         }
@@ -464,16 +590,66 @@ internal static class UiAuditCaptureService
         return true;
     }
 
-    private static bool HasAutoScrollAncestor(Control control)
+    private static IReadOnlyList<ScrollableControl> ScrollableAncestors(Control control)
     {
-        for (Control? current = control.Parent; current is not null && current is not Form; current = current.Parent)
+        var ancestors = new List<ScrollableControl>();
+        for (Control? current = control.Parent; current is not null; current = current.Parent)
         {
             if (current is ScrollableControl scrollable && scrollable.AutoScroll)
             {
-                return true;
+                ancestors.Add(scrollable);
             }
         }
-        return false;
+        return ancestors;
+    }
+
+    private static void ValidateScrollReachability(
+        Control control,
+        string windowName,
+        ICollection<AuditFinding> findings)
+    {
+        var ancestors = ScrollableAncestors(control);
+        if (ancestors.Count == 0)
+        {
+            return;
+        }
+
+        var initialBounds = control.RectangleToScreen(control.ClientRectangle);
+        if (ancestors.All(scrollable =>
+                scrollable.RectangleToScreen(scrollable.ClientRectangle).IntersectsWith(initialBounds)))
+        {
+            return;
+        }
+
+        var positions = ancestors.Select(scrollable => scrollable.AutoScrollPosition).ToArray();
+        try
+        {
+            foreach (var scrollable in ancestors)
+            {
+                scrollable.ScrollControlIntoView(control);
+                scrollable.PerformLayout();
+            }
+            Application.DoEvents();
+
+            var controlBounds = control.RectangleToScreen(control.ClientRectangle);
+            foreach (var scrollable in ancestors)
+            {
+                var viewport = scrollable.RectangleToScreen(scrollable.ClientRectangle);
+                if (!viewport.IntersectsWith(controlBounds))
+                {
+                    findings.Add(new AuditFinding(windowName, "ERROR",
+                        $"Button '{control.Text}' cannot be reached through {scrollable.GetType().Name} scrolling."));
+                    break;
+                }
+            }
+        }
+        finally
+        {
+            for (var index = ancestors.Count - 1; index >= 0; index--)
+            {
+                ancestors[index].AutoScrollPosition = new Point(-positions[index].X, -positions[index].Y);
+            }
+        }
     }
 
     private static void RecordUncapturedFormTypes(ISet<Type> capturedFormTypes, ICollection<AuditFinding> findings)

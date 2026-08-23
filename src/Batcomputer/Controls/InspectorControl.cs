@@ -84,6 +84,7 @@ public sealed class InspectorControl : UserControl
 
         _root.Dock = DockStyle.Fill;
         _root.ColumnCount = 1;
+        _root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         _root.RowCount = 5;
         _root.BackColor = Theme.CardBg;
         _root.RowStyles.Add(new RowStyle(SizeType.Absolute, 62f));   // identity
@@ -301,6 +302,7 @@ public sealed class InspectorControl : UserControl
     private void BuildFooter()
     {
         var footer = new Panel { Dock = DockStyle.Fill, BackColor = Theme.CardBg };
+        var stacked = false;
 
         foreach (var (b, text) in new[] { (_refresh, "Refresh"), (_copy, "Breakdown") })
         {
@@ -321,16 +323,40 @@ public sealed class InspectorControl : UserControl
         footer.Controls.Add(_preflight);
         footer.Resize += (_, _) =>
         {
-            // Give the longer Breakdown caption a little more room while keeping all
-            // three actions inside a narrow inspector.
-            var gap = 5;
-            var usable = Math.Max(120, footer.Width - gap * 2);
-            var breakdownWidth = Math.Clamp((int)Math.Round(usable * 0.38), 84, 116);
-            var sideWidth = Math.Max(40, (usable - breakdownWidth) / 2);
-            var checkWidth = Math.Max(40, usable - breakdownWidth - sideWidth);
-            _refresh.SetBounds(0, 2, sideWidth, 30);
-            _copy.SetBounds(sideWidth + gap, 2, breakdownWidth, 30);
-            _preflight.SetBounds(sideWidth + gap + breakdownWidth + gap, 2, checkWidth, 30);
+            var dpi = Math.Max(96, DeviceDpi);
+            int Scale(int logical) => Math.Max(1, logical * dpi / 96);
+            var gap = Scale(5);
+            var actionHeight = Scale(30);
+            var refreshMinimum = TextRenderer.MeasureText(_refresh.Text, _refresh.Font).Width + Scale(18);
+            var breakdownMinimum = TextRenderer.MeasureText(_copy.Text, _copy.Font).Width + Scale(18);
+            var checkMinimum = TextRenderer.MeasureText(_preflight.Text, _preflight.Font).Width + Scale(18);
+            var shouldStack = footer.ClientSize.Width < refreshMinimum + breakdownMinimum + checkMinimum + gap * 2;
+            if (stacked != shouldStack)
+            {
+                stacked = shouldStack;
+                _root.RowStyles[4].Height = Scale(stacked ? 70 : 38);
+                _root.PerformLayout();
+            }
+
+            if (stacked)
+            {
+                var half = Math.Max(1, (footer.ClientSize.Width - gap) / 2);
+                _copy.SetBounds(0, Scale(1), Math.Max(1, footer.ClientSize.Width), actionHeight);
+                _refresh.SetBounds(0, Scale(36), half, actionHeight);
+                _preflight.SetBounds(half + gap, Scale(36),
+                    Math.Max(1, footer.ClientSize.Width - half - gap), actionHeight);
+                return;
+            }
+
+            var extra = Math.Max(0,
+                footer.ClientSize.Width - refreshMinimum - breakdownMinimum - checkMinimum - gap * 2);
+            var refreshWidth = refreshMinimum + extra / 3;
+            var breakdownWidth = breakdownMinimum + extra / 3;
+            var checkWidth = Math.Max(1,
+                footer.ClientSize.Width - refreshWidth - breakdownWidth - gap * 2);
+            _refresh.SetBounds(0, Scale(2), refreshWidth, actionHeight);
+            _copy.SetBounds(refreshWidth + gap, Scale(2), breakdownWidth, actionHeight);
+            _preflight.SetBounds(refreshWidth + gap + breakdownWidth + gap, Scale(2), checkWidth, actionHeight);
         };
 
         _root.Controls.Add(footer, 0, 4);

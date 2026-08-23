@@ -8,7 +8,7 @@ namespace Batcomputer;
 /// the bar/labels repaint on their own; <see cref="Report"/> also forces a repaint for the long
 /// synchronous stretches (retoc, UAssetAPI) that never yield.
 /// </summary>
-public sealed class ProgressDialog : Form
+public sealed class ProgressDialog : AdaptiveForm
 {
     private readonly Label _stepLabel = new();
     private readonly Label _detailLabel = new();

@@ -4,7 +4,7 @@ namespace Batcomputer;
 /// Modal material forge: clone a base MI, map its texture parameters, then generate the new MI.
 /// The dialog stays focused while matching the rest of Batcomputer.
 /// </summary>
-public sealed partial class MaterialWizard : Form
+public sealed partial class MaterialWizard : AdaptiveForm
 {
     private const string ClearTextureOverrideDisplay = "(None - clear texture)";
 
@@ -170,7 +170,7 @@ public sealed partial class MaterialWizard : Form
         sourceCard.Controls.Add(browse);
         var read = new Button
         {
-            Text = "Read parameters", Left = 580, Top = 31, Width = 142, Height = 34,
+            Text = "Read parameters", Left = 580, Top = 31, Width = 152, Height = 34,
             Anchor = AnchorStyles.Top | AnchorStyles.Right
         };
         Theme.StyleDarkButton(read);

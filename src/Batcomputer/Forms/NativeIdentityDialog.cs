@@ -3,7 +3,7 @@ using System.Drawing.Drawing2D;
 namespace Batcomputer;
 
 /// <summary>Edits a suit's pawn tag and menu text.</summary>
-public sealed class NativeIdentityDialog : Form
+public sealed class NativeIdentityDialog : AdaptiveForm
 {
     private const int PadX = 22;
     private const int FieldW = 496;
@@ -16,6 +16,7 @@ public sealed class NativeIdentityDialog : Form
     private readonly Label _tagStatus = new();
     private readonly StatusDot _tagDot = new();
     private readonly Button _save = new();
+    private readonly Panel _body = new();
     private readonly string _suggestedTag;
 
     public string PawnTag => _tag.Text.Trim();
@@ -29,18 +30,22 @@ public sealed class NativeIdentityDialog : Form
         _suggestedTag = suggestedTag ?? "";
         Text = "Native identity";
         AutoScaleMode = AutoScaleMode.Dpi;
-        AutoScroll = true;
-        FormBorderStyle = FormBorderStyle.FixedDialog;
+        FormBorderStyle = FormBorderStyle.Sizable;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
-        MaximizeBox = false;
+        MaximizeBox = true;
         ShowInTaskbar = false;
         BackColor = Theme.WindowBg;
         ForeColor = Theme.OnDark;
         Font = Theme.Body;
 
+        _body.Dock = DockStyle.Fill;
+        _body.AutoScroll = true;
+        _body.BackColor = Theme.WindowBg;
+        Controls.Add(_body);
+
         var y = 18;
-        Controls.Add(new Label
+        _body.Controls.Add(new Label
         {
             Text = "Native identity",
             Font = Theme.Heading,
@@ -49,7 +54,7 @@ public sealed class NativeIdentityDialog : Form
             BackColor = Color.Transparent,
         });
         y += 24;
-        Controls.Add(new Label
+        _body.Controls.Add(new Label
         {
             Text = "How the game and its menus refer to this suit.",
             Font = Theme.Caption,
@@ -64,7 +69,7 @@ public sealed class NativeIdentityDialog : Form
             "Use the tag family your character needs. It can be any valid pawn tag, but must be unique.");
 
         _tagDot.Bounds = new Rectangle(PadX, y, 8, 8);
-        Controls.Add(_tagDot);
+        _body.Controls.Add(_tagDot);
         const int suggestW = 94;
         const int suggestGap = 10;
         var statusX = PadX + 14;
@@ -72,7 +77,7 @@ public sealed class NativeIdentityDialog : Form
         _tagStatus.Bounds = new Rectangle(statusX, y - 5, statusW, 18);
         _tagStatus.Font = Theme.Caption;
         _tagStatus.BackColor = Color.Transparent;
-        Controls.Add(_tagStatus);
+        _body.Controls.Add(_tagStatus);
 
         var suggest = new Button
         {
@@ -84,7 +89,7 @@ public sealed class NativeIdentityDialog : Form
         };
         Theme.StyleDarkButton(suggest);
         suggest.Click += (_, _) => { _tag.Text = _suggestedTag; _tag.Focus(); _tag.SelectAll(); };
-        Controls.Add(suggest);
+        _body.Controls.Add(suggest);
         y += 22;
 
         y = Section("MENU TEXT", y);
@@ -98,22 +103,23 @@ public sealed class NativeIdentityDialog : Form
             "Copied from the playable base. Change it only when this suit uses a different unlock gate.");
 
         ClientSize = new Size(FieldW + PadX * 2, y + 60);
-        var buttonY = ClientSize.Height - 46;
-
+        MinimumSize = new Size(400, 500);
         _save.Text = "Save";
         _save.DialogResult = DialogResult.OK;
-        _save.Bounds = new Rectangle(PadX + FieldW - 178, buttonY, 86, 32);
+        _save.Width = 86;
         Theme.StyleGoldButton(_save);
-        Controls.Add(_save);
 
         var cancel = new Button
         {
             Text = "Cancel",
             DialogResult = DialogResult.Cancel,
-            Bounds = new Rectangle(PadX + FieldW - 86, buttonY, 86, 32),
+            Width = 86,
         };
         Theme.StyleDarkButton(cancel);
-        Controls.Add(cancel);
+        var footer = DialogActionFooter.Create(_save, cancel);
+        Controls.Add(footer);
+        footer.BringToFront();
+        _body.AutoScrollMinSize = new Size(FieldW + PadX * 2, y + 8);
         AcceptButton = _save;
         CancelButton = cancel;
 
@@ -145,13 +151,13 @@ public sealed class NativeIdentityDialog : Form
             using var pen = new Pen(Theme.LineSoft);
             e.Graphics.DrawLine(pen, width + 10, label.Height / 2 + 1, label.Width, label.Height / 2 + 1);
         };
-        Controls.Add(label);
+        _body.Controls.Add(label);
         return y + 30;
     }
 
     private int Field(TextBox box, string label, string? value, int y, string hint)
     {
-        Controls.Add(new Label
+        _body.Controls.Add(new Label
         {
             Text = label,
             Font = Theme.BodyStrong,
@@ -177,12 +183,12 @@ public sealed class NativeIdentityDialog : Form
         box.Width = FieldW - 22;
         box.Top = (34 - box.PreferredHeight) / 2;
         frame.Controls.Add(box);
-        Controls.Add(frame);
+        _body.Controls.Add(frame);
         y += 38;
 
         var hintHeight = TextRenderer.MeasureText(hint, Theme.Caption, new Size(FieldW, 0),
             TextFormatFlags.WordBreak).Height;
-        Controls.Add(new Label
+        _body.Controls.Add(new Label
         {
             Text = hint,
             Font = Theme.Caption,

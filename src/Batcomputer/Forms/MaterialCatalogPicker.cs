@@ -6,7 +6,7 @@ namespace Batcomputer;
 /// while MaterialWizard resolves the selected asset to the extracted copy when
 /// it needs to read its native parameters.
 /// </summary>
-public sealed class MaterialCatalogPicker : Form
+public sealed class MaterialCatalogPicker : AdaptiveForm
 {
     private readonly ListView _list = new();
     private readonly TextBox _search = new();

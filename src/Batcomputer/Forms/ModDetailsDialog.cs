@@ -7,7 +7,7 @@ namespace Batcomputer;
 /// actions. Opened by clicking a mod tile on Home. The dialog only reports which action was
 /// chosen - MainForm owns the operations themselves.
 /// </summary>
-public sealed class ModDetailsDialog : Form
+public sealed class ModDetailsDialog : AdaptiveForm
 {
     public enum ModAction { None, EditSuits, Rename, ChangeId, Build, Install, OpenOutput, Delete }
 
@@ -21,10 +21,11 @@ public sealed class ModDetailsDialog : Form
         Text = "Mod";
         AutoScaleMode = AutoScaleMode.Dpi;
         ClientSize = new Size(520, 470);
-        FormBorderStyle = FormBorderStyle.FixedDialog;
+        MinimumSize = new Size(536, 380);
+        FormBorderStyle = FormBorderStyle.Sizable;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
-        MaximizeBox = false;
+        MaximizeBox = true;
         ShowInTaskbar = false;
         BackColor = Theme.WindowBg;
         ForeColor = Theme.OnDark;
@@ -33,6 +34,13 @@ public sealed class ModDetailsDialog : Form
 
         const int pad = 18;
         var w = ClientSize.Width - pad * 2;
+        var body = new Panel
+        {
+            Dock = DockStyle.Fill,
+            AutoScroll = true,
+            BackColor = Theme.WindowBg,
+        };
+        Controls.Add(body);
 
         // --- identity card -----------------------------------------------------
         var card = new RoundedPanel
@@ -71,7 +79,7 @@ public sealed class ModDetailsDialog : Form
         chips.Controls.Add(Chip($"{suits.Count} suit{(suits.Count == 1 ? "" : "s")}", Theme.Parts));
         chips.Controls.Add(Chip(mod.PackageBaseName, null));
         card.Controls.Add(chips);
-        Controls.Add(card);
+        body.Controls.Add(card);
 
         // --- fields ------------------------------------------------------------
         var y = card.Bottom + 12;
@@ -82,7 +90,7 @@ public sealed class ModDetailsDialog : Form
                      ("String table", mod.StringTablePackage),
                  })
         {
-            Controls.Add(new Label
+            body.Controls.Add(new Label
             {
                 Left = pad, Top = y, Width = 92, Height = 17,
                 Text = label, Font = Theme.Caption, ForeColor = Theme.OnDarkMuted,
@@ -94,13 +102,13 @@ public sealed class ModDetailsDialog : Form
                 Font = Theme.Mono, ForeColor = Theme.OnDark, AutoEllipsis = true,
             };
             _tips.SetToolTip(v, value);
-            Controls.Add(v);
+            body.Controls.Add(v);
             y += 19;
         }
 
         // --- suits -------------------------------------------------------------
         y += 8;
-        Controls.Add(SectionLabel("SUITS IN THIS MOD", pad, y, w));
+        body.Controls.Add(SectionLabel("SUITS IN THIS MOD", pad, y, w));
         y += 22;
 
         var list = new ListView
@@ -125,7 +133,7 @@ public sealed class ModDetailsDialog : Form
                 list.Items.Add(new ListViewItem(new[] { suit, slot }));
             }
         }
-        Controls.Add(list);
+        body.Controls.Add(list);
         y = list.Bottom + 10;
 
         // --- build output ------------------------------------------------------
@@ -136,12 +144,14 @@ public sealed class ModDetailsDialog : Form
             Font = Theme.Caption, ForeColor = built ? Theme.OnDarkMuted : Theme.Warn, AutoEllipsis = true,
         };
         _tips.SetToolTip(outLabel, buildPath);
-        Controls.Add(outLabel);
+        body.Controls.Add(outLabel);
+        body.AutoScrollMinSize = new Size(ClientSize.Width, outLabel.Bottom + 12);
 
         // --- actions -----------------------------------------------------------
         var footer = new Panel
         {
-            Left = 0, Top = ClientSize.Height - 104, Width = ClientSize.Width, Height = 104,
+            Dock = DockStyle.Bottom,
+            Height = 104,
             BackColor = Theme.SlateDark,
         };
         footer.Paint += (_, e) =>
@@ -173,6 +183,7 @@ public sealed class ModDetailsDialog : Form
         Theme.StyleDarkButton(close);
         footer.Controls.Add(close);
         Controls.Add(footer);
+        footer.BringToFront();
 
         CancelButton = close;
     }

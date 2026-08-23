@@ -359,7 +359,7 @@ public sealed partial class MainForm
             return null;
         }
 
-        using var dlg = new Form
+        using var dlg = new AdaptiveDialogForm
         {
             Text = title,
             Width = 760,
@@ -439,7 +439,7 @@ public sealed partial class MainForm
             return;
         }
 
-        using var dlg = new Form
+        using var dlg = new AdaptiveDialogForm
         {
             Text = $"{role} materials" + (string.IsNullOrWhiteSpace(report.AssetFile) ? "" : $" — {report.AssetFile}"),
             Width = 760,

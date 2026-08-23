@@ -16,6 +16,10 @@ public sealed partial class MainForm
     private Control CreateToyboxPanel()
     {
         var outer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
+        // A TableLayoutPanel's implicit column is AutoSize. That preserved the designer shell's
+        // 1280px preferred width and pushed right-aligned actions outside a narrower main window.
+        // Make the single workspace column consume the width it is actually given.
+        outer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         // The extra height keeps the workspace labels and suit details readable.
         outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 80));
         outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
@@ -35,9 +39,20 @@ public sealed partial class MainForm
         // height could therefore extend behind the Diagnostics drawer and clip bottom actions.
         // Constrain the workspace to the height its parent actually gives it.
         body.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 98));
+        body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 116));
         body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 340));
         body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        body.ClientSizeChanged += (_, _) =>
+        {
+            // Recover horizontal workspace room at compact display widths without squeezing the
+            // workflow labels or requiring the whole main window to stay at its design width.
+            var dpi = Math.Max(96, DeviceDpi);
+            int Scale(int logical) => Math.Max(1, logical * dpi / 96);
+            var compact = body.ClientSize.Width < Scale(1050);
+            body.ColumnStyles[1].Width = Scale(compact ? 260 : 340);
+            _toyboxSearchText.MinimumSize = new Size(Scale(compact ? 80 : 150), Scale(30));
+            _toyboxPrimaryActionButton.Width = Scale(compact ? 150 : 160);
+        };
         outer.Controls.Add(body, 0, 2);
 
         // Category rail hosted in its designer-editable shell.
@@ -175,15 +190,33 @@ public sealed partial class MainForm
         rightSplit.Panel1.Padding = new Padding(1);
         rightSplit.Panel2.Padding = new Padding(1);
         _toyboxWorkspaceSplit = rightSplit;
-        var rightSplitSet = false;
+        var layingOutSplit = false;
         rightSplit.SizeChanged += (_, _) =>
         {
-            if (rightSplitSet || rightSplit.Width <= 700) return;
-            var distance = rightSplit.Width - 330;
-            var max = rightSplit.Width - rightSplit.Panel2MinSize - 1;
-            if (distance > max) distance = max;
-            if (distance < rightSplit.Panel1MinSize) distance = rightSplit.Panel1MinSize;
-            try { rightSplit.SplitterDistance = distance; rightSplitSet = true; } catch { /* not sized yet */ }
+            if (layingOutSplit || rightSplit.Width <= rightSplit.SplitterWidth + 2) return;
+            layingOutSplit = true;
+            try
+            {
+                var dpi = Math.Max(96, DeviceDpi);
+                int Scale(int logical) => Math.Max(1, logical * dpi / 96);
+                var available = Math.Max(2, rightSplit.ClientSize.Width - rightSplit.SplitterWidth);
+                var panel1Minimum = Math.Min(Scale(260), available / 2);
+                var panel2Minimum = Math.Min(Scale(260), available - panel1Minimum);
+                var inspectorWidth = Math.Clamp(Scale(330), panel2Minimum, available - panel1Minimum);
+                rightSplit.Panel1MinSize = 0;
+                rightSplit.Panel2MinSize = 0;
+                rightSplit.SplitterDistance = Math.Max(1, available - inspectorWidth);
+                rightSplit.Panel1MinSize = panel1Minimum;
+                rightSplit.Panel2MinSize = panel2Minimum;
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                // WinForms can report a transient zero-size splitter while its parent relayouts.
+            }
+            finally
+            {
+                layingOutSplit = false;
+            }
         };
         var toybox = new ToyboxControl { Dock = DockStyle.Fill };
         toybox.HostContent(toyBox);
@@ -478,7 +511,7 @@ public sealed partial class MainForm
 
     private Control CreateCategoryRail()
     {
-        var rail = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, BackColor = Theme.PanelBg, Padding = new Padding(4, 6, 4, 6) };
+        var rail = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, BackColor = Theme.PanelBg, Padding = new Padding(4, 6, 4, 6) };
         var cats = new[] { ("Home", "⌂"), ("Base", "◱"), ("Materials", "◈"), ("Faces", "◉"), ("Textures", "▣"), ("Parts", "◆"), ("Equipment", "★"), ("Gliders", "︾"), ("Animations", "➤"), ("Research", "⌕") };
 
         // Load PNGs per category instead of requiring every category to have one.
@@ -605,6 +638,7 @@ public sealed partial class MainForm
             Dock = DockStyle.Fill,
             FlowDirection = FlowDirection.TopDown,
             WrapContents = false,
+            AutoScroll = true,
             BackColor = Theme.PanelBg,
             Padding = new Padding(4, 6, 4, 6),
         };

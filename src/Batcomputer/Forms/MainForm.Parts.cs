@@ -2311,7 +2311,7 @@ public sealed partial class MainForm
     {
         var current = CurrentEquipmentSlotNames();
 
-        using var dlg = new Form
+        using var dlg = new AdaptiveDialogForm
         {
             Text = $"Place {eq.Name} in which slot?",
             Width = 420,
@@ -2326,7 +2326,7 @@ public sealed partial class MainForm
         };
         dlg.Shown += (_, _) => Theme.UseDarkTitleBar(dlg);
         var info = new Label { Dock = DockStyle.Top, Height = 44, Padding = new Padding(12, 12, 12, 0), Text = $"Characters carry two gadgets. Which slot should '{eq.Name}' replace?" };
-        var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, Padding = new Padding(12, 8, 12, 12), WrapContents = false };
+        var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, Padding = new Padding(12, 8, 12, 12), WrapContents = false, AutoScroll = true };
 
         int chosen = -1;
         for (var i = 0; i < Math.Max(2, current.Count); i++)
@@ -2340,6 +2340,15 @@ public sealed partial class MainForm
             btn.Click += (_, _) => { chosen = slotIndex; dlg.DialogResult = DialogResult.OK; };
             flow.Controls.Add(btn);
         }
+        flow.ClientSizeChanged += (_, _) =>
+        {
+            var width = Math.Max(120,
+                flow.ClientSize.Width - flow.Padding.Horizontal - SystemInformation.VerticalScrollBarWidth - 2);
+            foreach (var button in flow.Controls.OfType<Button>())
+            {
+                button.Width = width;
+            }
+        };
 
         dlg.Controls.Add(flow);
         dlg.Controls.Add(info);

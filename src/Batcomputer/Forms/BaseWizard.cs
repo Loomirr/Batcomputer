@@ -1,7 +1,7 @@
 namespace Batcomputer;
 
 /// <summary>Manual fallback for choosing a base set from extracted files.</summary>
-public sealed partial class BaseWizard : Form
+public sealed partial class BaseWizard : AdaptiveForm
 {
     private readonly TextBox _suitName = new();
     private readonly TextBox _modFolder = new();
@@ -35,9 +35,10 @@ public sealed partial class BaseWizard : Form
         Text = "Set base suit";
         Width = 720;
         Height = 340;
+        MinimumSize = new Size(520, 320);
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
-        MaximizeBox = false;
+        MaximizeBox = true;
         BackColor = Theme.WindowBg;
         ForeColor = Theme.OnDark;
 

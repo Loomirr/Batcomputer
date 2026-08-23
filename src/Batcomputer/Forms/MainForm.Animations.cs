@@ -127,7 +127,12 @@ public sealed partial class MainForm
             "  • Replace idle/walk/run — swap individual locomotion poses for custom or borrowed AnimSequences (safe).\n" +
             "  • Swap category by family — borrow a whole montage category (jump/glide). ⚠ Layer/locomotion category swaps crash across families — use Replace idle/walk/run instead.\n" +
             "  • Equipment animations graft in automatically when you add a foreign gadget (Equipment tab).");
-        intro.Height = 132;
+        var introTextHeight = TextRenderer.MeasureText(
+            intro.Text,
+            intro.Font,
+            new Size(Math.Max(1, intro.ClientSize.Width - intro.Padding.Horizontal), int.MaxValue),
+            TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding).Height;
+        intro.Height = Math.Max(132, introTextHeight + intro.Padding.Vertical + 4);
         _toyboxTileFlow.Controls.Add(intro);
 
         // The custom-archetype gate toggle.
@@ -216,7 +221,7 @@ public sealed partial class MainForm
             rows.Add((p, p));
         }
 
-        using var dlg = new Form
+        using var dlg = new AdaptiveDialogForm
         {
             Text = title,
             Width = 800,
@@ -381,7 +386,7 @@ public sealed partial class MainForm
             .ToList();
         if (families.Count == 0) { AppendLog($"No other families have a '{category}' set."); return; }
 
-        using var dlg = new Form { Text = $"{category} — source family", Width = 360, Height = 420, AutoScaleMode = AutoScaleMode.Dpi, MinimumSize = new Size(320, 340), StartPosition = FormStartPosition.CenterParent, BackColor = Theme.WindowBg, ForeColor = Theme.OnDark };
+        using var dlg = new AdaptiveDialogForm { Text = $"{category} — source family", Width = 360, Height = 420, AutoScaleMode = AutoScaleMode.Dpi, MinimumSize = new Size(320, 340), StartPosition = FormStartPosition.CenterParent, BackColor = Theme.WindowBg, ForeColor = Theme.OnDark };
         dlg.Shown += (_, _) => Theme.UseDarkTitleBar(dlg);
         var list = new ListBox { Dock = DockStyle.Fill, BackColor = Theme.CardBg, ForeColor = Theme.OnDark, BorderStyle = BorderStyle.None };
         Theme.StyleListBox(list);

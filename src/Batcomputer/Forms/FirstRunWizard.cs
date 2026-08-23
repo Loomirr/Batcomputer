@@ -7,7 +7,7 @@ namespace Batcomputer;
 ///
 /// Re-runnable from Settings → General → "Run first-time setup again".
 /// </summary>
-public sealed class FirstRunWizard : Form
+public sealed class FirstRunWizard : AdaptiveForm
 {
     private sealed class Step
     {
@@ -136,11 +136,11 @@ public sealed class FirstRunWizard : Form
         Text = "Batcomputer — Setup";
         AutoScaleMode = AutoScaleMode.Dpi;
         ClientSize = new Size(620, 380);
-        MinimumSize = new Size(620, 380);
-        FormBorderStyle = FormBorderStyle.FixedDialog;
+        MinimumSize = new Size(500, 400);
+        FormBorderStyle = FormBorderStyle.Sizable;
         StartPosition = FormStartPosition.CenterScreen;
         MinimizeBox = false;
-        MaximizeBox = false;
+        MaximizeBox = true;
         BackColor = Theme.WindowBg;
         ForeColor = Theme.OnDark;
         Font = Theme.Body;
@@ -159,12 +159,12 @@ public sealed class FirstRunWizard : Form
         _title.Font = AppFonts.Condensed(15f, FontStyle.Bold);
         _title.ForeColor = Theme.OnDark;
 
-        _blurb.SetBounds(Pad, 76, w, 60);
+        _blurb.SetBounds(Pad, 76, w, 80);
         _blurb.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _blurb.Font = Theme.Body;
         _blurb.ForeColor = Theme.OnDarkMuted;
 
-        _inputWrap.SetBounds(Pad, 146, w - 104, 36);
+        _inputWrap.SetBounds(Pad, 166, w - 104, 36);
         _inputWrap.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _inputWrap.BackColor = Theme.Slate;
         _inputWrap.BorderColor = Theme.SlateLight;
@@ -178,14 +178,14 @@ public sealed class FirstRunWizard : Form
         _inputWrap.Controls.Add(_input);
         _inputWrap.Layout += (_, _) => _input.Top = (_inputWrap.Height - _input.Height) / 2;
 
-        _browse.SetBounds(Pad + w - 96, 146, 96, 36);
+        _browse.SetBounds(Pad + w - 96, 166, 96, 36);
         _browse.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         _browse.Text = "Browse…";
         Theme.StyleDarkButton(_browse);
         _browse.Click += (_, _) => Browse();
 
-        _dot.SetBounds(Pad + 2, 196, 10, 10);
-        _status.SetBounds(Pad + 18, 190, w - 20, 20);
+        _dot.SetBounds(Pad + 2, 216, 10, 10);
+        _status.SetBounds(Pad + 18, 210, w - 20, 20);
         _status.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _status.Font = Theme.Caption;
         _status.ForeColor = Theme.OnDarkMuted;
@@ -193,13 +193,13 @@ public sealed class FirstRunWizard : Form
         var hintLabel = new Label
         {
             Name = "hint",
-            Bounds = new Rectangle(Pad, 216, w, 34),
+            Bounds = new Rectangle(Pad, 236, w, 34),
             Font = Theme.Caption,
             ForeColor = Theme.Blend(Theme.OnDarkMuted, Theme.WindowBg, 0.75),
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
         };
 
-        _bar.SetBounds(Pad, 268, w, 8);
+        _bar.SetBounds(Pad, 288, w, 8);
         _bar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _bar.BackColor = Theme.WindowBg;
         _bar.Maximum = _steps.Count;

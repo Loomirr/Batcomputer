@@ -724,6 +724,7 @@ internal static class Program
         // Keep the bundled typeface as the default for controls without an explicit font.
         try { Application.SetDefaultFont(AppFonts.Condensed(10f, FontStyle.Bold)); } catch { /* pre-window only */ }
         ThemedMenuRenderer.Apply(); // dark context menus app-wide
+        AdaptiveWindowManager.Enable();
         Theme.ApplyDarkTitleBarsAppWide();
         Animator.Enabled = AppSettings.Current.AnimationsEnabled;
 

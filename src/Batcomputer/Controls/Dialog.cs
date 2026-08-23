@@ -82,7 +82,7 @@ public static class Dialog
         const int W = 480, Pad = 18;
         var accent = Accent(model.Severity);
 
-        var form = new Form
+        var form = new AdaptiveDialogForm
         {
             Text = model.WindowTitle,
             AutoScaleMode = AutoScaleMode.Dpi,

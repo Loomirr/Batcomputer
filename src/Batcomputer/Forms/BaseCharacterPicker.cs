@@ -7,7 +7,7 @@ namespace Batcomputer;
 /// appearance; a separate real playable supplies movement, equipment, and the
 /// runtime archetype when the visual source does not have its own machinery.
 /// </summary>
-public sealed partial class BaseCharacterPicker : Form
+public sealed partial class BaseCharacterPicker : AdaptiveForm
 {
     private readonly ListBox _list = new();
     private readonly SearchBox _search = new();
@@ -49,9 +49,10 @@ public sealed partial class BaseCharacterPicker : Form
         Text = playablesOnly ? "Pick a gameplay donor" : "Pick visual base";
         Width = 600;
         Height = 570;
+        MinimumSize = new Size(420, 360);
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
-        MaximizeBox = false;
+        MaximizeBox = true;
         BackColor = Theme.WindowBg;
         ForeColor = Theme.OnDark;
 
@@ -70,20 +71,23 @@ public sealed partial class BaseCharacterPicker : Form
             Left = 14,
             Top = 12,
             Width = 556,
-            Height = 42,
-            ForeColor = Theme.OnDark
+            Height = 60,
+            ForeColor = Theme.OnDark,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
         };
 
         _search.Left = 14;
-        _search.Top = 58;
+        _search.Top = 76;
         _search.Width = 556;
+        _search.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _search.PlaceholderText = "Search characters…";
         _search.TextChanged += (_, _) => ApplyFilter();
 
         _list.Left = 14;
-        _list.Top = 88;
+        _list.Top = 106;
         _list.Width = 556;
-        _list.Height = 376;
+        _list.Height = 358;
+        _list.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
         Theme.StyleListBox(_list);
         _list.DoubleClick += (_, _) => Accept();
 

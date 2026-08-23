@@ -4,7 +4,7 @@ namespace Batcomputer;
 /// In-app release readiness review. Findings stay with the current action instead
 /// of creating report files that immediately become stale after the next build.
 /// </summary>
-public sealed class ReleasePreflightForm : Form
+public sealed class ReleasePreflightForm : AdaptiveForm
 {
     private const int WidthPx = 760;
     private const int HeightPx = 620;

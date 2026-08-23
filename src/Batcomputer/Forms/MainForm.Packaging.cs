@@ -965,7 +965,7 @@ public sealed partial class MainForm
             return;
         }
 
-        using var dlg = new Form
+        using var dlg = new AdaptiveDialogForm
         {
             Text = "Package contents preview",
             Width = 900,
@@ -1664,7 +1664,7 @@ public sealed partial class MainForm
 
         static string Kb(long bytes) => bytes >= 1024 ? $"{bytes / 1024.0:0.#} KB" : $"{bytes} B";
 
-        using var dlg = new Form
+        using var dlg = new AdaptiveDialogForm
         {
             Text = "Package built",
             Width = 620,

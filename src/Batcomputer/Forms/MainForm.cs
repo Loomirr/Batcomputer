@@ -8,7 +8,7 @@ using UAssetAPI.Unversioned;
 
 namespace Batcomputer;
 
-public sealed partial class MainForm : Form
+public sealed partial class MainForm : AdaptiveForm
 {
     private readonly TextBox _projectRootText = new();
 
@@ -349,8 +349,8 @@ public sealed partial class MainForm : Form
 
     private const int CollapsedDiagnosticsLogicalHeight = 40;
     private const int ExpandedDiagnosticsLogicalHeight = 186;
-    private const int MaximumStartupWindowWidth = 1800;
-    private const int MaximumStartupWindowHeight = 1000;
+    private const int MaximumStartupWindowLogicalWidth = 1800;
+    private const int MaximumStartupWindowLogicalHeight = 1000;
     private bool _diagnosticsCollapsed = true;
     private Button? _diagnosticsHeaderButton;
 
@@ -363,7 +363,7 @@ public sealed partial class MainForm : Form
 
         // Some display drivers expose two monitors as one very wide work area. A
         // maximized startup window can therefore span both displays before WinForms
-        // raises Shown. Normalize it once, then apply a conservative physical-pixel
+        // raises Shown. Normalize it once, then apply a conservative DPI-scaled
         // cap so the authoring surface always opens as a normal desktop window.
         if (WindowState == FormWindowState.Maximized)
         {
@@ -382,10 +382,14 @@ public sealed partial class MainForm : Form
         var requestedMinimum = new Size(
             LogicalToDeviceUnits(960),
             LogicalToDeviceUnits(640));
+        var maximumStartupSize = new Size(
+            LogicalToDeviceUnits(MaximumStartupWindowLogicalWidth),
+            LogicalToDeviceUnits(MaximumStartupWindowLogicalHeight));
         var fittedBounds = ConstrainWindowBoundsForTest(
             Bounds,
             workingArea,
             requestedMinimum,
+            maximumStartupSize,
             recenter,
             edgeGap);
         MinimumSize = new Size(
@@ -401,6 +405,7 @@ public sealed partial class MainForm : Form
         Rectangle currentBounds,
         Rectangle workingArea,
         Size requestedMinimum,
+        Size maximumSize,
         bool recenter,
         int edgeGap)
     {
@@ -411,8 +416,12 @@ public sealed partial class MainForm : Form
             Math.Max(workingArea.Left + edgeGap + 1, workingArea.Right - edgeGap),
             Math.Max(workingArea.Top + edgeGap + 1, workingArea.Bottom - edgeGap));
 
-        var maximumWidth = Math.Max(1, Math.Min(usable.Width, MaximumStartupWindowWidth));
-        var maximumHeight = Math.Max(1, Math.Min(usable.Height, MaximumStartupWindowHeight));
+        var maximumWidth = Math.Max(1, Math.Min(
+            usable.Width,
+            Math.Max(requestedMinimum.Width, maximumSize.Width)));
+        var maximumHeight = Math.Max(1, Math.Min(
+            usable.Height,
+            Math.Max(requestedMinimum.Height, maximumSize.Height)));
         var minimumWidth = Math.Max(1, Math.Min(requestedMinimum.Width, maximumWidth));
         var minimumHeight = Math.Max(1, Math.Min(requestedMinimum.Height, maximumHeight));
         var width = Math.Clamp(currentBounds.Width, minimumWidth, maximumWidth);
@@ -924,7 +933,7 @@ public sealed partial class MainForm : Form
     private string? PromptForText(string title, string label, string initial, string confirmText = "OK")
     {
         const int W = 430, Pad = 18;
-        using var dlg = new Form
+        using var dlg = new AdaptiveDialogForm
         {
             Text = title,
             ClientSize = new Size(W, 158),
@@ -1514,7 +1523,7 @@ public sealed partial class MainForm : Form
     {
         const int Width = 560;
         const int Padding = 18;
-        using var form = new Form
+        using var form = new AdaptiveDialogForm
         {
             Text = "Batcomputer - Texture import",
             StartPosition = FormStartPosition.CenterParent,
@@ -1696,7 +1705,7 @@ public sealed partial class MainForm : Form
 
         const int Width = 540;
         const int Padding = 18;
-        using var form = new Form
+        using var form = new AdaptiveDialogForm
         {
             Text = "Batcomputer - Texture cook profile",
             StartPosition = FormStartPosition.CenterParent,
@@ -2504,7 +2513,7 @@ public sealed partial class MainForm : Form
         }
 
         // Checklist + warning.
-        using var dlg = new Form
+        using var dlg = new AdaptiveDialogForm
         {
             Text = "Update all suits",
             Width = 720,

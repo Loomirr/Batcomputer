@@ -1,7 +1,7 @@
 namespace Batcomputer;
 
 /// <summary>Edits the four icon paths stored by a suit's UIMD.</summary>
-public sealed partial class UimdIconsDialog : Form
+public sealed partial class UimdIconsDialog : AdaptiveForm
 {
     private readonly TextBox _menu = new();
     private readonly TextBox _suit = new();

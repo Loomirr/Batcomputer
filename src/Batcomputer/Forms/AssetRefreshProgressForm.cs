@@ -1,7 +1,7 @@
 namespace Batcomputer;
 
 /// <summary>Small modal progress surface used by the game-asset refresh command.</summary>
-public sealed class AssetRefreshProgressForm : Form
+public sealed class AssetRefreshProgressForm : AdaptiveForm
 {
     private readonly Label _phase = new();
     private readonly Label _status = new();
@@ -18,11 +18,12 @@ public sealed class AssetRefreshProgressForm : Form
         ForeColor = Theme.OnDark;
         Font = Theme.Body;
         StartPosition = FormStartPosition.CenterParent;
-        FormBorderStyle = FormBorderStyle.FixedDialog;
+        FormBorderStyle = FormBorderStyle.Sizable;
         MinimizeBox = false;
-        MaximizeBox = false;
+        MaximizeBox = true;
         ShowInTaskbar = false;
-        ClientSize = new Size(620, firstRun ? 210 : 150);
+        ClientSize = new Size(620, firstRun ? 260 : 150);
+        MinimumSize = new Size(420, firstRun ? 300 : 190);
 
         var offset = 0;
         if (firstRun)
@@ -31,20 +32,23 @@ public sealed class AssetRefreshProgressForm : Form
             {
                 Left = 18, Top = 16, Width = 584, Height = 16,
                 Text = "SETUP - STEP 2 OF 2", Font = Theme.Eyebrow, ForeColor = Theme.Gold,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
             };
             var title = new Label
             {
                 Left = 18, Top = 36, Width = 584, Height = 24,
                 Text = "First-time game asset extraction", Font = AppFonts.Condensed(13f, FontStyle.Bold), ForeColor = Theme.OnDark,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
             };
             var intro = new Label
             {
-                Left = 18, Top = 62, Width = 584, Height = 32,
+                Left = 18, Top = 62, Width = 584, Height = 58,
                 Text = "Batcomputer is extracting character, animation, and localisation assets. This can use about 18 GB and may take a while.",
                 Font = Theme.Body, ForeColor = Theme.OnDarkMuted,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
             };
             Controls.AddRange(new Control[] { eyebrow, title, intro });
-            offset = 60;
+            offset = 112;
         }
 
         _phase.Left = 18;
@@ -79,7 +83,7 @@ public sealed class AssetRefreshProgressForm : Form
         _cancel.Top = 106 + offset;
         _cancel.Width = 100;
         _cancel.Height = 28;
-        _cancel.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _cancel.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
         _cancel.Click += (_, _) =>
         {
             _cancel.Enabled = false;

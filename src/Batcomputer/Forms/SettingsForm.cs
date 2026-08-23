@@ -7,7 +7,7 @@ namespace Batcomputer;
 /// FModel-style two-pane layout - a left nav rail, a sectioned dark
 /// form with rounded inputs + inline "…" browse buttons and status dots, and a footer bar.
 /// </summary>
-public sealed partial class SettingsForm : Form
+public sealed partial class SettingsForm : AdaptiveForm
 {
     private sealed class PathRow
     {
@@ -97,6 +97,7 @@ public sealed partial class SettingsForm : Form
         var hint = new Label
         {
             AutoSize = false, Left = 20, Top = 0, Width = 520, Height = 58,
+            AutoEllipsis = true,
             TextAlign = ContentAlignment.MiddleLeft, ForeColor = Theme.OnDarkMuted, Font = Theme.Caption,
             Text = "Status dots: green = found, amber = not set, red = path missing."
         };
@@ -111,6 +112,8 @@ public sealed partial class SettingsForm : Form
         {
             cancel.Left = footer.Width - cancel.Width - 20;
             save.Left = cancel.Left - save.Width - 10;
+            hint.Width = Math.Max(0, save.Left - hint.Left - 10);
+            hint.Visible = hint.Width >= 80;
         }
         footer.Resize += (_, _) => LayoutFooter();
 
@@ -221,15 +224,17 @@ public sealed partial class SettingsForm : Form
 
     // Layout constants for a field row within the paths panel.
     private const int RowLabelX = 28, RowLabelW = 196, RowInputX = 232, RowInputW = 420;
-    private const int RowBrowseX = 660, RowBrowseW = 38, RowDotX = 706;
+    private const int RowBrowseX = 660, RowBrowseW = 44, RowDotX = 712;
+    private const int ContentDesignWidth = 764;
 
     private Panel BuildPathsPanel(bool firstRun)
     {
-        var panel = new Panel { AutoScroll = true, BackColor = Theme.WindowBg, Padding = new Padding(0, 12, 0, 12) };
+        var panel = new Panel { AutoScroll = true, BackColor = Theme.WindowBg, Padding = new Padding(0, 12, 0, 12), Width = ContentDesignWidth };
 
         var intro = new Label
         {
             AutoSize = false, Left = RowLabelX, Top = 16, Width = 690, Height = firstRun ? 40 : 22,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
             ForeColor = Theme.OnDarkMuted, Font = Theme.Caption,
             Text = firstRun
                 ? "First-time setup: Batcomputer has already found its packaging helper. Select your .usmap and game Content\\Paks folder; Batcomputer can extract the character assets it needs. You can set the Unreal Engine 5.6 and Oodle paths now or later."
@@ -249,6 +254,7 @@ public sealed partial class SettingsForm : Form
             }
             y += 6;
         }
+        panel.AutoScrollMinSize = new Size(0, y + panel.Padding.Bottom);
         return panel;
     }
 
@@ -263,6 +269,7 @@ public sealed partial class SettingsForm : Form
         var input = new RoundedPanel
         {
             Left = RowInputX, Top = y + 4, Width = RowInputW, Height = 36,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
             CornerRadius = Theme.RadiusSm, BackColor = Theme.Slate, BorderColor = Theme.SlateLight
         };
         row.Box.BorderStyle = BorderStyle.None;
@@ -279,7 +286,7 @@ public sealed partial class SettingsForm : Form
         row.Box.Top = (input.Height - row.Box.Height) / 2;
         input.Click += (_, _) => row.Box.Focus();
 
-        var browse = new Button { Left = RowBrowseX, Top = y + 4, Width = RowBrowseW, Height = 36, Text = "…" };
+        var browse = new Button { Left = RowBrowseX, Top = y + 4, Width = RowBrowseW, Height = 36, Text = "…", Anchor = AnchorStyles.Top | AnchorStyles.Right };
         Theme.StyleDarkButton(browse);
         browse.Font = new Font(Theme.Body.FontFamily, 12f, FontStyle.Bold);
         browse.Click += (_, _) => Browse(row);
@@ -289,6 +296,7 @@ public sealed partial class SettingsForm : Form
         row.Status.Top = y + 15;
         row.Status.Width = 14;
         row.Status.Height = 14;
+        row.Status.Anchor = AnchorStyles.Top | AnchorStyles.Right;
 
         host.Controls.Add(label);
         host.Controls.Add(input);
@@ -302,6 +310,7 @@ public sealed partial class SettingsForm : Form
         var lbl = new Label
         {
             Left = RowLabelX, Top = y, Width = RowDotX + 14 - RowLabelX, Height = 26,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
             BackColor = Theme.WindowBg
         };
         lbl.Paint += (_, e) =>
@@ -326,7 +335,7 @@ public sealed partial class SettingsForm : Form
 
     private Panel BuildGeneralPanel()
     {
-        var panel = new Panel { AutoScroll = true, BackColor = Theme.WindowBg, Padding = new Padding(0, 12, 0, 12) };
+        var panel = new Panel { AutoScroll = true, BackColor = Theme.WindowBg, Padding = new Padding(0, 12, 0, 12), Width = ContentDesignWidth };
 
         // Every row advances a cursor. The absolute Tops this used to carry meant adding a row meant
         // hand-editing every Top below it, and one missed edit stacked two buttons on the same pixel.
@@ -408,7 +417,7 @@ public sealed partial class SettingsForm : Form
 
         Section("PATHS");
         // Re-run the guided setup when paths change or a fresh full asset extraction is needed.
-        var rerun = new Button { Width = 200, Text = "Run first-time setup again" };
+        var rerun = new Button { Width = 212, Text = "Run first-time setup again" };
         Theme.StyleDarkButton(rerun);
         rerun.FlatAppearance.BorderColor = Theme.Crit;
         rerun.ForeColor = Theme.Crit;
@@ -426,12 +435,13 @@ public sealed partial class SettingsForm : Form
         };
         ButtonRow(rerun, "Walks through every required path, then offers the full first-time game extraction.");
 
+        panel.AutoScrollMinSize = new Size(0, y + panel.Padding.Bottom);
         return panel;
     }
 
     private Panel BuildVisualPanel()
     {
-        var panel = new Panel { AutoScroll = true, BackColor = Theme.WindowBg, Padding = new Padding(0, 12, 0, 12) };
+        var panel = new Panel { AutoScroll = true, BackColor = Theme.WindowBg, Padding = new Padding(0, 12, 0, 12), Width = ContentDesignWidth };
         var y = 20;
 
         panel.Controls.Add(SectionDivider("THEME", y));
@@ -479,6 +489,7 @@ public sealed partial class SettingsForm : Form
             ForeColor = Theme.OnDarkMuted, Font = Theme.Caption,
         });
 
+        panel.AutoScrollMinSize = new Size(0, y + 74 + panel.Padding.Bottom);
         return panel;
     }
 

@@ -1,7 +1,7 @@
 namespace Batcomputer;
 
 /// <summary>Progress surface for the one-time UE registry writer preparation.</summary>
-public sealed class RegistryWriterProgressForm : Form
+public sealed class RegistryWriterProgressForm : AdaptiveForm
 {
     private readonly Label _phase = new();
     private readonly Label _detail = new();

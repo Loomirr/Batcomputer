@@ -7,7 +7,7 @@ namespace Batcomputer;
 /// page renders with WebGL inside this window. Step 1 shows a WebGL smoke test to prove the embed
 /// works on the machine; later it loads the decoded character glTF.
 /// </summary>
-public sealed class ModelPreviewForm : Form
+public sealed class ModelPreviewForm : AdaptiveForm
 {
     // A UNIQUE host per preview. The folder behind a fixed host changes every build, and WebView2
     // keeps serving the previous page's models.js and .glb from cache - which renders as a stuck

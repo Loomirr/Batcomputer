@@ -1,7 +1,7 @@
 namespace Batcomputer;
 
 /// <summary>Picker for tested game-material templates, filtered by the selected target.</summary>
-internal sealed class MaterialTemplatePicker : Form
+internal sealed class MaterialTemplatePicker : AdaptiveForm
 {
     private readonly MaterialTemplateCatalogService _catalog = new();
     private readonly MaterialTemplateCatalogService.Target? _target;
@@ -26,6 +26,7 @@ internal sealed class MaterialTemplatePicker : Form
     private void BuildLayout()
     {
         Text = "Batcomputer - Material templates";
+        AutoScaleMode = AutoScaleMode.Dpi;
         ClientSize = new Size(920, 660);
         MinimumSize = new Size(780, 560);
         StartPosition = FormStartPosition.CenterParent;
@@ -36,55 +37,89 @@ internal sealed class MaterialTemplatePicker : Form
         Font = Theme.Body;
         Shown += (_, _) => Theme.UseDarkTitleBar(this);
 
-        var header = new Panel
+        var header = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
             Height = 76,
             BackColor = Theme.WindowBg,
+            Padding = new Padding(18, 10, 18, 9),
+            ColumnCount = 3,
+            RowCount = 1,
         };
-        header.Controls.Add(new Panel { Left = 18, Top = 17, Width = 3, Height = 42, BackColor = Theme.Materials });
-        header.Controls.Add(new Label
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 15));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
+        header.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        header.Controls.Add(new Panel
         {
-            Left = 33, Top = 13, Width = 500, Height = 18,
+            Dock = DockStyle.Fill,
+            Margin = new Padding(0, 7, 12, 7),
+            BackColor = Theme.Materials,
+        }, 0, 0);
+        var heading = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            Margin = Padding.Empty,
+            ColumnCount = 1,
+            RowCount = 2,
+        };
+        heading.RowStyles.Add(new RowStyle(SizeType.Absolute, 19));
+        heading.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        heading.Controls.Add(new Label
+        {
+            Dock = DockStyle.Fill,
             Text = "GAME MATERIAL TEMPLATES", Font = Theme.Eyebrow, ForeColor = Theme.Materials,
-        });
-        header.Controls.Add(new Label
+        }, 0, 0);
+        heading.Controls.Add(new Label
         {
-            Left = 33, Top = 32, Width = 520, Height = 25,
+            Dock = DockStyle.Fill,
+            AutoEllipsis = true,
             Text = "Choose a tested material template", Font = Theme.Heading, ForeColor = Theme.OnDark,
-        });
-        _targetLabel.SetBounds(560, 20, 340, 38);
-        _targetLabel.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        }, 0, 1);
+        header.Controls.Add(heading, 1, 0);
+        _targetLabel.Dock = DockStyle.Fill;
+        _targetLabel.Margin = new Padding(10, 0, 0, 0);
+        _targetLabel.AutoEllipsis = true;
         _targetLabel.TextAlign = ContentAlignment.MiddleRight;
         _targetLabel.Font = Theme.Caption;
         _targetLabel.ForeColor = Theme.OnDarkMuted;
         _targetLabel.Text = _target is null
             ? "Target: not selected"
             : $"Target: {_target.DisplayName}\n{_target.Kind} · {UnrealPathUtil.AssetName(_target.MeshPackagePath)}";
-        header.Controls.Add(_targetLabel);
+        header.Controls.Add(_targetLabel, 2, 0);
 
-        var filters = new Panel
+        var filters = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
             Height = 52,
             Padding = new Padding(18, 8, 18, 8),
             BackColor = Theme.SlateDark,
+            ColumnCount = 3,
+            RowCount = 1,
         };
-        _search.SetBounds(18, 9, 340, 32);
+        filters.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
+        filters.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 28));
+        filters.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+        filters.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        _search.Dock = DockStyle.Fill;
+        _search.Margin = new Padding(0, 1, 6, 1);
         _search.PlaceholderText = "Search templates, categories, and notes…";
         Theme.StyleDarkInput(_search);
         _search.TextChanged += (_, _) => RefreshRecipes();
-        filters.Controls.Add(_search);
-        _category.SetBounds(370, 9, 220, 32);
+        filters.Controls.Add(_search, 0, 0);
+        _category.Dock = DockStyle.Fill;
+        _category.Margin = new Padding(0, 1, 6, 1);
         _category.DropDownStyle = ComboBoxStyle.DropDownList;
         Theme.StyleDarkCombo(_category);
         _category.SelectedIndexChanged += (_, _) => RefreshRecipes();
-        filters.Controls.Add(_category);
-        _advanced.SetBounds(608, 12, 270, 26);
+        filters.Controls.Add(_category, 1, 0);
+        _advanced.Dock = DockStyle.Fill;
+        _advanced.Margin = new Padding(8, 0, 0, 0);
+        _advanced.AutoEllipsis = true;
         _advanced.Text = "Show advanced and unavailable";
         _advanced.ForeColor = Theme.OnDark;
         _advanced.CheckedChanged += (_, _) => RefreshRecipes();
-        filters.Controls.Add(_advanced);
+        filters.Controls.Add(_advanced, 2, 0);
 
         var body = new TableLayoutPanel
         {
