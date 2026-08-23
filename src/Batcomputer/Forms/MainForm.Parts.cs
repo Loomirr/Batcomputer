@@ -2583,7 +2583,10 @@ public sealed partial class MainForm
 
     private NativeSuitPartRecord? FindExactMeshCounterpartPart(NativeSuitPartRecord part, string desiredContext)
     {
-        if (_partIndex is null || string.IsNullOrWhiteSpace(part.MeshObjectName))
+        if (_partIndex is null ||
+            string.IsNullOrWhiteSpace(part.MeshObjectName) ||
+            string.IsNullOrWhiteSpace(part.CharacterFolder) ||
+            string.IsNullOrWhiteSpace(part.SourcePackagePath))
         {
             return null;
         }
@@ -2592,11 +2595,14 @@ public sealed partial class MainForm
             .Where(candidate =>
                 candidate.HasMesh &&
                 candidate.Context.Equals(desiredContext, StringComparison.OrdinalIgnoreCase) &&
+                candidate.CharacterFolder.Equals(part.CharacterFolder, StringComparison.OrdinalIgnoreCase) &&
+                BaseEligibilityService.IsSameCharacterVariant(
+                    part.SourcePackagePath,
+                    candidate.SourcePackagePath) &&
                 (candidate.MeshObjectName.Equals(part.MeshObjectName, StringComparison.OrdinalIgnoreCase) ||
                  (!string.IsNullOrWhiteSpace(part.MeshObjectPath) &&
                   candidate.MeshObjectPath.Equals(part.MeshObjectPath, StringComparison.OrdinalIgnoreCase))))
-            .OrderByDescending(candidate => candidate.CharacterFolder.Equals(part.CharacterFolder, StringComparison.OrdinalIgnoreCase))
-            .ThenBy(candidate => candidate.SourcePackagePath, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(candidate => candidate.SourcePackagePath, StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault();
     }
 
@@ -3048,29 +3054,31 @@ public sealed partial class MainForm
             return false;
         }
 
+        var hasReplacementGlider = incomingGlider is not null ||
+                                   GliderService.ProjectHasReplacementGlider(project);
+        var driver = incomingGlider is not null
+            ? GliderService.PairedCapeDriverForPart(incomingGlider)
+            : hasReplacementGlider
+                ? GliderService.ProjectReplacementGliderDriver(project)
+                : PairedCapeVisibilityDriver.PairedCapable;
         if (baseContract != AnimArchetypeGraftService.CapeGlideContractStatus.Paired)
         {
             var detail = baseContract == AnimArchetypeGraftService.CapeGlideContractStatus.Unknown
                 ? "Batcomputer could not verify that this playable base owns the native two-component cape visibility setup. Refresh the character assets and run the build check before pairing a regular cape with a glider."
-                : "This playable base does not natively own separate regular-cape and glide-visual components. Adding both would leave the regular cape visible during gliding.";
+                : "This playable base does not natively own separate regular-cape and glide-visual components. Adding both is not a proven runtime layout and may crash or leave the regular cape visible during gliding.";
             Dialog.Error(this,
                 "Cape and glider are not compatible with this base",
-                detail + "\n\nPick the visual base again and choose a verified two-cape playable, or remove the regular Cape before adding this glider.",
+                detail + "\n\nPick the visual base again and choose a verified two-cape playable donor, or remove the regular Cape before adding this glider.",
                 windowTitle: windowTitle);
             return true;
         }
 
-        var hasReplacementGlider = incomingGlider is not null ||
-                                   GliderService.ProjectHasReplacementGlider(project);
         if (!hasReplacementGlider)
         {
             // The untouched glider on a base classified Paired already owns the proven driver.
             return false;
         }
 
-        var driver = incomingGlider is not null
-            ? GliderService.PairedCapeDriverForPart(incomingGlider)
-            : GliderService.ProjectReplacementGliderDriver(project);
         if (driver == PairedCapeVisibilityDriver.PairedCapable)
         {
             return false;

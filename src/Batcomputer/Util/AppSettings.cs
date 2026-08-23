@@ -473,7 +473,8 @@ public sealed class AppSettings
         // Let users point setup at the exact UAssetGUI dump folder they see, even
         // if that is one or two levels deeper than the Content root the services
         // internally need.
-        if (Path.GetFileName(full).Equals("Minifig", StringComparison.OrdinalIgnoreCase) &&
+        if ((Path.GetFileName(full).Equals("Minifig", StringComparison.OrdinalIgnoreCase) ||
+             Path.GetFileName(full).Equals("Smallfig", StringComparison.OrdinalIgnoreCase)) &&
             Directory.GetParent(full)?.Name.Equals("Characters", StringComparison.OrdinalIgnoreCase) == true &&
             Directory.GetParent(Directory.GetParent(full)!.FullName)?.Name.Equals("Content", StringComparison.OrdinalIgnoreCase) == true)
         {

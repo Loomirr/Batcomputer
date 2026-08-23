@@ -570,8 +570,8 @@ public sealed class PatchStep
 
 public sealed class NativeSuitPartIndex
 {
-    public int SchemaVersion { get; set; } = 2;
-    public string ToolVersion { get; set; } = "0.3-recipe-index";
+    public int SchemaVersion { get; set; } = PartIndexService.CurrentIndexSchemaVersion;
+    public string ToolVersion { get; set; } = "0.4-multi-rig-index";
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public string Status { get; set; } = "created";
     public string SourceContentRoot { get; set; } = "";

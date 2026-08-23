@@ -942,9 +942,9 @@ public sealed partial class MainForm
     /// </summary>
     private async Task ApplyBaseCharacterFromCatalog(string playablePackage)
     {
-        if (BaseEligibilityService.IsCutsceneVisualPackage(playablePackage))
+        if (BaseEligibilityService.RequiresSeparateGameplayDonor(playablePackage))
         {
-            await ApplyVisualCutsceneBaseFromCatalog(playablePackage);
+            await ApplyVisualOnlyBaseFromCatalog(playablePackage);
             return;
         }
 
@@ -1123,7 +1123,16 @@ public sealed partial class MainForm
                 .ToList();
             foreach (var vp in villainParts)
             {
-                UpsertPartGraft(vp.Slot, false, vp, vp);
+                // Keep each generated package on its native recipe. The playable boss and
+                // cutscene assets often share a mesh, but use different component classes,
+                // parents and CUT material instances (Mr. Freeze is the clearest example).
+                var playablePart = vp.Context.Equals("playable", StringComparison.OrdinalIgnoreCase)
+                    ? vp
+                    : FindExactMeshCounterpartPart(vp, "playable") ?? vp;
+                var cutscenePart = vp.Context.Equals("cutscene", StringComparison.OrdinalIgnoreCase)
+                    ? vp
+                    : FindExactMeshCounterpartPart(vp, "cutscene") ?? vp;
+                UpsertPartGraft(vp.Slot, false, playablePart, cutscenePart);
             }
             if (villainParts.Count > 0)
             {
@@ -1197,14 +1206,18 @@ public sealed partial class MainForm
         _session.RaiseChanged();
     }
 
-    private async Task ApplyVisualCutsceneBaseFromCatalog(string visualCutscenePackage)
+    private async Task ApplyVisualOnlyBaseFromCatalog(string visualPackage)
     {
         var extracted = AppSettings.Current.EffectiveExtractedContentRoot();
-        var visualDisk = PackageToExtractedUasset(visualCutscenePackage, extracted);
-        var visual = TemplateFromUasset(visualDisk, "visual-cutscene", extracted);
+        var visualDisk = PackageToExtractedUasset(visualPackage, extracted);
+        var isCutsceneVisual = BaseEligibilityService.IsCutsceneVisualPackage(visualPackage);
+        var visual = TemplateFromUasset(
+            visualDisk,
+            isCutsceneVisual ? "visual-cutscene" : "visual-character",
+            extracted);
         if (visual is null)
         {
-            AppendLog($"Visual cutscene is not extracted on disk: {visualDisk}. Extract that character folder, then try again.");
+            AppendLog($"Visual character is not extracted on disk: {visualDisk}. Extract that character folder, then try again.");
             return;
         }
 
@@ -1224,8 +1237,8 @@ public sealed partial class MainForm
             AppendLog($"Visual source '{visual.Stem}' needs a separate gameplay donor.");
         }
 
-        // A cutscene visual never silently chooses machinery. Authors can deliberately
-        // combine any visual character with any eligible playable donor.
+        // A visual-only Blueprint never silently chooses machinery. Authors can deliberately
+        // combine any cutscene, quest NPC, boss, or similar visual with an eligible playable.
         var donorPackage = PromptForMachineryDonor(recommendedPackage);
         if (string.IsNullOrWhiteSpace(donorPackage))
         {
@@ -1240,8 +1253,11 @@ public sealed partial class MainForm
         }
 
         var dcmdDisk = FindDcmdSiblingForPlayable(gameplay!.Uasset);
+        var stagedCutscene = isCutsceneVisual
+            ? visual.Uasset
+            : ResolveCutsceneSibling(gameplay.PackagePath) ?? gameplay.Uasset;
         _basePlayableText.Text = gameplay.Uasset;
-        _baseCutsceneText.Text = visual.Uasset;
+        _baseCutsceneText.Text = stagedCutscene;
         _baseDcmdText.Text = dcmdDisk ?? "";
 
         if (!await UseAsBase())
@@ -1249,7 +1265,7 @@ public sealed partial class MainForm
             return;
         }
 
-        RecordBaseProfile(visual, visual, gameplay);
+        RecordBaseProfile(visual, isCutsceneVisual ? visual : null, gameplay);
         ApplyVisualSourceMaterials(visual);
         await ApplyVisualAttachmentsToGameplayDonorAsync(visual.PackagePath);
 

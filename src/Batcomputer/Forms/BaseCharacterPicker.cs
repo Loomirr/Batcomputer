@@ -56,12 +56,10 @@ public sealed partial class BaseCharacterPicker : AdaptiveForm
         BackColor = Theme.WindowBg;
         ForeColor = Theme.OnDark;
 
-        _all = GameDataService.Instance.AssetsOfClass("BlueprintGeneratedClass")
-            .Where(asset => BaseEligibilityService.IsVisualCharacterPackage(asset.Path) &&
-                            (!_playablesOnly || BaseEligibilityService.IsGameplayDonorPackage(asset.Path)))
-            .OrderBy(asset => CharacterTypeRank(asset.Path))
-            .ThenBy(asset => asset.Path, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        _all = BuildVisualAssetList(
+            GameDataService.Instance.AssetsOfClass("BlueprintGeneratedClass"),
+            AppSettings.Current.EffectiveExtractedContentRoot(),
+            _playablesOnly);
 
         var prompt = new Label
         {
@@ -110,6 +108,74 @@ public sealed partial class BaseCharacterPicker : AdaptiveForm
         AcceptButton = accept;
         CancelButton = cancel;
         ApplyFilter();
+    }
+
+    /// <summary>
+    /// Merges the shipped path catalog with extracted quest-character Blueprints. Some native
+    /// characters, including Batmite, live under Characters/Smallfig and are absent from older
+    /// shipped catalogs even though the normal refresh extracted them successfully.
+    /// </summary>
+    internal static List<GameDataAsset> BuildVisualAssetList(
+        IEnumerable<GameDataAsset> catalogAssets,
+        string extractedContentRoot,
+        bool playablesOnly)
+    {
+        var assetsByPath = new Dictionary<string, GameDataAsset>(StringComparer.OrdinalIgnoreCase);
+        foreach (var asset in catalogAssets)
+        {
+            var package = UnrealPathUtil.NormalizePackagePath(asset.Path);
+            if (BaseEligibilityService.IsVisualCharacterPackage(package) &&
+                (!playablesOnly || BaseEligibilityService.IsGameplayDonorPackage(package)))
+            {
+                assetsByPath.TryAdd(package, asset);
+            }
+        }
+
+        if (!playablesOnly)
+        {
+            foreach (var package in EnumerateExtractedQuestVisualPackages(extractedContentRoot))
+            {
+                assetsByPath.TryAdd(package, new GameDataAsset
+                {
+                    Path = package,
+                    Class = "BlueprintGeneratedClass"
+                });
+            }
+        }
+
+        return assetsByPath.Values
+            .OrderBy(asset => CharacterTypeRank(asset.Path))
+            .ThenBy(asset => asset.Path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    internal static IReadOnlyList<string> EnumerateExtractedQuestVisualPackages(string extractedContentRoot)
+    {
+        try
+        {
+            var contentRoot = AppSettings.NormalizeContentRoot(extractedContentRoot);
+            var charactersRoot = Path.Combine(contentRoot, "Characters");
+            if (!Directory.Exists(charactersRoot))
+            {
+                return Array.Empty<string>();
+            }
+
+            return Directory.EnumerateFiles(charactersRoot, "BP_*.uasset", SearchOption.AllDirectories)
+                .Where(path => Path.GetFileNameWithoutExtension(path)
+                    .EndsWith("_Quest", StringComparison.OrdinalIgnoreCase))
+                .Select(path => "/Game/" + Path.ChangeExtension(
+                    Path.GetRelativePath(contentRoot, path), null)!.Replace('\\', '/'))
+                .Where(BaseEligibilityService.IsVisualCharacterPackage)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch
+        {
+            // A refresh can replace the extraction while the picker is opening. Keep the
+            // shipped catalog usable and let the next open discover the new files.
+            return Array.Empty<string>();
+        }
     }
 
     private void ApplyFilter()

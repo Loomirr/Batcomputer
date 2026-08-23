@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.9.0-beta.6 — 2026-08-23
+
+Responsive windows, quest-character support, and safer native component grafts.
+
+- Makes every top-level Batcomputer window and dialog resizable, keeps oversized windows inside one
+  monitor, and adapts dense layouts for small or high-DPI displays.
+- Discovers extracted `_Quest` Blueprints as visual bases, including characters under
+  `Characters/Smallfig`, while still requiring an explicit playable gameplay donor.
+- Indexes both Minifig and Smallfig part recipes, invalidates older Minifig-only caches so they are
+  rebuilt when needed, and recognizes Smallfig-owned character materials.
+- Includes the shared `M_Cape_Transparent` parent in every extraction profile so native cape
+  materials have their required dependency.
+- Keeps playable and cutscene extra-part grafts on their exact role-specific native recipes instead
+  of reusing one context for both, including Mr. Freeze boss components.
+- Adds the generated-class property and complete construction-script dependency links required for
+  newly appended components to instantiate in-game, then reopens and validates each written asset.
+- Clears an unrelated cloned skeletal `AnimClass` when the selected donor explicitly has none.
+- Blocks synthetic regular-cape and glide-visual layouts on bases without native paired-cape wiring;
+  verified paired bases retain their standing, gliding, and landing visibility behavior.
+- Removes third-party build-machine debug paths from the portable single-file executable.
+
 ## 0.9.0-beta.5 — 2026-08-22
 
 Donor selection, declarative staging, cape/glider safety, and registry reliability fixes.

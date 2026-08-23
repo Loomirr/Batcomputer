@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using UAssetAPI;
 using UAssetAPI.ExportTypes;
+using UAssetAPI.FieldTypes;
 using UAssetAPI.PropertyTypes.Objects;
 using UAssetAPI.PropertyTypes.Structs;
 using UAssetAPI.UnrealTypes;
@@ -871,9 +872,21 @@ public sealed class PartGraftService
             SetNamePropertyValueLive(asset, newNode.Data, "ParentComponentOrVariableName", ResolveParentComponent(newNode.Data, donorPart));
             SetNamePropertyValueLive(asset, newNode.Data, "InternalVariableName", targetSlot);
             SetGuidPropertyValueLive(newNode.Data, "VariableGuid", Guid.NewGuid());
-            newNode.CreateBeforeSerializationDependencies = new List<FPackageIndex> { FromExportNumber(componentExportIndex) };
+            RepairScsNodeComponentDependencyLive(newNode);
             newNode.SerializationBeforeCreateDependencies = new List<FPackageIndex> { newNode.ClassIndex, newNode.TemplateIndex }.Where(x => !x.IsNull()).ToList();
             newNode.CreateBeforeCreateDependencies = new List<FPackageIndex> { FromExportNumber(scsExportIndex) };
+
+            // An authored Blueprint component has three linked pieces: the template export,
+            // its SCS node, and an FObjectProperty on the BlueprintGeneratedClass. The live
+            // graft path historically wrote only the first two. UAssetAPI could round-trip
+            // that package, and the viewer could render the declarative mesh, but Unreal had
+            // no reflected field through which to instantiate the new component in-game.
+            AddClassChildPropertyLive(
+                asset,
+                (ClassExport)asset.Exports[classExportIndex - 1],
+                cloneSlot,
+                targetSlot,
+                newComponent.ClassIndex);
 
             asset.Exports.Add(newComponent);
             asset.Exports.Add(newNode);
@@ -899,7 +912,64 @@ public sealed class PartGraftService
             // attempt, so a rejected write is recoverable.)
             try
             {
-                _ = new UAsset(result.OutputUasset, EngineVersion.VER_UE5_6, mappings, CustomSerializationFlags.SkipPreloadDependencyLoading);
+                var validated = new UAsset(result.OutputUasset, EngineVersion.VER_UE5_6, mappings, CustomSerializationFlags.SkipPreloadDependencyLoading);
+                var validatedClass = validated.Exports.OfType<ClassExport>().FirstOrDefault();
+                var validatedProperty = validatedClass?.LoadedProperties
+                    .OfType<FObjectProperty>()
+                    .FirstOrDefault(property => property.Name.ToString().Equals(targetSlot, StringComparison.OrdinalIgnoreCase));
+                if (validatedProperty is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Generated component '{targetSlot}' is missing its Blueprint class property.");
+                }
+
+                var validatedComponent = validated.Exports.OfType<NormalExport>()
+                    .FirstOrDefault(export => export.ObjectName.ToString()
+                        .Equals(targetSlot + "_GEN_VARIABLE", StringComparison.OrdinalIgnoreCase));
+                if (validatedComponent is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Generated component template '{targetSlot}_GEN_VARIABLE' is missing.");
+                }
+                var validatedAnimClass = FindPropertyLive<ObjectPropertyData>(
+                    validatedComponent.Data,
+                    "AnimClass")?.Value ?? FPackageIndex.FromRawIndex(0);
+                if (string.IsNullOrWhiteSpace(donorPart.AnimClassObjectName) &&
+                    !validatedAnimClass.IsNull())
+                {
+                    throw new InvalidOperationException(
+                        $"Generated component '{targetSlot}' retained an unrelated AnimClass even though its donor has none.");
+                }
+
+                var validatedNode = validated.Exports.OfType<NormalExport>()
+                    .FirstOrDefault(export =>
+                        export.ObjectName.ToString().StartsWith("SCS_Node", StringComparison.OrdinalIgnoreCase) &&
+                        FindPropertyLive<NamePropertyData>(export.Data, "InternalVariableName")?.Value.ToString()
+                            .Equals(targetSlot, StringComparison.OrdinalIgnoreCase) == true);
+                var validatedTemplateIndex = validatedNode is null
+                    ? FPackageIndex.FromRawIndex(0)
+                    : GetObjectPropertyValueLive(validatedNode.Data, "ComponentTemplate");
+                var validatedComponentIndex = validated.Exports.IndexOf(validatedComponent) + 1;
+                if (validatedNode is null ||
+                    validatedTemplateIndex.Index != validatedComponentIndex ||
+                    !validatedNode.CreateBeforeSerializationDependencies.Any(
+                        dependency => dependency.Index == validatedComponentIndex))
+                {
+                    throw new InvalidOperationException(
+                        $"Generated SCS node '{targetSlot}' is not create-before-serialization dependent on its component template.");
+                }
+
+                var validatedNodeIndex = validated.Exports.IndexOf(validatedNode) + 1;
+                var validatedScs = validated.Exports.OfType<NormalExport>()
+                    .FirstOrDefault(export => export.ObjectName.ToString()
+                        .Equals("SimpleConstructionScript_0", StringComparison.OrdinalIgnoreCase));
+                if (validatedScs is null ||
+                    !validatedScs.CreateBeforeSerializationDependencies.Any(
+                        dependency => dependency.Index == validatedNodeIndex))
+                {
+                    throw new InvalidOperationException(
+                        $"Generated SimpleConstructionScript is not create-before-serialization dependent on node '{targetSlot}'.");
+                }
             }
             catch (Exception validateEx)
             {
@@ -1402,9 +1472,20 @@ public sealed class PartGraftService
         List<FPackageIndex> materialImports,
         IReadOnlyCollection<string>? componentTagsOverride = null)
     {
+        var animClass = FindPropertyLive<ObjectPropertyData>(component.Data, "AnimClass");
         if (!animImport.IsNull())
         {
             SetObjectPropertyValueLive(component.Data, "AnimClass", animImport);
+        }
+        else if (!donorPart.MeshKind.Equals("StaticMesh", StringComparison.OrdinalIgnoreCase) &&
+                 animClass is not null)
+        {
+            // A closest-shell clone can come from a different skeletal visual family. For example,
+            // a regular cape added to Nightwing has no AnimClass of its own and may use the Face
+            // component as its only non-glider skeletal shell. Retaining the face AnimBlueprint on
+            // the cape mesh is an invalid mesh/animation pairing and can crash during component
+            // initialization. The donor's explicit lack of an AnimClass means clear the clone.
+            animClass.Value = FPackageIndex.FromRawIndex(0);
         }
 
         if (donorPart.MeshKind.Equals("StaticMesh", StringComparison.OrdinalIgnoreCase))
@@ -1423,6 +1504,141 @@ public sealed class PartGraftService
             component.Data,
             "ComponentTags",
             (componentTagsOverride ?? donorPart.ComponentTags).ToList());
+    }
+
+    /// <summary>
+    /// Adds the reflected object property that lets Unreal bind an appended SCS component to the
+    /// generated class. Cooked component properties all share the same Blueprint-visible/instanced
+    /// metadata; only the field name and component class differ.
+    /// </summary>
+    private static void AddClassChildPropertyLive(
+        UAsset asset,
+        ClassExport classExport,
+        string cloneSlot,
+        string newSlot,
+        FPackageIndex componentClass)
+    {
+        if (classExport.LoadedProperties.Any(property =>
+                property.Name.ToString().Equals(newSlot, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        var objectProperties = classExport.LoadedProperties.OfType<FObjectProperty>().ToList();
+        var clone = objectProperties.FirstOrDefault(property =>
+                property.Name.ToString().Equals(cloneSlot, StringComparison.OrdinalIgnoreCase))
+            ?? objectProperties.FirstOrDefault(property => property.PropertyClass.Index == componentClass.Index)
+            ?? objectProperties.FirstOrDefault()
+            ?? throw new InvalidOperationException(
+                $"Could not find a Blueprint component property to clone for '{newSlot}'.");
+
+        var added = new FObjectProperty
+        {
+            Name = MakeName(asset, newSlot),
+            SerializedType = clone.SerializedType,
+            PropertyClass = componentClass,
+            ArrayDim = clone.ArrayDim,
+            ElementSize = clone.ElementSize,
+            PropertyFlags = clone.PropertyFlags,
+            RepIndex = clone.RepIndex,
+            RepNotifyFunc = clone.RepNotifyFunc,
+            BlueprintReplicationCondition = clone.BlueprintReplicationCondition,
+            RawValue = clone.RawValue,
+            UsmapPropertyTypeOverrides = clone.UsmapPropertyTypeOverrides,
+            Flags = clone.Flags,
+            MetaDataMap = clone.MetaDataMap,
+        };
+
+        classExport.LoadedProperties = classExport.LoadedProperties.Append(added).ToArray();
+    }
+
+    internal static bool AddsClassChildPropertyForTest()
+    {
+        var asset = new UAsset(
+            EngineVersion.VER_UE5_6,
+            mappings: null,
+            CustomSerializationFlags.None);
+        asset.ClearNameIndexList();
+        var sourceClass = FromImportNumber(1);
+        var graftClass = FromImportNumber(2);
+        var classExport = new ClassExport
+        {
+            LoadedProperties =
+            [
+                new FObjectProperty
+                {
+                    Name = MakeName(asset, "Face"),
+                    SerializedType = MakeName(asset, "ObjectProperty"),
+                    PropertyClass = sourceClass,
+                    ElementSize = 8,
+                },
+            ],
+        };
+
+        AddClassChildPropertyLive(asset, classExport, "Face", "Hip", graftClass);
+        AddClassChildPropertyLive(asset, classExport, "Face", "Hip", graftClass);
+
+        var added = classExport.LoadedProperties.OfType<FObjectProperty>()
+            .Where(property => property.Name.ToString().Equals("Hip", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        return classExport.LoadedProperties.Length == 2 &&
+               added.Count == 1 &&
+               added[0].PropertyClass.Index == graftClass.Index;
+    }
+
+    internal static bool ClearsStaleAnimClassForDonorWithoutAnimForTest()
+    {
+        var asset = new UAsset(
+            EngineVersion.VER_UE5_6,
+            mappings: null,
+            CustomSerializationFlags.None);
+        asset.ClearNameIndexList();
+        var component = new NormalExport
+        {
+            Data =
+            [
+                new ObjectPropertyData(MakeName(asset, "AnimClass"))
+                {
+                    Value = FromImportNumber(5)
+                },
+                new ObjectPropertyData(MakeName(asset, "SkeletalMesh")),
+                new ObjectPropertyData(MakeName(asset, "SkinnedAsset")),
+                new ArrayPropertyData(MakeName(asset, "OverrideMaterials")),
+                new ArrayPropertyData(MakeName(asset, "ComponentTags")),
+            ]
+        };
+        var donor = new NativeSuitPartRecord { MeshKind = "SkeletalMesh" };
+
+        SetComponentTemplateDataLive(
+            asset,
+            component,
+            donor,
+            FromImportNumber(7),
+            FPackageIndex.FromRawIndex(0),
+            []);
+
+        return FindPropertyLive<ObjectPropertyData>(component.Data, "AnimClass")?.Value.IsNull() == true &&
+               BuildCreateBeforeSerializationDependenciesLive(
+                   FromImportNumber(7),
+                   FPackageIndex.FromRawIndex(0),
+                   []).Select(index => index.Index).SequenceEqual([-7]);
+    }
+
+    internal static bool AddsScsNodeDependencyInNativeOrderForTest()
+    {
+        var existing = new[] { 30, 31, 32, 33, 34, 29 }
+            .Select(FromExportNumber)
+            .ToList();
+        var once = AddScsNodeDependencyInNativeOrder(
+            existing,
+            FromExportNumber(59),
+            FromExportNumber(29));
+        var twice = AddScsNodeDependencyInNativeOrder(
+            once,
+            FromExportNumber(59),
+            FromExportNumber(29));
+        return twice.Select(index => index.Index)
+            .SequenceEqual([30, 31, 32, 33, 34, 59, 29]);
     }
 
     private static void SetBoolPropertyIfPresentLive(List<PropertyData> properties, string propertyName, bool value)
@@ -1493,10 +1709,68 @@ public sealed class PartGraftService
             .ToList();
     }
 
+    private static void RepairScsNodeComponentDependencyLive(NormalExport scsNode)
+    {
+        var componentTemplate = GetObjectPropertyValueLive(scsNode.Data, "ComponentTemplate");
+        if (componentTemplate.Index <= 0)
+        {
+            throw new InvalidOperationException(
+                $"SCS node '{scsNode.ObjectName}' has no export-backed ComponentTemplate.");
+        }
+
+        // Match native cooked SCS nodes exactly: the node cannot serialize until its component
+        // template export has been created. Never retain the cloned node's dependency on the old
+        // source component after assigning a new ComponentTemplate.
+        scsNode.CreateBeforeSerializationDependencies = [componentTemplate];
+    }
+
     private static void AddScsRootNodeLive(UAsset asset, NormalExport scsExport, int scsNodeExportIndex)
     {
         AddObjectIndexToArrayPropertyLive(asset, scsExport.Data, "RootNodes", FromExportNumber(scsNodeExportIndex));
         AddObjectIndexToArrayPropertyLive(asset, scsExport.Data, "AllNodes", FromExportNumber(scsNodeExportIndex));
+
+        var defaultRootIndex = asset.Exports
+            .Select((export, index) => (export, index: index + 1))
+            .Where(entry => entry.export is NormalExport)
+            .Select(entry => (node: (NormalExport)entry.export, entry.index))
+            .FirstOrDefault(entry =>
+                entry.node.ObjectName.ToString().StartsWith("SCS_Node", StringComparison.OrdinalIgnoreCase) &&
+                FindPropertyLive<NamePropertyData>(entry.node.Data, "InternalVariableName")?.Value.ToString()
+                    .Equals("DefaultSceneRoot", StringComparison.OrdinalIgnoreCase) == true)
+            .index;
+        scsExport.CreateBeforeSerializationDependencies =
+            AddScsNodeDependencyInNativeOrder(
+                scsExport.CreateBeforeSerializationDependencies,
+                FromExportNumber(scsNodeExportIndex),
+                defaultRootIndex > 0 ? FromExportNumber(defaultRootIndex) : FPackageIndex.FromRawIndex(0));
+    }
+
+    private static List<FPackageIndex> AddScsNodeDependencyInNativeOrder(
+        IEnumerable<FPackageIndex> existing,
+        FPackageIndex newNode,
+        FPackageIndex defaultRoot)
+    {
+        var dependencies = existing
+            .GroupBy(index => index.Index)
+            .Select(group => group.First())
+            .ToList();
+        if (dependencies.Any(index => index.Index == newNode.Index))
+        {
+            return dependencies;
+        }
+
+        var rootPosition = defaultRoot.IsNull()
+            ? -1
+            : dependencies.FindIndex(index => index.Index == defaultRoot.Index);
+        if (rootPosition >= 0)
+        {
+            dependencies.Insert(rootPosition, newNode);
+        }
+        else
+        {
+            dependencies.Add(newNode);
+        }
+        return dependencies;
     }
 
     private static void AddObjectIndexToArrayPropertyLive(UAsset asset, List<PropertyData> properties, string propertyName, FPackageIndex objectIndex)

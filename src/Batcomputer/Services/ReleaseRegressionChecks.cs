@@ -25,6 +25,129 @@ internal static class ReleaseRegressionChecks
             "developer refresh extracts Content/Models/Gadgets",
             failures,
             output);
+        Check(
+            new[]
+            {
+                GameAssetRefreshService.BatmanFilters,
+                GameAssetRefreshService.AllCharacterFilters,
+                GameAssetRefreshService.DeveloperResearchFilters,
+            }.All(filters => filters.Contains(
+                GameAssetRefreshService.CapeTransparentMaterialFilter,
+                StringComparer.OrdinalIgnoreCase)),
+            "every refresh profile extracts the shared transparent cape material",
+            failures,
+            output);
+
+        var questRegressionRoot = Path.Combine(
+            Path.GetTempPath(),
+            "Batcomputer-quest-regression-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var contentRoot = Path.Combine(questRegressionRoot, "Content");
+            var smallfigRoot = Path.Combine(contentRoot, "Characters", "Smallfig");
+            var batmiteRoot = Path.Combine(smallfigRoot, "Batmite");
+            Directory.CreateDirectory(batmiteRoot);
+            foreach (var stem in new[] { "BP_Batmite_Quest", "BP_Batmite_01_Quest", "BP_Batmite_02_Quest" })
+            {
+                File.WriteAllBytes(Path.Combine(batmiteRoot, stem + ".uasset"), Array.Empty<byte>());
+            }
+            File.WriteAllBytes(
+                Path.Combine(batmiteRoot, "BP_CAT_Archetype_Batmite.uasset"),
+                Array.Empty<byte>());
+
+            var questPackages = BaseCharacterPicker.EnumerateExtractedQuestVisualPackages(contentRoot);
+            var visualAssets = BaseCharacterPicker.BuildVisualAssetList(
+                Array.Empty<GameDataAsset>(),
+                contentRoot,
+                playablesOnly: false);
+            var gameplayAssets = BaseCharacterPicker.BuildVisualAssetList(
+                Array.Empty<GameDataAsset>(),
+                contentRoot,
+                playablesOnly: true);
+            Check(
+                questPackages.Count == 3 &&
+                questPackages.Contains(
+                    "/Game/Characters/Smallfig/Batmite/BP_Batmite_Quest",
+                    StringComparer.OrdinalIgnoreCase) &&
+                visualAssets.Count == 3 &&
+                gameplayAssets.Count == 0 &&
+                BaseEligibilityService.RequiresSeparateGameplayDonor(
+                    "/Game/Characters/Smallfig/Batmite/BP_Batmite_Quest") &&
+                !BaseEligibilityService.RequiresSeparateGameplayDonor(
+                    "/Game/Characters/Minifig/Nightwing/BP_Nightwing_Default_Playable") &&
+                BaseEligibilityService.CharacterStem(
+                    "/Game/Characters/Smallfig/Batmite/BP_Batmite_01_Quest") == "Batmite_01" &&
+                BaseEligibilityService.CharacterStem(
+                    "/Game/Characters/Minifig/MrFreeze/BP_MrFreeze_BaR_Boss") ==
+                BaseEligibilityService.CharacterStem(
+                    "/Game/Characters/Minifig/MrFreeze/BP_MrFreeze_BaR_Cutscene") &&
+                BaseEligibilityService.IsSameCharacterVariant(
+                    "/Game/Characters/Minifig/Alfred/BP_Alfred_Default_Quest",
+                    "/Game/Characters/Minifig/Alfred/BP_Alfred_Default_Cutscene") &&
+                !BaseEligibilityService.IsSameCharacterVariant(
+                    "/Game/Characters/Minifig/Alfred/BP_Alfred_Default_Quest",
+                    "/Game/Characters/Minifig/Alfred/BP_Alfred_1966_Cutscene"),
+                "extracted Smallfig _Quest Blueprints appear as visual bases and require an explicit gameplay donor",
+                failures,
+                output);
+
+            var indexedBlueprints = PartIndexService.EnumerateCharacterBlueprintsForTest(contentRoot);
+            Check(
+                indexedBlueprints.Count == 3 &&
+                indexedBlueprints.Any(path => Path.GetFileNameWithoutExtension(path)
+                    .Equals("BP_Batmite_Quest", StringComparison.OrdinalIgnoreCase)) &&
+                !PartIndexService.IsCurrentIndexForTest(new NativeSuitPartIndex { SchemaVersion = 2 }) &&
+                PartIndexService.IsCurrentIndexForTest(new NativeSuitPartIndex()),
+                "the native part index scans Smallfig quest-character Blueprints",
+                failures,
+                output);
+            Check(
+                AppSettings.NormalizeContentRoot(smallfigRoot)
+                    .Equals(contentRoot, StringComparison.OrdinalIgnoreCase) &&
+                AnimArchetypeGraftService.IsCharacterOwnedMaterialPackage(
+                    "/Game/Characters/Smallfig/Batmite/Materials/MI_Batmite_EoM",
+                    "Batmite"),
+                "Smallfig extract roots and character-owned materials resolve like Minifig assets",
+                failures,
+                output);
+        }
+        catch (Exception ex)
+        {
+            output.WriteLine("FAIL: Smallfig quest-character regression threw: " + ex.Message);
+            failures.Add("extracted Smallfig _Quest Blueprints appear as visual bases and require an explicit gameplay donor");
+            failures.Add("the native part index scans Smallfig quest-character Blueprints");
+            failures.Add("Smallfig extract roots and character-owned materials resolve like Minifig assets");
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(questRegressionRoot))
+                {
+                    Directory.Delete(questRegressionRoot, recursive: true);
+                }
+            }
+            catch
+            {
+                // Best-effort cleanup of the uniquely named regression folder.
+            }
+        }
+
+        Check(
+            PartGraftService.AddsClassChildPropertyForTest(),
+            "an appended SCS component gets one reflected generated-class field bound to its component class",
+            failures,
+            output);
+        Check(
+            PartGraftService.ClearsStaleAnimClassForDonorWithoutAnimForTest(),
+            "a skeletal donor with no AnimClass clears an unrelated cloned-shell AnimClass and dependency",
+            failures,
+            output);
+        Check(
+            PartGraftService.AddsScsNodeDependencyInNativeOrderForTest(),
+            "an appended SCS node is added once to SimpleConstructionScript create-before-serialization dependencies",
+            failures,
+            output);
 
         Check(
             PartGraftService.CanRepointExistingComponentForTest(false, false, false, false),
@@ -171,6 +294,7 @@ internal static class ReleaseRegressionChecks
                     IsGlider = false,
                     Playable = new SavedPartGraftDonor
                     {
+                        Context = "playable",
                         Stem = "SK_CAPE_TwoHole_Spiked",
                         ComponentTags = ["TtCharacterAsset.Cape", "Cape"]
                     }
@@ -530,6 +654,44 @@ internal static class ReleaseRegressionChecks
                 nativeCapeOnPairedBase,
                 AnimArchetypeGraftService.CapeGlideContractStatus.Paired),
             "a native cape graft keeps the paired-base visibility-wiring exemption",
+            failures,
+            output);
+        var unsafeGeneratedNightwingCapePair = new NativeSuitProject
+        {
+            PartGrafts =
+            [
+                new SavedPartGraft
+                {
+                    Slot = "Cape",
+                    Playable = new SavedPartGraftDonor
+                    {
+                        Context = "playable",
+                        Stem = "SK_CAPE_TwoHole_Spiked",
+                        ComponentTags = ["TtCharacterAsset.Cape", "Cape"]
+                    }
+                },
+                new SavedPartGraft
+                {
+                    Slot = "Cape",
+                    IsGlider = true,
+                    Playable = new SavedPartGraftDonor
+                    {
+                        Context = "playable",
+                        AnimClassObjectName = "ABP_Cape_Glide_C",
+                        ComponentTags = ["Glider"]
+                    }
+                }
+            ]
+        };
+        Check(
+            GliderService.HasCapeAndGliderCombination(
+                unsafeGeneratedNightwingCapePair,
+                AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly) &&
+            GliderService.ProjectReplacementGliderDriver(unsafeGeneratedNightwingCapePair) ==
+                PairedCapeVisibilityDriver.PairedCapable &&
+            StageValidationService.BlocksSyntheticCapePairOnGlideOnlyBaseForTest(
+                unsafeGeneratedNightwingCapePair),
+            "a synthetic Cape plus ABP_Cape_Glide remains a blocked cape/glider combination on a glide-only base",
             failures,
             output);
         var additiveCapeWithGraftedGlider = new NativeSuitProject

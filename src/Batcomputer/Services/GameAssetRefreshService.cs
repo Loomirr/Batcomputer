@@ -15,6 +15,8 @@ public sealed class GameAssetRefreshService
 {
     public const string RetocEngineVersion = "UE5_6";
     public const string CharacterGadgetFilter = "Content/Models/Gadgets/";
+    public const string CapeTransparentMaterialFilter =
+        "Content/Art/TechnicalArt/Optimisation/M_Cape_Transparent";
 
     public enum RefreshProfile
     {
@@ -44,6 +46,9 @@ public sealed class GameAssetRefreshService
         // One metadata asset used only by the Playable 3D viewer's read-only native
         // colour-preset selector. This does not restore Red Brick authoring assets.
         ViewerBaseGameRedBrickPaletteService.RetocFilter,
+        // Shared parent used by native cape materials. It lives outside Characters,
+        // so a character-only filter does not bring it into the extracted workspace.
+        CapeTransparentMaterialFilter,
     }.Concat(TextureCookTemplateService.RetocFilters).ToArray();
 
     // The normal refresh profile used by the builder - this has to be SELF-SUFFICIENT, because it
@@ -62,6 +67,7 @@ public sealed class GameAssetRefreshService
         "Content/Localization/StringTables/",
         "Content/Animation/",
         CharacterGadgetFilter,
+        CapeTransparentMaterialFilter,
         // Keep the clean-install viewer self-sufficient without broadening this into
         // a Red Brick authoring or collectables extraction profile.
         ViewerBaseGameRedBrickPaletteService.RetocFilter,
@@ -80,6 +86,7 @@ public sealed class GameAssetRefreshService
         "Content/Abilities/",
         "Content/Gameplay/",
         CharacterGadgetFilter,
+        CapeTransparentMaterialFilter,
         "Content/UI/",
         "Content/Localization/StringTables/",
         "Content/Plugins/GameFeatures/",

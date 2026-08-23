@@ -397,6 +397,14 @@ public sealed class StageValidationService
         }
 
         var capeGlideContract = new AnimArchetypeGraftService().BaseCapeGlideContract(project);
+        CheckCapeGliderContract(project, capeGlideContract, findings);
+    }
+
+    private static void CheckCapeGliderContract(
+        NativeSuitProject project,
+        AnimArchetypeGraftService.CapeGlideContractStatus capeGlideContract,
+        List<Finding> findings)
+    {
         if (GliderService.HasAdditiveCapeAndGliderCombination(project, capeGlideContract))
         {
             findings.Add(new("ERROR",
@@ -433,9 +441,22 @@ public sealed class StageValidationService
             {
                 findings.Add(new("ERROR",
                     "This suit combines a regular cape with a glide visual, but its playable base does not natively own separate cosmetic-cape and glider components. " +
-                    "The regular cape would remain visible while gliding. Re-select the visual base and choose a playable donor with the native two-cape visibility setup, then re-apply both parts."));
+                    "That synthetic component layout is not runtime-proven and may crash or leave the regular cape visible while gliding. " +
+                    "Re-select the visual base and choose a playable donor with the native two-cape visibility setup, then re-apply both parts."));
             }
         }
+    }
+
+    internal static bool BlocksSyntheticCapePairOnGlideOnlyBaseForTest(NativeSuitProject project)
+    {
+        var findings = new List<Finding>();
+        CheckCapeGliderContract(
+            project,
+            AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
+            findings);
+        return findings.Any(finding =>
+            finding.Severity == "ERROR" &&
+            finding.Message.Contains("not runtime-proven", StringComparison.Ordinal));
     }
 
     private string PackagePathToBasePath(string packagePath)

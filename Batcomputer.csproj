@@ -8,10 +8,10 @@
     <AssemblyName>Batcomputer</AssemblyName>
     <RootNamespace>Batcomputer</RootNamespace>
     <ApplicationIcon Condition="Exists('Assets\Icon.ico')">Assets\Icon.ico</ApplicationIcon>
-    <Version>0.9.0-beta.5</Version>
+    <Version>0.9.0-beta.6</Version>
     <AssemblyVersion>0.9.0.0</AssemblyVersion>
-    <FileVersion>0.9.0.5</FileVersion>
-    <InformationalVersion>0.9.0-beta.5</InformationalVersion>
+    <FileVersion>0.9.0.6</FileVersion>
+    <InformationalVersion>0.9.0-beta.6</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <!-- Code-built controls do not need designer serialization metadata. -->
     <NoWarn>$(NoWarn);WFO1000</NoWarn>
@@ -109,6 +109,35 @@
   <Target Name="RemoveWebView2WpfReference" BeforeTargets="ResolveAssemblyReferences">
     <ItemGroup>
       <Reference Remove="@(Reference)" Condition="'%(Reference.Filename)' == 'Microsoft.Web.WebView2.Wpf'" />
+    </ItemGroup>
+  </Target>
+  <!-- UAssetAPI 1.1.0 carries its build machine's full CodeView path. Sanitize a
+       private intermediate copy before single-file bundling; never alter NuGet's cache. -->
+  <Target Name="SanitizeBundledUAssetApiCodeViewPath"
+          AfterTargets="PrepareForBundle"
+          BeforeTargets="_GenerateSingleFileBundleInputCache"
+          Condition="'$(PublishSingleFile)' == 'true'">
+    <ItemGroup>
+      <_UAssetApiBundleInput Include="@(FilesToBundle)"
+                             Condition="'%(FilesToBundle.Filename)%(FilesToBundle.Extension)' == 'UAssetAPI.dll'" />
+    </ItemGroup>
+    <Error Condition="'@(_UAssetApiBundleInput)' == ''"
+           Text="Could not find UAssetAPI.dll in the single-file bundle inputs." />
+    <Error Condition="'@(_UAssetApiBundleInput->Count())' != '1'"
+           Text="Expected exactly one UAssetAPI.dll single-file bundle input." />
+    <PropertyGroup>
+      <_SanitizedUAssetApiBundleDir>$(IntermediateOutputPath)sanitized-bundle</_SanitizedUAssetApiBundleDir>
+      <_SanitizedUAssetApiBundlePath>$(_SanitizedUAssetApiBundleDir)\UAssetAPI.dll</_SanitizedUAssetApiBundlePath>
+    </PropertyGroup>
+    <MakeDir Directories="$(_SanitizedUAssetApiBundleDir)" />
+    <Exec Command="powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\Tools\Sanitize-CodeViewPath.ps1&quot; -SourcePath &quot;%(_UAssetApiBundleInput.FullPath)&quot; -DestinationPath &quot;$(_SanitizedUAssetApiBundlePath)&quot; -ExpectedPdbName &quot;UAssetAPI.pdb&quot;" />
+    <ItemGroup>
+      <FilesToBundle Remove="@(_UAssetApiBundleInput);$(_SanitizedUAssetApiBundlePath)" />
+      <FilesToBundle Include="$(_SanitizedUAssetApiBundlePath)">
+        <DestinationSubPath>UAssetAPI.dll</DestinationSubPath>
+        <RelativePath>UAssetAPI.dll</RelativePath>
+        <AssetType>runtime</AssetType>
+      </FilesToBundle>
     </ItemGroup>
   </Target>
   <!-- Include the default workspace in portable releases. -->

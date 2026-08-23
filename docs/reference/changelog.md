@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.0-beta.6
+
+- All top-level windows and dialogs are resizable and constrained to usable single-monitor bounds,
+  with responsive layouts for smaller and high-DPI displays.
+- Extracted `_Quest` Blueprints, including Smallfig characters such as Batmite, can be selected as
+  visual bases and are paired with an explicit playable gameplay donor.
+- The native part index now scans Minifig and Smallfig recipes and invalidates older Minifig-only
+  caches so they are rebuilt when needed.
+- Every extraction profile includes the shared transparent cape material dependency.
+- Role-specific playable and cutscene recipes are preserved for extra parts such as Mr. Freeze's,
+  and appended components receive the generated-class and construction-script links needed in-game.
+- Unsafe synthetic cape/glider layouts are blocked; native paired-cape bases retain the supported
+  visibility behavior.
+- Third-party build-machine debug paths are removed from the portable single-file executable.
+
 ## 0.9.0-beta.5
 
 - Cutscene visuals now always open the gameplay-donor picker, and Catwoman playables resolve their

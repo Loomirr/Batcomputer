@@ -42,6 +42,13 @@ public static class BaseEligibilityService
         UnrealPathUtil.AssetName(UnrealPathUtil.NormalizePackagePath(packagePath ?? ""))
             .EndsWith("_Playable", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Visual-only characters (cutscenes, quest NPCs, bosses, and similar authored BPs) must be
+    /// combined with an explicit real playable rather than entering the playable-base path.
+    /// </summary>
+    public static bool RequiresSeparateGameplayDonor(string? packagePath) =>
+        IsVisualCharacterPackage(packagePath) && !IsGameplayDonorPackage(packagePath);
+
     public static string CharacterStem(string? packagePath)
     {
         var stem = UnrealPathUtil.AssetName(UnrealPathUtil.NormalizePackagePath(packagePath ?? ""));
@@ -50,7 +57,11 @@ public static class BaseEligibilityService
             stem = stem[3..];
         }
 
-        foreach (var suffix in new[] { "_Default_Cutscene", "_Cutscene", "_Playable" })
+        foreach (var suffix in new[]
+                 {
+                     "_Default_Cutscene", "_Default_Playable", "_Cutscene", "_Playable",
+                     "_Quest", "_Boss", "_Goon", "_Civilian", "_Batcave"
+                 })
         {
             if (stem.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
             {
@@ -59,6 +70,28 @@ public static class BaseEligibilityService
         }
 
         return stem;
+    }
+
+    /// <summary>
+    /// Matches the same authored character variant across runtime roles. Some default siblings
+    /// spell the role as <c>_Playable</c> versus <c>_Default_Cutscene</c>, while quest assets can
+    /// retain <c>_Default</c> before <c>_Quest</c>; a terminal Default is therefore optional, but
+    /// named variants such as 1966 or BaR must still match exactly.
+    /// </summary>
+    public static bool IsSameCharacterVariant(string? firstPackagePath, string? secondPackagePath)
+    {
+        static string WithoutTerminalDefault(string value) =>
+            value.EndsWith("_Default", StringComparison.OrdinalIgnoreCase)
+                ? value[..^"_Default".Length]
+                : value;
+
+        var first = CharacterStem(firstPackagePath);
+        var second = CharacterStem(secondPackagePath);
+        return !string.IsNullOrWhiteSpace(first) &&
+               (first.Equals(second, StringComparison.OrdinalIgnoreCase) ||
+                WithoutTerminalDefault(first).Equals(
+                    WithoutTerminalDefault(second),
+                    StringComparison.OrdinalIgnoreCase));
     }
 
     public static SuitBaseProfile CreateProfile(string? visualBasePackage, string? gameplayDonorPackage)

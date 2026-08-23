@@ -7,6 +7,10 @@ namespace Batcomputer;
 
 public sealed class PartIndexService
 {
+    public const int CurrentIndexSchemaVersion = 3;
+
+    private static readonly string[] CharacterRigFolders = { "Minifig", "Smallfig" };
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -54,26 +58,32 @@ public sealed class PartIndexService
     {
         var contentRoot = string.IsNullOrWhiteSpace(sourceContentRoot)
             ? FindDefaultExtractedContentRoot()
-            : sourceContentRoot.Trim();
-        var minifigRoot = Path.Combine(contentRoot, "Characters", "Minifig");
+            : AppSettings.NormalizeContentRoot(sourceContentRoot.Trim());
+        // Preserve the legacy diagnostic field for existing part-index readers while the scan
+        // itself now covers both supported character rigs.
+        var legacyMinifigRoot = Path.Combine(contentRoot, "Characters", "Minifig");
+        var characterRoots = CharacterRigFolders
+            .Select(folder => Path.Combine(contentRoot, "Characters", folder))
+            .Where(Directory.Exists)
+            .ToList();
 
         var index = new NativeSuitPartIndex
         {
             CreatedUtc = DateTime.UtcNow,
             SourceContentRoot = contentRoot,
-            SourceMinifigRoot = minifigRoot,
+            SourceMinifigRoot = legacyMinifigRoot,
             MappingsPath = FindDefaultMappingsPath()
         };
 
         Directory.CreateDirectory(PartIndexOutputRoot);
 
-        if (!Directory.Exists(minifigRoot))
+        if (characterRoots.Count == 0)
         {
             index.Status = "missing-source-root";
             index.Errors.Add(new NativeSuitPartScanError
             {
-                Uasset = minifigRoot,
-                Error = "Extracted minifig root was not found."
+                Uasset = Path.Combine(contentRoot, "Characters"),
+                Error = "No extracted Minifig or Smallfig character root was found."
             });
             SavePartIndex(index);
             return index;
@@ -96,11 +106,7 @@ public sealed class PartIndexService
             }
         }
 
-        var assets = Directory
-            .EnumerateFiles(minifigRoot, "BP_*.uasset", SearchOption.AllDirectories)
-            .Where(path => !Path.GetFileNameWithoutExtension(path).StartsWith("BP_CAT_Archetype", StringComparison.OrdinalIgnoreCase))
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var assets = EnumerateCharacterBlueprints(contentRoot);
 
         index.AssetsFound = assets.Count;
 
@@ -110,7 +116,7 @@ public sealed class PartIndexService
             {
                 var asset = new UAsset(assetPath, EngineVersion.VER_UE5_6, mappings, CustomSerializationFlags.SkipPreloadDependencyLoading);
                 using var doc = JsonDocument.Parse(asset.SerializeJson(false));
-                var parts = ExtractParts(doc.RootElement, assetPath, contentRoot, minifigRoot);
+                var parts = ExtractParts(doc.RootElement, assetPath, contentRoot);
                 index.AssetsParsed++;
                 if (parts.Count > 0)
                 {
@@ -146,15 +152,38 @@ public sealed class PartIndexService
             return null;
         }
 
-        return JsonSerializer.Deserialize<NativeSuitPartIndex>(File.ReadAllText(PartIndexPath), JsonOptions);
+        var index = JsonSerializer.Deserialize<NativeSuitPartIndex>(File.ReadAllText(PartIndexPath), JsonOptions);
+        // Version 2 scanned Minifig only. Treat it as a stale cache so selecting an extracted
+        // Smallfig visual automatically builds the multi-rig index instead of silently omitting
+        // its cape, head, and face recipes.
+        return IsCurrentIndex(index) ? index : null;
     }
+
+    internal static bool IsCurrentIndexForTest(NativeSuitPartIndex? index) => IsCurrentIndex(index);
+
+    private static bool IsCurrentIndex(NativeSuitPartIndex? index) =>
+        index is not null && index.SchemaVersion >= CurrentIndexSchemaVersion;
 
     private void SavePartIndex(NativeSuitPartIndex index)
     {
         File.WriteAllText(PartIndexPath, JsonSerializer.Serialize(index, JsonOptions));
     }
 
-    private static List<NativeSuitPartRecord> ExtractParts(JsonElement root, string assetPath, string contentRoot, string minifigRoot)
+    internal static IReadOnlyList<string> EnumerateCharacterBlueprintsForTest(string contentRoot) =>
+        EnumerateCharacterBlueprints(AppSettings.NormalizeContentRoot(contentRoot));
+
+    private static List<string> EnumerateCharacterBlueprints(string contentRoot) =>
+        CharacterRigFolders
+            .Select(folder => Path.Combine(contentRoot, "Characters", folder))
+            .Where(Directory.Exists)
+            .SelectMany(root => Directory.EnumerateFiles(root, "BP_*.uasset", SearchOption.AllDirectories))
+            .Where(path => !Path.GetFileNameWithoutExtension(path)
+                .StartsWith("BP_CAT_Archetype", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private static List<NativeSuitPartRecord> ExtractParts(JsonElement root, string assetPath, string contentRoot)
     {
         var output = new List<NativeSuitPartRecord>();
         if (!root.TryGetProperty("Exports", out var exportsElement) ||
@@ -174,7 +203,7 @@ public sealed class PartIndexService
 
         var contentRelative = Path.GetRelativePath(contentRoot, assetPath);
         var stem = Path.GetFileNameWithoutExtension(assetPath);
-        var characterFolder = GetCharacterFolder(assetPath, minifigRoot);
+        var characterFolder = GetCharacterFolder(assetPath, contentRoot);
         var context = DetermineContext(stem);
 
         for (var exportIndex = 0; exportIndex < exports.Count; exportIndex++)
@@ -448,10 +477,18 @@ public sealed class PartIndexService
             return "batcave";
         }
 
+        // Quest characters are appearance donors, not gameplay donors. Their concrete BP still
+        // supplies the playable-side visual recipe; the visual-base flow deliberately reuses that
+        // recipe for cutscene when no dedicated counterpart exists.
+        if (lower.EndsWith("_quest", StringComparison.Ordinal))
+        {
+            return "playable";
+        }
+
         return "playable";
     }
 
-    private static string GetCharacterFolder(string assetPath, string minifigRoot)
+    private static string GetCharacterFolder(string assetPath, string contentRoot)
     {
         var directory = Path.GetDirectoryName(assetPath);
         if (string.IsNullOrWhiteSpace(directory))
@@ -459,8 +496,13 @@ public sealed class PartIndexService
             return "";
         }
 
-        var relative = Path.GetRelativePath(minifigRoot, directory);
-        return relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).FirstOrDefault() ?? "";
+        var charactersRoot = Path.Combine(contentRoot, "Characters");
+        var segments = Path.GetRelativePath(charactersRoot, directory)
+            .Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
+                StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length >= 2 && CharacterRigFolders.Contains(segments[0], StringComparer.OrdinalIgnoreCase)
+            ? segments[1]
+            : segments.FirstOrDefault() ?? "";
     }
 
     private static string PackagePathFromContentPath(string assetPath, string contentRoot)

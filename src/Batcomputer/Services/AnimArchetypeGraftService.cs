@@ -490,10 +490,10 @@ public sealed class AnimArchetypeGraftService
                 .Distinct()
                 .ToList();
             var face = mis.FirstOrDefault(n => UnrealPathUtil.AssetName(n).StartsWith("MI_FACE_", StringComparison.OrdinalIgnoreCase)) ?? "";
-            // Body: the character's own material (…/Minifig/<Char>/Materials/MI_<Char>…), not
+            // Body: the character's own material (…/<rig>/<Char>/Materials/MI_<Char>…), not
             // face/hair/cape attachment materials.
             var body = mis.FirstOrDefault(n =>
-                           n.Contains($"/Minifig/{characterFolder}/", StringComparison.OrdinalIgnoreCase) &&
+                           IsCharacterOwnedMaterialPackage(n, characterFolder) &&
                            IsCharacterMaterialFolder(n) &&
                            !UnrealPathUtil.AssetName(n).StartsWith("MI_FACE_", StringComparison.OrdinalIgnoreCase) &&
                            !UnrealPathUtil.AssetName(n).StartsWith("MI_HAIR_", StringComparison.OrdinalIgnoreCase))
@@ -512,6 +512,12 @@ public sealed class AnimArchetypeGraftService
     private static bool IsCharacterMaterialFolder(string packagePath) =>
         packagePath.Contains("/Material/", StringComparison.OrdinalIgnoreCase) ||
         packagePath.Contains("/Materials/", StringComparison.OrdinalIgnoreCase);
+
+    internal static bool IsCharacterOwnedMaterialPackage(string packagePath, string characterFolder) =>
+        new[] { "Minifig", "Smallfig" }.Any(rig =>
+            packagePath.Contains(
+                $"/Characters/{rig}/{characterFolder}/",
+                StringComparison.OrdinalIgnoreCase));
 
     private static string FindCharacterBodyMaterialOnDisk(string characterBlueprint, string characterFolder)
     {
