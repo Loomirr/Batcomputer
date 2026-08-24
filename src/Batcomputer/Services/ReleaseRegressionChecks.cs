@@ -38,6 +38,46 @@ internal static class ReleaseRegressionChecks
             failures,
             output);
 
+        var movedExtractRoot = Path.Combine(
+            Path.GetTempPath(),
+            "Batcomputer-template-path-regression-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var activeContent = Path.Combine(movedExtractRoot, "Current", "Content");
+            var activeBase = Path.Combine(
+                activeContent,
+                "Characters",
+                "Minifig",
+                "Batman",
+                "BP_Batman_1989_Playable");
+            Directory.CreateDirectory(Path.GetDirectoryName(activeBase)!);
+            File.WriteAllText(activeBase + ".uasset", "current-uasset");
+            File.WriteAllText(activeBase + ".uexp", "current-uexp");
+            var staleTemplate = new TemplateRecord
+            {
+                PackagePath = "/Game/Characters/Minifig/Batman/BP_Batman_1989_Playable",
+                ContentRelative = "Characters/Minifig/Batman/BP_Batman_1989_Playable",
+                Uasset = Path.Combine(movedExtractRoot, "Retired", "Content", "Characters", "Minifig", "Batman", "BP_Batman_1989_Playable.uasset"),
+                Uexp = Path.Combine(movedExtractRoot, "Retired", "Content", "Characters", "Minifig", "Batman", "BP_Batman_1989_Playable.uexp"),
+                Role = "playable",
+            };
+            Check(
+                SuitProjectService.RefreshTemplateSourceForTest(staleTemplate, activeContent) &&
+                staleTemplate.Uasset.Equals(activeBase + ".uasset", StringComparison.OrdinalIgnoreCase) &&
+                staleTemplate.Uexp?.Equals(activeBase + ".uexp", StringComparison.OrdinalIgnoreCase) == true &&
+                staleTemplate.PackagePath == "/Game/Characters/Minifig/Batman/BP_Batman_1989_Playable",
+                "saved suits relocate retired absolute template paths to the active extract by exact /Game package",
+                failures,
+                output);
+        }
+        finally
+        {
+            if (Directory.Exists(movedExtractRoot))
+            {
+                Directory.Delete(movedExtractRoot, recursive: true);
+            }
+        }
+
         var questRegressionRoot = Path.Combine(
             Path.GetTempPath(),
             "Batcomputer-quest-regression-" + Guid.NewGuid().ToString("N"));
@@ -2083,6 +2123,156 @@ internal static class ReleaseRegressionChecks
             compactWindow.MinimumSize.Width <= compactWindow.Bounds.Width &&
             compactWindow.MinimumSize.Height <= compactWindow.Bounds.Height,
             "resizable windows lower oversized minimums to fit a small display",
+            failures,
+            output);
+
+        var nativeBodies = NativeBodyProfileService.Catalog();
+        Check(
+            nativeBodies.Count == 9 &&
+            nativeBodies.Select(profile => profile.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 9 &&
+            nativeBodies.Count(profile => profile.Id.Contains("armless", StringComparison.OrdinalIgnoreCase)) == 2,
+            "native body catalog exposes the exact shipped Minifig/Smallfig variants",
+            failures,
+            output);
+        Check(
+            nativeBodies.All(profile =>
+                !profile.Id.Contains("08-armless", StringComparison.OrdinalIgnoreCase) &&
+                !profile.Id.Contains("08-headless", StringComparison.OrdinalIgnoreCase) &&
+                !profile.Id.Contains("08-no-", StringComparison.OrdinalIgnoreCase)) &&
+            nativeBodies.Single(profile => profile.Id == "minifig-headless").HeadPolicy ==
+                NativeBodyProfileService.IntentionallyAbsentHeadPolicy &&
+            nativeBodies.Single(profile => profile.Id == "smallfig-armless").GeometryFamily == "Smallfig",
+            "body profiles do not synthesize unsupported reduced 08 combinations and preserve head policy",
+            failures,
+            output);
+        var bodyDeclaration = new NativeSuitProject
+        {
+            BodyProfile = NativeBodyProfileService.Find("minifig-no-upper-body"),
+        };
+        var bodyRoundTrip = System.Text.Json.JsonSerializer.Deserialize<NativeSuitProject>(
+            System.Text.Json.JsonSerializer.Serialize(bodyDeclaration));
+        Check(
+            MainForm.ProjectRequiresCompletedGraftStage(bodyDeclaration) &&
+            bodyRoundTrip?.BodyProfile?.MeshPackagePath ==
+                "/Game/Characters/LEGOfig/SK_LEGOFig_Minifig_NoUpperBody" &&
+            bodyRoundTrip.BodyProfile.MissingRegions.Contains("Torso", StringComparer.OrdinalIgnoreCase),
+            "native body declaration persists and requires a certified declarative stage",
+            failures,
+            output);
+        var reducedBody = NativeBodyProfileService.Find("minifig-armless");
+        var ordinaryBody = NativeBodyProfileService.Find("minifig-standard");
+        Check(
+            NativeBodyProfileService.SelectAfterBaseChange(reducedBody, ordinaryBody, baseIdentityChanged: false)?.Id ==
+                "minifig-armless" &&
+            NativeBodyProfileService.SelectAfterBaseChange(reducedBody, ordinaryBody, baseIdentityChanged: true)?.Id ==
+                "minifig-standard",
+            "reselecting the same base preserves an explicit native body while a real base change follows the new base",
+            failures,
+            output);
+
+        var newerMaterial = new GeneratedMaterialEntry
+        {
+            PackagePath = "/Game/Mods/Shared/Materials/MI_Shared",
+            DisplayName = "New metadata",
+            CreatedUtc = "2026-01-02T00:00:00Z",
+            CompatibleFaceMeshPackagePaths = ["/Game/Characters/Attachments/LEGOface/SK_LEGOface"],
+        };
+        var staleMaterial = new GeneratedMaterialEntry
+        {
+            PackagePath = newerMaterial.PackagePath,
+            DisplayName = "Old metadata",
+            CreatedUtc = "2026-01-01T00:00:00Z",
+        };
+        Check(
+            !ToolMaterialLibraryService.PreferMigratedEntry(staleMaterial, newerMaterial) &&
+            ToolMaterialLibraryService.PreferMigratedEntry(newerMaterial, staleMaterial),
+            "older saved suits cannot replace newer workspace material metadata during migration",
+            failures,
+            output);
+
+        var materialReferenceRoot = Path.Combine(
+            Path.GetTempPath(),
+            "Batcomputer-material-library-regression-" + Guid.NewGuid().ToString("N"));
+        var sharedReferencesDetected = false;
+        var sharedLibraryRoundTrip = false;
+        var previousSettings = AppSettings.Current;
+        try
+        {
+            var exportRoot = Path.Combine(materialReferenceRoot, "ExportContent");
+            var packageBase = Path.Combine(exportRoot, "Mods", "Shared", "Materials", "MI_Shared");
+            Directory.CreateDirectory(Path.GetDirectoryName(packageBase)!);
+            File.WriteAllText(packageBase + ".uasset", "cooked-uasset");
+            File.WriteAllText(packageBase + ".uexp", "cooked-uexp");
+            AppSettings.Current = new AppSettings
+            {
+                ProjectRoot = materialReferenceRoot,
+                ExportContentRoot = exportRoot,
+            };
+            var projects = new SuitProjectService(materialReferenceRoot);
+            projects.SaveProject(new NativeSuitProject
+            {
+                SlotId = "material_origin",
+                DisplayName = "Material origin",
+                GeneratedMaterials = [newerMaterial],
+            });
+            projects.SaveProject(new NativeSuitProject
+            {
+                SlotId = "material_consumer",
+                DisplayName = "Material consumer",
+                MaterialAssignments =
+                [
+                    new SavedMaterialAssignment
+                    {
+                        Component = "CharacterMesh0",
+                        Slot = 0,
+                        Context = "both",
+                        MiPackagePath = newerMaterial.PackagePath,
+                    },
+                ],
+            });
+            var library = new ToolMaterialLibraryService(materialReferenceRoot);
+            library.Register([newerMaterial]);
+            var references = library.FindReferencingSuits(
+                newerMaterial.PackagePath,
+                exceptSlotId: "material_origin");
+            sharedReferencesDetected =
+                references.Count == 1 && references[0].Equals("Material consumer", StringComparison.Ordinal);
+            var importedProject = new NativeSuitProject { SlotId = "material_import" };
+            var packageStage = Path.Combine(materialReferenceRoot, "PackageStage");
+            var copied = library.CopyPackageToContentRoot(newerMaterial.PackagePath, packageStage);
+            sharedLibraryRoundTrip =
+                library.LoadAvailable().Any(material => material.PackagePath.Equals(
+                    newerMaterial.PackagePath,
+                    StringComparison.OrdinalIgnoreCase)) &&
+                library.ImportIntoProject(importedProject, newerMaterial.PackagePath) &&
+                importedProject.GeneratedMaterials.Count == 1 &&
+                copied.Count == 2 &&
+                File.Exists(Path.Combine(packageStage, "Mods", "Shared", "Materials", "MI_Shared.uasset")) &&
+                File.Exists(Path.Combine(packageStage, "Mods", "Shared", "Materials", "MI_Shared.uexp"));
+        }
+        finally
+        {
+            AppSettings.Current = previousSettings;
+            try
+            {
+                if (Directory.Exists(materialReferenceRoot))
+                {
+                    Directory.Delete(materialReferenceRoot, recursive: true);
+                }
+            }
+            catch
+            {
+                // Best-effort cleanup of the unique regression directory.
+            }
+        }
+        Check(
+            sharedReferencesDetected,
+            "shared material deletion and rename protection detects other saved suits",
+            failures,
+            output);
+        Check(
+            sharedLibraryRoundTrip,
+            "a tool-created material can be discovered, imported, and staged by another suit",
             failures,
             output);
 

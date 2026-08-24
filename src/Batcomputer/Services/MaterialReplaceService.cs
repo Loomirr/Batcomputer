@@ -470,7 +470,7 @@ public sealed class MaterialReplaceService
         return created;
     }
 
-    private static NormalExport? FindComponentExport(UAsset asset, string componentName)
+    internal static NormalExport? FindComponentExport(UAsset asset, string componentName)
     {
         // The character body mesh is "CharacterMesh0" in the playable BP but the
         // inherited ACharacter mesh "Mesh" in the cutscene BP; accept either.

@@ -7,6 +7,10 @@
 - Batman and other character families when the suit uses an appropriate playable donor and unique
   identity.
 - Built-in playable and cutscene visual bases, plus indexed character parts.
+- Exact shipped root-body profiles: standard Minifig, Minifig 08, headless Minifig, armless
+  Minifig, Minifig without its left hand, Minifig without its upper body, standard Smallfig,
+  Smallfig 08, and armless Smallfig. These profiles preserve the chosen gameplay donor and all use
+  the native shared `SKEL_LEGOfig` skeleton.
 - Game-material templates and face tools.
 - Character, mask, normal/packed, and verified UI texture cooking.
 - Supported equipment, glider, and animation-data grafting.
@@ -16,12 +20,16 @@
   gameplay behavior and uses the cape donor's animation while gliding. Wingsuits and other
   glide-only visuals are also supported when the regular `Cape` is removed.
 - Custom OBJ static-mesh attachments.
+- Read-only 3D inspection of indexed native parts with the mesh's resolved default and component
+  material overrides.
 - Direct installation, build checks, and installable ZIPs.
 
 ## Not supported yet
 
 - Custom Red Brick creation. The viewer only previews the game's existing colour options.
 - Custom skeletal-mesh cooking or skeleton transfer.
+- Arbitrary skeleton swapping. Supported Minifig and Smallfig body profiles already use the same
+  native skeleton; other rigs still need separate research and in-game proof.
 - Arbitrary new gameplay powers or code-driven character mechanics.
 - Physical collectible placement in levels.
 - Perfect shader/lighting parity between the 3D viewer and the game.

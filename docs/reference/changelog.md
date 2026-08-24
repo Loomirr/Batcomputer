@@ -1,5 +1,17 @@
 # Changelog
 
+## In development
+
+- Added the exact native Minifig and Smallfig body choices without changing the selected gameplay
+  donor's playstyle or shared skeleton.
+- Tool-created materials can be found and reused from **All tool materials** in another suit.
+- Native parts can be inspected in 3D with their attachment and resolved material recipes before
+  being applied.
+- Saved bases move from a retired absolute extract path to the active Content folder when the exact
+  `/Game` package still exists.
+- Diagnostics keeps its reading position when new lines arrive, and the 3D viewer's material panel
+  is smaller and starts in the lower-right corner.
+
 ## 0.9.0-beta.7
 
 - A failed base selection, reselection, or saved-edit replay now restores the previous project and

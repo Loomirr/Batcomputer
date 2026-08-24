@@ -27,6 +27,19 @@ visual base can come from a different playable, cutscene, or supported `_Quest` 
 A character can have the look you want without having a complete playable setup. The visual base
 supplies the appearance; the gameplay donor supplies movement, equipment, and other playable data.
 
+### When should I choose a Native body profile?
+
+Set the visual base and gameplay donor first. Then open **Parts** → **Native body profiles** and
+leave the detected body alone unless the visual character uses another exact shipped body. Choose
+the body before adding replacement arms, hands, heads, wings, hooks, or brick-body parts. Reduced
+bodies intentionally leave their named regions empty until you add a compatible native part.
+
+### Do I need to choose or transfer a skeleton for Minifig and Smallfig bodies?
+
+No. All nine supported body profiles use the game's shared `SKEL_LEGOfig` skeleton. Selecting a
+body changes its root mesh while keeping the gameplay donor's animation class and runtime setup.
+Custom skeleton transfer is not supported.
+
 ### Can I resize the windows?
 
 Yes. The main window, tools, and dialogs are resizable and capped to one usable monitor. If a button
@@ -39,6 +52,13 @@ percentage in a bug report.
 
 No. If a suit opens, checks, builds, and works in-game, leave it alone. Rebase when the game dump
 changed or a saved base points at an older extraction.
+
+### Why did an older suit point at a deleted extract folder?
+
+Older projects saved absolute cache paths alongside their `/Game` package identities. Batcomputer
+now relocates those template records to the active extracted Content folder when the exact package
+is present. If the exact package is missing, refresh character assets and the part index, then
+re-select the visual base and gameplay donor. It will not guess a similarly named package.
 
 ### What is the difference between refreshing game assets and refreshing the part index?
 
@@ -101,6 +121,19 @@ supported **Glide cape** preset and its matching native cape, or remove the regu
 the glide-only visual.
 
 ## Materials, models, and previews
+
+### Can I reuse a material I created in another suit?
+
+Yes. Open **Materials** and choose **All tool materials**. Tool-created materials are kept in the
+workspace library and can be imported into another suit without copying them by hand. **Your
+materials** shows the current suit's own set. Rename or deletion is blocked when another saved suit
+still references the material.
+
+### Can I inspect a base-game part before applying it?
+
+Yes. Right-click an indexed native part and choose **Inspect part in 3D**. The inspector shows the
+mesh and source recipe, attachment socket, material slots, and whether each preview material came
+from a component override or the mesh default. Its map switches are viewer-only.
 
 ### Can I make a custom face?
 

@@ -12,6 +12,11 @@ at a cooked material layout.
 4. Override only the textures or colors you intend to change.
 5. Generate the material and apply it to the slot.
 
+Materials created by the tool are available across the current workspace. Use **Your materials**
+for the current suit's set, or **All tool materials** to find and import one made for another suit.
+Batcomputer keeps the cooked package and metadata together and prevents a rename or deletion that
+would break another saved suit.
+
 A blank override inherits the donor value. **Set None** writes an intentional null/disabled value
 where the template supports it; it is different from leaving the override blank.
 

@@ -20,6 +20,8 @@ public sealed partial class MainForm
     private ContextMenuStrip BuildPartTileMenu(NativeSuitPartRecord part)
     {
         var menu = new ContextMenuStrip();
+        menu.Items.Add("Inspect part in 3D…", null, (_, _) => ShowPartInspector(part));
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Apply to character", null, async (_, _) => await ApplyToyboxPartDropToCharacterAsync(part));
         menu.Items.Add("Select for advanced graft", null, (_, _) => SelectToyboxPart(part));
         menu.Items.Add("Copy source path", null, (_, _) => { try { Clipboard.SetText(part.SourcePackagePath); } catch { /* clipboard busy */ } });
@@ -282,6 +284,97 @@ public sealed partial class MainForm
         return !string.IsNullOrWhiteSpace(nativeComponent)
             ? nativeComponent
             : graft.Slot;
+    }
+
+    private List<VirtualTilePanel.Tile> NativeBodyProfileTiles()
+    {
+        var search = CurrentToyboxSearch();
+        var currentId = _currentProject?.BodyProfile?.Id ?? "";
+        return NativeBodyProfileService.Catalog()
+            .Where(profile => MatchesToyboxSearch(
+                search,
+                profile.DisplayName,
+                profile.GeometryFamily,
+                profile.MeshPackagePath,
+                string.Join(" ", profile.MissingRegions)))
+            .Select(profile => new VirtualTilePanel.Tile
+            {
+                Section = profile.MissingRegions.Count == 0 ? "STANDARD BODIES" : "REDUCED NATIVE BODIES",
+                Title = (profile.Id.Equals(currentId, StringComparison.OrdinalIgnoreCase) ? "● " : "") + profile.DisplayName,
+                Subtitle = profile.MissingRegions.Count == 0
+                    ? $"{profile.GeometryFamily} · complete body"
+                    : $"missing {string.Join(", ", profile.MissingRegions).ToLowerInvariant()}",
+                Accent = profile.Id.Equals(currentId, StringComparison.OrdinalIgnoreCase) ? Theme.Gold : Theme.Parts,
+                OnClick = () => _ = ApplyNativeBodyProfileAsync(profile, confirm: true),
+                ToolTip =
+                    $"Native mesh: {profile.MeshPackagePath}\n" +
+                    $"Skeleton: {profile.SkeletonPackagePath}\n" +
+                    $"Evidence: {profile.EvidenceTier}\n" +
+                    (profile.Warnings.Count == 0 ? "" : "\n" + string.Join("\n", profile.Warnings)),
+            })
+            .ToList();
+    }
+
+    private async Task<bool> ApplyNativeBodyProfileAsync(NativeBodyProfile profile, bool confirm)
+    {
+        EnsureProject();
+        var project = _currentProject;
+        if (project?.PlayableTemplate is null || project.CutsceneTemplate is null)
+        {
+            AppendLog("Choose a playable + cutscene base before selecting a native body profile.");
+            SelectComboValue(_toyboxCategoryCombo, "Base");
+            return false;
+        }
+
+        var warning = profile.MissingRegions.Count == 0
+            ? "This keeps the gameplay donor's animation class and runtime behavior, and replaces only CharacterMesh0's native mesh."
+            :
+                $"This body intentionally has no {string.Join(", ", profile.MissingRegions).ToLowerInvariant()}.\n\n" +
+                string.Join("\n", profile.Warnings) +
+                "\n\nYou can add a compatible native replacement part separately.";
+        if (confirm && !Dialog.Confirm(
+                this,
+                "Use native body profile",
+                $"Use '{profile.DisplayName}' for both playable and cutscene?\n\n{warning}",
+                confirmText: "Use body"))
+        {
+            return false;
+        }
+
+        NativeBodyProfile? previous;
+        try
+        {
+            previous = project.BodyProfile is null
+                ? null
+                : JsonSerializer.Deserialize<NativeBodyProfile>(JsonSerializer.Serialize(project.BodyProfile));
+        }
+        catch
+        {
+            previous = project.BodyProfile;
+        }
+
+        project.BodyProfile = NativeBodyProfileService.Find(profile.Id) ?? profile;
+        project.BodyProfile.SourceVisualPackage = profile.SourceVisualPackage;
+        try
+        {
+            await RebuildGraftStageFromDeclarativeAsync(project, _projectRootText.Text.Trim());
+            RecordChange(project, "Parts", "Native body", profile.DisplayName, status: "staged");
+            AppendLog($"Native body profile = {profile.DisplayName}. Gameplay donor behavior and animation class were preserved.");
+            RefreshInspector();
+            RefreshToyboxTiles();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            project.BodyProfile = previous;
+            AppendLog("Native body profile was not changed: " + ex.Message);
+            Dialog.Error(
+                this,
+                "Body profile could not be applied",
+                "The previous project and generated stage were kept.\n\n" + ex.Message);
+            RefreshToyboxTiles();
+            return false;
+        }
     }
 
     private static bool GraftTargetsComponent(SavedPartGraft graft, string component)
@@ -1656,6 +1749,13 @@ public sealed partial class MainForm
         return menu;
     }
 
+    private void ShowPartInspector(NativeSuitPartRecord part)
+    {
+        var inspector = new PartInspectorForm(part);
+        inspector.ApplyRequested += async (_, _) => await ApplyToyboxPartDropToCharacterAsync(part);
+        inspector.Show(this);
+    }
+
     private async Task RemoveCustomStaticMeshAsync(CustomStaticMeshImport mesh)
     {
         var project = _currentProject;
@@ -2036,9 +2136,19 @@ public sealed partial class MainForm
             emptyMessage: "No face materials matched. Try <all faces> or clear the search.");
     }
 
-    private VirtualTilePanel.Tile BuildFaceMaterialTile(string materialPath, bool isUserMade, string section)
+    private VirtualTilePanel.Tile BuildFaceMaterialTile(
+        string materialPath,
+        bool isUserMade,
+        string section,
+        bool allowDelete = true,
+        IReadOnlyList<string>? compatibleFaceMeshes = null)
     {
-        var compatibility = FaceCompatibilityFor(materialPath, CurrentFaceTarget(), out var targetMesh, out var sourceMeshes);
+        var compatibility = FaceCompatibilityFor(
+            materialPath,
+            CurrentFaceTarget(),
+            out var targetMesh,
+            out var sourceMeshes,
+            compatibleFaceMeshes);
         var sourceLabel = sourceMeshes.Count == 0
             ? "unrecorded face family"
             : string.Join(", ", sourceMeshes.Select(UnrealPathUtil.AssetName));
@@ -2061,11 +2171,14 @@ public sealed partial class MainForm
                 ? null
                 : new ToyboxDragPayload { Kind = "material", MaterialPath = materialPath, FaceOnly = true },
             OnClick = () => ApplyFaceMaterial(materialPath),
-            MenuFactory = () => BuildFaceMaterialTileMenu(materialPath, isUserMade),
+            MenuFactory = () => BuildFaceMaterialTileMenu(materialPath, isUserMade, allowDelete),
         };
     }
 
-    private ContextMenuStrip BuildFaceMaterialTileMenu(string materialPath, bool isUserMade)
+    private ContextMenuStrip BuildFaceMaterialTileMenu(
+        string materialPath,
+        bool isUserMade,
+        bool allowDelete = true)
     {
         var menu = new ContextMenuStrip();
         menu.Items.Add("Apply to Face", null, (_, _) => ApplyFaceMaterial(materialPath));
@@ -2073,7 +2186,10 @@ public sealed partial class MainForm
         if (isUserMade)
         {
             menu.Items.Add("Edit this face material…", null, (_, _) => OpenMaterialFromBase(materialPath, editInPlace: true));
-            menu.Items.Add("Delete this face material…", null, async (_, _) => await DeleteGeneratedMaterialAsync(materialPath));
+            if (allowDelete)
+            {
+                menu.Items.Add("Delete this face material…", null, async (_, _) => await DeleteGeneratedMaterialAsync(materialPath));
+            }
         }
         else
         {
@@ -2148,10 +2264,17 @@ public sealed partial class MainForm
         string materialPath,
         FaceTarget? target,
         out string targetMesh,
-        out IReadOnlyList<string> sourceMeshes)
+        out IReadOnlyList<string> sourceMeshes,
+        IReadOnlyList<string>? knownSourceMeshes = null)
     {
         targetMesh = UnrealPathUtil.NormalizePackagePath(target?.MeshPackagePath);
-        sourceMeshes = CompatibleFaceMeshesForMaterial(materialPath);
+        sourceMeshes = knownSourceMeshes is null
+            ? CompatibleFaceMeshesForMaterial(materialPath)
+            : knownSourceMeshes
+                .Select(UnrealPathUtil.NormalizePackagePath)
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
         if (string.IsNullOrWhiteSpace(targetMesh) || sourceMeshes.Count == 0)
         {
             return FaceMaterialCompatibility.Unknown;
@@ -2218,6 +2341,19 @@ public sealed partial class MainForm
         if (authored?.CompatibleFaceMeshPackagePaths is { Count: > 0 })
         {
             return authored.CompatibleFaceMeshPackagePaths
+                .Select(UnrealPathUtil.NormalizePackagePath)
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        var shared = new ToolMaterialLibraryService(_projectRootText.Text.Trim())
+            .LoadAvailable()
+            .FirstOrDefault(material => UnrealPathUtil.NormalizePackagePath(material.PackagePath)
+                .Equals(package, StringComparison.OrdinalIgnoreCase));
+        if (shared?.CompatibleFaceMeshPackagePaths is { Count: > 0 })
+        {
+            return shared.CompatibleFaceMeshPackagePaths
                 .Select(UnrealPathUtil.NormalizePackagePath)
                 .Where(path => !string.IsNullOrWhiteSpace(path))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -4301,6 +4437,24 @@ public sealed partial class MainForm
                     return true;
                 },
                 "seed the declarative stage from the clean patched base");
+
+            if (project.BodyProfile is not null)
+            {
+                var bodyResult = new NativeBodyProfileService().ApplyToContentRoot(
+                    graftedContentRoot,
+                    project,
+                    UiMappings());
+                foreach (var file in bodyResult.Files)
+                {
+                    AppendLog($"  native body {file.Role}: {(file.Success ? "OK" : "FAILED")} — {file.Detail}");
+                }
+                if (!bodyResult.Success)
+                {
+                    throw new InvalidOperationException(
+                        $"Native body profile '{project.BodyProfile.DisplayName}' could not be written to both required character packages. " +
+                        string.Join(" | ", bodyResult.Files.Where(file => !file.Success).Select(file => $"{file.Role}: {file.Detail}")));
+                }
+            }
         }
 
         AppendLog($"  replaying {replayParts.Count} declared part(s) onto a clean base…");

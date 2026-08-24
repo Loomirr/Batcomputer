@@ -856,6 +856,7 @@ public sealed partial class MainForm
     }
 
     internal static bool ProjectRequiresCompletedGraftStage(NativeSuitProject project) =>
+        project.BodyProfile is not null ||
         project.PartGrafts is { Count: > 0 } ||
         project.CustomStaticMeshes is { Count: > 0 } ||
         project.MaterialAssignments is { Count: > 0 } ||

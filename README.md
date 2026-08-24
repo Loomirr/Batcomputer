@@ -15,9 +15,13 @@ or Loomirr's LOTDK UE4SS.
 - Starts a suit with a gameplay donor and a playable, cutscene, or supported extracted `_Quest`
   visual base.
 - Adds hair, hats, capes, torsos, accessories, equipment, and compatible animation data.
+- Selects the exact shipped Minifig or Smallfig root-body geometry without replacing the gameplay
+  donor's runtime setup.
 - Adapts verified native cape/glider pairs across compatible gameplay donors without replacing the
   donor's general play style or visual identity.
 - Copies working game materials and applies new textures to individual mesh slots.
+- Keeps tool-created materials available to other suits in the same workspace and previews indexed
+  native parts with their resolved default materials before applying them.
 - Creates the PawnTag, DCMD, UIMD, StringTable, and Asset Registry data the game needs.
 - Builds one or more suits into a single mod release.
 - Installs the pak trio, PawnTags configuration, mod manifest, and registry plugin to the correct
@@ -88,11 +92,13 @@ overwrite the shared registry. Batcomputer does not modify the runtime DLL or `m
 
 1. Create or open a mod.
 2. Add a suit, then choose a visual base and a playable donor.
-3. Use the part, material, texture, equipment, and animation tools to assemble the suit.
-4. Set the native identity and review the donor-based menu icons.
-5. Use the 3D viewer to inspect the assembled character. Normal game-part placement is preview-only;
+3. Confirm the detected native body profile, or choose another exact shipped Minifig/Smallfig body
+   before adding replacement parts. The shared native skeleton is automatic.
+4. Use the part, material, texture, equipment, and animation tools to assemble the suit.
+5. Set the native identity and review the donor-based menu icons.
+6. Use the 3D viewer to inspect the assembled character. Normal game-part placement is preview-only;
    custom OBJ scale, position, rotation, and UV changes can be saved and **Baked to game**.
-6. Run **Check mod**, then select **Build Mod**.
+7. Run **Check mod**, then select **Build Mod**.
 
 Every export is a mod, including a mod containing one suit. **Build Mod** creates the release and
 installs it into the configured game folders. Restart the game before testing a newly built mod.

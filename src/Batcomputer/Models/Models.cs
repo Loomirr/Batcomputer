@@ -184,6 +184,10 @@ public sealed class NativeSuitProject
 
     // Separates the visual cutscene source from the playable machinery donor.
     public SuitBaseProfile? BaseProfile { get; set; }
+    // The root LEGO body geometry is independent of the gameplay donor. Keeping this as a
+    // declarative profile makes reduced native bodies survive clean rebuilds and rebases without
+    // replacing the donor's animation class, collision, tags, transforms, or gameplay machinery.
+    public NativeBodyProfile? BodyProfile { get; set; }
     public List<NativeSuitRequirement> Requirements { get; set; } = new();
 
     // UIMD icon texture paths. Empty keeps the donor icon.
@@ -360,6 +364,25 @@ public sealed class GeneratedTextureEntry
     public string IoStoreRoot { get; set; } = "";
     public string PackageBaseName { get; set; } = "";
     public string CreatedUtc { get; set; } = "";
+}
+
+/// <summary>
+/// A shipped LEGOfig body mesh selected independently from the visual/gameplay base. Only the
+/// skeletal mesh reference is rewritten; every other CharacterMesh0 property remains donor-owned.
+/// </summary>
+public sealed class NativeBodyProfile
+{
+    public string Id { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public string MeshPackagePath { get; set; } = "";
+    public string MeshObjectPath { get; set; } = "";
+    public string SkeletonPackagePath { get; set; } = "";
+    public string GeometryFamily { get; set; } = "";
+    public List<string> MissingRegions { get; set; } = new();
+    public string HeadPolicy { get; set; } = "integrated";
+    public string EvidenceTier { get; set; } = "experimental";
+    public string SourceVisualPackage { get; set; } = "";
+    public List<string> Warnings { get; set; } = new();
 }
 
 public sealed class GeneratedMaterialEntry

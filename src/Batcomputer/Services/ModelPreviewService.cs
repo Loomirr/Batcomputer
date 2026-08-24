@@ -164,6 +164,7 @@ public static class ModelPreviewService
         public string? ViewerLayoutProjectRoot { get; init; }
         public string? StagedPlayablePath { get; init; }
         public bool AllowPartMover { get; init; } = true;
+        public bool IncludeDefaultHead { get; init; } = true;
         public IReadOnlyCollection<PreviewRedBrickTint> RedBrickTints { get; init; } = Array.Empty<PreviewRedBrickTint>();
     }
 
@@ -173,6 +174,12 @@ public static class ModelPreviewService
         string PrimaryHex,
         string SecondaryHex,
         string TertiaryHex);
+
+    public sealed record PartPreviewMaterial(int Slot, string MaterialPath, bool IsComponentOverride);
+
+    public sealed record PartInspectionResult(
+        string PreviewFolder,
+        IReadOnlyList<PartPreviewMaterial> Materials);
 
     /// <summary>A component added by a saved part graft, without needing to mount the staged package.</summary>
     public sealed record PreviewAdditionalPart(
@@ -552,6 +559,7 @@ public static class ModelPreviewService
     private static string? MeshPathFor(UObject component) =>
         (component.GetOrDefault<FPackageIndex>("SkeletalMeshAsset")
          ?? component.GetOrDefault<FPackageIndex>("SkeletalMesh")
+         ?? component.GetOrDefault<FPackageIndex>("SkinnedAsset")
          ?? component.GetOrDefault<FPackageIndex>("StaticMesh"))?.ResolvedObject?.GetPathName();
 
     private static bool IsCharacterMeshComponent(UObject component) =>
@@ -970,7 +978,12 @@ public static class ModelPreviewService
         var layoutKey = ViewerLayoutService.SuitKey(project);
         ViewerLayoutService.ImportLegacyIfEmpty(projectRoot, layoutKey, project.PreviewPartPlacements);
 
-        return BuildPreviewCharacter(paksDir, usmapPath, basePath, previewOptions: new CharacterPreviewOptions
+        return BuildPreviewCharacter(
+            paksDir,
+            usmapPath,
+            basePath,
+            bodyMeshPath: project.BodyProfile?.MeshObjectPath,
+            previewOptions: new CharacterPreviewOptions
         {
             HiddenComponents = hidden,
             AdditionalParts = additions,
@@ -979,6 +992,8 @@ public static class ModelPreviewService
             ViewerLayoutProjectRoot = projectRoot,
             StagedPlayablePath = HasLoosePackage(previewContentRoots, stagedBasePath) ? stagedBasePath : null,
             AllowPartMover = true,
+            IncludeDefaultHead = project.BodyProfile?.HeadPolicy
+                .Equals(NativeBodyProfileService.IntentionallyAbsentHeadPolicy, StringComparison.OrdinalIgnoreCase) != true,
             RedBrickTints = redBrickTints ?? Array.Empty<PreviewRedBrickTint>(),
         }, looseContentRoots: previewContentRoots);
     }
@@ -1378,7 +1393,7 @@ public static class ModelPreviewService
         var hasAuthoredBareHead = resolvedComponents.Any(component =>
             !component.Key.Equals("CharacterMesh0", StringComparison.OrdinalIgnoreCase) &&
             component.MeshPath?.Contains("LEGOfig_Minifig_Head", StringComparison.OrdinalIgnoreCase) == true);
-        if (bodyHeadPoint is { } activeHeadPoint && !string.IsNullOrWhiteSpace(bodyPath) &&
+        if (options.IncludeDefaultHead && bodyHeadPoint is { } activeHeadPoint && !string.IsNullOrWhiteSpace(bodyPath) &&
             IsLegoFigureBody(bodyPath) && !hasAuthoredBareHead)
         {
             var referenceHeadPoint = activeHeadPoint;
@@ -1549,6 +1564,53 @@ public static class ModelPreviewService
     public static string BuildPreview(string paksDir, string usmapPath, IReadOnlyList<string> objectPaths)
         => BuildPreviewCore(MakeProvider(paksDir, usmapPath),
             objectPaths.Select(p => new PreviewPart(p, AttachToHead: false)).ToList());
+
+    /// <summary>Builds a read-only preview for one indexed native part using its authored component
+    /// material overrides when present, otherwise the skeletal/static mesh's own default slots.</summary>
+    public static string BuildPreviewPart(
+        string paksDir,
+        string usmapPath,
+        NativeSuitPartRecord part) =>
+        BuildPartInspection(paksDir, usmapPath, part).PreviewFolder;
+
+    public static PartInspectionResult BuildPartInspection(
+        string paksDir,
+        string usmapPath,
+        NativeSuitPartRecord part)
+    {
+        var materials = part.Materials
+            .Select((material, slot) => new
+            {
+                Slot = slot,
+                Path = !string.IsNullOrWhiteSpace(material.ObjectPath)
+                    ? material.ObjectPath
+                    : string.IsNullOrWhiteSpace(material.PackagePath)
+                        ? ""
+                        : $"{material.PackagePath}.{material.ObjectName}",
+            })
+            .Where(material => !string.IsNullOrWhiteSpace(material.Path))
+            .ToDictionary(material => material.Slot, material => material.Path);
+        var provider = MakeProvider(paksDir, usmapPath);
+        var mesh = provider.LoadPackageObject(part.MeshObjectPath);
+        var defaults = MeshSlotMaterials(mesh);
+        var resolvedMaterials = Enumerable.Range(
+                0,
+                Math.Max(defaults.Count, materials.Count == 0 ? 0 : materials.Keys.Max() + 1))
+            .Select(slot => materials.TryGetValue(slot, out var componentOverride)
+                ? new PartPreviewMaterial(slot, componentOverride, true)
+                : new PartPreviewMaterial(slot, defaults.ElementAtOrDefault(slot)?.GetPathName() ?? "", false))
+            .ToList();
+        var folder = BuildPreviewCore(
+            provider,
+            [new PreviewPart(
+                part.MeshObjectPath,
+                AttachToHead: false,
+                IsStaticAttachment: part.MeshKind.Contains("Static", StringComparison.OrdinalIgnoreCase),
+                ComponentName: part.Slot,
+                MaterialPaths: materials.Count == 0 ? null : materials,
+                DisplayName: UnrealPathUtil.AssetName(part.MeshObjectPath))]);
+        return new PartInspectionResult(folder, resolvedMaterials);
+    }
 
     private static string BuildPreviewCore(
         DefaultFileProvider provider,
@@ -4171,11 +4233,13 @@ public static class ModelPreviewService
   #expr{background:#22262c;color:#e6e9ee;border:1px solid #3a4048;border-radius:5px;padding:3px 6px;
     font-family:inherit;font-size:13px;outline:none}
   #partmove,#meshmove,#redbrick,#matedit{position:absolute;width:214px;color:#dfe4ea;font-size:12px;
-    background:rgba(26,29,34,.9);padding:9px 10px;border:1px solid #333a44;border-radius:6px}
+    background:rgba(26,29,34,.94);padding:9px 10px;border:1px solid #3b424d;border-radius:8px;
+    box-shadow:0 8px 22px rgba(0,0,0,.24)}
   #meshmove{right:14px;top:30px}
   #partmove{right:14px;top:408px}
   #redbrick{right:258px;top:30px}
-  #matedit{left:10px;top:202px;max-height:calc(100vh - 230px);overflow:auto}
+  #matedit{right:14px;bottom:14px;width:186px;max-height:calc(100vh - 44px);overflow:auto;
+    padding:7px 8px;font-size:11px}
   #partmove label,#meshmove label,#redbrick label,#matedit label{display:block;color:#f0c230;margin-bottom:5px}
   #partmove select,#meshmove select,#redbrick select,#matedit select{box-sizing:border-box;width:100%;margin-bottom:7px;background:#22262c;color:#e6e9ee;
     border:1px solid #3a4048;border-radius:4px;padding:4px;font:inherit}
@@ -4186,10 +4250,12 @@ public static class ModelPreviewService
   #partmove button,#meshmove button,#redbrick button,#matedit button{border:1px solid #3a4048;border-radius:4px;background:#232833;color:#dfe4ea;padding:4px 7px;cursor:pointer;font:inherit}
   #partmove button.save,#meshmove button.save{border-color:#aa8b1b;color:#f0c230}
   #partmove button:disabled,#meshmove button:disabled{opacity:.45;cursor:default}
-  #matedit .maptoggle{display:flex;align-items:center;justify-content:space-between;border-top:1px solid #303640;padding:5px 0;color:#cbd1d9}
-  #matedit .maptoggle input{width:15px;height:15px;accent-color:#f0c230}
-  #matedit .summary{margin:0 0 7px;color:#9ea6b2;line-height:1.35}
-  #matedit .actions{display:flex;gap:6px;margin-top:8px}
+  #matedit select{margin-bottom:5px;padding:3px}
+  #matedit .maptoggle{display:flex;align-items:center;justify-content:space-between;border-top:1px solid #303640;padding:3px 0;color:#cbd1d9}
+  #matedit .maptoggle input{width:14px;height:14px;accent-color:#f0c230}
+  #matedit .summary{margin:0 0 5px;color:#9ea6b2;line-height:1.25}
+  #matedit .actions{display:flex;gap:5px;margin-top:5px}
+  #matedit .actions button{padding:3px 6px}
   #matedit .actions button{border-color:#aa8b1b;color:#f0c230}
   .panel-drag-handle{cursor:move;user-select:none;touch-action:none}
   .panel-dragging{opacity:.92}
@@ -4257,9 +4323,8 @@ function makePanelDraggable(panel,handle){
   handle.addEventListener('pointermove',move);handle.addEventListener('pointerup',stop);handle.addEventListener('pointercancel',stop);
 }
 function applyDefaultPanelLayout(){
-  // Keep the character unobstructed by default: diagnostics/material controls on the left, preview
-  // controls on the right, and the part editor immediately below the custom-mesh editor. These are
-  // only starting positions; every panel remains independently draggable afterwards.
+  // Keep the character unobstructed by default: preview controls start at the upper right and the
+  // smaller material panel starts at the lower right. Every panel remains draggable afterwards.
   const edge=14,gap=10,top=30;
   const mesh=document.getElementById('meshmove');
   const part=document.getElementById('partmove');
@@ -4273,10 +4338,15 @@ function applyDefaultPanelLayout(){
   placeRight(red,mesh?edge+mesh.offsetWidth+gap:edge,top);
   placeRight(part,edge,mesh?top+mesh.offsetHeight+14:top);
   if(material){
-    const maxY=Math.max(0,window.innerHeight-material.offsetHeight-edge);
-    const y=Math.round((window.innerHeight-material.offsetHeight)*0.41);
-    material.style.right='auto';material.style.left='10px';material.style.bottom='auto';
-    material.style.top=Math.min(maxY,Math.max(60,y))+'px';
+    material.style.left='auto';material.style.right=edge+'px';
+    material.style.top='auto';material.style.bottom=edge+'px';
+    // On a short viewer, place it beside the Part panel instead of stacking controls on top of one
+    // another. Normal-size viewers keep the requested lower-right layout.
+    if(part){
+      const partBottom=part.offsetTop+part.offsetHeight+gap;
+      const materialTop=window.innerHeight-edge-material.offsetHeight;
+      if(materialTop<partBottom)material.style.right=(edge+part.offsetWidth+gap)+'px';
+    }
   }
 }
 function setRedBrickPalette(palette){

@@ -92,9 +92,30 @@ public sealed class SuitProjectService
 
     public NativeSuitProject? LoadProject(string path)
     {
-        return File.Exists(path)
-            ? JsonSerializer.Deserialize<NativeSuitProject>(File.ReadAllText(path), JsonOptions)
-            : null;
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        var project = JsonSerializer.Deserialize<NativeSuitProject>(File.ReadAllText(path), JsonOptions);
+        if (project is not null && RefreshSavedTemplateSources(
+                project,
+                AppSettings.Current.EffectiveExtractedContentRoot()))
+        {
+            // Absolute extract paths are local cache details, not part of a suit's identity. When
+            // an old dump has been replaced, keep the same /Game packages and migrate only their
+            // disk locations so opening the suit does not require a manual JSON repair.
+            try
+            {
+                AtomicFileUtil.WriteAllText(path, JsonSerializer.Serialize(project, JsonOptions));
+            }
+            catch
+            {
+                // The in-memory project is already repaired for this session. A read-only folder
+                // or brief file lock should not turn that successful migration into a load error.
+            }
+        }
+        return project;
     }
 
     public string ProjectRoot { get; }
@@ -298,6 +319,22 @@ public sealed class SuitProjectService
                 $"Target package path for {record.Role} must start with /Game/. Current value: '{targetPackagePath}'.");
         }
 
+        if (!TryRefreshTemplateSource(
+                record,
+                AppSettings.Current.EffectiveExtractedContentRoot(),
+                out _))
+        {
+            var role = string.IsNullOrWhiteSpace(record.Role) ? "base" : record.Role;
+            var package = UnrealPathUtil.NormalizePackagePath(record.PackagePath);
+            var identity = string.IsNullOrWhiteSpace(package)
+                ? (string.IsNullOrWhiteSpace(record.ContentRelative) ? record.Stem : record.ContentRelative)
+                : package;
+            throw new FileNotFoundException(
+                $"The saved {role} package '{identity}' is not present in the active extracted Content folder. " +
+                "Refresh character assets, then open Base and re-select this suit's visual base and gameplay donor. " +
+                "The saved project has not been replaced.");
+        }
+
         var targetBase = Path.Combine(stageContentRoot, targetRel);
         Directory.CreateDirectory(Path.GetDirectoryName(targetBase)!);
         File.Copy(record.Uasset, targetBase + ".uasset", overwrite: true);
@@ -309,6 +346,131 @@ public sealed class SuitProjectService
         {
             File.Copy(record.Ubulk, targetBase + ".ubulk", overwrite: true);
         }
+    }
+
+    /// <summary>
+    /// Moves saved template records from a retired extract folder to the currently configured
+    /// Content root. The Unreal package path remains authoritative, so this never guesses a
+    /// different character merely because its old absolute path disappeared.
+    /// </summary>
+    private static bool RefreshSavedTemplateSources(NativeSuitProject project, string activeContentRoot)
+    {
+        var changed = false;
+        foreach (var record in new[]
+                 {
+                     project.PlayableTemplate,
+                     project.CutsceneTemplate,
+                     project.DcmdTemplate,
+                     project.VisualSourceTemplate,
+                     project.VisualCutsceneSourceTemplate,
+                     project.StaticMeshComponentShapeTemplate,
+                 })
+        {
+            if (record is not null && TryRefreshTemplateSource(record, activeContentRoot, out var recordChanged))
+            {
+                changed |= recordChanged;
+            }
+        }
+        return changed;
+    }
+
+    internal static bool RefreshTemplateSourceForTest(TemplateRecord record, string activeContentRoot) =>
+        TryRefreshTemplateSource(record, activeContentRoot, out _);
+
+    private static bool TryRefreshTemplateSource(
+        TemplateRecord record,
+        string activeContentRoot,
+        out bool changed)
+    {
+        changed = false;
+        if (string.IsNullOrWhiteSpace(activeContentRoot) || !Directory.Exists(activeContentRoot))
+        {
+            return !string.IsNullOrWhiteSpace(record.Uasset) && File.Exists(record.Uasset);
+        }
+
+        var relative = GamePackageRelativePath(record.PackagePath) ??
+                       NormalizeContentRelative(record.ContentRelative) ??
+                       ContentRelativeFromSavedPath(record.Uasset);
+        if (string.IsNullOrWhiteSpace(relative))
+        {
+            return false;
+        }
+
+        var contentRoot = Path.GetFullPath(activeContentRoot);
+        var sourceBase = Path.GetFullPath(Path.Combine(contentRoot, relative));
+        if (!FileSystemPathUtil.IsWithinDirectory(sourceBase, contentRoot))
+        {
+            return false;
+        }
+
+        var uasset = sourceBase + ".uasset";
+        if (!File.Exists(uasset))
+        {
+            return false;
+        }
+
+        var uexp = sourceBase + ".uexp";
+        var ubulk = sourceBase + ".ubulk";
+        var normalizedRelative = Path.GetRelativePath(contentRoot, sourceBase)
+            .Replace('\\', '/');
+        var package = "/Game/" + normalizedRelative;
+        var resolvedUexp = File.Exists(uexp) ? uexp : null;
+        var resolvedUbulk = File.Exists(ubulk) ? ubulk : null;
+
+        changed = !string.Equals(record.Uasset, uasset, StringComparison.OrdinalIgnoreCase) ||
+                  !string.Equals(record.Uexp, resolvedUexp, StringComparison.OrdinalIgnoreCase) ||
+                  !string.Equals(record.Ubulk, resolvedUbulk, StringComparison.OrdinalIgnoreCase) ||
+                  !string.Equals(record.PackagePath, package, StringComparison.OrdinalIgnoreCase) ||
+                  !string.Equals(record.ContentRelative, normalizedRelative, StringComparison.OrdinalIgnoreCase);
+
+        record.Uasset = uasset;
+        record.Uexp = resolvedUexp;
+        record.Ubulk = resolvedUbulk;
+        record.PackagePath = package;
+        record.ContentRelative = normalizedRelative;
+        record.Stem = Path.GetFileName(sourceBase);
+        record.UassetLength = new FileInfo(uasset).Length;
+        record.UexpLength = resolvedUexp is null ? 0 : new FileInfo(resolvedUexp).Length;
+        record.HasSplitPair = resolvedUexp is not null;
+        record.HasPair = resolvedUexp is not null;
+        return true;
+    }
+
+    private static string? NormalizeContentRelative(string? contentRelative)
+    {
+        if (string.IsNullOrWhiteSpace(contentRelative))
+        {
+            return null;
+        }
+
+        var relative = contentRelative.Trim().Replace('\\', '/').TrimStart('/');
+        if (relative.StartsWith("Content/", StringComparison.OrdinalIgnoreCase))
+        {
+            relative = relative["Content/".Length..];
+        }
+        if (relative.EndsWith(".uasset", StringComparison.OrdinalIgnoreCase))
+        {
+            relative = relative[..^".uasset".Length];
+        }
+        return string.IsNullOrWhiteSpace(relative)
+            ? null
+            : relative.Replace('/', Path.DirectorySeparatorChar);
+    }
+
+    private static string? ContentRelativeFromSavedPath(string? savedUasset)
+    {
+        if (string.IsNullOrWhiteSpace(savedUasset))
+        {
+            return null;
+        }
+
+        var normalized = savedUasset.Replace('\\', '/');
+        var markerIndex = normalized.LastIndexOf("/Content/", StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+        {
+            return null;
+        }
+        return NormalizeContentRelative(normalized[(markerIndex + "/Content/".Length)..]);
     }
 
     private static string? GamePackageRelativePath(string? packagePath)

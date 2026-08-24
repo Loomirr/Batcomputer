@@ -78,6 +78,27 @@ internal static class UiAuditCaptureService
                 PackagePath = "/Game/Mods/UiAudit/Textures/T_UI_Audit_SuitIcon",
                 ObjectPath = "/Game/Mods/UiAudit/Textures/T_UI_Audit_SuitIcon.T_UI_Audit_SuitIcon",
             };
+            var samplePart = new NativeSuitPartRecord
+            {
+                Slot = "Head",
+                Context = "playable",
+                SourcePackagePath = "/Game/Characters/Minifig/UiAudit/BP_UiAudit_Playable",
+                MeshObjectPath = "/Game/Characters/Attachments/Hair/UiAudit/SM_UIAuditHair.SM_UIAuditHair",
+                ComponentClass = "StaticMeshComponent",
+                ComponentTemplateExport = "Head_GEN_VARIABLE",
+                ParentComponentOrVariableName = "CharacterMesh0",
+                AttachSocket = "HeadStud_Attach_Socket",
+                Materials =
+                [
+                    new NativeSuitObjectRef
+                    {
+                        ObjectName = "MI_UIAuditHair",
+                        PackagePath = "/Game/Characters/Attachments/Hair/UiAudit/MI_UIAuditHair",
+                        ObjectPath = "/Game/Characters/Attachments/Hair/UiAudit/MI_UIAuditHair.MI_UIAuditHair",
+                        ClassName = "MaterialInstanceConstant",
+                    },
+                ],
+            };
             var sampleMod = new NativeSuitModProject
             {
                 ModId = "UiAuditMod",
@@ -140,6 +161,12 @@ internal static class UiAuditCaptureService
                     form.ConfigureFaceHelpersForUiAudit();
                     return form;
                 }, 150),
+                ("Native part inspector", () =>
+                {
+                    var form = new PartInspectorForm(samplePart);
+                    form.ConfigureForUiAudit();
+                    return form;
+                }, 250),
                 ("Mod details", () => new ModDetailsDialog(sampleMod, new[] { ("UI Audit Batman", "batman_ui_audit"), ("UI Audit Nightwing", "nightwing_ui_audit") }, true, "C:\\Audit\\Builds\\UiAuditMod"), 150),
                 ("Native identity", () => new NativeIdentityDialog(sampleProject, sampleProject.PawnTag), 150),
                 ("Registry writer progress", () => new RegistryWriterProgressForm(), 150),

@@ -11,8 +11,14 @@ Good reasons to use this flow include:
 - The inspector shows no components after a failed base change.
 - A saved part says its playable or cutscene donor cannot be found.
 - Diagnostics says the part index belongs to another extracted Content folder.
+- Opening the suit reports that a saved base package is missing from the active extracted Content
+  folder.
 
 If the suit already opens, checks, builds, and works in-game, leave it alone.
+
+When an older project contains a retired absolute extract path, Batcomputer first tries the exact
+saved `/Game` package under the active Content folder and updates the cache path automatically. A
+manual rebase is needed only when that exact package is not present or the game data itself changed.
 
 ## Before you start
 

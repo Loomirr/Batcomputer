@@ -1081,6 +1081,11 @@ public sealed partial class MainForm
         if (_currentProject is not null)
         {
             RecordBaseProfile(visualSource, visualCutsceneSource, _currentProject.PlayableTemplate);
+            var selectedVisualBody = visualCutsceneSource ?? visualSource;
+            if (selectedVisualBody is not null)
+            {
+                await PreserveVisualBodyProfileAsync(selectedVisualBody);
+            }
         }
         // Reskin: paint the donor's working playable + cutscene with the villain's body + face
         // materials (context "both" so gameplay AND cutscenes look like the villain).
@@ -1266,6 +1271,7 @@ public sealed partial class MainForm
         }
 
         RecordBaseProfile(visual, isCutsceneVisual ? visual : null, gameplay);
+        await PreserveVisualBodyProfileAsync(visual);
         ApplyVisualSourceMaterials(visual);
         await ApplyVisualAttachmentsToGameplayDonorAsync(visual.PackagePath);
 
@@ -1691,6 +1697,7 @@ public sealed partial class MainForm
                 break;
             case "Materials":
                 _toyboxTypeCombo.Items.Add("Your materials");
+                _toyboxTypeCombo.Items.Add("All tool materials");
                 _toyboxTypeCombo.Items.Add("<all game materials>");
                 foreach (var folder in GameMaterialFolders())
                 {
@@ -1702,6 +1709,7 @@ public sealed partial class MainForm
                 _toyboxTypeCombo.Items.Add("Texture cooker notes");
                 break;
             case "Parts":
+                _toyboxTypeCombo.Items.Add("Native body profiles");
                 if (_partIndex is null)
                 {
                     LoadPartIndexAndRefreshGrid(logIfMissing: false);
@@ -2375,6 +2383,14 @@ public sealed partial class MainForm
         if (category == "Parts")
         {
             var selectedSlot = _toyboxTypeCombo.SelectedItem?.ToString() ?? "<all parts>";
+            if (selectedSlot.Equals("Native body profiles", StringComparison.OrdinalIgnoreCase))
+            {
+                ShowVirtualTiles(
+                    NativeBodyProfileTiles(),
+                    header: "Choose the shipped root body geometry independently from the gameplay donor. Reduced bodies leave their missing regions empty until you add the visual character's compatible native replacement parts.",
+                    emptyMessage: "No native body profiles matched the current search.");
+                return;
+            }
             var isAttachment = selectedSlot.StartsWith("Attachment:", StringComparison.OrdinalIgnoreCase);
             var sourceFilter = FilterVal(2);
             var showOnlyYourMeshes = string.Equals(sourceFilter, "Your meshes", StringComparison.OrdinalIgnoreCase);
@@ -3300,6 +3316,59 @@ public sealed partial class MainForm
         return captured;
     }
 
+    /// <summary>
+    /// A visual-only character can use a reduced root body even though its gameplay donor does not.
+    /// Persist that native mesh as its own declaration and replay it before attachments/materials.
+    /// </summary>
+    private async Task<bool> PreserveVisualBodyProfileAsync(TemplateRecord visual)
+    {
+        var project = _currentProject;
+        if (project is null)
+        {
+            return false;
+        }
+
+        var resolved = NativeBodyProfileService.TryResolveFromBlueprint(
+            visual.Uasset,
+            visual.PackagePath,
+            UiMappings());
+        if (resolved is null)
+        {
+            AppendLog($"Visual body profile could not be identified on {visual.Stem}; keeping the staged donor body.");
+            return false;
+        }
+
+        if (project.BodyProfile is not null &&
+            project.BodyProfile.Id.Equals(resolved.Id, StringComparison.OrdinalIgnoreCase))
+        {
+            project.BodyProfile.SourceVisualPackage = visual.PackagePath;
+            return false;
+        }
+
+        var previous = project.BodyProfile;
+        project.BodyProfile = resolved;
+        try
+        {
+            await RebuildGraftStageFromDeclarativeAsync(project, _projectRootText.Text.Trim());
+            AppendLog(
+                $"Preserved visual body '{resolved.DisplayName}' while keeping {project.PlayableTemplate?.Stem}'s gameplay machinery." +
+                (resolved.MissingRegions.Count == 0
+                    ? ""
+                    : $" Missing regions stay empty: {string.Join(", ", resolved.MissingRegions)}."));
+            return true;
+        }
+        catch (Exception ex)
+        {
+            project.BodyProfile = previous;
+            AppendLog($"Visual body preservation failed; the prior body and generated stage were kept: {ex.Message}");
+            Dialog.Error(
+                this,
+                "Visual body could not be preserved",
+                "The visual base was selected, but its native body profile could not be replayed safely. The prior generated payload was kept.\n\n" + ex.Message);
+            return false;
+        }
+    }
+
     private sealed record BaseStageDirectorySnapshot(
         string Name,
         string StagePath,
@@ -4015,6 +4084,19 @@ public sealed partial class MainForm
             previousProjectSnapshot.VisualCutsceneSourceTemplate?.PackagePath ??
             previousProjectSnapshot.VisualSourceTemplate?.PackagePath,
             cutscene.PackagePath);
+        var resolvedBaseBody =
+            NativeBodyProfileService.TryResolveFromBlueprint(
+                cutscene.Uasset,
+                cutscene.PackagePath,
+                UiMappings()) ??
+            NativeBodyProfileService.TryResolveFromBlueprint(
+                playable.Uasset,
+                playable.PackagePath,
+                UiMappings());
+        _currentProject.BodyProfile = NativeBodyProfileService.SelectAfterBaseChange(
+            previousProjectSnapshot.BodyProfile,
+            resolvedBaseBody,
+            playableBaseChanged || cutsceneBaseChanged || visualBaseChanged);
         if (playableBaseChanged || cutsceneBaseChanged || visualBaseChanged)
         {
             List<string> removedAdapterComponents;

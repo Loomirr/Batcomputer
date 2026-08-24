@@ -22,7 +22,7 @@ for the whole mod.
 
 Create a suit inside the active mod. Give it a unique suit ID and display name.
 
-## 3. Choose the bases
+## 3. Choose the base and body
 
 Batcomputer separates two jobs that the game often stores in different assets:
 
@@ -30,8 +30,24 @@ Batcomputer separates two jobs that the game often stores in different assets:
   supported extracted `_Quest` character.
 - **Gameplay donor:** supplies gameplay-facing playable behavior and metadata.
 
-For the first test, choose a playable donor close to the character family you are making. Select
-**Use as base** and wait for the generated playable and cutscene assets to complete.
+Use this order:
+
+1. Open **Base** and pick the character whose appearance you want. This is the visual base.
+2. If Batcomputer opens the playable picker, choose the character whose movement, combat,
+   equipment, and normal animation style you want to keep. This is the gameplay donor. A cutscene,
+   `_Quest`, or NPC visual is not a substitute for this playable donor.
+3. Choose **Use as base** and wait for both generated character roles and the saved-edit replay to
+   finish.
+4. Open **Parts** → **Native body profiles**. Leave the detected profile selected for an ordinary
+   character. Choose another profile only when the visual character really uses that shipped body,
+   such as Minifig 08, Smallfig, headless, armless, no-left-hand, or no-upper-body.
+5. For a reduced body, add the visual character's compatible native replacement parts after the
+   body is selected. A missing region is intentional; Batcomputer does not invent geometry for it.
+
+The body profile changes only the root `CharacterMesh0` geometry. It does not replace the gameplay
+donor's animation class, collision, movement, equipment, or other runtime machinery. Every
+supported Minifig and Smallfig profile already uses the game's shared `SKEL_LEGOfig` skeleton, so
+there is no separate skeleton step or skeleton selector.
 
 ![Base character browser](../assets/screenshots/base-character-picker.jpg){ .bc-doc-shot loading=lazy }
 
@@ -49,6 +65,8 @@ Use the left navigation:
   in-game.
 
 The right inspector shows the playable and cutscene component trees and their material slots.
+Right-click a native part and choose **Inspect part in 3D** to see its mesh, attachment recipe, and
+resolved default or component-override materials before applying it.
 
 ### Give a glide-only character a regular cape
 

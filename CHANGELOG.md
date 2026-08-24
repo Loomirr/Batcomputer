@@ -1,5 +1,17 @@
 # Changelog
 
+## In development
+
+- Adds the exact shipped Minifig and Smallfig root-body profiles while preserving the selected
+  gameplay donor's runtime setup and shared native skeleton.
+- Keeps tool-created materials in a workspace library so another suit can find, import, and package
+  them safely.
+- Adds a modern read-only native-part inspector with a 3D preview, exact attachment recipe, and
+  resolved mesh-default or component-override materials.
+- Relocates saved base-template paths to the active extract by exact `/Game` package when an older
+  cache folder has been replaced.
+- Keeps Diagnostics in place while reading older lines instead of forcing the log back to the end.
+
 ## 0.9.0-beta.7 — 2026-08-24
 
 Safer project recovery, current part indexes, and working cape/glider swaps.

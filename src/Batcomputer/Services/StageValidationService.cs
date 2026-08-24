@@ -58,12 +58,66 @@ public sealed class StageValidationService
             CheckDonorShellStaticHair(asset, role, findings);
         }
 
+        CheckNativeBodyProfile(project, characterAssets, findings);
         CheckPawnTag(project, findings);
         CheckGliderAnimInjection(project, findings);
         CheckRequiredAbilitySets(project, findings);
         CheckEquipmentDependencies(project, findings);
         CheckGliderDependencies(project, characterAssets, findings);
         return findings;
+    }
+
+    private static void CheckNativeBodyProfile(
+        NativeSuitProject project,
+        IReadOnlyDictionary<string, UAsset> characterAssets,
+        List<Finding> findings)
+    {
+        var profile = project.BodyProfile;
+        if (profile is null)
+        {
+            return;
+        }
+
+        var canonical = NativeBodyProfileService.Find(profile.Id) ??
+                        NativeBodyProfileService.MatchMesh(profile.MeshPackagePath);
+        if (canonical is null)
+        {
+            findings.Add(new("ERROR",
+                $"The saved native body profile '{profile.Id}' is not in this Batcomputer body catalog. Re-select it and rebuild the suit."));
+            return;
+        }
+
+        if (!profile.HeadPolicy.Equals(NativeBodyProfileService.IntegratedHeadPolicy, StringComparison.OrdinalIgnoreCase) &&
+            !profile.HeadPolicy.Equals(NativeBodyProfileService.IntentionallyAbsentHeadPolicy, StringComparison.OrdinalIgnoreCase))
+        {
+            findings.Add(new("ERROR",
+                $"Native body profile '{profile.DisplayName}' has an unknown head policy '{profile.HeadPolicy}'. Re-select it before packaging."));
+        }
+
+        foreach (var role in new[] { "playable", "cutscene" })
+        {
+            if (!characterAssets.TryGetValue(role, out var asset))
+            {
+                continue;
+            }
+            var actual = UnrealPathUtil.NormalizePackagePath(
+                NativeBodyProfileService.TryReadBodyMeshPackage(asset));
+            if (!actual.Equals(canonical.MeshPackagePath, StringComparison.OrdinalIgnoreCase))
+            {
+                findings.Add(new("ERROR",
+                    $"{role}: CharacterMesh0 uses '{actual}' but the suit declares native body '{canonical.MeshPackagePath}'. Rebuild the suit so the body profile is applied to both roles."));
+            }
+        }
+
+        if (canonical.MissingRegions.Count > 0)
+        {
+            findings.Add(new("WARN",
+                $"Native body '{canonical.DisplayName}' intentionally leaves {string.Join(", ", canonical.MissingRegions).ToLowerInvariant()} missing. Check equipment, attachments, damage/death, LODs, and cutscenes in-game."));
+        }
+        foreach (var warning in canonical.Warnings)
+        {
+            findings.Add(new("WARN", $"Native body '{canonical.DisplayName}': {warning}"));
+        }
     }
 
     /// <summary>

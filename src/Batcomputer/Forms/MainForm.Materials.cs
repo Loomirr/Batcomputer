@@ -227,6 +227,7 @@ public sealed partial class MainForm
                 },
             };
         _currentProject.GeneratedMaterials ??= new List<GeneratedMaterialEntry>();
+        var registered = new List<GeneratedMaterialEntry>();
         foreach (var result in results)
         {
             var package = UnrealPathUtil.NormalizePackagePath(result.PackagePath);
@@ -240,7 +241,7 @@ public sealed partial class MainForm
                     ? result.CompatibleFaceMeshPackagePaths
                     : FaceMeshesForMaterial(source).ToList())
                 : new List<string>();
-            _currentProject.GeneratedMaterials.Add(new GeneratedMaterialEntry
+            var entry = new GeneratedMaterialEntry
             {
                 DisplayName = UnrealPathUtil.AssetName(package),
                 Kind = result.IsFaceMaterial ? "Face" : "Material",
@@ -257,9 +258,12 @@ public sealed partial class MainForm
                 TemplateOutputRole = result.TemplateOutputRole,
                 TemplateGroupId = result.TemplateGroupId,
                 CreatedUtc = DateTime.UtcNow.ToString("O"),
-            });
+            };
+            _currentProject.GeneratedMaterials.Add(entry);
+            registered.Add(entry);
         }
         (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject);
+        new ToolMaterialLibraryService(_projectRootText.Text.Trim()).Register(registered);
     }
 
     private MaterialTemplateCatalogService.Target? CurrentMaterialTemplateTarget()
@@ -297,6 +301,23 @@ public sealed partial class MainForm
             menu.Items.Add($"Apply to slot [{_toyboxSlotLabel}]", null, (_, _) => ApplyToyboxMaterial(miGamePath));
         }
         menu.Items.Add("Copy /Game path", null, (_, _) => { try { Clipboard.SetText(miGamePath); } catch { /* clipboard busy */ } });
+        return menu;
+    }
+
+    private ContextMenuStrip BuildToolMaterialLibraryMenu(string miGamePath)
+    {
+        var menu = new ContextMenuStrip();
+        menu.Items.Add("Edit shared material…", null, (_, _) => OpenMaterialFromBase(miGamePath, editInPlace: true));
+        if (!string.IsNullOrWhiteSpace(ExtractModFolder(_targetPlayableText.Text.Trim())))
+        {
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add($"Apply to slot [{_toyboxSlotLabel}]", null, (_, _) => ApplyToyboxMaterial(miGamePath));
+        }
+        menu.Items.Add("Copy /Game path", null, (_, _) =>
+        {
+            try { Clipboard.SetText(miGamePath); }
+            catch { /* clipboard busy */ }
+        });
         return menu;
     }
 
@@ -579,6 +600,46 @@ public sealed partial class MainForm
     {
         var search = CurrentToyboxSearch();
 
+        if (type == "All tool materials")
+        {
+            var materials = new ToolMaterialLibraryService(_projectRootText.Text.Trim())
+                .LoadAvailable()
+                .Where(material => MatchesToyboxSearch(
+                    search,
+                    material.DisplayName,
+                    material.PackagePath,
+                    material.Kind,
+                    material.SourceMaterialPackagePath))
+                .ToList();
+            var tiles = materials.Select(material =>
+            {
+                var path = UnrealPathUtil.NormalizePackagePath(material.PackagePath);
+                var isFace = material.Kind.Equals("Face", StringComparison.OrdinalIgnoreCase);
+                return isFace
+                    ? BuildFaceMaterialTile(
+                        path,
+                        isUserMade: true,
+                        "TOOL MATERIAL LIBRARY",
+                        allowDelete: false,
+                        compatibleFaceMeshes: material.CompatibleFaceMeshPackagePaths)
+                    : new VirtualTilePanel.Tile
+                    {
+                        Section = "TOOL MATERIAL LIBRARY",
+                        Title = UnrealPathUtil.AssetName(path).Replace("MI_", ""),
+                        Subtitle = "shared tool MI · drag to apply",
+                        Accent = Theme.Materials,
+                        DragPayload = new ToyboxDragPayload { Kind = "material", MaterialPath = path },
+                        MenuFactory = () => BuildToolMaterialLibraryMenu(path),
+                        ToolTip = $"Available to every suit in this workspace.\n{path}\nSource: {material.SourceMaterialPackagePath}",
+                    };
+            }).ToList();
+            ShowVirtualTiles(
+                tiles,
+                header: "Every material created by the tool in this workspace. Drag one onto the current suit or right-click to apply/edit it; packaging brings the referenced cooked material into this suit automatically.",
+                emptyMessage: "No available tool-created materials matched. Create one under Your materials first.");
+            return;
+        }
+
         if (type == "Your materials")
         {
             var mod = ExtractModFolder(_targetPlayableText.Text.Trim());
@@ -805,6 +866,16 @@ public sealed partial class MainForm
             return;
         }
 
+        var library = new ToolMaterialLibraryService(_projectRootText.Text.Trim());
+        var externalReferences = library.FindReferencingSuits(oldPackage, _currentProject?.SlotId);
+        if (externalReferences.Count > 0)
+        {
+            AppendLog(
+                $"Kept shared material {UnrealPathUtil.AssetName(oldPackage)} at its old path because it is still used by " +
+                $"{string.Join(", ", externalReferences)}. The edited output was saved as the new independent material {UnrealPathUtil.AssetName(newPackage)}.");
+            return;
+        }
+
         var reassigned = 0;
         var registryUpdated = 0;
         if (_currentProject is not null)
@@ -845,6 +916,7 @@ public sealed partial class MainForm
         }
 
         var removed = DeleteGeneratedMaterialFiles(oldPackage);
+        library.Remove(oldPackage);
         AppendLog($"Renamed material {UnrealPathUtil.AssetName(oldPackage)} to {UnrealPathUtil.AssetName(newPackage)}; updated {reassigned} assignment(s) and {registryUpdated} saved material record(s), removed {removed} old file(s).");
         RefreshInspector();
     }
@@ -855,6 +927,19 @@ public sealed partial class MainForm
         if (!package.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase))
         {
             AppendLog($"Material delete refused outside /Game/Mods: {package}");
+            return;
+        }
+
+        var library = new ToolMaterialLibraryService(_projectRootText.Text.Trim());
+        var externalReferences = library.FindReferencingSuits(package, _currentProject?.SlotId);
+        if (externalReferences.Count > 0)
+        {
+            var users = string.Join("\n", externalReferences.Select(name => "• " + name));
+            AppendLog($"Material delete blocked: {package} is still used by {string.Join(", ", externalReferences)}.");
+            Dialog.Warn(
+                this,
+                "Material is shared",
+                "This material is still saved on another suit, so deleting its cooked files would break that suit. Remove or replace it there first.\n\n" + users);
             return;
         }
 
@@ -892,6 +977,7 @@ public sealed partial class MainForm
         }
 
         var removedFiles = DeleteGeneratedMaterialFiles(package);
+        library.Remove(package);
         if (removedAssignments > 0 && _currentProject is not null)
         {
             await RebuildGraftStageFromDeclarativeAsync();
@@ -1229,6 +1315,7 @@ public sealed partial class MainForm
             m.Component.Equals(component, StringComparison.OrdinalIgnoreCase) &&
             m.Slot == slot &&
             m.Context.Equals(context, StringComparison.OrdinalIgnoreCase));
+        new ToolMaterialLibraryService(projectRoot).ImportIntoProject(_currentProject, mi);
         _currentProject.MaterialAssignments.Add(new SavedMaterialAssignment
         {
             Component = component,
@@ -1338,6 +1425,17 @@ public sealed partial class MainForm
             AppendLog(copied > 0
                 ? $"Staged {copied} generated Mods\\{mod} asset file(s) into the pack content root."
                 : $"No generated Mods\\{mod} assets to stage.");
+        }
+
+        var library = new ToolMaterialLibraryService(_projectRootText.Text.Trim());
+        var libraryCopies = 0;
+        foreach (var package in ReferencedGeneratedMaterialPackagesForRelease(project))
+        {
+            libraryCopies += library.CopyPackageToContentRoot(package, contentRootToPackage).Count;
+        }
+        if (libraryCopies > 0)
+        {
+            AppendLog($"Staged {libraryCopies} referenced tool-material package file(s), including shared cross-suit materials.");
         }
 
         var missing = MissingReferencedGeneratedMaterialFiles(project, contentRootToPackage);

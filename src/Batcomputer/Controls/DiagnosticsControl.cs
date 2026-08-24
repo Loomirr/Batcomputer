@@ -1,4 +1,5 @@
 using System.Text;
+using System.Runtime.InteropServices;
 
 namespace Batcomputer;
 
@@ -10,6 +11,12 @@ namespace Batcomputer;
 /// </summary>
 public partial class DiagnosticsControl : UserControl
 {
+    private const int EmGetFirstVisibleLine = 0x00CE;
+    private const int EmLineScroll = 0x00B6;
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
     public DiagnosticsControl()
     {
         InitializeComponent();
@@ -43,9 +50,50 @@ public partial class DiagnosticsControl : UserControl
             }
             builder.Append('[').Append(DateTime.Now.ToString("HH:mm:ss")).Append("] ").AppendLine(line);
         }
+        var selectionStart = _logText.SelectionStart;
+        var selectionLength = _logText.SelectionLength;
+        var firstVisibleLine = FirstVisibleLine();
+        var wasFollowingTail = IsFollowingTail(firstVisibleLine);
+
         _logText.AppendText(builder.ToString());
-        _logText.SelectionStart = _logText.TextLength;
-        _logText.ScrollToCaret();
+        if (wasFollowingTail)
+        {
+            _logText.SelectionStart = _logText.TextLength;
+            _logText.SelectionLength = 0;
+            _logText.ScrollToCaret();
+        }
+        else
+        {
+            // Appending to a TextBox moves its caret and viewport to the end. Put both back when
+            // the user has scrolled upward so live diagnostics do not fight older-log reading.
+            _logText.SelectionStart = Math.Min(selectionStart, _logText.TextLength);
+            _logText.SelectionLength = Math.Min(selectionLength, _logText.TextLength - _logText.SelectionStart);
+            var currentFirstVisibleLine = FirstVisibleLine();
+            SendMessage(
+                _logText.Handle,
+                EmLineScroll,
+                IntPtr.Zero,
+                new IntPtr(firstVisibleLine - currentFirstVisibleLine));
+        }
+    }
+
+    private int FirstVisibleLine() =>
+        _logText.IsHandleCreated
+            ? SendMessage(_logText.Handle, EmGetFirstVisibleLine, IntPtr.Zero, IntPtr.Zero).ToInt32()
+            : 0;
+
+    private bool IsFollowingTail(int firstVisibleLine)
+    {
+        if (_logText.TextLength == 0)
+        {
+            return true;
+        }
+
+        var lastVisibleCharacter = _logText.GetCharIndexFromPosition(
+            new Point(Math.Max(0, _logText.ClientSize.Width - 2), Math.Max(0, _logText.ClientSize.Height - 2)));
+        var lastVisibleLine = _logText.GetLineFromCharIndex(lastVisibleCharacter);
+        var lastTextLine = _logText.GetLineFromCharIndex(Math.Max(0, _logText.TextLength - 1));
+        return firstVisibleLine == 0 && lastTextLine == 0 || lastVisibleLine >= lastTextLine - 1;
     }
 
     /// <summary>Clears the diagnostics surface.</summary>
