@@ -25,6 +25,35 @@ a real `Characters` folder. Check:
 - Check the **active extracted Content** path in Setup. An empty `ExtractedPakData` folder from an
   older portable layout is not used automatically.
 
+### The part browser is empty or has the wrong characters
+
+Open the main menu and choose **Refresh part index**. The index is tied to the active extracted
+Content folder, so an index built from another dump is intentionally rejected.
+
+If rebuilding still finds no parts, the extraction itself is incomplete. Run **Refresh game
+assets** → **Refresh all character assets** first, then rebuild the index again.
+
+## An older suit no longer loads its base
+
+Use this order:
+
+1. Confirm current mappings and the active extracted Content folder in Setup.
+2. Refresh all character assets.
+3. Choose **Refresh part index**.
+4. Open the suit and choose **Rebase suit to current dump…** from the main menu.
+5. Open **Base** and choose **Use as base** to re-stage and replay the saved edits.
+
+If the rebase preview says a template is missing, stop and extract that character again or select a
+new base manually. See [Update or repair a suit](../guides/update-repair-suit.md).
+
+## The inspector shows no components after a base change
+
+Do not rebuild the mod yet. Check Diagnostics for the first base-stage or donor error. Refresh the
+current assets and part index, then rebase or select both the visual and gameplay donors again.
+
+Beta 7 restores the previous project and generated stage when a replay fails. If Diagnostics lists a
+recovery backup, keep that folder until the suit opens correctly.
+
 ## The 3D viewer is blank
 
 - Install or repair Microsoft Edge WebView2 Runtime.
@@ -44,12 +73,25 @@ lighting without being broken.
 - For faces, confirm the template supports the selected face mesh family.
 - Reopen the suit if it was created before generated-material metadata was introduced.
 
+### Material apply says a saved part donor cannot be resolved
+
+Material changes replay the suit's saved parts onto a clean base before the new assignment is
+committed. Refresh the part index. If the exact named donor is still missing, remove and reapply
+that part from the current index, then apply the material again. The previous saved project stays
+active when this operation fails.
+
 ## A custom mesh stays gray
 
 - Apply the material to the custom mesh's own slot, not CharacterMesh0.
 - Reopen the 3D viewer after assigning it.
 - Confirm source textures resolve in diagnostics.
 - Save the transform and choose **Bake to game** before packaging.
+
+### A custom mesh returns to its original size or position
+
+Edit the mesh in the current version, save its transform, and choose **Bake to game**. The baked
+recipe is replayed during later part removals and base rebuilds. Keep the project-owned OBJ source;
+if it is missing, Batcomputer cannot rebuild that attachment.
 
 ## A UI icon is corrupt or crashes on hover
 
@@ -70,6 +112,28 @@ to test in-game.
 5. Confirm the intended character family is encoded in the PawnTag.
 6. Rebuild from current post-update donors.
 
+## A `_Quest` visual returns to the base picker
+
+Quest-only characters are visual bases, not gameplay donors. Select the `_Quest` character as the
+visual base, then choose an explicit compatible playable donor when prompted. Refresh the full
+character assets and part index if the `_Quest` Blueprint is not listed.
+
+## A cape/glider combination is blocked
+
+- Apply a supported native **Glide cape** preset first.
+- Apply the regular `Cape` from that exact same character variant second.
+- Do not add the glide visual manually as a Torso part.
+- For a wingsuit or unrelated character glider, remove the regular `Cape`.
+
+Batcomputer blocks mismatched controllers because they can leave both visuals active, use the wrong
+glide pose, or crash the game.
+
+## A window does not fit the display
+
+Resize or maximize the window. Batcomputer's windows and dialogs now adapt to a usable single
+monitor. If controls are still clipped, record the monitor resolution and Windows scaling
+percentage, try a lower scaling value, and include both values with a screenshot in the report.
+
 ## Access denied while building or installing
 
 Close the game, FModel, UAssetGUI, Explorer preview panes, and any previous Batcomputer instance that
@@ -85,5 +149,8 @@ Restore the last known-good release, then test one change at a time. Collect:
 - Whether a clean cold launch crashes before opening the suit menu.
 
 Do not repeatedly test a texture or cooked asset that already fails extractor validation.
+
+Also remove or move aside the last test mod before testing its replacement. Keeping two builds with
+the same identities in `~mods` can make it look like the new build is still broken.
 
 Still stuck? [Report a problem](reporting-issues.md).

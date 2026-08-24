@@ -2,25 +2,21 @@
 
 ## 0.9.0-beta.7 — 2026-08-24
 
-Recovery-safe base replay, exact donor recovery, and schema-safe dynamic cape-glide adapters.
+Safer project recovery, current part indexes, and working cape/glider swaps.
 
-- Makes base selection, reselection, and declarative part/material/removal replay transactional.
-  Failed rebuilds restore the prior project and generated stages, retain a recovery backup when
-  needed, and keep packaging blocked until the saved edits replay completely.
-- Binds the native part-index cache to the active extracted Content root, reloads or rebuilds it for
-  the current workspace, and adds **Refresh part index** to the main menu.
-- Recovers complete legacy donor recipes only from an exact source-package, mesh, and role match
-  before replay, so an index refresh cannot silently substitute a different component recipe.
-- Migrates project-owned OBJ sources safely when a base change derives a new slot ID, using
-  no-overwrite moves and targeted rollback so a failed base change cannot lose the custom mesh.
-- Fixes the Batmite `_Quest` visual-base flow with a Robin playable donor instead of returning to
-  the base picker, while retaining the selected quest-character appearance.
-- Adds a schema-safe dynamic adapter for giving a Nightwing gameplay donor a native Batman
-  regular-cape/glide-cape pair. It reapplies Nightwing's Head, Face, and body materials, keeps
-  Nightwing's general behavior, and replaces only Nightwing's glide/traversal categories with the
-  Batman LAS/MAS blocks required by the cape. Validation now rejects competing native and cape
-  glide controllers. The corrected path passed in-game acceptance with Nightwing's appearance and
-  normal playset intact and the Batman cape-glide animation active.
+- A failed base selection, reselection, or saved-edit replay now restores the previous project and
+  generated files instead of leaving the suit empty. Packaging stays blocked until every saved edit
+  has been rebuilt successfully.
+- The part index follows the active extracted Content folder and has a dedicated **Refresh part
+  index** command in the main menu.
+- Older saved parts recover their full native donor only from an exact package, mesh, and
+  playable/cutscene match. A refresh cannot silently swap in a similarly named part.
+- Base changes preserve project-owned OBJ sources, including when a rebuild cannot finish.
+- Batmite `_Quest` visuals can use a Robin gameplay donor without returning to the base picker or
+  losing the selected appearance.
+- Glide-only gameplay donors such as Nightwing can use a supported native regular-cape/glide-cape
+  pair while keeping their appearance and normal playset. The matching cape donor supplies the
+  glide animation, and competing glide controllers are blocked before packaging.
 
 ## 0.9.0-beta.6 — 2026-08-23
 

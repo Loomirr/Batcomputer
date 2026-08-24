@@ -30,11 +30,18 @@ Back up:
 - Source images and OBJ files referenced by those projects
 - Notes stored in the mod project
 
+Back up before changing mappings, replacing the extracted Content folder, or rebasing several
+suits. A new Batcomputer portable can reuse these project folders without copying old cache files.
+
 ## Rebuildable data
 
 Game extracts, indexes, preview folders, registry-writer binaries, and staged builds can be recreated
 from the current game, mappings, projects, and source files. They may still take time to
 regenerate, so keep them when actively developing.
+
+If a base or part replay fails, Batcomputer normally restores the previous generated stage. When
+Diagnostics reports that a recovery backup was retained, keep that exact folder until the project
+opens and passes **Check mod** again.
 
 ## Game install layout
 
@@ -52,3 +59,6 @@ LEGOBatmanLotDK/
 ```
 
 Loomirr's LOTDK UE4SS supplies `LOTDKExpandedCoreRegistry`; suit mods must not replace it.
+
+See [Update or repair a suit](../guides/update-repair-suit.md) before moving an older project to a
+new game dump.

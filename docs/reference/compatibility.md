@@ -11,11 +11,10 @@
 - Character, mask, normal/packed, and verified UI texture cooking.
 - Supported equipment, glider, and animation-data grafting.
 - A separate regular cape plus a replacement glide cape when both come from the same indexed native
-  donor pair and its animation controller uses the game's verified paired-cape visibility contract.
-  On a glide-only gameplay donor, apply the glide preset first and its matching regular cape second;
-  Batcomputer preserves non-glide behavior while replacing the donor's glide-only animation
-  categories. Glide-only wingsuits and character gliders are supported when the regular `Cape` is
-  removed.
+  character variant and the preset is marked as a supported **Glide cape**. On a glide-only gameplay
+  donor, apply the preset first and its matching regular cape second. Batcomputer keeps normal
+  gameplay behavior and uses the cape donor's animation while gliding. Wingsuits and other
+  glide-only visuals are also supported when the regular `Cape` is removed.
 - Custom OBJ static-mesh attachments.
 - Direct installation, build checks, and installable ZIPs.
 
@@ -27,8 +26,8 @@
 - Physical collectible placement in levels.
 - Perfect shader/lighting parity between the 3D viewer and the game.
 - Combining a separate regular cape with a mismatched wingsuit or glide-only controller. The
-  supported adapter requires a proven native glide-cape preset and its matching regular cape from
-  the same indexed donor pair.
+  supported flow requires a native **Glide cape** preset and its matching regular cape from the same
+  indexed character variant.
 
 ## Content that needs extra testing
 
@@ -50,3 +49,5 @@ starts crashing or disappearing:
 5. Validate and rebuild every affected mod.
 
 Do not assume a package is compatible merely because FModel can list it.
+
+For the full recovery order, see [Update or repair a suit](../guides/update-repair-suit.md).

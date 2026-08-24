@@ -47,12 +47,32 @@ metadata the game needs, and packages the finished mod for Loomirr's LOTDK UE4SS
 
     [Troubleshooting](help/troubleshooting.md)
 
+-   <span class="bc-card-heading"><img src="assets/icons/Settings.png" alt=""> <strong>Update an older suit</strong></span>
+
+    ---
+
+    Refresh the current dump, rebuild the part index, and safely rebase a suit without starting
+    over.
+
+    [Update or repair a suit](guides/update-repair-suit.md)
+
+-   <span class="bc-card-heading"><img src="assets/icons/Code.png" alt=""> <strong>Get a quick answer</strong></span>
+
+    ---
+
+    Find the short version on bases, dumps, capes, custom meshes, builds, and sharing mods.
+
+    [Frequently asked questions](reference/faq.md)
+
 </div>
 
 ## What Batcomputer builds
 
 - Playable and cutscene character Blueprints based on game characters.
 - Character parts, materials, textures, equipment, gliders, and compatible animation data.
+- Visual bases from playable, cutscene, and supported `_Quest` character assets.
+- Verified native cape/glider pairs on compatible gameplay donors while keeping their normal
+  appearance and playstyle.
 - Custom static-mesh attachments imported from OBJ files.
 - PawnTag, DCMD, UIMD, StringTable, gameplay-tag configuration, and Asset Registry data.
 - One or more suits in a single mod.

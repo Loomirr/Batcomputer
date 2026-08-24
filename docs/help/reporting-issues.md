@@ -13,6 +13,8 @@ Use the repository's [bug report form](https://github.com/Loomirr/Batcomputer/is
 - Relevant Loomirr's LOTDK UE4SS log lines for in-game failures.
 - A screenshot when the problem is visual.
 - Whether the problem reproduces after a cold game restart.
+- For an older project, whether you refreshed game assets, refreshed the part index, or rebased the
+  suit before the failure.
 
 ## For build failures
 
@@ -36,6 +38,7 @@ Action: Build Mod
 Expected: release installs
 Actual: build check blocks the UIMD icon
 Reproduces: yes, after restart
+Asset refresh / rebase: current dump, part index refreshed, no rebase needed
 
 Relevant diagnostics:
 <paste only the relevant lines>

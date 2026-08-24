@@ -11,7 +11,7 @@ body:
     id: version
     attributes:
       label: Batcomputer version
-      description: For example, 0.9.0-beta.1.
+      description: For example, 0.9.0-beta.7.
     validations:
       required: true
   - type: input
@@ -43,6 +43,11 @@ body:
       label: Batcomputer diagnostics
       description: Use Copy log in Batcomputer and paste the relevant section here.
       render: text
+  - type: textarea
+    id: refresh-rebase
+    attributes:
+      label: Asset refresh and rebase state
+      description: For an older project, say whether game assets and the part index were refreshed and whether the suit was rebased.
   - type: textarea
     id: game-log
     attributes:

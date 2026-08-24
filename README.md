@@ -12,7 +12,8 @@ or Loomirr's LOTDK UE4SS.
 
 ## What it does
 
-- Starts a suit from a playable donor and any playable or cutscene character.
+- Starts a suit with a gameplay donor and a playable, cutscene, or supported extracted `_Quest`
+  visual base.
 - Adds hair, hats, capes, torsos, accessories, equipment, and compatible animation data.
 - Adapts verified native cape/glider pairs across compatible gameplay donors without replacing the
   donor's general play style or visual identity.
@@ -89,8 +90,8 @@ overwrite the shared registry. Batcomputer does not modify the runtime DLL or `m
 2. Add a suit, then choose a visual base and a playable donor.
 3. Use the part, material, texture, equipment, and animation tools to assemble the suit.
 4. Set the native identity and review the donor-based menu icons.
-5. Use the 3D viewer to inspect the assembled character. Placement and UV saves affect the viewer
-   only; they do not alter the in-game character transform.
+5. Use the 3D viewer to inspect the assembled character. Normal game-part placement is preview-only;
+   custom OBJ scale, position, rotation, and UV changes can be saved and **Baked to game**.
 6. Run **Check mod**, then select **Build Mod**.
 
 Every export is a mod, including a mod containing one suit. **Build Mod** creates the release and
@@ -98,6 +99,7 @@ installs it into the configured game folders. Restart the game before testing a 
 
 The documentation includes a full
 [first-suit tutorial](https://loomirr.github.io/Batcomputer/guides/first-suit/),
+[update and repair guide](https://loomirr.github.io/Batcomputer/guides/update-repair-suit/),
 [materials and faces guide](https://loomirr.github.io/Batcomputer/guides/materials-textures-faces/),
 and [troubleshooting checklist](https://loomirr.github.io/Batcomputer/help/troubleshooting/).
 

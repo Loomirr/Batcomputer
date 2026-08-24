@@ -30,11 +30,25 @@ In the 3D viewer:
 Offsets use Unreal centimeters. The viewer converts them for preview, and the bake step
 rebuilds the generated cooked mesh using the saved values.
 
+The baked scale, position, and rotation stay in the suit recipe. A later native-part removal or
+base replay should rebuild the custom mesh with those same values instead of returning it to the
+original OBJ placement.
+
 ## Apply a material
 
 Custom meshes expose material slots in the inspector. Generate or select a compatible material,
 then drag or apply it to the custom mesh slot as you would for a normal game part. Reopen the 3D
 viewer and confirm the material resolved on that mesh before baking.
+
+## Edit or remove a custom mesh
+
+Project-owned OBJ attachments have **Edit custom mesh** and **Remove from suit** actions in Parts.
+Editing updates the saved recipe; removing the attachment also removes it from later suit rebuilds.
+Keep an outside backup of the original OBJ even though Batcomputer keeps a project-owned source
+copy.
+
+If an edit fails while the suit is rebuilding, the previous project and generated stage stay in
+place. Check Diagnostics for the first failed donor or file operation before trying again.
 
 ## Current limits
 

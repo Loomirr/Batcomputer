@@ -2,21 +2,18 @@
 
 ## 0.9.0-beta.7
 
-- Base selection, reselection, and declarative replay are transactional. A failed rebuild restores
-  the prior project and generated stages and leaves packaging blocked until replay completes.
-- The native part index follows the active extracted Content root, reloads or rebuilds for the
-  current workspace, and can be refreshed directly from the main menu.
-- Older saved grafts recover complete donor recipes only from exact source-package, mesh, and role
-  matches before replay.
-- Project-owned OBJ sources migrate safely when a base change derives a new slot ID, with
-  no-overwrite moves and targeted rollback on failure.
+- A failed base selection, reselection, or saved-edit replay now restores the previous project and
+  generated files instead of leaving the suit empty.
+- The part index follows the active extracted Content folder and has a dedicated **Refresh part
+  index** command in the main menu.
+- Older saved parts recover their full native donor only from an exact package, mesh, and
+  playable/cutscene match. If that match is missing, the working generated files are left alone.
+- Base changes preserve project-owned OBJ sources, including when a rebuild cannot finish.
 - Batmite `_Quest` visuals can be paired with a Robin playable donor without returning to the base
   picker or losing the selected appearance.
-- A schema-safe dynamic paired-cape adapter can retain a Nightwing donor's appearance and general
-  behavior while replacing only Nightwing's glide/traversal categories with the Batman LAS/MAS
-  blocks required by a native Batman cape. Validation rejects competing glide controllers. The
-  corrected appearance/animation path passed in-game acceptance with Nightwing's normal playset
-  intact and the Batman cape-glide animation active.
+- Glide-only gameplay donors such as Nightwing can use a supported native regular-cape/glide-cape
+  pair while keeping their appearance and normal playset. The matching cape donor supplies the
+  glide animation, and competing glide controllers are blocked before packaging.
 
 ## 0.9.0-beta.6
 
@@ -43,7 +40,7 @@
   part removal triggers a clean rebuild.
 - Generated-file sharing violations receive bounded retries; incomplete playable/cutscene grafts
   stop the rebuild and cannot be packaged as a partial suit.
-- Fixed the first declarative rebuild on a fresh suit when no graft-stage folder exists yet.
+- Fixed the first saved-edit replay on a fresh suit when no part stage exists yet.
 - Fixed registry-writer launches from spaced Unreal paths, structured registry verification, and
   punctuation leaking from display names into Unreal identifiers.
 - Incompatible remote-controller families and unsupported regular-cape/glider combinations are
@@ -52,8 +49,8 @@
   projects receive the same package-time check.
 - Batman and Batgirl glide-cape controllers remain supported, Batman glide capes are called out in
   the Gliders browser, and the selected donor's controller identity is preserved.
-- Suit and mod outputs are prepared away from certified authoring stages, and only a fresh, complete
-  IoStore trio can be published or installed; failed installs restore the previous trio.
+- Suit and mod outputs are prepared in separate build attempts, and only a fresh, complete IoStore
+  trio can be published or installed. Failed installs restore the previous trio.
 
 ## 0.9.0-beta.4
 

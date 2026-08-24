@@ -26,8 +26,8 @@ Create a suit inside the active mod. Give it a unique suit ID and display name.
 
 Batcomputer separates two jobs that the game often stores in different assets:
 
-- **Visual base:** supplies the visible character assembly. This can be a playable or cutscene
-  character.
+- **Visual base:** supplies the visible character assembly. This can be a playable, cutscene, or
+  supported extracted `_Quest` character.
 - **Gameplay donor:** supplies gameplay-facing playable behavior and metadata.
 
 For the first test, choose a playable donor close to the character family you are making. Select
@@ -58,18 +58,18 @@ suit should use a normal cape and a matching glide cape:
 1. Refresh the native part index from the main menu if the donor parts were extracted recently.
 2. Open **Gliders**, choose **Glider presets**, and filter to one native **Glide cape** donor.
 3. Open that preset and choose **Use preset**. Batcomputer records the donor's complete glide
-   component, including its animation Blueprint, materials, visibility tags, and matching body pose.
+   setup, including the authored component, materials, visibility behavior, and body pose.
 4. Open **Parts** and apply the regular cosmetic `Cape` from the exact same character variant as the
-   glide preset. Do not use a custom OBJ cape or a cape from another donor pair.
-5. Batcomputer certifies the two parts as one dynamic adapter. It preserves the selected gameplay
-   donor's normal movement, combat, equipment, and appearance, but replaces its glide-only animation
-   categories with the cape donor's matching traversal and montage blocks.
+   glide preset. Right-click the part and choose **Apply to character**. Do not use a custom OBJ cape
+   or a cape from another donor pair.
+5. Batcomputer keeps the gameplay donor's appearance and normal movement, combat, and equipment,
+   then uses the cape donor's matching animation while gliding.
 6. Run **Check mod**, build, and cold-launch the game. Test standing cape visibility, glide opening,
    sustained flight, landing, and the character's normal combat/movement set.
 
-The glide preset must be applied before the regular cape. If the exact playable/cutscene donor pair
-or the verified paired-cape controller cannot be resolved, Batcomputer blocks the combination rather
-than producing a double-cape or crash-prone suit.
+The glide preset must be applied before the regular cape. Do not manually add the glide visual as a
+Torso part; **Use preset** keeps the game's authored setup. If the exact donor pair cannot be
+resolved, Batcomputer blocks the combination rather than building a double-cape or crash-prone suit.
 
 ## 5. Set identity and icons
 
@@ -114,3 +114,6 @@ Fully exit and restart the game. Confirm:
 - Materials, textures, equipment, glider, and animations behave as expected.
 
 Once this works, continue with [Build, test, and share](build-test-share.md).
+
+If an older suit no longer resolves its base or saved parts, use
+[Update or repair a suit](update-repair-suit.md).

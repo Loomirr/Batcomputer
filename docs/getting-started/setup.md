@@ -20,6 +20,7 @@ location.
 !!! warning "After a game update"
     Refresh the `.usmap`, then run a fresh character extraction before rebasing or packaging suits.
     Old cooked donors can parse successfully and still be incompatible with the updated game.
+    See [Update or repair a suit](../guides/update-repair-suit.md) for the full order.
 
 ## 3. Game `Content\Paks` folder
 

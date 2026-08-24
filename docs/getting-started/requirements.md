@@ -9,7 +9,7 @@
 | A matching `.usmap` | Cooked Unreal assets cannot be interpreted safely with mappings from another game build. |
 | Unreal Engine 5.6 | The bundled registry-writer project uses UE 5.6 to create native Asset Registry data. |
 | About 18 GB free for extraction | The full extraction includes characters, animations, localization, and supporting files. |
-| Loomirr's LOTDK UE4SS | Generated mods depend on its plugin loading and shared `/Game/Mods` discovery configuration. |
+| Loomirr's LOTDK UE4SS 0.1.1 or newer | Generated mods depend on its plugin loading and shared `/Game/Mods` discovery configuration. |
 
 ## Bundled with Batcomputer
 

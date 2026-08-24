@@ -16,7 +16,7 @@ Typical blockers include:
 
 ## Build and install
 
-Close the game before building. **Build mod**:
+Close the game before building, then choose **Build mod**:
 
 ![Build Mod workspace](../assets/screenshots/build-mod-workspace.jpg){ .bc-doc-shot loading=lazy }
 
@@ -25,6 +25,9 @@ Close the game before building. **Build mod**:
 3. Writes gameplay tags and native Asset Registry data.
 4. Builds the pak/ucas/utoc trio.
 5. Installs the completed build into the configured game.
+
+Batcomputer installs only a fresh, complete pak/ucas/utoc trio from the current build. If packaging
+or installation fails, it does not publish a partial trio over the last working install.
 
 Restart the game after each new installation. Unreal discovers tags, registry rows, and primary
 assets during startup.
@@ -46,7 +49,8 @@ Test at least:
 
 ## Create the ZIP
 
-Use Batcomputer's release ZIP action after a successful build. The archive uses game-relative paths
+On **Home** → **Build mod**, choose the **Zip _mod name_** tile after a successful build. The archive
+uses game-relative paths
 and starts above `LEGOBatmanLotDK`, so users can extract it into their Steam `common` directory or
 install it with a compatible mod manager.
 
@@ -61,3 +65,6 @@ Suit releases require Loomirr's LOTDK UE4SS. They must not include or overwrite 
 - State that the release contains no Batcomputer, UE, mappings, or extracted game files.
 - Provide a short list of included suits and known limitations.
 - Cold-test the exact ZIP you intend to upload.
+
+The ZIP is the thing to test and share. Do not replace files inside it after the final test; rebuild
+the archive instead.

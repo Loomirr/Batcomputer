@@ -36,11 +36,15 @@ of continuing with a half-working package.
 1. Close Batcomputer.
 2. Keep a backup of your existing folder.
 3. Extract the new portable over a new folder.
-4. Copy your `Batcomputer.settings.json`, `Generated`, and `Data` folders into the new folder if you
-   used the default portable workspace.
-5. Launch the new version and run release validation before rebuilding an existing mod.
+4. Copy `Batcomputer.settings.json`, `Generated`, and `Data\Mappings` into the new folder if you used
+   the default portable workspace. Let Batcomputer rebuild `Data\Cache` and other indexes.
+5. Launch the new version and open one existing project before deleting the old portable.
+6. Run **Check mod** before rebuilding or installing that project.
 
 During the beta, keep each portable version in its own folder until the new version has opened your
 projects successfully.
+
+If the game dump also changed, follow [Update or repair a suit](../guides/update-repair-suit.md)
+before rebuilding.
 
 Next: [First-time setup](setup.md).
