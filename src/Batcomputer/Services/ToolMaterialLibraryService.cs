@@ -25,6 +25,7 @@ public sealed class ToolMaterialLibraryService
     public string ProjectRoot { get; }
     public string CatalogRoot => Path.Combine(AppSettings.GeneratedRootFor(ProjectRoot), "NativeSuitMaterials");
     public string CatalogPath => Path.Combine(CatalogRoot, "material-library.json");
+    public string ContentRoot => Path.Combine(CatalogRoot, "Content");
 
     public ToolMaterialLibraryService(string projectRoot)
     {
@@ -35,6 +36,13 @@ public sealed class ToolMaterialLibraryService
     {
         var entries = LoadCatalog().Materials;
         var changed = MergeSavedSuitMaterials(entries);
+        foreach (var entry in entries)
+        {
+            // Older projects kept their authored MIs only in the suit's persisted build stage.
+            // Adopt those cooked files into the workspace library before the stage is rebuilt or
+            // the source suit is removed, so "All tool materials" is genuinely project-wide.
+            ArchivePackage(entry.PackagePath);
+        }
         var available = entries
             .Where(entry => HasCookedPackage(entry.PackagePath))
             .GroupBy(entry => UnrealPathUtil.NormalizePackagePath(entry.PackagePath), StringComparer.OrdinalIgnoreCase)
@@ -56,6 +64,9 @@ public sealed class ToolMaterialLibraryService
         foreach (var material in materials)
         {
             changed |= Upsert(entries, material);
+            // Register is also called after an in-place edit. Refresh the archived bytes from the
+            // newly cooked export instead of keeping an older complete library copy.
+            ArchivePackage(material.PackagePath, refreshFromSource: true);
         }
         if (changed)
         {
@@ -85,10 +96,19 @@ public sealed class ToolMaterialLibraryService
     public void Rename(string oldPackagePath, GeneratedMaterialEntry replacement)
     {
         var oldPackage = UnrealPathUtil.NormalizePackagePath(oldPackagePath);
+        var replacementPackage = UnrealPathUtil.NormalizePackagePath(replacement.PackagePath);
+        if (!IsSafeGamePackagePath(replacementPackage))
+        {
+            throw new InvalidOperationException(
+                $"Material package path must be a safe /Game/ path. Current value: '{replacement.PackagePath}'.");
+        }
+
         var entries = LoadCatalog().Materials;
         entries.RemoveAll(entry => UnrealPathUtil.NormalizePackagePath(entry.PackagePath)
             .Equals(oldPackage, StringComparison.OrdinalIgnoreCase));
         Upsert(entries, replacement);
+        ArchivePackage(replacement.PackagePath, refreshFromSource: true);
+        DeleteArchivedPackageFiles(oldPackage);
         Save(entries);
     }
 
@@ -101,6 +121,7 @@ public sealed class ToolMaterialLibraryService
         {
             Save(entries);
         }
+        DeleteArchivedPackageFiles(package);
     }
 
     public IReadOnlyList<string> FindReferencingSuits(string packagePath, string? exceptSlotId = null)
@@ -146,24 +167,32 @@ public sealed class ToolMaterialLibraryService
 
     public bool HasCookedPackage(string packagePath)
     {
-        var packageBase = ExportPackageBase(packagePath);
-        return packageBase is not null &&
-               File.Exists(packageBase + ".uasset") && new FileInfo(packageBase + ".uasset").Length > 0 &&
-               File.Exists(packageBase + ".uexp") && new FileInfo(packageBase + ".uexp").Length > 0;
+        var packageBase = ResolvePackageBase(packagePath);
+        return HasCompletePackageBase(packageBase);
+    }
+
+    public string? ResolvePackageUasset(string packagePath)
+    {
+        ArchivePackage(packagePath);
+        var packageBase = ResolvePackageBase(packagePath);
+        return HasCompletePackageBase(packageBase) ? packageBase + ".uasset" : null;
     }
 
     public IReadOnlyList<string> CopyPackageToContentRoot(string packagePath, string contentRoot)
     {
         var copied = new List<string>();
         var package = UnrealPathUtil.NormalizePackagePath(packagePath);
-        var sourceBase = ExportPackageBase(package);
-        if (sourceBase is null || !package.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+        if (!IsSafeGamePackagePath(package))
         {
             return copied;
         }
-        var destinationBase = Path.Combine(
-            contentRoot,
-            package["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar));
+        ArchivePackage(package);
+        var sourceBase = ResolvePackageBase(package);
+        var destinationBase = PackageBaseUnder(contentRoot, package);
+        if (sourceBase is null || destinationBase is null)
+        {
+            return copied;
+        }
         Directory.CreateDirectory(Path.GetDirectoryName(destinationBase)!);
         foreach (var extension in new[] { ".uasset", ".uexp", ".ubulk" })
         {
@@ -218,6 +247,31 @@ public sealed class ToolMaterialLibraryService
                     changed |= Upsert(entries, material);
                 }
             }
+
+            // Material Forge projects from before the shared catalog stored the package only as
+            // an assignment. Recover those records too; their cooked package is validated before
+            // the entry is shown, so a normal base-game or missing MI cannot become a false tile.
+            foreach (var assignment in project?.MaterialAssignments ?? Enumerable.Empty<SavedMaterialAssignment>())
+            {
+                var package = UnrealPathUtil.NormalizePackagePath(assignment.MiPackagePath);
+                if (!package.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase) ||
+                    entries.Any(entry => UnrealPathUtil.NormalizePackagePath(entry.PackagePath)
+                        .Equals(package, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                changed |= Upsert(entries, new GeneratedMaterialEntry
+                {
+                    DisplayName = UnrealPathUtil.AssetName(package),
+                    Kind = assignment.Component.Equals("Face", StringComparison.OrdinalIgnoreCase) ||
+                           package.Contains("/Face", StringComparison.OrdinalIgnoreCase) ||
+                           UnrealPathUtil.AssetName(package).StartsWith("MI_FACE_", StringComparison.OrdinalIgnoreCase)
+                        ? "Face"
+                        : "Material",
+                    PackagePath = package,
+                });
+            }
         }
         return changed;
     }
@@ -250,7 +304,7 @@ public sealed class ToolMaterialLibraryService
     private static bool Upsert(List<GeneratedMaterialEntry> entries, GeneratedMaterialEntry material)
     {
         var package = UnrealPathUtil.NormalizePackagePath(material.PackagePath);
-        if (string.IsNullOrWhiteSpace(package))
+        if (!IsSafeGamePackagePath(package))
         {
             return false;
         }
@@ -304,15 +358,155 @@ public sealed class ToolMaterialLibraryService
         CreatedUtc = entry.CreatedUtc,
     };
 
-    private static string? ExportPackageBase(string packagePath)
+    private bool ArchivePackage(string packagePath, bool refreshFromSource = false)
+    {
+        try
+        {
+            var package = UnrealPathUtil.NormalizePackagePath(packagePath);
+            if (!IsSafeGamePackagePath(package))
+            {
+                return false;
+            }
+
+            var archiveBase = PackageBaseUnder(ContentRoot, package);
+            if (archiveBase is null)
+            {
+                return false;
+            }
+            if (!refreshFromSource && HasCompletePackageBase(archiveBase))
+            {
+                return true;
+            }
+
+            var sourceBase = ResolvePackageBase(package, includeArchive: false);
+            if (!HasCompletePackageBase(sourceBase))
+            {
+                return HasCompletePackageBase(archiveBase);
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(archiveBase)!);
+            foreach (var extension in new[] { ".uasset", ".uexp", ".ubulk" })
+            {
+                var source = sourceBase + extension;
+                if (File.Exists(source))
+                {
+                    File.Copy(source, archiveBase + extension, overwrite: true);
+                }
+            }
+            return HasCompletePackageBase(archiveBase);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // A locked or read-only archive must not make the Materials tab unusable. The entry
+            // remains available from its original cooked source and can be adopted on a later load.
+            return HasCookedPackage(packagePath);
+        }
+    }
+
+    private string? ResolvePackageBase(string packagePath, bool includeArchive = true)
     {
         var package = UnrealPathUtil.NormalizePackagePath(packagePath);
-        if (!package.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+        if (!IsSafeGamePackagePath(package))
         {
             return null;
         }
-        return Path.Combine(
-            AppSettings.Current.EffectiveExportContentRoot(),
-            package["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar));
+
+        if (includeArchive)
+        {
+            var archiveBase = PackageBaseUnder(ContentRoot, package);
+            if (HasCompletePackageBase(archiveBase))
+            {
+                return archiveBase;
+            }
+        }
+
+        var exportBase = PackageBaseUnder(AppSettings.Current.EffectiveExportContentRoot(), package);
+        if (HasCompletePackageBase(exportBase))
+        {
+            return exportBase;
+        }
+
+        var projects = new SuitProjectService(ProjectRoot);
+        foreach (var summary in projects.ListProjectFiles())
+        {
+            NativeSuitProject? project;
+            try { project = projects.LoadProject(summary.Path); }
+            catch { continue; }
+            if (project is null)
+            {
+                continue;
+            }
+
+            foreach (var contentRoot in PersistedContentRoots(projects, project))
+            {
+                var candidate = PackageBaseUnder(contentRoot, package);
+                if (HasCompletePackageBase(candidate))
+                {
+                    return candidate;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static IEnumerable<string> PersistedContentRoots(
+        SuitProjectService projects,
+        NativeSuitProject project)
+    {
+        var projectOutput = projects.ProjectOutputDirectory(project);
+        yield return Path.Combine(projectOutput, "IoStore", "Stage", "LEGOBatmanLotDK", "Content");
+        foreach (var stage in new[] { "GraftedPartStage", "GraftedTorso2Stage", "PatchedNameMapStage" })
+        {
+            yield return Path.Combine(projectOutput, stage, "LEGOBatmanLotDK", "Content");
+        }
+    }
+
+    private static string? PackageBaseUnder(string contentRoot, string packagePath)
+    {
+        if (!IsSafeGamePackagePath(packagePath))
+        {
+            return null;
+        }
+
+        var root = Path.GetFullPath(contentRoot);
+        var packageBase = Path.GetFullPath(Path.Combine(
+            root,
+            packagePath["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar)));
+        return FileSystemPathUtil.IsWithinDirectory(packageBase, root) ? packageBase : null;
+    }
+
+    private static bool IsSafeGamePackagePath(string packagePath) =>
+        packagePath.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase) &&
+        packagePath.Length > "/Game/".Length &&
+        packagePath.Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .All(segment => segment is not "." and not ".." &&
+                            segment.IndexOfAny(Path.GetInvalidFileNameChars()) < 0);
+
+    private static bool HasCompletePackageBase(string? packageBase) =>
+        !string.IsNullOrWhiteSpace(packageBase) &&
+        File.Exists(packageBase + ".uasset") && new FileInfo(packageBase + ".uasset").Length > 0 &&
+        File.Exists(packageBase + ".uexp") && new FileInfo(packageBase + ".uexp").Length > 0;
+
+    private void DeleteArchivedPackageFiles(string packagePath)
+    {
+        var package = UnrealPathUtil.NormalizePackagePath(packagePath);
+        if (!IsSafeGamePackagePath(package))
+        {
+            return;
+        }
+
+        var packageBase = PackageBaseUnder(ContentRoot, package);
+        if (packageBase is null)
+        {
+            return;
+        }
+        foreach (var extension in new[] { ".uasset", ".uexp", ".ubulk" })
+        {
+            var path = packageBase + extension;
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
     }
 }

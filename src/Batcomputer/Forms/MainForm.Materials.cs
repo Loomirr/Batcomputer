@@ -831,6 +831,13 @@ public sealed partial class MainForm
             }
         }
 
+        var libraryUasset = new ToolMaterialLibraryService(_projectRootText.Text.Trim())
+            .ResolvePackageUasset(package);
+        if (!string.IsNullOrWhiteSpace(libraryUasset))
+        {
+            return libraryUasset;
+        }
+
         return null;
     }
 

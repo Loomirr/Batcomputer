@@ -15,6 +15,7 @@ public sealed partial class MainForm
         "Suits - Home",
         "Suits - Base",
         "Suits - Materials",
+        "Suits - All tool materials",
         "Suits - Faces",
         "Suits - Textures",
         "Suits - Parts",
@@ -50,6 +51,36 @@ public sealed partial class MainForm
                 RefreshToyboxTiles();
                 _inspectorTabs.SelectTab(NotebookTabName);
                 ConfigureModNotebookForUiAudit();
+                break;
+            case "Suits - All tool materials":
+                SelectWorkspaceFolder(WorkspaceFolder.Suits, refresh: false);
+                SelectComboValue(_toyboxCategoryCombo, "Materials");
+                SelectComboValue(_toyboxTypeCombo, "All tool materials");
+                ShowVirtualTiles(
+                [
+                    new VirtualTilePanel.Tile
+                    {
+                        Section = "TOOL MATERIAL LIBRARY",
+                        Title = "ClassicSuit_Body",
+                        Subtitle = "shared tool MI · drag to apply",
+                        Accent = Theme.Materials,
+                    },
+                    new VirtualTilePanel.Tile
+                    {
+                        Section = "TOOL MATERIAL LIBRARY",
+                        Title = "ClassicSuit_Cowl",
+                        Subtitle = "shared tool MI · drag to apply",
+                        Accent = Theme.Materials,
+                    },
+                    new VirtualTilePanel.Tile
+                    {
+                        Section = "TOOL MATERIAL LIBRARY",
+                        Title = "NeutralFace_Print",
+                        Subtitle = "shared face MI · apply to Face",
+                        Accent = Theme.Faces,
+                    },
+                ],
+                header: "Every material created by the tool in this workspace. Drag one onto the current suit or right-click to apply/edit it; packaging brings the referenced cooked material into this suit automatically.");
                 break;
             default:
                 SelectWorkspaceFolder(WorkspaceFolder.Suits, refresh: false);

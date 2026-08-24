@@ -5,7 +5,7 @@
 - Adds the exact shipped Minifig and Smallfig root-body profiles while preserving the selected
   gameplay donor's runtime setup and shared native skeleton.
 - Keeps tool-created materials in a workspace library so another suit can find, import, and package
-  them safely.
+  them safely, including materials recovered from older assignment-only suit projects.
 - Adds a modern read-only native-part inspector with a 3D preview, exact attachment recipe, and
   resolved mesh-default or component-override materials.
 - Relocates saved base-template paths to the active extract by exact `/Game` package when an older

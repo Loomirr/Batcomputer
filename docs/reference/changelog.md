@@ -4,7 +4,8 @@
 
 - Added the exact native Minifig and Smallfig body choices without changing the selected gameplay
   donor's playstyle or shared skeleton.
-- Tool-created materials can be found and reused from **All tool materials** in another suit.
+- Tool-created materials can be found and reused from **All tool materials** in another suit, and
+  older assignment-only materials are recovered into the workspace library automatically.
 - Native parts can be inspected in 3D with their attachment and resolved material recipes before
   being applied.
 - Saved bases move from a retired absolute extract path to the active Content folder when the exact

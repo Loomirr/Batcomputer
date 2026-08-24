@@ -127,7 +127,8 @@ the glide-only visual.
 Yes. Open **Materials** and choose **All tool materials**. Tool-created materials are kept in the
 workspace library and can be imported into another suit without copying them by hand. **Your
 materials** shows the current suit's own set. Rename or deletion is blocked when another saved suit
-still references the material.
+still references the material. Older suits that saved only the material assignment are added to the
+library automatically when their cooked material files are still present.
 
 ### Can I inspect a base-game part before applying it?
 

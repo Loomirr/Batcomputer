@@ -80,9 +80,15 @@ internal static class UiAuditCaptureService
             };
             var samplePart = new NativeSuitPartRecord
             {
-                Slot = "Head",
+                Slot = "Hair",
                 Context = "playable",
+                SemanticKind = "Hair",
+                IsKnownVisualSlot = true,
+                IsLikelyGraftCandidate = true,
                 SourcePackagePath = "/Game/Characters/Minifig/UiAudit/BP_UiAudit_Playable",
+                MeshKind = "StaticMesh",
+                MeshObjectName = "SM_UIAuditHair",
+                MeshPackagePath = "/Game/Characters/Attachments/Hair/UiAudit/SM_UIAuditHair",
                 MeshObjectPath = "/Game/Characters/Attachments/Hair/UiAudit/SM_UIAuditHair.SM_UIAuditHair",
                 ComponentClass = "StaticMeshComponent",
                 ComponentTemplateExport = "Head_GEN_VARIABLE",

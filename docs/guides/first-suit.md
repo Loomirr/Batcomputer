@@ -51,7 +51,11 @@ there is no separate skeleton step or skeleton selector.
 
 ![Base character browser](../assets/screenshots/base-character-picker.jpg){ .bc-doc-shot loading=lazy }
 
+![Gameplay donor browser](../assets/screenshots/gameplay-donor-picker.jpg){ .bc-doc-shot loading=lazy }
+
 ![Suit base workspace](../assets/screenshots/suit-base-workspace.jpg){ .bc-doc-shot loading=lazy }
+
+![Native body profile browser](../assets/screenshots/native-body-profiles.jpg){ .bc-doc-shot loading=lazy }
 
 ## 4. Customize the character
 
@@ -67,6 +71,8 @@ Use the left navigation:
 The right inspector shows the playable and cutscene component trees and their material slots.
 Right-click a native part and choose **Inspect part in 3D** to see its mesh, attachment recipe, and
 resolved default or component-override materials before applying it.
+
+![Native part inspector](../assets/screenshots/native-part-inspector.jpg){ .bc-doc-shot loading=lazy }
 
 ### Give a glide-only character a regular cape
 

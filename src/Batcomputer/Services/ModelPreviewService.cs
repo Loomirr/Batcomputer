@@ -4238,8 +4238,8 @@ public static class ModelPreviewService
   #meshmove{right:14px;top:30px}
   #partmove{right:14px;top:408px}
   #redbrick{right:258px;top:30px}
-  #matedit{right:14px;bottom:14px;width:186px;max-height:calc(100vh - 44px);overflow:auto;
-    padding:7px 8px;font-size:11px}
+  #matedit{right:14px;bottom:14px;width:162px;max-height:calc(100vh - 44px);overflow:auto;
+    padding:5px 6px;font-size:10px}
   #partmove label,#meshmove label,#redbrick label,#matedit label{display:block;color:#f0c230;margin-bottom:5px}
   #partmove select,#meshmove select,#redbrick select,#matedit select{box-sizing:border-box;width:100%;margin-bottom:7px;background:#22262c;color:#e6e9ee;
     border:1px solid #3a4048;border-radius:4px;padding:4px;font:inherit}
@@ -4250,12 +4250,12 @@ public static class ModelPreviewService
   #partmove button,#meshmove button,#redbrick button,#matedit button{border:1px solid #3a4048;border-radius:4px;background:#232833;color:#dfe4ea;padding:4px 7px;cursor:pointer;font:inherit}
   #partmove button.save,#meshmove button.save{border-color:#aa8b1b;color:#f0c230}
   #partmove button:disabled,#meshmove button:disabled{opacity:.45;cursor:default}
-  #matedit select{margin-bottom:5px;padding:3px}
-  #matedit .maptoggle{display:flex;align-items:center;justify-content:space-between;border-top:1px solid #303640;padding:3px 0;color:#cbd1d9}
-  #matedit .maptoggle input{width:14px;height:14px;accent-color:#f0c230}
-  #matedit .summary{margin:0 0 5px;color:#9ea6b2;line-height:1.25}
-  #matedit .actions{display:flex;gap:5px;margin-top:5px}
-  #matedit .actions button{padding:3px 6px}
+  #matedit>label{margin-bottom:3px}
+  #matedit select{margin-bottom:3px;padding:2px 3px}
+  #matedit .maptoggle{display:flex;align-items:center;justify-content:space-between;border-top:1px solid #303640;padding:2px 0;color:#cbd1d9}
+  #matedit .maptoggle input{width:13px;height:13px;accent-color:#f0c230}
+  #matedit .actions{display:flex;gap:4px;margin-top:3px}
+  #matedit .actions button{padding:2px 5px}
   #matedit .actions button{border-color:#aa8b1b;color:#f0c230}
   .panel-drag-handle{cursor:move;user-select:none;touch-action:none}
   .panel-dragging{opacity:.92}
@@ -4379,7 +4379,6 @@ function buildMaterialEditor(){
   if(!materialEditorEntries.length)return;
   const panel=document.createElement('div');panel.id='matedit';panel.title='Viewer-only map switches. These never change the suit or cooked files.';
   const label=document.createElement('label');label.textContent='Material editor';panel.appendChild(label);
-  const summary=document.createElement('div');summary.className='summary';summary.textContent='Toggle live maps to isolate preview shading.';panel.appendChild(summary);
   const select=document.createElement('select');
   materialEditorEntries.forEach((entry,index)=>{const option=document.createElement('option');option.value=String(index);
     option.textContent=entry.label;select.appendChild(option);});
@@ -4403,7 +4402,6 @@ function buildMaterialEditor(){
     Object.keys(entry.enabled).forEach(key=>entry.enabled[key]=true);applyMaterialEditorEntry(entry);sync();};
   actions.appendChild(reset);panel.appendChild(actions);
   function sync(){const entry=materialEditorEntries[Number(select.value)];if(!entry)return;
-    summary.textContent=entry.label+' - viewer only';
     toggles.forEach(([key,input])=>{input.checked=entry.available[key]&&!!entry.enabled[key];
       input.disabled=!entry.available[key];});
   }

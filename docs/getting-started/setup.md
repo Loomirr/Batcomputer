@@ -66,6 +66,8 @@ uses it locally and never copies it into generated mods or Batcomputer releases.
 
 When setup finishes, choose **Extract assets**. Wait for all three milestones:
 
+![First-time game asset extraction](../assets/screenshots/game-asset-extraction.jpg){ .bc-doc-shot loading=lazy }
+
 1. IoStore extraction completes without failed assets.
 2. UAssetAPI validation completes without parse errors.
 3. Template and part indexes rebuild successfully.

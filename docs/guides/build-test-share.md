@@ -14,6 +14,8 @@ Typical blockers include:
 - An unavailable Asset Registry writer.
 - A third-party mod build with no compatible Loomirr's LOTDK UE4SS installation.
 
+![Build check with an error and warning](../assets/screenshots/build-check-errors.jpg){ .bc-doc-shot loading=lazy }
+
 ## Build and install
 
 Close the game before building, then choose **Build mod**:

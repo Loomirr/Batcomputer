@@ -2195,6 +2195,8 @@ internal static class ReleaseRegressionChecks
             "Batcomputer-material-library-regression-" + Guid.NewGuid().ToString("N"));
         var sharedReferencesDetected = false;
         var sharedLibraryRoundTrip = false;
+        var legacyMaterialWasAdopted = false;
+        var unsafeMaterialPathRejected = false;
         var previousSettings = AppSettings.Current;
         try
         {
@@ -2249,6 +2251,61 @@ internal static class ReleaseRegressionChecks
                 copied.Count == 2 &&
                 File.Exists(Path.Combine(packageStage, "Mods", "Shared", "Materials", "MI_Shared.uasset")) &&
                 File.Exists(Path.Combine(packageStage, "Mods", "Shared", "Materials", "MI_Shared.uexp"));
+
+            const string legacyPackage = "/Game/Mods/Legacy/MI_LegacyBody";
+            var legacyProject = new NativeSuitProject
+            {
+                SlotId = "legacy_material_origin",
+                DisplayName = "Legacy material origin",
+                MaterialAssignments =
+                [
+                    new SavedMaterialAssignment
+                    {
+                        Component = "CharacterMesh0",
+                        Slot = 0,
+                        Context = "both",
+                        MiPackagePath = legacyPackage,
+                    },
+                ],
+            };
+            projects.SaveProject(legacyProject);
+            var legacyStageRoot = Path.Combine(
+                projects.ProjectOutputDirectory(legacyProject),
+                "IoStore",
+                "Stage",
+                "LEGOBatmanLotDK",
+                "Content");
+            var legacyStageBase = Path.Combine(legacyStageRoot, "Mods", "Legacy", "MI_LegacyBody");
+            Directory.CreateDirectory(Path.GetDirectoryName(legacyStageBase)!);
+            File.WriteAllText(legacyStageBase + ".uasset", "legacy-uasset");
+            File.WriteAllText(legacyStageBase + ".uexp", "legacy-uexp");
+
+            var adopted = library.LoadAvailable().Any(material => material.PackagePath.Equals(
+                legacyPackage,
+                StringComparison.OrdinalIgnoreCase));
+            Directory.Delete(projects.ProjectOutputDirectory(legacyProject), recursive: true);
+            var legacyPackageStage = Path.Combine(materialReferenceRoot, "LegacyPackageStage");
+            var legacyCopies = library.CopyPackageToContentRoot(legacyPackage, legacyPackageStage);
+            legacyMaterialWasAdopted =
+                adopted &&
+                library.LoadAvailable().Any(material => material.PackagePath.Equals(
+                    legacyPackage,
+                    StringComparison.OrdinalIgnoreCase)) &&
+                legacyCopies.Count == 2 &&
+                File.Exists(Path.Combine(legacyPackageStage, "Mods", "Legacy", "MI_LegacyBody.uasset")) &&
+                File.Exists(Path.Combine(legacyPackageStage, "Mods", "Legacy", "MI_LegacyBody.uexp"));
+
+            var unsafeMaterial = new GeneratedMaterialEntry
+            {
+                PackagePath = "/Game/Mods/../../Outside/MI_Unsafe",
+                DisplayName = "Unsafe material",
+            };
+            library.Register([unsafeMaterial]);
+            var unsafeStage = Path.Combine(materialReferenceRoot, "UnsafePackageStage");
+            unsafeMaterialPathRejected =
+                !File.ReadAllText(library.CatalogPath).Contains("MI_Unsafe", StringComparison.OrdinalIgnoreCase) &&
+                library.CopyPackageToContentRoot(unsafeMaterial.PackagePath, unsafeStage).Count == 0 &&
+                !Directory.Exists(Path.Combine(materialReferenceRoot, "Outside"));
         }
         finally
         {
@@ -2273,6 +2330,16 @@ internal static class ReleaseRegressionChecks
         Check(
             sharedLibraryRoundTrip,
             "a tool-created material can be discovered, imported, and staged by another suit",
+            failures,
+            output);
+        Check(
+            legacyMaterialWasAdopted,
+            "legacy suit assignments are adopted into the durable workspace material library",
+            failures,
+            output);
+        Check(
+            unsafeMaterialPathRejected,
+            "workspace material paths cannot escape their content roots",
             failures,
             output);
 

@@ -17,6 +17,8 @@ for the current suit's set, or **All tool materials** to find and import one mad
 Batcomputer keeps the cooked package and metadata together and prevents a rename or deletion that
 would break another saved suit.
 
+![Shared tool-material library](../assets/screenshots/all-tool-materials.jpg){ .bc-doc-shot loading=lazy }
+
 A blank override inherits the donor value. **Set None** writes an intentional null/disabled value
 where the template supports it; it is different from leaving the override blank.
 
@@ -73,6 +75,8 @@ plausible in an extractor while decoding incorrectly in-game. After cooking:
 1. Confirm the texture is present in the staged build.
 2. Confirm FModel can display it at the expected path.
 3. Test hover and selection in-game.
+
+![Suit icon assignment window](../assets/screenshots/suit-icons.jpg){ .bc-doc-shot loading=lazy }
 
 ### Existing legacy textures
 
