@@ -165,7 +165,9 @@ public sealed class AnimArchetypeGraftService
     public GlideVisualStatus BaseGlideVisual(NativeSuitProject project, out string? component)
     {
         component = null;
-        var playable = project.PlayableTemplate?.Uasset;
+        var playable = ResolveTemplateUasset(
+            project.PlayableTemplate,
+            AppSettings.Current.EffectiveExtractedContentRoot());
         if (string.IsNullOrWhiteSpace(playable) || !File.Exists(playable))
         {
             return GlideVisualStatus.Unknown;
@@ -186,7 +188,9 @@ public sealed class AnimArchetypeGraftService
     {
         try
         {
-            var playable = project.PlayableTemplate?.Uasset;
+            var playable = ResolveTemplateUasset(
+                project.PlayableTemplate,
+                AppSettings.Current.EffectiveExtractedContentRoot());
             if (string.IsNullOrWhiteSpace(playable) || !File.Exists(playable))
             {
                 return null;
@@ -603,6 +607,19 @@ public sealed class AnimArchetypeGraftService
             var mappings = LoadMappings();
             var extractedRoot = AppSettings.Current.EffectiveExtractedContentRoot();
             var customStem = UnrealPathUtil.AssetName(custom);
+            var hasAuthoredCapeShell = GliderService.TryGetAuthoredPairedCapeShell(
+                project,
+                out var authoredShellPlayable,
+                out _,
+                out var authoredShellDetail);
+            if (project.PairedCapeAdapter is not null && !hasAuthoredCapeShell)
+            {
+                result.Status = "error";
+                result.Error =
+                    "The declared paired-cape adapter failed certification before its authored shell could be packaged: " +
+                    authoredShellDetail;
+                return result;
+            }
 
             var donor = DetectDonorForProject(project, contentRoot, mappings);
             if (donor is null || !donor.Valid)
@@ -617,20 +634,83 @@ public sealed class AnimArchetypeGraftService
             //    change (e.g. dropping the whip and its GA_Item ability) can't leave
             //    stale AS_/DPRD_/anim-set assets behind in the persisted stage. Each
             //    is regenerated below only if the current config still needs it.
-            PurgeGeneratedArchetypeDerivatives(contentRoot, custom, result);
+            PurgeGeneratedArchetypeDerivatives(
+                contentRoot,
+                custom,
+                result);
 
-            // 1) Clone the donor archetype into the packaged root (if not present).
-            CloneDonorAsset(extractedRoot, donor.ArchetypePackage, donor.ArchetypeStem,
-                contentRoot, custom, customStem, mappings, result);
+            DonorInfo? authoredShellDonor = null;
+            if (hasAuthoredCapeShell)
+            {
+                var authoredShellUasset = PackageToBase(extractedRoot, authoredShellPlayable) + ".uasset";
+                authoredShellDonor = DetectDonor(authoredShellUasset, extractedRoot, mappings);
+                if (authoredShellDonor is null || !authoredShellDonor.Valid)
+                {
+                    result.Status = "error";
+                    result.Error = "Could not detect the authored paired-cape shell's parent archetype.";
+                    return result;
+                }
+
+                // Always restore a pristine authored-shell clone. A prior package attempt may
+                // have repointed this mod-local archetype to generated MAS/LAS/DPRD derivatives;
+                // those derivatives are purged above. Reusing that stale archetype would leave
+                // dangling imports after the user removes an equipment or animation override.
+                CloneDonorAsset(
+                    extractedRoot,
+                    authoredShellDonor.ArchetypePackage,
+                    authoredShellDonor.ArchetypeStem,
+                    contentRoot,
+                    custom,
+                    customStem,
+                    mappings,
+                    result);
+
+                // Keep the shell's exact superclass schema (and therefore its cooked child-CDO
+                // contract), but bridge its behavior references to the selected gameplay donor.
+                // Replacing the whole superclass with Nightwing is unsafe because the two cooked
+                // generated classes own different inherited fields and SCS layouts.
+                var behaviorRepoint = new Dictionary<string, string>();
+                AddPackageAndStemReplacement(
+                    behaviorRepoint,
+                    authoredShellDonor.MasCharPackage,
+                    donor.MasCharPackage);
+                AddPackageAndStemReplacement(
+                    behaviorRepoint,
+                    authoredShellDonor.LasCharPackage,
+                    donor.LasCharPackage);
+                AddPackageAndStemReplacement(
+                    behaviorRepoint,
+                    authoredShellDonor.DprdPackage,
+                    donor.DprdPackage);
+                if (behaviorRepoint.Count == 0)
+                {
+                    result.Status = "error";
+                    result.Error = "The authored shell or gameplay donor did not expose the MAS/LAS/DPRD references required for the gameplay bridge.";
+                    return result;
+                }
+                var behaviorChanges = ApplyNameMapReplacements(
+                    StageUasset(contentRoot, custom),
+                    behaviorRepoint,
+                    mappings);
+                result.Log.Add(
+                    $"paired-cape authored shell: kept {authoredShellDonor.ArchetypeStem} schema and repointed {behaviorChanges} MAS/LAS/DPRD name(s) to {donor.Family}");
+            }
+            else
+            {
+                // Normal custom-archetype suits clone the selected gameplay donor wholesale.
+                CloneDonorAsset(extractedRoot, donor.ArchetypePackage, donor.ArchetypeStem,
+                    contentRoot, custom, customStem, mappings, result);
+            }
 
             // 2) Reparent the playable + cutscene in the packaged root (name-map only,
             //    so it composes cleanly with any part grafts already applied).
+            var reparentDonor = authoredShellDonor ?? donor;
             var reparent = new Dictionary<string, string>
             {
-                [donor.ArchetypePackage] = custom,
-                ["Default__" + donor.ArchetypeStem + "_C"] = "Default__" + customStem + "_C",
-                [donor.ArchetypeStem + "_C"] = customStem + "_C",
-                [donor.ArchetypeStem] = customStem,
+                [reparentDonor.ArchetypePackage] = custom,
+                ["Default__" + reparentDonor.ArchetypeStem + "_C"] = "Default__" + customStem + "_C",
+                [reparentDonor.ArchetypeStem + "_C"] = customStem + "_C",
+                [reparentDonor.ArchetypeStem] = customStem,
             };
 
             // Machinery-donor (villain/NPC base): the base's OWN parent is a /BP_Master/ base
@@ -775,11 +855,22 @@ public sealed class AnimArchetypeGraftService
             }
         }
 
-        if (project.PartGrafts.Any(graft => graft.IsGlider) &&
-            !foreignAbilitySets.Contains(GliderService.GlidingAbilitySetPackage))
+        var usesPairedCapeAdapter = GliderService.IsDeclaredPairedCapeAdapterValid(
+            project,
+            BaseCapeGlideContract(project),
+            requireResolvedComponents: true,
+            out _);
+        if (EnsureGliderAbilitySetDependency(
+                project,
+                usesPairedCapeAdapter,
+                foreignAbilitySets))
         {
-            foreignAbilitySets.Add(GliderService.GlidingAbilitySetPackage);
             result.Log.Add("glider dependency: adding native AS_Gliding ability set");
+        }
+        else if (usesPairedCapeAdapter)
+        {
+            result.Log.Add(
+                "paired-cape adapter: preserving the gameplay donor's native gliding ability/loadout while replacing its glide-only animation categories with the certified cape donor's blocks");
         }
 
         // Cross-type glider: inject the donor character's glide anim sets
@@ -793,10 +884,21 @@ public sealed class AnimArchetypeGraftService
             {
                 if (File.Exists(PackageToBase(gliderExtractedRoot, project.GliderAnimLas) + ".uasset"))
                 {
-                    foreignLas.Add(project.GliderAnimLas);
+                    if (!usesPairedCapeAdapter)
+                    {
+                        foreignLas.Add(project.GliderAnimLas);
+                    }
                 }
                 else
                 {
+                    if (usesPairedCapeAdapter)
+                    {
+                        result.Status = "error";
+                        result.Error =
+                            "The certified paired-cape LAS dependency is missing from the active extract: " +
+                            project.GliderAnimLas;
+                        return result;
+                    }
                     result.Log.Add($"glider LAS not found on disk, skipped (glide pose won't change): {project.GliderAnimLas}");
                 }
             }
@@ -804,10 +906,21 @@ public sealed class AnimArchetypeGraftService
             {
                 if (File.Exists(PackageToBase(gliderExtractedRoot, project.GliderAnimMas) + ".uasset"))
                 {
-                    foreignMas.Add(project.GliderAnimMas);
+                    if (!usesPairedCapeAdapter)
+                    {
+                        foreignMas.Add(project.GliderAnimMas);
+                    }
                 }
                 else
                 {
+                    if (usesPairedCapeAdapter)
+                    {
+                        result.Status = "error";
+                        result.Error =
+                            "The certified paired-cape MAS dependency is missing from the active extract: " +
+                            project.GliderAnimMas;
+                        return result;
+                    }
                     result.Log.Add($"glider MAS not found on disk, skipped: {project.GliderAnimMas}");
                 }
             }
@@ -815,7 +928,8 @@ public sealed class AnimArchetypeGraftService
 
         if (foreignMas.Count == 0 && foreignLas.Count == 0 && foreignEd.Count == 0 &&
             foreignAbilitySets.Count == 0 &&
-            project.AnimationOverrides.Count == 0 && project.LocomotionOverrides.Count == 0)
+            project.AnimationOverrides.Count == 0 && project.LocomotionOverrides.Count == 0 &&
+            !usesPairedCapeAdapter)
         {
             result.Log.Add("no foreign gadgets or animation overrides — archetype left on donor sets");
             return result;
@@ -847,8 +961,8 @@ public sealed class AnimArchetypeGraftService
             var layerOverrides = project.AnimationOverrides.Where(o => o.Kind.Equals("Layer", StringComparison.OrdinalIgnoreCase)).ToList();
 
             // --- Animations: clone MAS/LAS, inject foreign blocks + apply overrides, repoint. ---
-            var needMas = foreignMas.Count > 0 || montageOverrides.Count > 0;
-            var needLas = foreignLas.Count > 0 || layerOverrides.Count > 0 || project.LocomotionOverrides.Count > 0;
+            var needMas = foreignMas.Count > 0 || montageOverrides.Count > 0 || usesPairedCapeAdapter;
+            var needLas = foreignLas.Count > 0 || layerOverrides.Count > 0 || project.LocomotionOverrides.Count > 0 || usesPairedCapeAdapter;
             if (needMas || needLas)
             {
                 if (needMas) CloneDonorAsset(extractedRoot, donor.MasCharPackage, donor.MasCharStem, patchedContentRoot, customMasPkg, masStem, mappings, result);
@@ -858,6 +972,33 @@ public sealed class AnimArchetypeGraftService
                 {
                     var r = graft.InjectParentSets(StageUasset(patchedContentRoot, customMasPkg), "TTAnimSet", foreignMas);
                     result.Log.Add($"MAS graft: {r.Status} added=[{string.Join(",", r.Added)}]{ErrSuffix(r.Error)}");
+                    if (usesPairedCapeAdapter && !r.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
+                    {
+                        result.Status = "error";
+                        result.Error =
+                            "The certified paired-cape MAS glide block could not be injected: " +
+                            (r.Error ?? r.Status);
+                        return result;
+                    }
+                }
+                if (usesPairedCapeAdapter)
+                {
+                    var donorSet = $"MAS_Glide_{donor.Family}";
+                    var r = graft.ReplaceParentSet(
+                        StageUasset(patchedContentRoot, customMasPkg),
+                        "TTAnimSet",
+                        donorSet,
+                        project.PairedCapeAdapter!.GlideAnimMasPackage,
+                        requireExisting: true);
+                    result.Log.Add($"paired-cape MAS category replacement: {r.Status} {donorSet}→{UnrealPathUtil.AssetName(project.PairedCapeAdapter.GlideAnimMasPackage)}{ErrSuffix(r.Error)}");
+                    if (!r.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
+                    {
+                        result.Status = "error";
+                        result.Error =
+                            "The certified paired-cape MAS glide category could not replace the gameplay donor's native category: " +
+                            (r.Error ?? r.Status);
+                        return result;
+                    }
                 }
                 foreach (var o in montageOverrides)
                 {
@@ -869,6 +1010,33 @@ public sealed class AnimArchetypeGraftService
                 {
                     var r = graft.InjectParentSets(StageUasset(patchedContentRoot, customLasPkg), "TTLayerSet", foreignLas);
                     result.Log.Add($"LAS graft: {r.Status} added=[{string.Join(",", r.Added)}]{ErrSuffix(r.Error)}");
+                    if (usesPairedCapeAdapter && !r.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
+                    {
+                        result.Status = "error";
+                        result.Error =
+                            "The certified paired-cape LAS traversal block could not be injected: " +
+                            (r.Error ?? r.Status);
+                        return result;
+                    }
+                }
+                if (usesPairedCapeAdapter)
+                {
+                    var donorSet = $"LAS_Traversal_{donor.Family}";
+                    var r = graft.ReplaceParentSet(
+                        StageUasset(patchedContentRoot, customLasPkg),
+                        "TTLayerSet",
+                        donorSet,
+                        project.PairedCapeAdapter!.GlideAnimLasPackage,
+                        requireExisting: true);
+                    result.Log.Add($"paired-cape LAS category replacement: {r.Status} {donorSet}→{UnrealPathUtil.AssetName(project.PairedCapeAdapter.GlideAnimLasPackage)}{ErrSuffix(r.Error)}");
+                    if (!r.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
+                    {
+                        result.Status = "error";
+                        result.Error =
+                            "The certified paired-cape LAS traversal category could not replace the gameplay donor's native category: " +
+                            (r.Error ?? r.Status);
+                        return result;
+                    }
                 }
                 foreach (var o in layerOverrides)
                 {
@@ -954,7 +1122,9 @@ public sealed class AnimArchetypeGraftService
             }
 
             // --- Loadout: clone DPRD, swap the gadget's ED into Equipment, repoint archetype. ---
-            if (foreignEd.Count > 0 || foreignAbilitySets.Count > 0)
+            if (RequiresGeneratedDprdFromResolvedDependencies(
+                    foreignEd.Count > 0,
+                    foreignAbilitySets.Count > 0))
             {
                 var customDprdPkg = $"/Game/Mods/{mod}/Characters/DA_DPRD_{mod}";
                 var dprdStem = UnrealPathUtil.AssetName(customDprdPkg);
@@ -1028,12 +1198,79 @@ public sealed class AnimArchetypeGraftService
     };
 
     /// <summary>
+    /// Mirrors the loadout-generation gate: native donor-family gadgets already live in the
+    /// gameplay DPRD, while a foreign equipment definition or controller ability set requires a
+    /// generated mod-local DPRD. Shared with final validation so valid native-equipment adapters
+    /// are not mistaken for foreign loadout grafts.
+    /// </summary>
+    internal static bool RequiresGeneratedDprd(
+        NativeSuitProject project,
+        string? donorFamily)
+    {
+        var gameData = GameDataService.Instance;
+        foreach (var change in project.EquipmentSlots)
+        {
+            var equipment = gameData.FindEquipment(change.Gadget);
+            if (equipment is null ||
+                (!string.IsNullOrWhiteSpace(donorFamily) &&
+                 equipment.NativeFamilies.Contains(donorFamily, StringComparer.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+            if (!string.IsNullOrWhiteSpace(equipment.EdPackage) ||
+                EquipmentDependencyService.RequiredAbilitySets(equipment, donorFamily).Count > 0)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Final generation uses the already-resolved dependency lists, which also include the
+    /// AS_Gliding set automatically added for ordinary non-paired replacement gliders. Keep this
+    /// separate from the paired-adapter equipment projection above so a no-equipment wingsuit
+    /// cannot lose its generated DPRD.
+    /// </summary>
+    internal static bool RequiresGeneratedDprdFromResolvedDependencies(
+        bool hasForeignEquipmentDefinitions,
+        bool hasForeignAbilitySets) =>
+        hasForeignEquipmentDefinitions || hasForeignAbilitySets;
+
+    /// <summary>
+    /// Adds the runtime gliding ability dependency for an ordinary replacement glider. The paired
+    /// Nightwing cape adapter deliberately keeps its gameplay donor's native gliding loadout, but
+    /// all other replacement gliders still need AS_Gliding in a generated DPRD even when the user
+    /// selected no equipment. Kept as one production helper so the release regression exercises
+    /// the same dependency mutation that feeds the generation gate.
+    /// </summary>
+    internal static bool EnsureGliderAbilitySetDependency(
+        NativeSuitProject project,
+        bool usesPairedCapeAdapter,
+        ICollection<string> foreignAbilitySets)
+    {
+        if (!project.PartGrafts.Any(graft => graft.IsGlider) ||
+            usesPairedCapeAdapter ||
+            foreignAbilitySets.Contains(
+                GliderService.GlidingAbilitySetPackage,
+                StringComparer.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        foreignAbilitySets.Add(GliderService.GlidingAbilitySetPackage);
+        return true;
+    }
+
+    /// <summary>
     /// Deletes previously-generated archetype derivatives (ability sets, DPRD, anim
     /// composites, cloned locomotion graph, the custom archetype) from the packaged
     /// stage so a re-package emits exactly the CURRENT config with no orphans. Leaves
     /// the playable/cutscene/DCMD/materials in place - they are re-derived or reused.
     /// </summary>
-    private static void PurgeGeneratedArchetypeDerivatives(string contentRoot, string customArchetypePackage, Result result)
+    private static void PurgeGeneratedArchetypeDerivatives(
+        string contentRoot,
+        string customArchetypePackage,
+        Result result)
     {
         // customArchetypePackage = /Game/Mods/<mod>/Characters/BP_CAT_Archetype_<mod>
         const string marker = "/Mods/";
@@ -1062,6 +1299,21 @@ public sealed class AnimArchetypeGraftService
             purged++;
         }
         if (purged > 0) result.Log.Add($"purged {purged} stale generated derivative(s) from Mods/{mod}/Characters before regenerating");
+    }
+
+    private static void AddPackageAndStemReplacement(
+        IDictionary<string, string> replacements,
+        string sourcePackage,
+        string targetPackage)
+    {
+        sourcePackage = UnrealPathUtil.NormalizePackagePath(sourcePackage);
+        targetPackage = UnrealPathUtil.NormalizePackagePath(targetPackage);
+        if (string.IsNullOrWhiteSpace(sourcePackage) || string.IsNullOrWhiteSpace(targetPackage))
+        {
+            return;
+        }
+        replacements[sourcePackage] = targetPackage;
+        replacements[UnrealPathUtil.AssetName(sourcePackage)] = UnrealPathUtil.AssetName(targetPackage);
     }
 
     private static void CloneDonorAsset(string extractedRoot, string donorPackage, string donorStem,
@@ -1144,11 +1396,7 @@ public sealed class AnimArchetypeGraftService
         for (var i = 0; i < nameMap.Count; i++)
         {
             var original = nameMap[i].ToString();
-            var patched = original;
-            foreach (var pair in ordered)
-            {
-                patched = patched.Replace(pair.Key, pair.Value, StringComparison.Ordinal);
-            }
+            var patched = ApplyReplacementMapNonCascading(original, ordered);
             if (patched != original)
             {
                 asset.SetNameReference(i, new FString(patched));
@@ -1156,6 +1404,71 @@ public sealed class AnimArchetypeGraftService
             }
         }
         return changed;
+    }
+
+    /// <summary>
+    /// Applies every match found in the original name without rescanning replacement text. A
+    /// package replacement such as MAS_Char_Nightwing -> MAS_Char_MyMod may itself contain the
+    /// shorter source stem; cascading the stem rule into that new text used to produce corrupt
+    /// paths such as MAS_Char_MyModMyMod. Longest-match selection also lets a compound
+    /// Package.Object name replace both original segments in one pass.
+    /// </summary>
+    private static string ApplyReplacementMapNonCascading(
+        string original,
+        IReadOnlyList<KeyValuePair<string, string>> ordered)
+    {
+        if (string.IsNullOrEmpty(original) || ordered.Count == 0)
+        {
+            return original;
+        }
+
+        System.Text.StringBuilder? patched = null;
+        var copyFrom = 0;
+        for (var position = 0; position < original.Length;)
+        {
+            KeyValuePair<string, string>? match = null;
+            foreach (var pair in ordered)
+            {
+                if (pair.Key.Length <= original.Length - position &&
+                    original.AsSpan(position, pair.Key.Length).SequenceEqual(pair.Key.AsSpan()))
+                {
+                    match = pair;
+                    break;
+                }
+            }
+
+            if (match is not { } replacement)
+            {
+                position++;
+                continue;
+            }
+
+            patched ??= new System.Text.StringBuilder(original.Length + 32);
+            patched.Append(original, copyFrom, position - copyFrom);
+            patched.Append(replacement.Value);
+            position += replacement.Key.Length;
+            copyFrom = position;
+        }
+
+        if (patched is null)
+        {
+            return original;
+        }
+        patched.Append(original, copyFrom, original.Length - copyFrom);
+        return patched.ToString();
+    }
+
+    internal static string ApplyNameMapReplacementsForTest(
+        string original,
+        IReadOnlyDictionary<string, string> replacements)
+    {
+        var ordered = replacements
+            .Where(pair => !string.IsNullOrWhiteSpace(pair.Key) &&
+                           !string.IsNullOrWhiteSpace(pair.Value) &&
+                           !pair.Key.Equals(pair.Value, StringComparison.Ordinal))
+            .OrderByDescending(pair => pair.Key.Length)
+            .ToList();
+        return ApplyReplacementMapNonCascading(original, ordered);
     }
 
     /// <summary>The donor set replaced for a category, relative to the actual donor family (e.g. LAS_Default_ThomasWayne).</summary>

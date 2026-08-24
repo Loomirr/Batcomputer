@@ -1132,7 +1132,7 @@ public sealed partial class MainForm
                 var cutscenePart = vp.Context.Equals("cutscene", StringComparison.OrdinalIgnoreCase)
                     ? vp
                     : FindExactMeshCounterpartPart(vp, "cutscene") ?? vp;
-                UpsertPartGraft(vp.Slot, false, playablePart, cutscenePart);
+                UpsertPartGraft(_currentProject, vp.Slot, false, playablePart, cutscenePart);
             }
             if (villainParts.Count > 0)
             {
@@ -1364,9 +1364,6 @@ public sealed partial class MainForm
             return;
         }
 
-        _currentProject.VisualSourceTemplate = visualSource ?? visual;
-        _currentProject.VisualCutsceneSourceTemplate = visualCutsceneSource ??
-            (BaseEligibilityService.IsCutsceneVisualPackage(visual.PackagePath) ? visual : null);
         var profile = BaseEligibilityService.CreateProfile(visual.PackagePath, gameplayDonor.PackagePath);
         var detected = AnimArchetypeGraftService.DetectDonor(
             gameplayDonor.Uasset,
@@ -1376,6 +1373,34 @@ public sealed partial class MainForm
         {
             profile.GameplayFamily = detected.Family;
         }
+        var adapterBaseIdentityChanged = _currentProject.PairedCapeAdapter is not null &&
+            (!UnrealPathUtil.NormalizePackagePath(_currentProject.BaseProfile?.VisualBasePackage ?? "").Equals(
+                 UnrealPathUtil.NormalizePackagePath(profile.VisualBasePackage),
+                 StringComparison.OrdinalIgnoreCase) ||
+             !UnrealPathUtil.NormalizePackagePath(_currentProject.BaseProfile?.GameplayDonorPackage ?? "").Equals(
+                 UnrealPathUtil.NormalizePackagePath(profile.GameplayDonorPackage),
+                 StringComparison.OrdinalIgnoreCase));
+        if (adapterBaseIdentityChanged)
+        {
+            try
+            {
+                RemovePairedCapeAdapterAtomically(_currentProject);
+            }
+            catch (InvalidOperationException ex)
+            {
+                AppendLog("Base profile change stopped before changing the project: " + ex.Message);
+                Dialog.Error(
+                    this,
+                    "Paired cape could not be changed safely",
+                    ex.Message,
+                    windowTitle: "Base character");
+                return;
+            }
+            AppendLog("Cape adapter cleared because the selected visual base or gameplay donor changed. Re-apply its regular cape and glide cape so the component-compatible overlay can be certified again.");
+        }
+        _currentProject.VisualSourceTemplate = visualSource ?? visual;
+        _currentProject.VisualCutsceneSourceTemplate = visualCutsceneSource ??
+            (BaseEligibilityService.IsCutsceneVisualPackage(visual.PackagePath) ? visual : null);
         _currentProject.BaseProfile = profile;
         try
         {
@@ -1455,7 +1480,7 @@ public sealed partial class MainForm
             var cutscene = source.Context.Equals("cutscene", StringComparison.OrdinalIgnoreCase)
                 ? source
                 : FindExactMeshCounterpartPart(source, "cutscene") ?? source;
-            UpsertPartGraft(source.Slot, false, playable, cutscene);
+            UpsertPartGraft(_currentProject, source.Slot, false, playable, cutscene);
         }
 
         var sourceKinds = sourceParts
@@ -2569,14 +2594,42 @@ public sealed partial class MainForm
         switch (change.Category)
         {
             case "Gliders":
+                List<string> removedAdapterComponents;
+                try
+                {
+                    removedAdapterComponents = RemovePairedCapeAdapterAtomically(_currentProject);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    _currentProject = previousProjectSnapshot;
+                    ApplyProjectToFields(_currentProject);
+                    UpdateSelectedLabels();
+                    AppendLog("Remove glider change stopped before staging: " + ex.Message);
+                    Dialog.Error(
+                        this,
+                        "Paired cape could not be cleared safely",
+                        ex.Message,
+                        windowTitle: "Review");
+                    _session.RaiseChanged();
+                    RefreshInspector();
+                    RefreshToyboxTiles();
+                    return;
+                }
                 _currentProject.PartGrafts.RemoveAll(graft => graft.IsGlider);
                 _currentProject.GliderType = "";
                 _currentProject.GliderMaterial = "";
                 _currentProject.GliderGrafted = false;
                 _currentProject.GliderAnimLas = "";
                 _currentProject.GliderAnimMas = "";
+                if (_currentProject.GliderAutoEnabledCustomArchetype)
+                {
+                    _currentProject.UseCustomArchetype = false;
+                }
+                _currentProject.GliderAutoEnabledCustomArchetype = false;
                 requiresCleanRebuild = true;
-                AppendLog("Cleared glider intent (visual + glide-animation injection); rebuilding the stage from the clean base.");
+                AppendLog(removedAdapterComponents.Count > 0
+                    ? "Cleared the certified Cape + Torso adapter pair and glider intent atomically; rebuilding the stage from the clean base."
+                    : "Cleared glider intent (visual + glide-animation injection); rebuilding the stage from the clean base.");
                 break;
             case "Equipment":
                 _currentProject.EquipmentSlots.Clear();
@@ -2914,11 +2967,15 @@ public sealed partial class MainForm
         _currentProject.EquipmentSlots.RemoveAll(s => s.Slot == slot);
         _currentProject.EquipmentSlots.Add(new EquipmentSlotChange { Slot = slot, Gadget = eq.Name });
 
-        if (isForeign && !_currentProject.UseCustomArchetype)
+        if (isForeign)
         {
-            _currentProject.UseCustomArchetype = true;
-            RecordChange("Animations", "archetype", "enabled for foreign equipment", status: "staged");
-            AppendLog($"Enabled the custom archetype for '{eq.Name}' dependency grafting.");
+            _currentProject.GliderAutoEnabledCustomArchetype = false;
+            if (!_currentProject.UseCustomArchetype)
+            {
+                _currentProject.UseCustomArchetype = true;
+                RecordChange("Animations", "archetype", "enabled for foreign equipment", status: "staged");
+                AppendLog($"Enabled the custom archetype for '{eq.Name}' dependency grafting.");
+            }
         }
 
         try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject); } catch { /* best effort */ }
@@ -3262,6 +3319,180 @@ public sealed partial class MainForm
         public string? ProjectFileContents { get; init; }
     }
 
+    /// <summary>
+    /// Owns only the project OBJ paths created while a saved suit moves to a newly-derived slot ID.
+    /// Destination files are installed with a no-overwrite move from unique temporary files. On a
+    /// failed base transaction, rollback deletes those exact paths and removes newly-created folders
+    /// only when they are empty; pre-existing project content is never replaced or recursively removed.
+    /// </summary>
+    internal sealed class BaseCustomMeshSourceMigration
+    {
+        private readonly string _slotRoot;
+        private readonly string _importedMeshesRoot;
+        private readonly bool _slotRootExisted;
+        private readonly bool _importedMeshesRootExisted;
+        private readonly HashSet<string> _createdDestinationFiles = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _temporaryFiles = new(StringComparer.OrdinalIgnoreCase);
+
+        internal BaseCustomMeshSourceMigration(string projectRoot, NativeSuitProject project)
+        {
+            var projectService = new SuitProjectService(projectRoot);
+            _slotRoot = Path.GetFullPath(projectService.ProjectOutputDirectory(project));
+            var guiOutputRoot = Path.GetFullPath(projectService.GuiOutputRoot);
+            if (!FileSystemPathUtil.IsWithinDirectory(_slotRoot, guiOutputRoot))
+            {
+                throw new InvalidOperationException("Refused to migrate custom meshes outside NativeSuitGuiProjects.");
+            }
+
+            _importedMeshesRoot = Path.GetFullPath(Path.Combine(_slotRoot, "ImportedMeshes"));
+            if (!FileSystemPathUtil.IsWithinDirectory(_importedMeshesRoot, _slotRoot))
+            {
+                throw new InvalidOperationException("Refused an unsafe ImportedMeshes migration path.");
+            }
+
+            _slotRootExisted = Directory.Exists(_slotRoot);
+            _importedMeshesRootExisted = Directory.Exists(_importedMeshesRoot);
+            RefuseReparsePointDirectory(_slotRoot);
+            RefuseReparsePointDirectory(_importedMeshesRoot);
+        }
+
+        internal int CopySources(
+            string projectRoot,
+            NativeSuitProject project,
+            IReadOnlyCollection<(CustomStaticMeshImport Mesh, string SourcePath)> sources)
+        {
+            if (sources.Count == 0)
+            {
+                return 0;
+            }
+
+            Directory.CreateDirectory(_importedMeshesRoot);
+            RefuseReparsePointDirectory(_slotRoot);
+            RefuseReparsePointDirectory(_importedMeshesRoot);
+
+            foreach (var (mesh, sourcePath) in sources)
+            {
+                if (!File.Exists(sourcePath))
+                {
+                    throw new FileNotFoundException(
+                        $"The saved OBJ for custom mesh '{mesh.DisplayName}' is missing.",
+                        sourcePath);
+                }
+                if (!Path.GetExtension(sourcePath).Equals(".obj", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"The saved source for custom mesh '{mesh.DisplayName}' is not an OBJ file.");
+                }
+
+                var destination = CustomStaticMeshImportService.PrepareProjectSourceDestination(
+                    projectRoot,
+                    project,
+                    mesh);
+                if (!FileSystemPathUtil.IsWithinDirectory(destination, _importedMeshesRoot))
+                {
+                    throw new InvalidOperationException("Refused a custom mesh destination outside ImportedMeshes.");
+                }
+                if (File.Exists(destination) || Directory.Exists(destination))
+                {
+                    throw new IOException(
+                        $"The destination custom mesh already exists and was not replaced: {destination}");
+                }
+
+                var temporary = Path.Combine(
+                    _importedMeshesRoot,
+                    $".batcomputer-{Guid.NewGuid():N}.obj.tmp");
+                _temporaryFiles.Add(temporary);
+                File.Copy(sourcePath, temporary, overwrite: false);
+                _createdDestinationFiles.Add(destination);
+                try
+                {
+                    File.Move(temporary, destination);
+                }
+                catch
+                {
+                    // A concurrently-created destination is not ours; never let rollback remove it.
+                    _createdDestinationFiles.Remove(destination);
+                    throw;
+                }
+                _temporaryFiles.Remove(temporary);
+            }
+
+            return sources.Count;
+        }
+
+        internal void Rollback()
+        {
+            var errors = new List<Exception>();
+            foreach (var path in _temporaryFiles.Concat(_createdDestinationFiles).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    if (!FileSystemPathUtil.IsWithinDirectory(path, _importedMeshesRoot))
+                    {
+                        throw new InvalidOperationException($"Refused to clean an unsafe custom mesh path: {path}");
+                    }
+                    if (File.Exists(path))
+                    {
+                        File.Delete(path);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    errors.Add(new InvalidOperationException(
+                        $"Could not remove the base transaction's custom mesh file '{path}'.",
+                        ex));
+                }
+            }
+
+            TryDeleteNewEmptyDirectory(_importedMeshesRoot, _importedMeshesRootExisted, errors);
+            TryDeleteNewEmptyDirectory(_slotRoot, _slotRootExisted, errors);
+            if (errors.Count > 0)
+            {
+                throw new AggregateException(
+                    "One or more project-owned custom mesh paths could not be rolled back.",
+                    errors);
+            }
+        }
+
+        private static void RefuseReparsePointDirectory(string path)
+        {
+            if (Directory.Exists(path) &&
+                (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new InvalidOperationException(
+                    $"Custom mesh source migration does not follow reparse-point directories: {path}");
+            }
+        }
+
+        private static void TryDeleteNewEmptyDirectory(
+            string path,
+            bool existedBefore,
+            ICollection<Exception> errors)
+        {
+            if (existedBefore || !Directory.Exists(path))
+            {
+                return;
+            }
+
+            try
+            {
+                RefuseReparsePointDirectory(path);
+                // Non-recursive deletion is intentional: an unexpected or concurrently-created
+                // entry belongs to someone else and must make the directory survive rollback.
+                if (!Directory.EnumerateFileSystemEntries(path).Any())
+                {
+                    Directory.Delete(path, recursive: false);
+                }
+            }
+            catch (Exception ex)
+            {
+                errors.Add(new InvalidOperationException(
+                    $"Could not remove the base transaction's empty custom mesh directory '{path}'.",
+                    ex));
+            }
+        }
+    }
+
     private static void CopyBaseStageDirectory(string sourceDirectory, string destinationDirectory)
     {
         var source = Path.GetFullPath(sourceDirectory)
@@ -3313,7 +3544,8 @@ public sealed partial class MainForm
 
     private async Task<BaseStageFilesystemSnapshot> CaptureBaseStageFilesystemAsync(
         string projectRoot,
-        string slotId)
+        string slotId,
+        IReadOnlyCollection<string>? requestedStageNames = null)
     {
         slotId = (slotId ?? "").Trim();
         if (string.IsNullOrWhiteSpace(slotId) ||
@@ -3342,13 +3574,23 @@ public sealed partial class MainForm
             throw new InvalidOperationException("Refused to create a base-stage backup outside the generated output root.");
         }
 
-        var stageNames = new[]
+        var allowedStageNames = new[]
         {
             "UnpatchedStage",
             "PatchedNameMapStage",
             "GraftedPartStage",
             "GraftedTorso2Stage",
         };
+        var stageNames = requestedStageNames is null
+            ? allowedStageNames.ToList()
+            : requestedStageNames
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        if (stageNames.Count == 0 ||
+            stageNames.Any(name => !allowedStageNames.Contains(name, StringComparer.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException("Refused to snapshot an unknown generated stage.");
+        }
         var stages = stageNames.Select(name =>
         {
             var stagePath = Path.GetFullPath(Path.Combine(slotRoot, name));
@@ -3441,18 +3683,16 @@ public sealed partial class MainForm
             await RunWithFileLockRetryAsync(
                 () =>
                 {
-                    File.Delete(Path.Combine(stage.StagePath, CompletedGraftStageMarkerName));
-                    if (Directory.Exists(stage.StagePath))
-                    {
-                        Directory.Delete(stage.StagePath, recursive: true);
-                    }
+                    DeleteGeneratedStageDirectoryIfPresent(stage.StagePath);
                     return true;
                 },
                 $"clear {stage.Name} for the new base");
         }
     }
 
-    private async Task RestoreBaseStageFilesystemAsync(BaseStageFilesystemSnapshot snapshot)
+    private async Task RestoreBaseStageFilesystemAsync(
+        BaseStageFilesystemSnapshot snapshot,
+        bool discardBackup = true)
     {
         var restoreErrors = new List<Exception>();
         foreach (var stage in snapshot.Stages)
@@ -3464,11 +3704,7 @@ public sealed partial class MainForm
                     {
                         // Invalidate a newly-built stage before any destructive restore work. If
                         // another file stays locked, packaging still cannot accept the partial tree.
-                        File.Delete(Path.Combine(stage.StagePath, CompletedGraftStageMarkerName));
-                        if (Directory.Exists(stage.StagePath))
-                        {
-                            Directory.Delete(stage.StagePath, recursive: true);
-                        }
+                        DeleteGeneratedStageDirectoryIfPresent(stage.StagePath);
                         if (stage.Existed)
                         {
                             if (!Directory.Exists(stage.BackupPath))
@@ -3567,7 +3803,10 @@ public sealed partial class MainForm
                 restoreErrors);
         }
 
-        await DiscardBaseStageFilesystemBackupAsync(snapshot, logFailure: true);
+        if (discardBackup)
+        {
+            await DiscardBaseStageFilesystemBackupAsync(snapshot, logFailure: true);
+        }
     }
 
     private async Task<bool> DiscardBaseStageFilesystemBackupAsync(
@@ -3611,6 +3850,55 @@ public sealed partial class MainForm
         _session.RaiseChanged();
         RefreshInspector();
         RefreshToyboxTiles();
+    }
+
+    internal static bool IsRecoverableIncompleteSlotForTest(
+        string destinationProjectPath,
+        string destinationOutputDirectory)
+    {
+        if (File.Exists(destinationProjectPath) || !Directory.Exists(destinationOutputDirectory))
+        {
+            return false;
+        }
+
+        try
+        {
+            if ((File.GetAttributes(destinationOutputDirectory) & FileAttributes.ReparsePoint) != 0)
+            {
+                return false;
+            }
+
+            var entries = Directory.EnumerateFileSystemEntries(destinationOutputDirectory).ToList();
+            if (entries.Count != 1 ||
+                !File.Exists(entries[0]) ||
+                !Path.GetFileName(entries[0]).Equals(
+                    IncompleteDeclarativeStageMarkerName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return (File.GetAttributes(entries[0]) & FileAttributes.ReparsePoint) == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryReclaimIncompleteSlot(
+        string destinationProjectPath,
+        string destinationOutputDirectory)
+    {
+        if (!IsRecoverableIncompleteSlotForTest(destinationProjectPath, destinationOutputDirectory))
+        {
+            return false;
+        }
+
+        var marker = Path.Combine(destinationOutputDirectory, IncompleteDeclarativeStageMarkerName);
+        File.Delete(marker);
+        Directory.Delete(destinationOutputDirectory, recursive: false);
+        return true;
     }
 
     private bool _useAsBaseInProgress;
@@ -3712,6 +4000,46 @@ public sealed partial class MainForm
         _currentProject.VisualSourceTemplate = cutscene;
         _currentProject.VisualCutsceneSourceTemplate = cutscene;
         _currentProject.BaseProfile = BaseEligibilityService.CreateProfile(cutscene.PackagePath, playable.PackagePath);
+        static bool SameBasePackage(string? left, string? right) =>
+            UnrealPathUtil.NormalizePackagePath(left ?? "").Equals(
+                UnrealPathUtil.NormalizePackagePath(right ?? ""),
+                StringComparison.OrdinalIgnoreCase);
+        var playableBaseChanged = !SameBasePackage(
+            previousProjectSnapshot.PlayableTemplate?.PackagePath,
+            playable.PackagePath);
+        var cutsceneBaseChanged = !SameBasePackage(
+            previousProjectSnapshot.CutsceneTemplate?.PackagePath,
+            cutscene.PackagePath);
+        var visualBaseChanged = !SameBasePackage(
+            previousProjectSnapshot.BaseProfile?.VisualBasePackage ??
+            previousProjectSnapshot.VisualCutsceneSourceTemplate?.PackagePath ??
+            previousProjectSnapshot.VisualSourceTemplate?.PackagePath,
+            cutscene.PackagePath);
+        if (playableBaseChanged || cutsceneBaseChanged || visualBaseChanged)
+        {
+            List<string> removedAdapterComponents;
+            try
+            {
+                removedAdapterComponents = RemovePairedCapeAdapterAtomically(_currentProject);
+            }
+            catch (InvalidOperationException ex)
+            {
+                RestoreAfterFailedBaseChange(previousProjectSnapshot);
+                AppendLog("Base change stopped before staging: " + ex.Message);
+                Dialog.Error(
+                    this,
+                    "Paired cape could not be changed safely",
+                    ex.Message,
+                    windowTitle: "Base character");
+                RefreshInspector();
+                RefreshToyboxTiles();
+                return false;
+            }
+            if (removedAdapterComponents.Count > 0)
+            {
+                AppendLog("Removed the prior base's certified Cape + Torso pair before staging the new base; re-apply the pair to create a compatible visual overlay for this base.");
+            }
+        }
         var metadataDonor = NativeMetadataDonorService.TryRead(
             _currentProject.DcmdTemplate,
             _currentProject.PlayableTemplate,
@@ -3734,6 +4062,17 @@ public sealed partial class MainForm
         {
             var destinationProjectPath = _projectService.ProjectPathForSlot(_currentProject.SlotId);
             var destinationOutputDirectory = _projectService.ProjectOutputDirectory(_currentProject);
+            try
+            {
+                if (TryReclaimIncompleteSlot(destinationProjectPath, destinationOutputDirectory))
+                {
+                    AppendLog($"Recovered abandoned incomplete output for slot '{_currentProject.SlotId}' from an earlier failed base change.");
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"  warning: abandoned incomplete output for slot '{_currentProject.SlotId}' could not be reclaimed: {ex.Message}");
+            }
             var destinationHasProject = File.Exists(destinationProjectPath);
             var destinationHasOwnedFiles = Directory.Exists(destinationOutputDirectory) &&
                                            Directory.EnumerateFileSystemEntries(destinationOutputDirectory).Any();
@@ -3746,121 +4085,144 @@ public sealed partial class MainForm
                 return false;
             }
         }
-        if (!previousSlotId.Equals(_currentProject.SlotId, StringComparison.OrdinalIgnoreCase) &&
-            previousMeshSources.Count > 0)
-        {
-            try
-            {
-                var importer = new CustomStaticMeshImportService();
-                foreach (var (mesh, sourcePath) in previousMeshSources)
-                {
-                    importer.CopySourceIntoProject(projectRoot, _currentProject, mesh, sourcePath);
-                }
-                AppendLog($"Copied {previousMeshSources.Count} project-owned custom OBJ source(s) into the new suit slot '{_currentProject.SlotId}'.");
-            }
-            catch (Exception ex)
-            {
-                AppendLog("Base not staged: custom mesh sources could not be copied into the new suit slot. " + ex.Message);
-                RestoreAfterFailedBaseChange(previousProjectSnapshot);
-                return false;
-            }
-        }
         ApplyProjectToFields(_currentProject);
         UpdateSelectedLabels();
 
         BaseStageFilesystemSnapshot? stageFilesystemSnapshot = null;
+        BaseCustomMeshSourceMigration? customMeshMigration = null;
         try
         {
             stageFilesystemSnapshot = await CaptureBaseStageFilesystemAsync(
-                    projectRoot,
-                    _currentProject.SlotId);
-                try
+                projectRoot,
+                _currentProject.SlotId);
+            if (!previousSlotId.Equals(_currentProject.SlotId, StringComparison.OrdinalIgnoreCase) &&
+                previousMeshSources.Count > 0)
+            {
+                // Construct this before the marker creates the new slot root so rollback knows
+                // whether that exact directory belonged to this transaction.
+                customMeshMigration = new BaseCustomMeshSourceMigration(projectRoot, _currentProject);
+            }
+
+            try
+            {
+                // Base-only suits need the same durable crash guard as declarative suits.
+                // Write it before clearing any stage; Finalize removes it only after the new
+                // project JSON and all generated outputs form one committed unit.
+                await MarkDeclarativeStageIncompleteAsync(_currentProject, projectRoot);
+                await ClearBaseStageFilesystemAsync(stageFilesystemSnapshot);
+                AppendLog("  snapshotted and cleared UnpatchedStage, PatchedNameMapStage, GraftedPartStage, and legacy GraftedTorso2Stage for the base change.");
+
+                if (customMeshMigration is not null)
                 {
-                    // Base-only suits need the same durable crash guard as declarative suits.
-                    // Write it before clearing any stage; Finalize removes it only after the new
-                    // project JSON and all generated outputs form one committed unit.
-                    await MarkDeclarativeStageIncompleteAsync(_currentProject, projectRoot);
-                    // Start the new base from clean generated stages. ImportedMeshes is a sibling
-                    // project-owned source directory and is deliberately outside this transaction.
-                    await ClearBaseStageFilesystemAsync(stageFilesystemSnapshot);
-                    AppendLog("  snapshotted and cleared UnpatchedStage, PatchedNameMapStage, GraftedPartStage, and legacy GraftedTorso2Stage for the base change.");
+                    var copied = customMeshMigration.CopySources(
+                        projectRoot,
+                        _currentProject,
+                        previousMeshSources);
+                    AppendLog($"Copied {copied} project-owned custom OBJ source(s) into the new suit slot '{_currentProject.SlotId}'.");
+                }
 
-                    _projectService.CreateUnpatchedStage(_currentProject);
-                    AppendLog($"Staged base: {playable.Stem} + {cutscene.Stem}{(_currentProject.DcmdTemplate is null ? " (no DCMD)" : " + DCMD")}");
-                    if (!PatchNameMapsWithUAssetApi())
-                    {
-                        throw new InvalidOperationException(
-                            "Base stage did not complete. Fix the patch error logged above, then set the base again.");
-                    }
+                _projectService.CreateUnpatchedStage(_currentProject);
+                AppendLog($"Staged base: {playable.Stem} + {cutscene.Stem}{(_currentProject.DcmdTemplate is null ? " (no DCMD)" : " + DCMD")}");
+                if (!PatchNameMapsWithUAssetApi())
+                {
+                    throw new InvalidOperationException(
+                        "Base stage did not complete. Fix the patch error logged above, then set the base again.");
+                }
 
-                    // Replay every declarative edit after changing the base. Custom meshes and
-                    // material/removal-only suits used to disappear here because only native
-                    // PartGrafts triggered this pass.
-                    if (ProjectRequiresCompletedGraftStage(_currentProject))
-                    {
-                        await RebuildGraftStageCoreAsync(persistProject: false);
-                    }
+                // Replay every declarative edit after changing the base. Custom meshes and
+                // material/removal-only suits used to disappear here because only native
+                // PartGrafts triggered this pass.
+                if (ProjectRequiresCompletedGraftStage(_currentProject))
+                {
+                    await RebuildGraftStageCoreAsync(persistProject: false);
+                }
 
-                    // Commit the project identity only after the new base and every declarative
-                    // edit have staged successfully. Until here the previous project JSON, stage
-                    // directories, and mod links remain recoverable.
-                    var savedProjectPath = _projectService.SaveProject(_currentProject);
-                    await FinalizeDeclarativeGraftStageAsync(_currentProject, projectRoot);
-                    if (!previousSlotId.Equals(_currentProject.SlotId, StringComparison.OrdinalIgnoreCase))
+                // Commit the project identity only after the new base and every declarative
+                // edit have staged successfully. Until here the previous project JSON, stage
+                // directories, mod links, and copied OBJ sources remain recoverable.
+                var savedProjectPath = _projectService.SaveProject(_currentProject);
+                await FinalizeDeclarativeGraftStageAsync(_currentProject, projectRoot);
+                if (!previousSlotId.Equals(_currentProject.SlotId, StringComparison.OrdinalIgnoreCase))
+                {
+                    try
                     {
-                        try
+                        var relinked = ModService.RelinkSuitReferences(
+                            previousSlotId,
+                            previousProjectPath,
+                            _currentProject,
+                            savedProjectPath);
+                        if (relinked > 0)
                         {
-                            var relinked = ModService.RelinkSuitReferences(
-                                previousSlotId,
-                                previousProjectPath,
-                                _currentProject,
-                                savedProjectPath);
-                            if (relinked > 0)
+                            AppendLog($"Updated {relinked} mod suit reference(s) for '{_currentProject.SlotId}'.");
+                        }
+                        _projectService.DeleteSavedProjectFile(previousProjectPath);
+                        AppendLog($"Replaced the temporary project ID '{previousSlotId}' with '{_currentProject.SlotId}'.");
+                    }
+                    catch (Exception migrationError)
+                    {
+                        // The new-slot JSON and its stages are already a consistent, valid
+                        // unit. Keep that unit (an orphan is recoverable) and leave the old
+                        // slot untouched instead of rolling the new stages back underneath the
+                        // newly saved JSON.
+                        AppendLog(
+                            $"  warning: the new slot was staged and saved, but old-slot/mod-reference cleanup did not finish: {migrationError.Message}");
+                    }
+                }
+
+                // Backup cleanup is bounded and best effort. If an external process locks the
+                // backup itself, the completed new stage remains authoritative and the backup
+                // path is logged for later cleanup.
+                await DiscardBaseStageFilesystemBackupAsync(stageFilesystemSnapshot, logFailure: true);
+                stageFilesystemSnapshot = null;
+                customMeshMigration = null;
+            }
+            catch (Exception stageFailure)
+            {
+                var rollbackFailures = new List<Exception>();
+                var recoveryBackupRoot = stageFilesystemSnapshot?.BackupRoot ?? "(not created)";
+                if (stageFilesystemSnapshot is not null)
+                {
+                    try
+                    {
+                        await RestoreBaseStageFilesystemAsync(stageFilesystemSnapshot);
+                        AppendLog("  restored the previous generated stages after the failed base change.");
+                        stageFilesystemSnapshot = null;
+                    }
+                    catch (Exception restoreFailure)
+                    {
+                        rollbackFailures.Add(restoreFailure);
+                    }
+                }
+
+                if (customMeshMigration is not null)
+                {
+                    try
+                    {
+                        await RunWithFileLockRetryAsync(
+                            () =>
                             {
-                                AppendLog($"Updated {relinked} mod suit reference(s) for '{_currentProject.SlotId}'.");
-                            }
-                            _projectService.DeleteSavedProjectFile(previousProjectPath);
-                            AppendLog($"Replaced the temporary project ID '{previousSlotId}' with '{_currentProject.SlotId}'.");
-                        }
-                        catch (Exception migrationError)
-                        {
-                            // The new-slot JSON and its stages are already a consistent, valid
-                            // unit. Keep that unit (an orphan is recoverable) and leave the old
-                            // slot untouched instead of rolling the new stages back underneath the
-                            // newly saved JSON.
-                            AppendLog(
-                                $"  warning: the new slot was staged and saved, but old-slot/mod-reference cleanup did not finish: {migrationError.Message}");
-                        }
+                                customMeshMigration.Rollback();
+                                return true;
+                            },
+                            "roll back custom mesh sources from the failed base change");
+                        AppendLog("  removed custom OBJ destinations created by the failed base change.");
+                        customMeshMigration = null;
                     }
-
-                    // Backup cleanup is bounded and best effort. If an external process locks the
-                    // backup itself, the completed new stage remains authoritative and the backup
-                    // path is logged for later cleanup.
-                    await DiscardBaseStageFilesystemBackupAsync(stageFilesystemSnapshot, logFailure: true);
-                    stageFilesystemSnapshot = null;
-                }
-                catch (Exception stageFailure)
-                {
-                    if (stageFilesystemSnapshot is not null)
+                    catch (Exception meshRollbackFailure)
                     {
-                        var recoveryBackupRoot = stageFilesystemSnapshot.BackupRoot;
-                        try
-                        {
-                            await RestoreBaseStageFilesystemAsync(stageFilesystemSnapshot);
-                            AppendLog("  restored the previous generated stages after the failed base change.");
-                            stageFilesystemSnapshot = null;
-                        }
-                        catch (Exception restoreFailure)
-                        {
-                            throw new AggregateException(
-                                $"The base change failed and its previous generated stages could not be fully restored. " +
-                                $"Recovery backup: {recoveryBackupRoot}",
-                                stageFailure,
-                                restoreFailure);
-                        }
+                        rollbackFailures.Add(meshRollbackFailure);
                     }
-                    throw;
                 }
+
+                if (rollbackFailures.Count > 0)
+                {
+                    throw new AggregateException(
+                        $"The base change failed and its prior state could not be fully restored. " +
+                        $"Recovery backup: {recoveryBackupRoot}",
+                        new[] { stageFailure }.Concat(rollbackFailures));
+                }
+                throw;
+            }
         }
         catch (Exception ex)
         {

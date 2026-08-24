@@ -69,6 +69,73 @@ public sealed class MaterialReplaceService
         Assignment assignment) =>
         ApplyCore(slotId, playablePackagePath, cutscenePackagePath, assignment, stageContentRoot);
 
+    /// <summary>
+    /// Reads the material actually assigned to an existing Blueprint component slot. This is used
+    /// to certify paired-cape visual overlays; scanning arbitrary imports is not sufficient when a
+    /// character Blueprint references several costume material variants.
+    /// </summary>
+    internal static string? TryReadComponentMaterialPackage(
+        string uassetPath,
+        string componentName,
+        int slot,
+        Usmap? mappings)
+    {
+        if (!File.Exists(uassetPath) || slot < 0)
+        {
+            return null;
+        }
+        try
+        {
+            var asset = new UAsset(
+                uassetPath,
+                EngineVersion.VER_UE5_6,
+                mappings,
+                CustomSerializationFlags.SkipPreloadDependencyLoading);
+            var component = FindComponentExport(asset, componentName);
+            var overrides = component?.Data.OfType<ArrayPropertyData>()
+                .FirstOrDefault(property => property.Name.ToString().Equals(
+                    "OverrideMaterials",
+                    StringComparison.OrdinalIgnoreCase));
+            if (overrides?.Value is null || slot >= overrides.Value.Length ||
+                overrides.Value[slot] is not ObjectPropertyData material ||
+                material.Value.IsNull() || !material.Value.IsImport())
+            {
+                return null;
+            }
+
+            var importIndex = -material.Value.Index - 1;
+            if (importIndex < 0 || importIndex >= asset.Imports.Count)
+            {
+                return null;
+            }
+            var current = asset.Imports[importIndex];
+            for (var depth = 0; depth < asset.Imports.Count + 1; depth++)
+            {
+                var name = current.ObjectName.ToString();
+                if (name.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+                {
+                    return UnrealPathUtil.NormalizePackagePath(name);
+                }
+                if (!current.OuterIndex.IsImport())
+                {
+                    return null;
+                }
+                var outerIndex = -current.OuterIndex.Index - 1;
+                if (outerIndex < 0 || outerIndex >= asset.Imports.Count)
+                {
+                    return null;
+                }
+                current = asset.Imports[outerIndex];
+            }
+        }
+        catch
+        {
+            // Declaration configuration reports a complete, actionable failure if the fallback
+            // cannot establish a material either. This probe remains non-destructive.
+        }
+        return null;
+    }
+
     private Result ApplyCore(
         string slotId,
         string playablePackagePath,

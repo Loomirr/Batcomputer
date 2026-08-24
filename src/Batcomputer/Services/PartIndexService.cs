@@ -152,11 +152,23 @@ public sealed class PartIndexService
             return null;
         }
 
-        var index = JsonSerializer.Deserialize<NativeSuitPartIndex>(File.ReadAllText(PartIndexPath), JsonOptions);
-        // Version 2 scanned Minifig only. Treat it as a stale cache so selecting an extracted
-        // Smallfig visual automatically builds the multi-rig index instead of silently omitting
-        // its cape, head, and face recipes.
-        return IsCurrentIndex(index) ? index : null;
+        try
+        {
+            var index = JsonSerializer.Deserialize<NativeSuitPartIndex>(
+                File.ReadAllText(PartIndexPath),
+                JsonOptions);
+            // Version 2 scanned Minifig only. Treat it as a stale cache so selecting an extracted
+            // Smallfig visual automatically builds the multi-rig index instead of silently omitting
+            // its cape, head, and face recipes. A same-schema index from a different extract is
+            // stale too: its donor paths and recipes must never be replayed against the active dump.
+            return IsCurrentIndex(index, FindDefaultExtractedContentRoot()) ? index : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            // This file is a disposable cache. A partial write or an older malformed copy must not
+            // prevent startup; callers that require the index will rebuild it from the extract.
+            return null;
+        }
     }
 
     internal static bool IsCurrentIndexForTest(NativeSuitPartIndex? index) => IsCurrentIndex(index);
@@ -164,9 +176,37 @@ public sealed class PartIndexService
     private static bool IsCurrentIndex(NativeSuitPartIndex? index) =>
         index is not null && index.SchemaVersion >= CurrentIndexSchemaVersion;
 
+    private static bool IsCurrentIndex(NativeSuitPartIndex? index, string activeContentRoot)
+    {
+        if (!IsCurrentIndex(index) || string.IsNullOrWhiteSpace(activeContentRoot))
+        {
+            return false;
+        }
+
+        var sourceContentRoot = index!.SourceContentRoot;
+        if (string.IsNullOrWhiteSpace(sourceContentRoot))
+        {
+            return false;
+        }
+
+        try
+        {
+            var indexedContentRoot = AppSettings.NormalizeContentRoot(sourceContentRoot);
+            var normalizedActiveRoot = AppSettings.NormalizeContentRoot(activeContentRoot);
+            return indexedContentRoot.Equals(normalizedActiveRoot, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (
+            ex is ArgumentException or IOException or NotSupportedException or UnauthorizedAccessException)
+        {
+            // SourceContentRoot is persisted cache metadata. Invalid path data makes the cache stale;
+            // callers can rebuild it from the currently configured extract.
+            return false;
+        }
+    }
+
     private void SavePartIndex(NativeSuitPartIndex index)
     {
-        File.WriteAllText(PartIndexPath, JsonSerializer.Serialize(index, JsonOptions));
+        AtomicFileUtil.WriteAllText(PartIndexPath, JsonSerializer.Serialize(index, JsonOptions));
     }
 
     internal static IReadOnlyList<string> EnumerateCharacterBlueprintsForTest(string contentRoot) =>

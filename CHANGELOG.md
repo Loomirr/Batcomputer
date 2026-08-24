@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.9.0-beta.7 — 2026-08-24
+
+Recovery-safe base replay, exact donor recovery, and schema-safe dynamic cape-glide adapters.
+
+- Makes base selection, reselection, and declarative part/material/removal replay transactional.
+  Failed rebuilds restore the prior project and generated stages, retain a recovery backup when
+  needed, and keep packaging blocked until the saved edits replay completely.
+- Binds the native part-index cache to the active extracted Content root, reloads or rebuilds it for
+  the current workspace, and adds **Refresh part index** to the main menu.
+- Recovers complete legacy donor recipes only from an exact source-package, mesh, and role match
+  before replay, so an index refresh cannot silently substitute a different component recipe.
+- Migrates project-owned OBJ sources safely when a base change derives a new slot ID, using
+  no-overwrite moves and targeted rollback so a failed base change cannot lose the custom mesh.
+- Fixes the Batmite `_Quest` visual-base flow with a Robin playable donor instead of returning to
+  the base picker, while retaining the selected quest-character appearance.
+- Adds a schema-safe dynamic adapter for giving a Nightwing gameplay donor a native Batman
+  regular-cape/glide-cape pair. It reapplies Nightwing's Head, Face, and body materials, keeps
+  Nightwing's general behavior, and replaces only Nightwing's glide/traversal categories with the
+  Batman LAS/MAS blocks required by the cape. Validation now rejects competing native and cape
+  glide controllers. The corrected path passed in-game acceptance with Nightwing's appearance and
+  normal playset intact and the Batman cape-glide animation active.
+
 ## 0.9.0-beta.6 — 2026-08-23
 
 Responsive windows, quest-character support, and safer native component grafts.

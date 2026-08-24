@@ -101,6 +101,46 @@ internal static class ReleaseRegressionChecks
                 "the native part index scans Smallfig quest-character Blueprints",
                 failures,
                 output);
+
+            var originalSettings = AppSettings.Current;
+            var partIndexTracksActiveExtract = false;
+            try
+            {
+                var indexProjectRoot = Path.Combine(questRegressionRoot, "PartIndexProject");
+                var indexService = new PartIndexService(indexProjectRoot);
+                Directory.CreateDirectory(Path.GetDirectoryName(indexService.PartIndexPath)!);
+                File.WriteAllText(
+                    indexService.PartIndexPath,
+                    System.Text.Json.JsonSerializer.Serialize(new NativeSuitPartIndex
+                    {
+                        // Deliberately record a nested rig folder: normalization should still match
+                        // the active Content root.
+                        SourceContentRoot = smallfigRoot
+                    }));
+
+                AppSettings.Current = new AppSettings { ExtractedContentRoot = contentRoot };
+                var normalizedMatchingIndexLoads = indexService.LoadPartIndex() is not null;
+
+                var replacementContentRoot = Path.Combine(
+                    questRegressionRoot,
+                    "ReplacementExtract",
+                    "Content");
+                Directory.CreateDirectory(replacementContentRoot);
+                AppSettings.Current.ExtractedContentRoot = replacementContentRoot;
+                var sameSchemaStaleIndexIsRejected = indexService.LoadPartIndex() is null;
+
+                partIndexTracksActiveExtract =
+                    normalizedMatchingIndexLoads && sameSchemaStaleIndexIsRejected;
+            }
+            finally
+            {
+                AppSettings.Current = originalSettings;
+            }
+            Check(
+                partIndexTracksActiveExtract,
+                "a same-schema native part index is rejected after the active extracted Content root changes",
+                failures,
+                output);
             Check(
                 AppSettings.NormalizeContentRoot(smallfigRoot)
                     .Equals(contentRoot, StringComparison.OrdinalIgnoreCase) &&
@@ -116,6 +156,7 @@ internal static class ReleaseRegressionChecks
             output.WriteLine("FAIL: Smallfig quest-character regression threw: " + ex.Message);
             failures.Add("extracted Smallfig _Quest Blueprints appear as visual bases and require an explicit gameplay donor");
             failures.Add("the native part index scans Smallfig quest-character Blueprints");
+            failures.Add("a same-schema native part index is rejected after the active extracted Content root changes");
             failures.Add("Smallfig extract roots and character-owned materials resolve like Minifig assets");
         }
         finally
@@ -521,6 +562,150 @@ internal static class ReleaseRegressionChecks
             "a suit's first declarative rebuild tolerates a not-yet-created graft stage",
             failures,
             output);
+        var baseTransactionRoot = Path.Combine(
+            Path.GetTempPath(),
+            "Batcomputer-base-transaction-regression-" + Guid.NewGuid().ToString("N"));
+        var missingBaseStagesAreSafe = false;
+        var existingBaseStageWasRemoved = false;
+        var markerOnlySlotWasRecoverable = false;
+        var ownedSlotWasPreserved = false;
+        try
+        {
+            var neverCreatedBaseStage = Path.Combine(baseTransactionRoot, "UnpatchedStage");
+            missingBaseStagesAreSafe = !MainForm.DeleteGeneratedStageDirectoryIfPresent(neverCreatedBaseStage);
+
+            var existingBaseStage = Path.Combine(baseTransactionRoot, "PatchedNameMapStage");
+            Directory.CreateDirectory(existingBaseStage);
+            File.WriteAllText(Path.Combine(existingBaseStage, ".batcomputer-stage-complete"), "complete");
+            File.WriteAllText(Path.Combine(existingBaseStage, "payload.uasset"), "payload");
+            existingBaseStageWasRemoved =
+                MainForm.DeleteGeneratedStageDirectoryIfPresent(existingBaseStage) &&
+                !Directory.Exists(existingBaseStage);
+
+            var markerOnlySlot = Path.Combine(baseTransactionRoot, "marker-only-slot");
+            Directory.CreateDirectory(markerOnlySlot);
+            File.WriteAllText(
+                Path.Combine(markerOnlySlot, ".batcomputer-declarative-stage-incomplete"),
+                "incomplete");
+            markerOnlySlotWasRecoverable = MainForm.IsRecoverableIncompleteSlotForTest(
+                Path.Combine(baseTransactionRoot, "marker-only.native-suit-project.json"),
+                markerOnlySlot);
+
+            var ownedSlot = Path.Combine(baseTransactionRoot, "owned-slot");
+            Directory.CreateDirectory(ownedSlot);
+            File.WriteAllText(
+                Path.Combine(ownedSlot, ".batcomputer-declarative-stage-incomplete"),
+                "incomplete");
+            File.WriteAllText(Path.Combine(ownedSlot, "saved-mesh.obj"), "owned");
+            ownedSlotWasPreserved = !MainForm.IsRecoverableIncompleteSlotForTest(
+                Path.Combine(baseTransactionRoot, "owned.native-suit-project.json"),
+                ownedSlot);
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(baseTransactionRoot))
+                {
+                    Directory.Delete(baseTransactionRoot, recursive: true);
+                }
+            }
+            catch
+            {
+                // Best-effort cleanup of the unique regression directory.
+            }
+        }
+        Check(
+            missingBaseStagesAreSafe &&
+            existingBaseStageWasRemoved &&
+            markerOnlySlotWasRecoverable &&
+            ownedSlotWasPreserved,
+            "base creation/reselection tolerates missing stages and reclaims only marker-only failed slots",
+            failures,
+            output);
+        var meshMigrationRoot = Path.Combine(
+            Path.GetTempPath(),
+            "Batcomputer-mesh-migration-regression-" + Guid.NewGuid().ToString("N"));
+        var partialMeshCopyWasRolledBack = false;
+        var preExistingMeshWasPreserved = false;
+        var freshMeshDirectoriesWereRemoved = false;
+        try
+        {
+            Directory.CreateDirectory(meshMigrationRoot);
+            var firstSource = Path.Combine(meshMigrationRoot, "first-source.obj");
+            var secondSource = Path.Combine(meshMigrationRoot, "second-source.obj");
+            File.WriteAllText(firstSource, "first source");
+            File.WriteAllText(secondSource, "second source");
+
+            var occupiedProject = new NativeSuitProject { SlotId = "occupied-migration-slot" };
+            var occupiedService = new SuitProjectService(meshMigrationRoot);
+            var occupiedImportedRoot = Path.Combine(
+                occupiedService.ProjectOutputDirectory(occupiedProject),
+                "ImportedMeshes");
+            Directory.CreateDirectory(occupiedImportedRoot);
+            var preExistingDestination = Path.Combine(occupiedImportedRoot, "second.obj");
+            File.WriteAllText(preExistingDestination, "pre-existing owned mesh");
+            var occupiedMigration = new MainForm.BaseCustomMeshSourceMigration(
+                meshMigrationRoot,
+                occupiedProject);
+            try
+            {
+                occupiedMigration.CopySources(
+                    meshMigrationRoot,
+                    occupiedProject,
+                    new[]
+                    {
+                        (new CustomStaticMeshImport { Id = "first", DisplayName = "First" }, firstSource),
+                        (new CustomStaticMeshImport { Id = "second", DisplayName = "Second" }, secondSource),
+                    });
+            }
+            catch (IOException)
+            {
+                // The first file was copied, then the second exact destination refused overwrite.
+            }
+            occupiedMigration.Rollback();
+            partialMeshCopyWasRolledBack = !File.Exists(Path.Combine(occupiedImportedRoot, "first.obj"));
+            preExistingMeshWasPreserved =
+                File.Exists(preExistingDestination) &&
+                File.ReadAllText(preExistingDestination) == "pre-existing owned mesh";
+
+            var freshProject = new NativeSuitProject { SlotId = "fresh-migration-slot" };
+            var freshService = new SuitProjectService(meshMigrationRoot);
+            var freshSlotRoot = freshService.ProjectOutputDirectory(freshProject);
+            var freshMigration = new MainForm.BaseCustomMeshSourceMigration(
+                meshMigrationRoot,
+                freshProject);
+            freshMigration.CopySources(
+                meshMigrationRoot,
+                freshProject,
+                new[]
+                {
+                    (new CustomStaticMeshImport { Id = "fresh", DisplayName = "Fresh" }, firstSource),
+                });
+            freshMigration.Rollback();
+            freshMeshDirectoriesWereRemoved = !Directory.Exists(freshSlotRoot);
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(meshMigrationRoot))
+                {
+                    Directory.Delete(meshMigrationRoot, recursive: true);
+                }
+            }
+            catch
+            {
+                // Best-effort cleanup of the unique regression directory.
+            }
+        }
+        Check(
+            partialMeshCopyWasRolledBack &&
+            preExistingMeshWasPreserved &&
+            freshMeshDirectoriesWereRemoved,
+            "failed slot-ID OBJ migration removes only files it created and leaves retries clean",
+            failures,
+            output);
         var materialOwnershipProject = new NativeSuitProject
         {
             GeneratedMaterials =
@@ -692,6 +877,882 @@ internal static class ReleaseRegressionChecks
             StageValidationService.BlocksSyntheticCapePairOnGlideOnlyBaseForTest(
                 unsafeGeneratedNightwingCapePair),
             "a synthetic Cape plus ABP_Cape_Glide remains a blocked cape/glider combination on a glide-only base",
+            failures,
+            output);
+
+        var pairedCapePreflightProject = CreateCertifiedNightwingCapeAdapterProject();
+        var incomingPreflightCape = pairedCapePreflightProject.PartGrafts.Single(graft => !graft.IsGlider);
+        pairedCapePreflightProject.PartGrafts.Remove(incomingPreflightCape);
+        var acceptsExactAuthoredShellPreflight = GliderService.CanConfigurePairedCapeAdapterWithIncoming(
+            pairedCapePreflightProject,
+            AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
+            incomingPreflightCape,
+            out _);
+        var expectedPlayableCapeSlot = incomingPreflightCape.Playable!.TemplateSlot;
+        var expectedCutsceneCapeSlot = incomingPreflightCape.Cutscene!.TemplateSlot;
+        incomingPreflightCape.Playable.TemplateSlot = "Torso";
+        incomingPreflightCape.Cutscene.TemplateSlot = "Torso";
+        var rejectsNonExactAuthoredShellPreflight = !GliderService.CanConfigurePairedCapeAdapterWithIncoming(
+            pairedCapePreflightProject,
+            AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
+            incomingPreflightCape,
+            out _);
+        incomingPreflightCape.Playable.TemplateSlot = expectedPlayableCapeSlot;
+        incomingPreflightCape.Cutscene.TemplateSlot = expectedCutsceneCapeSlot;
+        Check(
+            acceptsExactAuthoredShellPreflight && rejectsNonExactAuthoredShellPreflight,
+            "paired-cape preflight requires the donor's exact authored Cape plus Torso fields",
+            failures,
+            output);
+
+        var certifiedNightwingCapePair = CreateCertifiedNightwingCapeAdapterProject();
+        var adapterConfigured = GliderService.TryConfigurePairedCapeAdapter(
+            certifiedNightwingCapePair,
+            AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
+            nativeGliderComponent: "Cape",
+            out var adapterConfigureDetail);
+        var certifiedCosmeticCape = certifiedNightwingCapePair.PartGrafts.Single(graft => !graft.IsGlider);
+        var certifiedGlideCape = certifiedNightwingCapePair.PartGrafts.Single(graft => graft.IsGlider);
+        // Model the successful existing-field replay on the authored shell.
+        certifiedCosmeticCape.ResolvedComponent = certifiedCosmeticCape.Slot;
+        certifiedGlideCape.ResolvedComponent = certifiedGlideCape.Slot;
+        GliderService.RefreshPairedCapeAdapterResolvedComponents(certifiedNightwingCapePair);
+        var adapterIsResolved = GliderService.IsDeclaredPairedCapeAdapterValid(
+            certifiedNightwingCapePair,
+            AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
+            requireResolvedComponents: true,
+            out var adapterValidationDetail);
+        var authoredShellReady = GliderService.TryGetAuthoredPairedCapeShell(
+            certifiedNightwingCapePair,
+            out var authoredPlayableShell,
+            out var authoredCutsceneShell,
+            out _);
+        Check(
+            adapterConfigured &&
+            adapterIsResolved &&
+            authoredShellReady &&
+            certifiedNightwingCapePair.PairedCapeAdapter is not null &&
+            certifiedNightwingCapePair.PairedCapeAdapter.GameplayDonorPackage.Equals(
+                "/Game/Characters/Minifig/Nightwing/BP_Nightwing_Default_Playable",
+                StringComparison.OrdinalIgnoreCase) &&
+            authoredPlayableShell.EndsWith("BP_Batman_AnimatedSeries_Playable", StringComparison.OrdinalIgnoreCase) &&
+            authoredCutsceneShell.EndsWith("BP_Batman_AnimatedSeries_Cutscene", StringComparison.OrdinalIgnoreCase) &&
+            certifiedNightwingCapePair.PairedCapeAdapter.ResolvedCosmeticComponent == "Cape" &&
+            certifiedNightwingCapePair.PairedCapeAdapter.ResolvedGliderComponent == "Torso" &&
+            certifiedCosmeticCape.Slot == "Cape" &&
+            certifiedGlideCape.Slot == "Torso" &&
+            !certifiedCosmeticCape.PreferDonorComponentShell &&
+            !certifiedGlideCape.PreferDonorComponentShell &&
+            certifiedNightwingCapePair.GliderAnimLas.Equals(
+                "/Game/Animation/LayerAnimSets/Traversal/LAS_Traversal_Batman",
+                StringComparison.OrdinalIgnoreCase) &&
+            certifiedNightwingCapePair.GliderAnimMas.Equals(
+                "/Game/Animation/MontageAnimSets/Traversal/MAS_Glide_Batman",
+                StringComparison.OrdinalIgnoreCase) &&
+            certifiedNightwingCapePair.PairedCapeAdapter.GlideAnimLasPackage.Equals(
+                certifiedNightwingCapePair.GliderAnimLas,
+                StringComparison.OrdinalIgnoreCase) &&
+            certifiedNightwingCapePair.PairedCapeAdapter.GlideAnimMasPackage.Equals(
+                certifiedNightwingCapePair.GliderAnimMas,
+                StringComparison.OrdinalIgnoreCase) &&
+            certifiedNightwingCapePair.UseCustomArchetype &&
+            certifiedNightwingCapePair.GliderAutoEnabledCustomArchetype &&
+            !StageValidationService.BlocksSyntheticCapePairOnGlideOnlyBaseForTest(certifiedNightwingCapePair),
+            "a complete adapter keeps Nightwing's gameplay donor while binding its authored Cape plus Torso donor's Batman glide blocks",
+            failures,
+            output);
+        if (!adapterConfigured || !adapterIsResolved)
+        {
+            output.WriteLine(
+                $"  paired-cape adapter detail: configure='{adapterConfigureDetail}', validate='{adapterValidationDetail}'");
+        }
+
+        const string certifiedBatmanMas =
+            "/Game/Animation/MontageAnimSets/Traversal/MAS_Glide_Batman";
+        const string certifiedBatmanLas =
+            "/Game/Animation/LayerAnimSets/Traversal/LAS_Traversal_Batman";
+        var nightwingMasParents = new[]
+        {
+            "/Game/Animation/MontageAnimSets/Activity/MAS_MenusUpgrades_Nightwing",
+            "/Game/Animation/MontageAnimSets/Activity/MAS_Rewards_Nightwing",
+            "/Game/Animation/MontageAnimSets/Character/MAS_Playable",
+            "/Game/Animation/MontageAnimSets/Combat/MAS_Combat_Flurry_Nightwing",
+            "/Game/Animation/MontageAnimSets/Equipment/MAS_Equipment_ElectricBirdarang",
+            "/Game/Animation/MontageAnimSets/Equipment/MAS_Equipment_TetherLauncher",
+            "/Game/Animation/MontageAnimSets/Interaction/MAS_Interaction_Staff",
+            "/Game/Animation/MontageAnimSets/StatusEffects/MAS_StatusEffect_ElectricityBatons",
+            "/Game/Animation/MontageAnimSets/Traversal/MAS_Glide_Nightwing",
+            "/Game/Animation/MontageAnimSets/Traversal/MAS_Grapple_Nightwing",
+            "/Game/Animation/MontageAnimSets/Traversal/MAS_LedgeGrab_Nightwing",
+            "/Game/Animation/MontageAnimSets/Traversal/MAS_Movement_Nightwing"
+        };
+        var bridgedNightwingMasParents = nightwingMasParents
+            .Select(parent => parent.EndsWith("/MAS_Glide_Nightwing", StringComparison.OrdinalIgnoreCase)
+                ? certifiedBatmanMas
+                : parent)
+            .ToList();
+        var nightwingLasParents = new[]
+        {
+            "/Game/Animation/LayerAnimSets/Character/LAS_Playable",
+            "/Game/Animation/LayerAnimSets/Default/LAS_Default_Minifig",
+            "/Game/Animation/LayerAnimSets/Default/LAS_Default_Nightwing",
+            "/Game/Animation/LayerAnimSets/Equipment/LAS_Equipment_Boomerang_Nightwing",
+            "/Game/Animation/LayerAnimSets/Equipment/LAS_Equipment_TetherLauncher",
+            "/Game/Animation/LayerAnimSets/LAS_DEPRECATED_StaffInteractions",
+            "/Game/Animation/LayerAnimSets/Traversal/LAS_Traversal_Nightwing"
+        };
+        var bridgedNightwingLasParents = nightwingLasParents
+            .Select(parent => parent.EndsWith("/LAS_Traversal_Nightwing", StringComparison.OrdinalIgnoreCase)
+                ? certifiedBatmanLas
+                : parent)
+            .ToList();
+        var reorderedMasParents = new[]
+        {
+            "/Game/Animation/MontageAnimSets/Traversal/MAS_Glide_Nightwing",
+            "/Game/Animation/MontageAnimSets/Character/MAS_Playable",
+            "/Game/Animation/MontageAnimSets/Traversal/MAS_Movement_Nightwing"
+        };
+        var reorderedMasBridge = reorderedMasParents
+            .Select(parent => parent.EndsWith("/MAS_Glide_Nightwing", StringComparison.OrdinalIgnoreCase)
+                ? certifiedBatmanMas
+                : parent)
+            .ToList();
+        var reorderedLasParents = new[]
+        {
+            "/Game/Animation/LayerAnimSets/Traversal/LAS_Traversal_Nightwing",
+            "/Game/Animation/LayerAnimSets/Character/LAS_Playable",
+            "/Game/Animation/LayerAnimSets/Default/LAS_Default_Nightwing"
+        };
+        var reorderedLasBridge = reorderedLasParents
+            .Select(parent => parent.EndsWith("/LAS_Traversal_Nightwing", StringComparison.OrdinalIgnoreCase)
+                ? certifiedBatmanLas
+                : parent)
+            .ToList();
+        var masBridgeReplacesNightwingGlide =
+            StageValidationService.PairedCapeAnimationParentsAreSafeForTest(
+                nightwingMasParents,
+                bridgedNightwingMasParents,
+                certifiedBatmanMas,
+                "MAS_Glide_",
+                out _);
+        var lasBridgeReplacesNightwingGlide =
+            StageValidationService.PairedCapeAnimationParentsAreSafeForTest(
+                nightwingLasParents,
+                bridgedNightwingLasParents,
+                certifiedBatmanLas,
+                "LAS_Traversal_",
+                out _);
+        var reorderedCookedParentsRemainSafe =
+            StageValidationService.PairedCapeAnimationParentsAreSafeForTest(
+                reorderedMasParents,
+                reorderedMasBridge,
+                certifiedBatmanMas,
+                "MAS_Glide_",
+                out _) &&
+            StageValidationService.PairedCapeAnimationParentsAreSafeForTest(
+                reorderedLasParents,
+                reorderedLasBridge,
+                certifiedBatmanLas,
+                "LAS_Traversal_",
+                out _);
+        var missingCertifiedMasRejected =
+            !StageValidationService.PairedCapeAnimationParentsAreSafeForTest(
+                nightwingMasParents,
+                nightwingMasParents,
+                certifiedBatmanMas,
+                "MAS_Glide_",
+                out _);
+        var droppedNightwingParentRejected =
+            !StageValidationService.PairedCapeAnimationParentsAreSafeForTest(
+                nightwingLasParents,
+                bridgedNightwingLasParents
+                    .Where(parent => !UnrealPathUtil.AssetName(parent).Equals(
+                        "LAS_Default_Nightwing",
+                        StringComparison.OrdinalIgnoreCase))
+                    .ToList(),
+                certifiedBatmanLas,
+                "LAS_Traversal_",
+                out _);
+        var competingNightwingGlideRejected =
+            !StageValidationService.PairedCapeAnimationParentsAreSafeForTest(
+                nightwingMasParents,
+                nightwingMasParents.Append(certifiedBatmanMas).ToList(),
+                certifiedBatmanMas,
+                "MAS_Glide_",
+                out _);
+        var sameStemWrongPackageRejected =
+            !StageValidationService.PairedCapeAnimationParentsAreSafeForTest(
+                nightwingMasParents,
+                bridgedNightwingMasParents
+                    .Select(parent => parent.Equals(certifiedBatmanMas, StringComparison.OrdinalIgnoreCase)
+                        ? "/Game/Mods/WrongAnimationAlias/MAS_Glide_Batman"
+                        : parent)
+                    .ToList(),
+                certifiedBatmanMas,
+                "MAS_Glide_",
+                out _);
+        var unresolvedStemOnlyRejected =
+            !StageValidationService.PairedCapeAnimationParentsAreSafeForTest(
+                nightwingLasParents,
+                bridgedNightwingLasParents
+                    .Select(UnrealPathUtil.AssetName)
+                    .ToList(),
+                certifiedBatmanLas,
+                "LAS_Traversal_",
+                out _);
+        var unresolvedParentEntryRejected =
+            !StageValidationService.PairedCapeAnimationParentsAreSafeForTest(
+                nightwingMasParents,
+                bridgedNightwingMasParents.Append("").ToList(),
+                certifiedBatmanMas,
+                "MAS_Glide_",
+                out _);
+        Check(
+            masBridgeReplacesNightwingGlide &&
+            lasBridgeReplacesNightwingGlide &&
+            reorderedCookedParentsRemainSafe &&
+            missingCertifiedMasRejected &&
+            droppedNightwingParentRejected &&
+            competingNightwingGlideRejected &&
+            sameStemWrongPackageRejected &&
+            unresolvedStemOnlyRejected &&
+            unresolvedParentEntryRejected,
+            "paired-cape MAS/LAS clones retain every non-glide Nightwing parent while replacing each native glide category with exactly one certified Batman package (duplicates and same-stem aliases rejected)",
+            failures,
+            output);
+
+        const string authoredBatmanDprd =
+            "/Game/Characters/Minifig/Batman/DA_DPRD_Batman";
+        const string gameplayNightwingDprd =
+            "/Game/Characters/Minifig/Nightwing/DA_DPRD_Nightwing";
+        const string sameStemWrongNightwingDprd =
+            "/Game/Mods/WrongAlias/DA_DPRD_Nightwing";
+        const string regressionMod = "NightwingCapeBridgeRegression";
+        var exactGameplayBehaviorBridgeAccepted =
+            StageValidationService.BehaviorBridgeReferencesAreSafeForTest(
+                [(gameplayNightwingDprd, "DA_DPRD_Nightwing")],
+                authoredBatmanDprd,
+                gameplayNightwingDprd);
+        var sameStemWrongBehaviorBridgeRejected =
+            !StageValidationService.BehaviorBridgeReferencesAreSafeForTest(
+                [(sameStemWrongNightwingDprd, "DA_DPRD_Nightwing")],
+                authoredBatmanDprd,
+                gameplayNightwingDprd);
+        var retainedAuthoredBehaviorBridgeRejected =
+            !StageValidationService.BehaviorBridgeReferencesAreSafeForTest(
+                [
+                    (gameplayNightwingDprd, "DA_DPRD_Nightwing"),
+                    (authoredBatmanDprd, "DA_DPRD_Batman")
+                ],
+                authoredBatmanDprd,
+                gameplayNightwingDprd);
+        var equipmentFreeDprd = StageValidationService.ExpectedPairedCapeDprdPackageForTest(
+            certifiedNightwingCapePair,
+            regressionMod,
+            gameplayNightwingDprd,
+            "Nightwing");
+        certifiedNightwingCapePair.EquipmentSlots.Add(new EquipmentSlotChange
+        {
+            Slot = 0,
+            Gadget = "Electrorang"
+        });
+        var nativeEquipmentDprd = StageValidationService.ExpectedPairedCapeDprdPackageForTest(
+            certifiedNightwingCapePair,
+            regressionMod,
+            gameplayNightwingDprd,
+            "Nightwing");
+        certifiedNightwingCapePair.EquipmentSlots.Clear();
+        certifiedNightwingCapePair.EquipmentSlots.Add(new EquipmentSlotChange
+        {
+            Slot = 0,
+            Gadget = "Batarang"
+        });
+        var foreignEquipmentDprd = StageValidationService.ExpectedPairedCapeDprdPackageForTest(
+            certifiedNightwingCapePair,
+            regressionMod,
+            gameplayNightwingDprd,
+            "Nightwing");
+        certifiedNightwingCapePair.EquipmentSlots.Clear();
+        var generatedEquipmentDprd =
+            $"/Game/Mods/{regressionMod}/Characters/DA_DPRD_{regressionMod}";
+        var generatedEquipmentBehaviorBridgeAccepted =
+            StageValidationService.BehaviorBridgeReferencesAreSafeForTest(
+                [(generatedEquipmentDprd, $"DA_DPRD_{regressionMod}")],
+                authoredBatmanDprd,
+                foreignEquipmentDprd,
+                gameplayNightwingDprd);
+        var danglingGameplayDprdRejectedForGeneratedBridge =
+            !StageValidationService.BehaviorBridgeReferencesAreSafeForTest(
+                [
+                    (generatedEquipmentDprd, $"DA_DPRD_{regressionMod}"),
+                    (gameplayNightwingDprd, "DA_DPRD_Nightwing")
+                ],
+                authoredBatmanDprd,
+                foreignEquipmentDprd,
+                gameplayNightwingDprd);
+        var ordinaryGliderAbilitySets = new List<string>();
+        var ordinaryGliderProject = new NativeSuitProject
+        {
+            PartGrafts = [new SavedPartGraft { IsGlider = true }]
+        };
+        var ordinaryGliderDependencyWasEmitted =
+            AnimArchetypeGraftService.EnsureGliderAbilitySetDependency(
+                ordinaryGliderProject,
+                usesPairedCapeAdapter: false,
+                ordinaryGliderAbilitySets);
+        var ordinaryGliderAbilitySetStillForcesGeneratedDprd =
+            ordinaryGliderDependencyWasEmitted &&
+            ordinaryGliderAbilitySets.Count == 1 &&
+            ordinaryGliderAbilitySets[0].Equals(
+                GliderService.GlidingAbilitySetPackage,
+                StringComparison.OrdinalIgnoreCase) &&
+            AnimArchetypeGraftService.RequiresGeneratedDprdFromResolvedDependencies(
+                hasForeignEquipmentDefinitions: false,
+                hasForeignAbilitySets: ordinaryGliderAbilitySets.Count > 0);
+        var pairedGliderAbilitySets = new List<string>();
+        var pairedGliderKeepsNativeAbilityLoadout =
+            !AnimArchetypeGraftService.EnsureGliderAbilitySetDependency(
+                certifiedNightwingCapePair,
+                usesPairedCapeAdapter: true,
+                pairedGliderAbilitySets) &&
+            pairedGliderAbilitySets.Count == 0;
+        var pairedNoEquipmentKeepsGameplayDprd =
+            !AnimArchetypeGraftService.RequiresGeneratedDprd(
+                certifiedNightwingCapePair,
+                "Nightwing");
+        const string sourceMasPackage =
+            "/Game/Characters/Minifig/Nightwing/Animations/MAS_Char_Nightwing";
+        var generatedMasPackage =
+            $"/Game/Mods/{regressionMod}/Characters/MAS_Char_{regressionMod}";
+        var nonCascadingCloneIdentity =
+            AnimArchetypeGraftService.ApplyNameMapReplacementsForTest(
+                sourceMasPackage + ".MAS_Char_Nightwing",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    [sourceMasPackage] = generatedMasPackage,
+                    ["MAS_Char_Nightwing"] = $"MAS_Char_{regressionMod}"
+                })
+            .Equals(
+                generatedMasPackage + $".MAS_Char_{regressionMod}",
+                StringComparison.Ordinal);
+        Check(
+            exactGameplayBehaviorBridgeAccepted &&
+            sameStemWrongBehaviorBridgeRejected &&
+            retainedAuthoredBehaviorBridgeRejected &&
+            equipmentFreeDprd.Equals(gameplayNightwingDprd, StringComparison.OrdinalIgnoreCase) &&
+            nativeEquipmentDprd.Equals(gameplayNightwingDprd, StringComparison.OrdinalIgnoreCase) &&
+            foreignEquipmentDprd.Equals(generatedEquipmentDprd, StringComparison.OrdinalIgnoreCase) &&
+            generatedEquipmentBehaviorBridgeAccepted &&
+            danglingGameplayDprdRejectedForGeneratedBridge &&
+            ordinaryGliderAbilitySetStillForcesGeneratedDprd &&
+            pairedGliderKeepsNativeAbilityLoadout &&
+            pairedNoEquipmentKeepsGameplayDprd &&
+            nonCascadingCloneIdentity,
+            "exact behavior bridges keep paired native equipment on Nightwing DPRD, switch foreign equipment exclusively to mod-local DPRD, retain ordinary glider AS_Gliding DPRD generation, and emit exact non-cascading mod-local package identities",
+            failures,
+            output);
+
+        var expectedAnimClass = certifiedGlideCape.Playable!.AnimClassObjectName;
+        certifiedGlideCape.Playable.AnimClassObjectName = "ABP_Wingsuit_C";
+        var rejectsWrongAdapterAnimClass = !GliderService.IsDeclaredPairedCapeAdapterValid(
+            certifiedNightwingCapePair,
+            AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
+            requireResolvedComponents: true,
+            out _);
+        certifiedGlideCape.Playable.AnimClassObjectName = expectedAnimClass;
+
+        var expectedGliderGraftId = certifiedNightwingCapePair.PairedCapeAdapter!.GlideCapeGraftInstanceId;
+        certifiedNightwingCapePair.PairedCapeAdapter.GlideCapeGraftInstanceId = "removed-glider-graft";
+        var rejectsStaleAdapterGraftId = !GliderService.IsDeclaredPairedCapeAdapterValid(
+            certifiedNightwingCapePair,
+            AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
+            requireResolvedComponents: true,
+            out _);
+        certifiedNightwingCapePair.PairedCapeAdapter.GlideCapeGraftInstanceId = expectedGliderGraftId;
+
+        var expectedCosmeticSource = certifiedCosmeticCape.Playable!.SourcePackagePath;
+        certifiedCosmeticCape.Playable.SourcePackagePath =
+            "/Game/Characters/Minifig/Batman/BP_Batman_GrayGhost_Playable";
+        var rejectsChangedAdapterSource = !GliderService.IsDeclaredPairedCapeAdapterValid(
+            certifiedNightwingCapePair,
+            AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
+            requireResolvedComponents: true,
+            out _);
+        certifiedCosmeticCape.Playable.SourcePackagePath = expectedCosmeticSource;
+        var adapterRecoversAfterRestoringIdentity = GliderService.IsDeclaredPairedCapeAdapterValid(
+            certifiedNightwingCapePair,
+            AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
+            requireResolvedComponents: true,
+            out _);
+        certifiedNightwingCapePair.PartGrafts.Add(certifiedGlideCape);
+        var duplicateShellLookupRejectedWithoutThrow = false;
+        try
+        {
+            duplicateShellLookupRejectedWithoutThrow =
+                !GliderService.TryGetAuthoredPairedCapeShell(
+                    certifiedNightwingCapePair,
+                    out var duplicatePlayableShell,
+                    out var duplicateCutsceneShell,
+                    out _) &&
+                string.IsNullOrWhiteSpace(duplicatePlayableShell) &&
+                string.IsNullOrWhiteSpace(duplicateCutsceneShell);
+        }
+        catch
+        {
+            duplicateShellLookupRejectedWithoutThrow = false;
+        }
+        var rejectsDuplicateActiveGlider = !GliderService.IsDeclaredPairedCapeAdapterValid(
+            certifiedNightwingCapePair,
+            AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
+            requireResolvedComponents: true,
+            out _);
+        certifiedNightwingCapePair.PartGrafts.RemoveAt(certifiedNightwingCapePair.PartGrafts.Count - 1);
+
+        var adapterCertificate = certifiedNightwingCapePair.PairedCapeAdapter!;
+        var expectedCertificateSource = adapterCertificate.GliderCutsceneSourcePackage;
+        adapterCertificate.GliderCutsceneSourcePackage =
+            "/Game/Characters/Minifig/Batman/BP_Batman_GrayGhost_Cutscene";
+        var rejectsTamperedCertificateSource =
+            !GliderService.IsDeclaredPairedCapeAdapterValid(
+                certifiedNightwingCapePair,
+                AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
+                requireResolvedComponents: true,
+                out _) &&
+            !GliderService.TryGetAuthoredPairedCapeShell(
+                certifiedNightwingCapePair,
+                out _,
+                out _,
+                out _);
+        adapterCertificate.GliderCutsceneSourcePackage = expectedCertificateSource;
+
+        var expectedCertificateAnimClass = adapterCertificate.PairedAnimClassObjectName;
+        adapterCertificate.PairedAnimClassObjectName = "ABP_Cape_Glide_Imposter_C";
+        var rejectsTamperedCertificateAnimClass =
+            !GliderService.IsDeclaredPairedCapeAdapterValid(
+                certifiedNightwingCapePair,
+                AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
+                requireResolvedComponents: true,
+                out _) &&
+            !GliderService.TryGetAuthoredPairedCapeShell(
+                certifiedNightwingCapePair,
+                out _,
+                out _,
+                out _);
+        adapterCertificate.PairedAnimClassObjectName = expectedCertificateAnimClass;
+
+        var expectedProjectGlideMas = certifiedNightwingCapePair.GliderAnimMas;
+        certifiedNightwingCapePair.GliderAnimMas =
+            "/Game/Animation/MontageAnimSets/Traversal/MAS_Glide_Nightwing";
+        var rejectsGameplayDonorGlideFallback =
+            !GliderService.IsDeclaredPairedCapeAdapterValid(
+                certifiedNightwingCapePair,
+                AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
+                requireResolvedComponents: true,
+                out _);
+        certifiedNightwingCapePair.GliderAnimMas = expectedProjectGlideMas;
+
+        var expectedCertificateGlideLas = adapterCertificate.GlideAnimLasPackage;
+        adapterCertificate.GlideAnimLasPackage =
+            "/Game/Animation/LayerAnimSets/Traversal/LAS_Traversal_Nightwing";
+        var rejectsTamperedGlideAnimationCertificate =
+            !GliderService.IsDeclaredPairedCapeAdapterValid(
+                certifiedNightwingCapePair,
+                AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
+                requireResolvedComponents: true,
+                out _);
+        adapterCertificate.GlideAnimLasPackage = expectedCertificateGlideLas;
+
+        certifiedCosmeticCape.PreferDonorComponentShell = true;
+        var rejectsSyntheticDonorShell = !GliderService.IsDeclaredPairedCapeAdapterValid(
+            certifiedNightwingCapePair,
+            AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
+            requireResolvedComponents: true,
+            out _);
+        certifiedCosmeticCape.PreferDonorComponentShell = false;
+        Check(
+            rejectsWrongAdapterAnimClass &&
+            rejectsStaleAdapterGraftId &&
+            rejectsChangedAdapterSource &&
+            adapterRecoversAfterRestoringIdentity &&
+            rejectsDuplicateActiveGlider &&
+            duplicateShellLookupRejectedWithoutThrow &&
+            rejectsTamperedCertificateSource &&
+            rejectsTamperedCertificateAnimClass &&
+            rejectsGameplayDonorGlideFallback &&
+            rejectsTamperedGlideAnimationCertificate &&
+            rejectsSyntheticDonorShell,
+            "paired-cape certification and shell lookup fail closed on changed sources, glide blocks, certificates, shell mode, or duplicate graft identities",
+            failures,
+            output);
+
+        var visualFixture = CreateVisualOverlayRegressionFixture();
+        var selectsCompatibleScaffold = PairedCapeVisualOverlayService.TrySelectCompatibleScaffoldForTest(
+            visualFixture.Index,
+            visualFixture.OverlayGrafts,
+            visualFixture.CosmeticCape,
+            visualFixture.GlideCape,
+            "/Game/Characters/Minifig/Batman/BP_Batman_AnimatedSeries_Playable",
+            "/Game/Characters/Minifig/Batman/BP_Batman_AnimatedSeries_Cutscene",
+            out var selectedVisualPlayableShell,
+            out var selectedVisualCutsceneShell);
+        var exactOverlayCertificateValid = PairedCapeVisualOverlayService.ValidateDeclaration(
+            visualFixture.Project,
+            visualFixture.Index,
+            visualFixture.Project.PairedCapeAdapter!,
+            out _,
+            visualFixture.IdentityMaterials);
+        var overlayHead = visualFixture.Project.PairedCapeAdapter!.VisualOverlay!.ComponentGrafts
+            .Single(graft => graft.Slot.Equals("Head", StringComparison.OrdinalIgnoreCase));
+        var expectedHeadMesh = overlayHead.Playable!.MeshObjectPath;
+        overlayHead.Playable.MeshObjectPath =
+            "/Game/Characters/Heads/Batman/SK_Head_Batman.SK_Head_Batman";
+        var rejectsTamperedHeadRecipe = !PairedCapeVisualOverlayService.ValidateDeclaration(
+            visualFixture.Project,
+            visualFixture.Index,
+            visualFixture.Project.PairedCapeAdapter,
+            out _,
+            visualFixture.IdentityMaterials);
+        overlayHead.Playable.MeshObjectPath = expectedHeadMesh;
+        var overlayFace = visualFixture.Project.PairedCapeAdapter.VisualOverlay.ComponentGrafts
+            .Single(graft => graft.Slot.Equals("Face", StringComparison.OrdinalIgnoreCase));
+        var expectedFaceAnim = overlayFace.Playable!.AnimClassObjectPath;
+        overlayFace.Playable.AnimClassObjectPath =
+            "/Game/Characters/Heads/Faces/ABP_LEGOface_Batman.ABP_LEGOface_Batman_C";
+        var rejectsTamperedFaceAnim = !PairedCapeVisualOverlayService.ValidateDeclaration(
+            visualFixture.Project,
+            visualFixture.Index,
+            visualFixture.Project.PairedCapeAdapter,
+            out _,
+            visualFixture.IdentityMaterials);
+        overlayFace.Playable.AnimClassObjectPath = expectedFaceAnim;
+        var expectedBodyMaterial = visualFixture.Project.PairedCapeAdapter.VisualOverlay.PlayableBodyMaterialPackage;
+        visualFixture.Project.PairedCapeAdapter.VisualOverlay.PlayableBodyMaterialPackage =
+            "/Game/Characters/Minifig/Batman/Materials/MI_Batman_AnimatedSeries";
+        var rejectsTamperedIdentityMaterial = !PairedCapeVisualOverlayService.ValidateDeclaration(
+            visualFixture.Project,
+            visualFixture.Index,
+            visualFixture.Project.PairedCapeAdapter,
+            out _,
+            visualFixture.IdentityMaterials);
+        visualFixture.Project.PairedCapeAdapter.VisualOverlay.PlayableBodyMaterialPackage = expectedBodyMaterial;
+        var expectedScaffold = visualFixture.Project.PairedCapeAdapter.AuthoredShellPlayablePackage;
+        visualFixture.Project.PairedCapeAdapter.AuthoredShellPlayablePackage =
+            "/Game/Characters/Minifig/Batman/BP_Batman_AnimatedSeries_Playable";
+        var rejectsIncompatiblePreferredScaffold = !PairedCapeVisualOverlayService.ValidateDeclaration(
+            visualFixture.Project,
+            visualFixture.Index,
+            visualFixture.Project.PairedCapeAdapter,
+            out _,
+            visualFixture.IdentityMaterials);
+        visualFixture.Project.PairedCapeAdapter.AuthoredShellPlayablePackage = expectedScaffold;
+        var expectedOverlay = visualFixture.Project.PairedCapeAdapter.VisualOverlay;
+        visualFixture.Project.PairedCapeAdapter.VisualOverlay = null;
+        var packageOnlyRealProjectCannotBypassOverlay = !PairedCapeVisualOverlayService.ValidateDeclaration(
+            visualFixture.Project,
+            visualFixture.Index,
+            visualFixture.Project.PairedCapeAdapter,
+            out _,
+            visualFixture.IdentityMaterials);
+        visualFixture.Project.PairedCapeAdapter.VisualOverlay = expectedOverlay;
+        var exactObjectPackageIdentityRejectsSameStem =
+            StageValidationService.ObjectIdentityMatchesForTest(
+                "MI_FACE_Nightwing",
+                "/Game/Characters/Heads/Faces/MI_FACE_Nightwing",
+                "/Game/Characters/Heads/Faces/MI_FACE_Nightwing.MI_FACE_Nightwing") &&
+            !StageValidationService.ObjectIdentityMatchesForTest(
+                "MI_FACE_Nightwing",
+                "/Game/Imposters/MI_FACE_Nightwing",
+                "/Game/Characters/Heads/Faces/MI_FACE_Nightwing.MI_FACE_Nightwing");
+        var restoredNightwingFaceTags = PartGraftService.ComponentTagsForExistingFieldRepointForTest(
+            ["TtCharacterAsset.Face"],
+            ["TtCharacterAsset.Face", "FLS"],
+            restoreExistingFieldRecipe: true);
+        var ordinaryRepointKeepsScaffoldTags = PartGraftService.ComponentTagsForExistingFieldRepointForTest(
+            ["TtCharacterAsset.Face"],
+            ["TtCharacterAsset.Face", "FLS"],
+            restoreExistingFieldRecipe: false);
+        var overlayCanRestoreBothExistingFields = PartGraftService.CanRestoreExistingFieldRecipeForTest(
+            playableRequested: true,
+            playableExists: true,
+            playableCanRepoint: true,
+            cutsceneRequested: true,
+            cutsceneExists: true,
+            cutsceneCanRepoint: true);
+        var overlayRejectsMissingRoleField = !PartGraftService.CanRestoreExistingFieldRecipeForTest(
+            playableRequested: true,
+            playableExists: true,
+            playableCanRepoint: true,
+            cutsceneRequested: true,
+            cutsceneExists: false,
+            cutsceneCanRepoint: false);
+        var overlayRejectsIncompatibleRoleField = !PartGraftService.CanRestoreExistingFieldRecipeForTest(
+            playableRequested: true,
+            playableExists: true,
+            playableCanRepoint: false,
+            cutsceneRequested: true,
+            cutsceneExists: true,
+            cutsceneCanRepoint: true);
+        Check(
+            selectsCompatibleScaffold &&
+            selectedVisualPlayableShell.EndsWith("BP_Batman_GrayGhost_Playable", StringComparison.OrdinalIgnoreCase) &&
+            selectedVisualCutsceneShell.EndsWith("BP_Batman_GrayGhost_Cutscene", StringComparison.OrdinalIgnoreCase) &&
+            exactOverlayCertificateValid &&
+            rejectsTamperedHeadRecipe &&
+            rejectsTamperedFaceAnim &&
+            rejectsTamperedIdentityMaterial &&
+            rejectsIncompatiblePreferredScaffold &&
+            packageOnlyRealProjectCannotBypassOverlay &&
+            exactObjectPackageIdentityRejectsSameStem &&
+            restoredNightwingFaceTags.SequenceEqual(
+                new[] { "TtCharacterAsset.Face", "FLS" },
+                StringComparer.OrdinalIgnoreCase) &&
+            ordinaryRepointKeepsScaffoldTags.SequenceEqual(
+                new[] { "TtCharacterAsset.Face" },
+                StringComparer.OrdinalIgnoreCase),
+            "Nightwing's static Head rejects the Batman Animated shell, selects Gray Ghost, and certifies exact Head/Face/AnimClass/body/face identities",
+            failures,
+            output);
+        Check(
+            overlayCanRestoreBothExistingFields &&
+            overlayRejectsMissingRoleField &&
+            overlayRejectsIncompatibleRoleField,
+            "automatic visual overlays require both compatible live role fields and cannot enter the synthetic component ADD path",
+            failures,
+            output);
+
+        var certificateShellProject = CreateCertifiedNightwingCapeAdapterProject();
+        var certificateShellConfigured = GliderService.TryConfigurePairedCapeAdapter(
+            certificateShellProject,
+            AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
+            "Cape",
+            out _);
+        certificateShellProject.PairedCapeAdapter!.AuthoredShellPlayablePackage =
+            "/Game/Characters/Minifig/Batman/BP_Batman_GrayGhost_Playable";
+        certificateShellProject.PairedCapeAdapter.AuthoredShellCutscenePackage =
+            "/Game/Characters/Minifig/Batman/BP_Batman_GrayGhost_Cutscene";
+        var shellLookupUsesCertificate = GliderService.TryGetAuthoredPairedCapeShell(
+            certificateShellProject,
+            out var certificatePlayableShell,
+            out var certificateCutsceneShell,
+            out _) &&
+            certificatePlayableShell.EndsWith("BP_Batman_GrayGhost_Playable", StringComparison.OrdinalIgnoreCase) &&
+            certificateCutsceneShell.EndsWith("BP_Batman_GrayGhost_Cutscene", StringComparison.OrdinalIgnoreCase);
+        Check(
+            certificateShellConfigured && shellLookupUsesCertificate,
+            "paired-cape shell lookup returns the certified compatible scaffold rather than the cosmetic donor",
+            failures,
+            output);
+
+        var coexistenceProject = CreateCertifiedNightwingCapeAdapterProject();
+        coexistenceProject.PartGrafts.Add(new SavedPartGraft
+        {
+            Slot = "Head",
+            ResolvedComponent = "Head_2",
+            InstanceId = "user-hair"
+        });
+        var headTwoDoesNotSuppressBaseHead =
+            !StageValidationService.HasLaterUserPartOverrideForTest(coexistenceProject, "Head");
+        coexistenceProject.PartGrafts.Add(new SavedPartGraft
+        {
+            Slot = "Face",
+            ResolvedComponent = "Face",
+            InstanceId = "user-face"
+        });
+        var exactFaceReplacementWins =
+            StageValidationService.HasLaterUserPartOverrideForTest(coexistenceProject, "Face");
+        coexistenceProject.PartGrafts.Add(new SavedPartGraft
+        {
+            Slot = "Body",
+            ResolvedComponent = "",
+            InstanceId = "legacy-user-body"
+        });
+        var unresolvedLegacyBodyReplacementWins =
+            StageValidationService.HasLaterUserPartOverrideForTest(coexistenceProject, "CharacterMesh0");
+        Check(
+            headTwoDoesNotSuppressBaseHead && exactFaceReplacementWins && unresolvedLegacyBodyReplacementWins,
+            "visual-overlay validation distinguishes a coexisting Head_2 attachment from exact Face/body field overrides",
+            failures,
+            output);
+
+        var baseChangeProject = CreateCertifiedNightwingCapeAdapterProject();
+        var baseChangeAdapterConfigured = GliderService.TryConfigurePairedCapeAdapter(
+            baseChangeProject,
+            AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
+            "Cape",
+            out _);
+        baseChangeProject.PartGrafts.Single(graft => !graft.IsGlider).ResolvedComponent = "Cape";
+        baseChangeProject.PartGrafts.Single(graft => graft.IsGlider).ResolvedComponent = "Torso";
+        GliderService.RefreshPairedCapeAdapterResolvedComponents(baseChangeProject);
+        baseChangeProject.GliderType = "native:Batman Animated glide cape";
+        baseChangeProject.GliderMaterial = "/Game/Regression/Materials/MI_Glide";
+        baseChangeProject.GliderGrafted = true;
+        baseChangeProject.PartGrafts.Add(new SavedPartGraft
+        {
+            Slot = "Head",
+            InstanceId = "unrelated-user-head",
+            Playable = new SavedPartGraftDonor { Slot = "Head" }
+        });
+        var removedAdapterFields = MainForm.RemovePairedCapeAdapterAtomicallyForTest(baseChangeProject);
+        Check(
+            baseChangeAdapterConfigured &&
+            baseChangeProject.PairedCapeAdapter is null &&
+            baseChangeProject.PartGrafts.Count == 1 &&
+            baseChangeProject.PartGrafts[0].InstanceId == "unrelated-user-head" &&
+            string.IsNullOrWhiteSpace(baseChangeProject.GliderType) &&
+            string.IsNullOrWhiteSpace(baseChangeProject.GliderMaterial) &&
+            string.IsNullOrWhiteSpace(baseChangeProject.GliderAnimLas) &&
+            string.IsNullOrWhiteSpace(baseChangeProject.GliderAnimMas) &&
+            !baseChangeProject.GliderGrafted &&
+            !baseChangeProject.GliderAutoEnabledCustomArchetype &&
+            !baseChangeProject.UseCustomArchetype &&
+            removedAdapterFields.Contains("Cape", StringComparer.OrdinalIgnoreCase) &&
+            removedAdapterFields.Contains("Torso", StringComparer.OrdinalIgnoreCase),
+            "changing a visual/base identity removes the bound Cape/Torso pair and all adapter-derived glider state atomically",
+            failures,
+            output);
+
+        var staleIdFallbackProject = CreateCertifiedNightwingCapeAdapterProject();
+        var staleIdFallbackConfigured = GliderService.TryConfigurePairedCapeAdapter(
+            staleIdFallbackProject,
+            AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
+            "Cape",
+            out _);
+        staleIdFallbackProject.PairedCapeAdapter!.CosmeticCapeGraftInstanceId = "retired-cosmetic-id";
+        staleIdFallbackProject.PairedCapeAdapter.GlideCapeGraftInstanceId = "retired-glider-id";
+        MainForm.RemovePairedCapeAdapterAtomicallyForTest(staleIdFallbackProject);
+        var exactSourceFallbackRemovedPair =
+            staleIdFallbackConfigured &&
+            staleIdFallbackProject.PairedCapeAdapter is null &&
+            staleIdFallbackProject.PartGrafts.Count == 0;
+
+        var corruptBoundIdProject = CreateCertifiedNightwingCapeAdapterProject();
+        var corruptBoundIdConfigured = GliderService.TryConfigurePairedCapeAdapter(
+            corruptBoundIdProject,
+            AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
+            "Cape",
+            out _);
+        var corruptBoundAdapter = corruptBoundIdProject.PairedCapeAdapter!;
+        var corruptBoundCosmetic = corruptBoundIdProject.PartGrafts.Single(graft => !graft.IsGlider);
+        var corruptCosmeticId = corruptBoundAdapter.CosmeticCapeGraftInstanceId;
+        corruptBoundCosmetic.InstanceId = "real-cosmetic-with-stale-id";
+        corruptBoundIdProject.PartGrafts.Add(new SavedPartGraft
+        {
+            Slot = "Head",
+            InstanceId = corruptCosmeticId,
+            Playable = new SavedPartGraftDonor
+            {
+                SourcePackagePath = "/Game/Regression/Corrupt/BP_UnrelatedHead_Playable",
+                Context = "playable",
+                Slot = "Head"
+            },
+            Cutscene = new SavedPartGraftDonor
+            {
+                SourcePackagePath = "/Game/Regression/Corrupt/BP_UnrelatedHead_Cutscene",
+                Context = "cutscene",
+                Slot = "Head"
+            }
+        });
+        MainForm.RemovePairedCapeAdapterAtomicallyForTest(corruptBoundIdProject);
+        var corruptIdCannotRedirectRemoval =
+            corruptBoundIdConfigured &&
+            corruptBoundIdProject.PairedCapeAdapter is null &&
+            corruptBoundIdProject.PartGrafts.Count == 1 &&
+            string.Equals(
+                corruptBoundIdProject.PartGrafts[0].InstanceId,
+                corruptCosmeticId,
+                StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(corruptBoundIdProject.PartGrafts[0].Slot, "Head", StringComparison.OrdinalIgnoreCase);
+
+        var corruptIdNoFallbackProject = CreateCertifiedNightwingCapeAdapterProject();
+        var corruptIdNoFallbackConfigured = GliderService.TryConfigurePairedCapeAdapter(
+            corruptIdNoFallbackProject,
+            AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
+            "Cape",
+            out _);
+        var corruptNoFallbackAdapter = corruptIdNoFallbackProject.PairedCapeAdapter!;
+        var corruptNoFallbackCosmetic = corruptIdNoFallbackProject.PartGrafts.Single(graft => !graft.IsGlider);
+        var corruptNoFallbackBoundId = corruptNoFallbackAdapter.CosmeticCapeGraftInstanceId;
+        corruptNoFallbackCosmetic.InstanceId = "real-cosmetic-with-invalid-source";
+        corruptNoFallbackCosmetic.Playable!.SourcePackagePath =
+            "/Game/Regression/Corrupt/BP_Cape_WrongSource_Playable";
+        corruptIdNoFallbackProject.PartGrafts.Add(new SavedPartGraft
+        {
+            Slot = "Head",
+            InstanceId = corruptNoFallbackBoundId,
+            Playable = new SavedPartGraftDonor
+            {
+                SourcePackagePath = "/Game/Regression/Corrupt/BP_UnrelatedHead_Playable",
+                Context = "playable",
+                Slot = "Head"
+            },
+            Cutscene = new SavedPartGraftDonor
+            {
+                SourcePackagePath = "/Game/Regression/Corrupt/BP_UnrelatedHead_Cutscene",
+                Context = "cutscene",
+                Slot = "Head"
+            }
+        });
+        var corruptNoFallbackAdapterBefore = corruptIdNoFallbackProject.PairedCapeAdapter;
+        var corruptNoFallbackGraftsBefore = corruptIdNoFallbackProject.PartGrafts.ToList();
+        var corruptNoFallbackLasBefore = corruptIdNoFallbackProject.GliderAnimLas;
+        var corruptNoFallbackFailedClosed = false;
+        try
+        {
+            MainForm.RemovePairedCapeAdapterAtomicallyForTest(corruptIdNoFallbackProject);
+        }
+        catch (InvalidOperationException)
+        {
+            corruptNoFallbackFailedClosed = true;
+        }
+        var corruptIdWithoutRecipeFallbackPreservesState =
+            corruptIdNoFallbackConfigured &&
+            corruptNoFallbackFailedClosed &&
+            ReferenceEquals(corruptIdNoFallbackProject.PairedCapeAdapter, corruptNoFallbackAdapterBefore) &&
+            corruptIdNoFallbackProject.PartGrafts.Count == corruptNoFallbackGraftsBefore.Count &&
+            corruptNoFallbackGraftsBefore.All(graft => corruptIdNoFallbackProject.PartGrafts.Contains(graft)) &&
+            string.Equals(
+                corruptIdNoFallbackProject.GliderAnimLas,
+                corruptNoFallbackLasBefore,
+                StringComparison.OrdinalIgnoreCase);
+
+        var ambiguousStaleIdProject = CreateCertifiedNightwingCapeAdapterProject();
+        var ambiguousStaleIdConfigured = GliderService.TryConfigurePairedCapeAdapter(
+            ambiguousStaleIdProject,
+            AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
+            "Cape",
+            out _);
+        var ambiguousCosmetic = ambiguousStaleIdProject.PartGrafts.Single(graft => !graft.IsGlider);
+        ambiguousStaleIdProject.PartGrafts.Add(new SavedPartGraft
+        {
+            Slot = "Cape",
+            InstanceId = "duplicate-cosmetic-source",
+            IsGlider = false,
+            Playable = ambiguousCosmetic.Playable,
+            Cutscene = ambiguousCosmetic.Cutscene,
+        });
+        ambiguousStaleIdProject.PairedCapeAdapter!.CosmeticCapeGraftInstanceId = "missing-cosmetic-id";
+        var ambiguousAdapterBefore = ambiguousStaleIdProject.PairedCapeAdapter;
+        var ambiguousCountBefore = ambiguousStaleIdProject.PartGrafts.Count;
+        var ambiguousLasBefore = ambiguousStaleIdProject.GliderAnimLas;
+        var ambiguousRemovalFailedClosed = false;
+        try
+        {
+            MainForm.RemovePairedCapeAdapterAtomicallyForTest(ambiguousStaleIdProject);
+        }
+        catch (InvalidOperationException)
+        {
+            ambiguousRemovalFailedClosed = true;
+        }
+        Check(
+            exactSourceFallbackRemovedPair &&
+            corruptIdCannotRedirectRemoval &&
+            corruptIdWithoutRecipeFallbackPreservesState &&
+            ambiguousStaleIdConfigured &&
+            ambiguousRemovalFailedClosed &&
+            ReferenceEquals(ambiguousStaleIdProject.PairedCapeAdapter, ambiguousAdapterBefore) &&
+            ambiguousStaleIdProject.PartGrafts.Count == ambiguousCountBefore &&
+            ambiguousStaleIdProject.GliderAnimLas == ambiguousLasBefore,
+            "atomic adapter removal ignores corrupt IDs, resolves the exact source/slot/role pair, and preserves all state when no unique pair exists",
             failures,
             output);
         var additiveCapeWithGraftedGlider = new NativeSuitProject
@@ -1030,6 +2091,395 @@ internal static class ReleaseRegressionChecks
             : $"release regressions: FAIL ({failures.Count})");
         return failures.Count == 0 ? 0 : 1;
     }
+
+    private static NativeSuitProject CreateCertifiedNightwingCapeAdapterProject()
+    {
+        const string nightwingPlayable =
+            "/Game/Characters/Minifig/Nightwing/BP_Nightwing_Default_Playable";
+        return new NativeSuitProject
+        {
+            AllowSyntheticPairedCapeVisualOverlayFixture = true,
+            PlayableTemplate = new TemplateRecord
+            {
+                PackagePath = nightwingPlayable,
+                Stem = "BP_Nightwing_Default_Playable",
+                Character = "Nightwing",
+                Role = "playable"
+            },
+            BaseProfile = new SuitBaseProfile
+            {
+                VisualBasePackage =
+                    "/Game/Characters/Minifig/Nightwing/BP_Nightwing_Default_Cutscene",
+                VisualBaseKind = "cutscene",
+                VisualFamily = "Nightwing",
+                GameplayDonorPackage = nightwingPlayable,
+                GameplayFamily = "Nightwing",
+                Eligibility = "ready"
+            },
+            // Prove that certification replaces a glide-only donor's wingsuit pose with the exact
+            // authored Cape + Torso donor's traversal/glide blocks while retaining Nightwing's
+            // general gameplay graph.
+            UseCustomArchetype = true,
+            GliderAutoEnabledCustomArchetype = true,
+            GliderAnimLas = "/Game/Animation/LayerAnimSets/Traversal/LAS_Traversal_Batman",
+            GliderAnimMas = "/Game/Animation/MontageAnimSets/Traversal/MAS_Glide_Batman",
+            PartGrafts =
+            [
+                new SavedPartGraft
+                {
+                    Slot = "Cape",
+                    Label = "Batman Animated Series native cosmetic cape",
+                    InstanceId = "nightwing-adapter-cosmetic-cape",
+                    OccupancyGroup = "cape.cosmetic",
+                    ResolvedComponent = "Cape_2",
+                    Playable = AnimatedSeriesCapeDonor("playable", isGlider: false),
+                    Cutscene = AnimatedSeriesCapeDonor("cutscene", isGlider: false)
+                },
+                new SavedPartGraft
+                {
+                    Slot = "Cape",
+                    Label = "Batman Animated Series paired glide cape",
+                    IsGlider = true,
+                    InstanceId = "nightwing-adapter-glide-cape",
+                    OccupancyGroup = "glider.primary",
+                    ResolvedComponent = "Cape",
+                    Playable = AnimatedSeriesCapeDonor("playable", isGlider: true),
+                    Cutscene = AnimatedSeriesCapeDonor("cutscene", isGlider: true)
+                }
+            ]
+        };
+    }
+
+    private static SavedPartGraftDonor AnimatedSeriesCapeDonor(string context, bool isGlider)
+    {
+        var playable = context.Equals("playable", StringComparison.OrdinalIgnoreCase);
+        var source = playable
+            ? "/Game/Characters/Minifig/Batman/BP_Batman_AnimatedSeries_Playable"
+            : "/Game/Characters/Minifig/Batman/BP_Batman_AnimatedSeries_Cutscene";
+        if (isGlider)
+        {
+            return new SavedPartGraftDonor
+            {
+                SourcePackagePath = source,
+                Context = playable ? "playable" : "cutscene",
+                Slot = "Torso",
+                Stem = playable
+                    ? "BP_Batman_AnimatedSeries_Playable"
+                    : "BP_Batman_AnimatedSeries_Cutscene",
+                MeshKind = "SkeletalMesh",
+                SemanticKind = "Torso",
+                MeshObjectPath =
+                    "/Game/Characters/Attachments/Cape/SK_CAPE_Glide.SK_CAPE_Glide",
+                AnimClassObjectName = "ABP_Cape_Glide_C",
+                AnimClassPackagePath = "/Game/Characters/Attachments/Cape/ABP_Cape_Glide",
+                AnimClassObjectPath =
+                    "/Game/Characters/Attachments/Cape/ABP_Cape_Glide.ABP_Cape_Glide_C",
+                TemplatePackagePath = source,
+                TemplateSlot = "Torso",
+                TemplateComponentClass = playable
+                    ? "SkeletalMeshComponentBudgeted"
+                    : "SkeletalMeshComponent",
+                ParentComponentOrVariableName = playable ? "CharacterMesh0" : "Mesh (CharacterMesh0)",
+                AttachSocket = "Chest_Socket",
+                Materials = playable
+                    ?
+                    [
+                        MaterialRef(
+                            "MI_CAPE_Spiked_Glide_BatmanAnimatedSeries",
+                            "/Game/Characters/Attachments/Cape/Spiked/MI_CAPE_Spiked_Glide_BatmanAnimatedSeries"),
+                        MaterialRef(
+                            "MI_CAPE_Spiked_Glide_BatmanAnimatedSeries_LOD1",
+                            "/Game/Characters/Attachments/Cape/Spiked/MI_CAPE_Spiked_Glide_BatmanAnimatedSeries_LOD1")
+                    ]
+                    :
+                    [
+                        MaterialRef(
+                            "MI_Cape_Glide_Batman_AnimatedSeries_LOD0_CUT",
+                            "/Game/Characters/Attachments/Cape/Spiked/MI_Cape_Glide_Batman_AnimatedSeries_LOD0_CUT"),
+                        MaterialRef(
+                            "MI_Cape_Glide_Batman_AnimatedSeries_LOD1_CUT",
+                            "/Game/Characters/Attachments/Cape/Spiked/MI_Cape_Glide_Batman_AnimatedSeries_LOD1_CUT")
+                    ],
+                ComponentTags = ["TtCharacterAsset.Torso", "Glider"]
+            };
+        }
+
+        var lod0Name = playable
+            ? "MI_Cape_Batman_AnimatedSeries_LOD0"
+            : "MI_Cape_Batman_AnimatedSeriesLOD0_CUT";
+        var lod0Package =
+            "/Game/Characters/Attachments/Cape/TwoHole_Spiked/Materials/" + lod0Name;
+        var lod1Name = playable
+            ? "MI_Cape_Batman_AnimatedSeries_LOD1"
+            : "MI_Cape_Batman_AnimatedSeries_LOD1_CUT";
+        var lod1Package =
+            "/Game/Characters/Attachments/Cape/TwoHole_Spiked/Materials/" + lod1Name;
+        return new SavedPartGraftDonor
+        {
+            SourcePackagePath = source,
+            Context = playable ? "playable" : "cutscene",
+            Slot = "Cape",
+            Stem = playable
+                ? "BP_Batman_AnimatedSeries_Playable"
+                : "BP_Batman_AnimatedSeries_Cutscene",
+            MeshKind = "SkeletalMesh",
+            SemanticKind = "Cape",
+            MeshObjectPath = playable
+                ? "/Game/Characters/Attachments/Cape/TwoHole_Spiked/SK_CAPE_TwoHole_Spiked.SK_CAPE_TwoHole_Spiked"
+                : "/Game/Characters/Attachments/Cape/TwoHole_Spiked/SK_CAPE_TwoHole_Spiked_Advanced.SK_CAPE_TwoHole_Spiked_Advanced",
+            TemplatePackagePath = source,
+            TemplateSlot = "Cape",
+            TemplateComponentClass = playable
+                ? "SkeletalMeshComponentBudgeted"
+                : "SkeletalMeshComponent",
+            ParentComponentOrVariableName = playable ? "CharacterMesh0" : "Mesh (CharacterMesh0)",
+            AttachSocket = "Root",
+            Materials =
+            [
+                MaterialRef(lod0Name, lod0Package),
+                MaterialRef(playable ? lod1Name : lod0Name, playable ? lod1Package : lod0Package),
+                MaterialRef(lod1Name, lod1Package)
+            ],
+            ComponentTags = ["TtCharacterAsset.Cape", "Cape"]
+        };
+    }
+
+    private sealed record VisualOverlayRegressionFixture(
+        NativeSuitProject Project,
+        NativeSuitPartIndex Index,
+        SavedPartGraft CosmeticCape,
+        SavedPartGraft GlideCape,
+        IReadOnlyList<SavedPartGraft> OverlayGrafts,
+        PairedCapeVisualOverlayService.IdentityMaterials IdentityMaterials);
+
+    private static VisualOverlayRegressionFixture CreateVisualOverlayRegressionFixture()
+    {
+        const string nightwingPlayable =
+            "/Game/Characters/Minifig/Nightwing/BP_Nightwing_Default_Playable";
+        const string nightwingCutscene =
+            "/Game/Characters/Minifig/Nightwing/BP_Nightwing_Default_Cutscene";
+        const string animatedPlayable =
+            "/Game/Characters/Minifig/Batman/BP_Batman_AnimatedSeries_Playable";
+        const string animatedCutscene =
+            "/Game/Characters/Minifig/Batman/BP_Batman_AnimatedSeries_Cutscene";
+        const string grayGhostPlayable =
+            "/Game/Characters/Minifig/Batman/BP_Batman_GrayGhost_Playable";
+        const string grayGhostCutscene =
+            "/Game/Characters/Minifig/Batman/BP_Batman_GrayGhost_Cutscene";
+
+        var index = new NativeSuitPartIndex
+        {
+            Parts =
+            [
+                VisualOverlayIndexPart(nightwingPlayable, "playable", "Head", "StaticMeshComponentBudgeted",
+                    "StaticMesh", "/Game/Characters/Attachments/Hair/SM_HAIR_ShortWavyPartRight.SM_HAIR_ShortWavyPartRight",
+                    animObject: "", animPackage: ""),
+                VisualOverlayIndexPart(nightwingCutscene, "cutscene", "Head", "StaticMeshComponent",
+                    "StaticMesh", "/Game/Characters/Attachments/Hair/SM_HAIR_ShortWavyPartRight.SM_HAIR_ShortWavyPartRight",
+                    animObject: "", animPackage: ""),
+                VisualOverlayIndexPart(nightwingPlayable, "playable", "Face", "SkeletalMeshComponentBudgeted",
+                    "SkeletalMesh", "/Game/Characters/Heads/Faces/SK_FACE_Superhero.SK_FACE_Superhero",
+                    animObject: "ABP_LEGOface_Superhero_C", animPackage: "/Game/Characters/Heads/Faces/ABP_LEGOface_Superhero"),
+                VisualOverlayIndexPart(nightwingCutscene, "cutscene", "Face", "SkeletalMeshComponent",
+                    "SkeletalMesh", "/Game/Characters/Heads/Faces/SK_FACE_Superhero.SK_FACE_Superhero",
+                    animObject: "ABP_LEGOface_Superhero_C", animPackage: "/Game/Characters/Heads/Faces/ABP_LEGOface_Superhero"),
+
+                // The cosmetic donor is the preferred shell, but its skeletal Head cannot host
+                // Nightwing's native static hair field without changing the reflected schema.
+                VisualOverlayIndexPart(animatedPlayable, "playable", "Head", "SkeletalMeshComponentBudgeted",
+                    "SkeletalMesh", "/Game/Characters/Heads/Batman/SK_Head_Batman.SK_Head_Batman"),
+                VisualOverlayIndexPart(animatedCutscene, "cutscene", "Head", "SkeletalMeshComponent",
+                    "SkeletalMesh", "/Game/Characters/Heads/Batman/SK_Head_Batman.SK_Head_Batman"),
+                VisualOverlayIndexPart(animatedPlayable, "playable", "Face", "SkeletalMeshComponentBudgeted",
+                    "SkeletalMesh", "/Game/Characters/Heads/Faces/SK_FACE_Batman.SK_FACE_Batman",
+                    animObject: "ABP_LEGOface_Batman_C", animPackage: "/Game/Characters/Heads/Faces/ABP_LEGOface_Batman"),
+                VisualOverlayIndexPart(animatedCutscene, "cutscene", "Face", "SkeletalMeshComponent",
+                    "SkeletalMesh", "/Game/Characters/Heads/Faces/SK_FACE_Batman.SK_FACE_Batman",
+                    animObject: "ABP_LEGOface_Batman_C", animPackage: "/Game/Characters/Heads/Faces/ABP_LEGOface_Batman"),
+                VisualOverlayIndexPart(animatedPlayable, "playable", "Cape", "SkeletalMeshComponentBudgeted",
+                    "SkeletalMesh", AnimatedSeriesCapeDonor("playable", false).MeshObjectPath),
+                VisualOverlayIndexPart(animatedCutscene, "cutscene", "Cape", "SkeletalMeshComponent",
+                    "SkeletalMesh", AnimatedSeriesCapeDonor("cutscene", false).MeshObjectPath),
+                VisualOverlayIndexPart(animatedPlayable, "playable", "Torso", "SkeletalMeshComponentBudgeted",
+                    "SkeletalMesh", AnimatedSeriesCapeDonor("playable", true).MeshObjectPath,
+                    animObject: "ABP_Cape_Glide_C", animPackage: "/Game/Characters/Attachments/Cape/ABP_Cape_Glide"),
+                VisualOverlayIndexPart(animatedCutscene, "cutscene", "Torso", "SkeletalMeshComponent",
+                    "SkeletalMesh", AnimatedSeriesCapeDonor("cutscene", true).MeshObjectPath,
+                    animObject: "ABP_Cape_Glide_C", animPackage: "/Game/Characters/Attachments/Cape/ABP_Cape_Glide"),
+
+                // Gray Ghost owns the same authored Cape/Torso field classes and a static Head,
+                // making it the first safe Batman scaffold for the Nightwing overlay.
+                VisualOverlayIndexPart(grayGhostPlayable, "playable", "Head", "StaticMeshComponentBudgeted",
+                    "StaticMesh", "/Game/Characters/Attachments/Hair/SM_HAIR_GrayGhost.SM_HAIR_GrayGhost"),
+                VisualOverlayIndexPart(grayGhostCutscene, "cutscene", "Head", "StaticMeshComponent",
+                    "StaticMesh", "/Game/Characters/Attachments/Hair/SM_HAIR_GrayGhost.SM_HAIR_GrayGhost"),
+                VisualOverlayIndexPart(grayGhostPlayable, "playable", "Face", "SkeletalMeshComponentBudgeted",
+                    "SkeletalMesh", "/Game/Characters/Heads/Faces/SK_FACE_Batman.SK_FACE_Batman",
+                    animObject: "ABP_LEGOface_Batman_C", animPackage: "/Game/Characters/Heads/Faces/ABP_LEGOface_Batman"),
+                VisualOverlayIndexPart(grayGhostCutscene, "cutscene", "Face", "SkeletalMeshComponent",
+                    "SkeletalMesh", "/Game/Characters/Heads/Faces/SK_FACE_Batman.SK_FACE_Batman",
+                    animObject: "ABP_LEGOface_Batman_C", animPackage: "/Game/Characters/Heads/Faces/ABP_LEGOface_Batman"),
+                VisualOverlayIndexPart(grayGhostPlayable, "playable", "Cape", "SkeletalMeshComponentBudgeted",
+                    "SkeletalMesh", "/Game/Characters/Attachments/Cape/SK_CAPE_GrayGhost.SK_CAPE_GrayGhost"),
+                VisualOverlayIndexPart(grayGhostCutscene, "cutscene", "Cape", "SkeletalMeshComponent",
+                    "SkeletalMesh", "/Game/Characters/Attachments/Cape/SK_CAPE_GrayGhost.SK_CAPE_GrayGhost"),
+                VisualOverlayIndexPart(grayGhostPlayable, "playable", "Torso", "SkeletalMeshComponentBudgeted",
+                    "SkeletalMesh", "/Game/Characters/Attachments/Cape/SK_CAPE_Glide.SK_CAPE_Glide",
+                    animObject: "ABP_Cape_Glide_C", animPackage: "/Game/Characters/Attachments/Cape/ABP_Cape_Glide"),
+                VisualOverlayIndexPart(grayGhostCutscene, "cutscene", "Torso", "SkeletalMeshComponent",
+                    "SkeletalMesh", "/Game/Characters/Attachments/Cape/SK_CAPE_Glide.SK_CAPE_Glide",
+                    animObject: "ABP_Cape_Glide_C", animPackage: "/Game/Characters/Attachments/Cape/ABP_Cape_Glide"),
+            ]
+        };
+
+        var overlayGrafts = new[]
+        {
+            VisualOverlayGraft(index, nightwingPlayable, nightwingCutscene, "Face"),
+            VisualOverlayGraft(index, nightwingPlayable, nightwingCutscene, "Head"),
+        };
+        var project = CreateCertifiedNightwingCapeAdapterProject();
+        project.AllowSyntheticPairedCapeVisualOverlayFixture = false;
+        var cosmetic = project.PartGrafts.Single(graft => !graft.IsGlider);
+        var glider = project.PartGrafts.Single(graft => graft.IsGlider);
+        var identity = new PairedCapeVisualOverlayService.IdentityMaterials(
+            "/Game/Characters/Minifig/Nightwing/Materials/MI_Nightwing",
+            "/Game/Characters/Minifig/Nightwing/Materials/MI_Nightwing_CUT",
+            "/Game/Characters/Heads/Faces/MI_FACE_Nightwing",
+            "/Game/Characters/Heads/Faces/MI_FACE_Nightwing_CUT");
+        project.PairedCapeAdapter = new PairedCapeAdapterProfile
+        {
+            SchemaVersion = GliderService.PairedCapeAdapterSchemaVersion,
+            AdapterId = "visual-overlay-regression",
+            GameplayDonorPackage = nightwingPlayable,
+            NativeGliderComponent = "Cape",
+            AuthoredShellPlayablePackage = grayGhostPlayable,
+            AuthoredShellCutscenePackage = grayGhostCutscene,
+            CosmeticCapeGraftInstanceId = cosmetic.InstanceId,
+            GlideCapeGraftInstanceId = glider.InstanceId,
+            CosmeticPlayableSourcePackage = cosmetic.Playable!.SourcePackagePath,
+            CosmeticCutsceneSourcePackage = cosmetic.Cutscene!.SourcePackagePath,
+            GliderPlayableSourcePackage = glider.Playable!.SourcePackagePath,
+            GliderCutsceneSourcePackage = glider.Cutscene!.SourcePackagePath,
+            PairedAnimClassObjectName = "ABP_Cape_Glide_C",
+            GlideAnimLasPackage = project.GliderAnimLas,
+            GlideAnimMasPackage = project.GliderAnimMas,
+            ResolvedCosmeticComponent = "Cape",
+            ResolvedGliderComponent = "Torso",
+            VisualOverlay = new PairedCapeVisualOverlayProfile
+            {
+                VisualPlayableSourcePackage = nightwingPlayable,
+                VisualCutsceneSourcePackage = nightwingCutscene,
+                ComponentGrafts = overlayGrafts.ToList(),
+                PlayableBodyMaterialPackage = identity.PlayableBody,
+                CutsceneBodyMaterialPackage = identity.CutsceneBody,
+                PlayableFaceMaterialPackage = identity.PlayableFace,
+                CutsceneFaceMaterialPackage = identity.CutsceneFace,
+            }
+        };
+        return new(project, index, cosmetic, glider, overlayGrafts, identity);
+    }
+
+    private static SavedPartGraft VisualOverlayGraft(
+        NativeSuitPartIndex index,
+        string playablePackage,
+        string cutscenePackage,
+        string slot)
+    {
+        var playable = index.Parts.Single(part =>
+            part.SourcePackagePath == playablePackage && part.Context == "playable" && part.Slot == slot);
+        var cutscene = index.Parts.Single(part =>
+            part.SourcePackagePath == cutscenePackage && part.Context == "cutscene" && part.Slot == slot);
+        return new SavedPartGraft
+        {
+            Slot = slot,
+            Label = "paired-cape visual base " + slot,
+            InstanceId = "paired-cape-overlay-" + slot.ToLowerInvariant(),
+            OccupancyGroup = "paired-cape.visual." + slot.ToLowerInvariant(),
+            Playable = VisualOverlayDonor(playable),
+            Cutscene = VisualOverlayDonor(cutscene),
+        };
+    }
+
+    private static SavedPartGraftDonor VisualOverlayDonor(NativeSuitPartRecord part) => new()
+    {
+        SourcePackagePath = part.SourcePackagePath,
+        Slot = part.Slot,
+        Context = part.Context,
+        MeshObjectPath = part.MeshObjectPath,
+        AnimClassObjectName = part.AnimClassObjectName,
+        AnimClassPackagePath = part.AnimClassPackagePath,
+        AnimClassObjectPath = part.AnimClassObjectPath,
+        Stem = part.Stem,
+        MeshKind = part.MeshKind,
+        SemanticKind = part.SemanticKind,
+        TemplatePackagePath = part.TemplatePackagePath,
+        TemplateSlot = part.TemplateSlot,
+        TemplateComponentClass = part.TemplateComponentClass,
+        ParentComponentOrVariableName = part.ParentComponentOrVariableName,
+        AttachSocket = part.AttachSocket,
+        Materials = part.Materials.Select(material => MaterialRef(material.ObjectName, material.PackagePath)).ToList(),
+        ComponentTags = part.ComponentTags.ToList(),
+    };
+
+    private static NativeSuitPartRecord VisualOverlayIndexPart(
+        string package,
+        string context,
+        string slot,
+        string componentClass,
+        string meshKind,
+        string meshObjectPath,
+        string animObject = "",
+        string animPackage = "")
+    {
+        var meshObject = meshObjectPath[(meshObjectPath.LastIndexOf('.') + 1)..];
+        var nightwingFace = package.Contains("/Nightwing/", StringComparison.OrdinalIgnoreCase) &&
+                            slot.Equals("Face", StringComparison.OrdinalIgnoreCase);
+        var materialName = nightwingFace
+            ? context == "playable" ? "MI_FACE_Nightwing" : "MI_FACE_Nightwing_CUT"
+            : "MI_" + slot + "_" + UnrealPathUtil.AssetName(package);
+        var materialPackage = nightwingFace
+            ? "/Game/Characters/Heads/Faces/" + materialName
+            : "/Game/Regression/Materials/" + materialName;
+        var tags = slot.Equals("Cape", StringComparison.OrdinalIgnoreCase)
+            ? new List<string> { "TtCharacterAsset.Cape", "Cape" }
+            : slot.Equals("Torso", StringComparison.OrdinalIgnoreCase)
+                ? new List<string> { "TtCharacterAsset.Torso", "Glider" }
+                : new List<string> { "TtCharacterAsset." + slot };
+        return new NativeSuitPartRecord
+        {
+            SourcePackagePath = package,
+            CharacterFolder = package.Contains("/Nightwing/", StringComparison.OrdinalIgnoreCase) ? "Nightwing" : "Batman",
+            Stem = UnrealPathUtil.AssetName(package),
+            Context = context,
+            Slot = slot,
+            ComponentClass = componentClass,
+            MeshKind = meshKind,
+            MeshObjectName = meshObject,
+            MeshPackagePath = meshObjectPath[..meshObjectPath.LastIndexOf('.')],
+            MeshObjectPath = meshObjectPath,
+            AnimClassObjectName = animObject,
+            AnimClassPackagePath = animPackage,
+            AnimClassObjectPath = string.IsNullOrWhiteSpace(animObject) ? "" : animPackage + "." + animObject,
+            Materials = [MaterialRef(materialName, materialPackage)],
+            ComponentTags = tags,
+            SemanticKind = slot,
+            TemplatePackagePath = package,
+            TemplateSlot = slot,
+            TemplateComponentClass = componentClass,
+            ParentComponentOrVariableName = context == "playable" ? "CharacterMesh0" : "Mesh (CharacterMesh0)",
+            AttachSocket = slot.Equals("Head", StringComparison.OrdinalIgnoreCase)
+                ? "HeadStud_Attach_Socket"
+                : slot.Equals("Face", StringComparison.OrdinalIgnoreCase) ? "Head_Socket" : "Root",
+        };
+    }
+
+    private static NativeSuitObjectRef MaterialRef(string objectName, string packagePath) => new()
+    {
+        ObjectName = objectName,
+        PackagePath = packagePath,
+        ObjectPath = packagePath + "." + objectName,
+        ClassName = "MaterialInstanceConstant"
+    };
 
     private static void Check(
         bool condition,

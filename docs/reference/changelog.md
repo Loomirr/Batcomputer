@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.9.0-beta.7
+
+- Base selection, reselection, and declarative replay are transactional. A failed rebuild restores
+  the prior project and generated stages and leaves packaging blocked until replay completes.
+- The native part index follows the active extracted Content root, reloads or rebuilds for the
+  current workspace, and can be refreshed directly from the main menu.
+- Older saved grafts recover complete donor recipes only from exact source-package, mesh, and role
+  matches before replay.
+- Project-owned OBJ sources migrate safely when a base change derives a new slot ID, with
+  no-overwrite moves and targeted rollback on failure.
+- Batmite `_Quest` visuals can be paired with a Robin playable donor without returning to the base
+  picker or losing the selected appearance.
+- A schema-safe dynamic paired-cape adapter can retain a Nightwing donor's appearance and general
+  behavior while replacing only Nightwing's glide/traversal categories with the Batman LAS/MAS
+  blocks required by a native Batman cape. Validation rejects competing glide controllers. The
+  corrected appearance/animation path passed in-game acceptance with Nightwing's normal playset
+  intact and the Batman cape-glide animation active.
+
 ## 0.9.0-beta.6
 
 - All top-level windows and dialogs are resizable and constrained to usable single-monitor bounds,

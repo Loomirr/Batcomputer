@@ -47,6 +47,8 @@ public sealed class PartGraftService
             targetSlot: "Torso2",
             cloneSlot: "Face",
             attachSocket: "Chest_Socket",
+            preferDonorComponentShell: false,
+            restoreExistingFieldRecipe: false,
             stageName: "GraftedTorso2Stage",
             reportFileName: "torso2-graft-report.json");
     }
@@ -57,7 +59,9 @@ public sealed class PartGraftService
         NativeSuitPartRecord? cutscenePart,
         string targetSlot,
         string cloneSlot,
-        string attachSocket)
+        string attachSocket,
+        bool preferDonorComponentShell = false,
+        bool restoreExistingFieldRecipe = false)
     {
         return CreateSelectedPartGraftedStage(
             project,
@@ -66,6 +70,8 @@ public sealed class PartGraftService
             targetSlot,
             cloneSlot,
             attachSocket,
+            preferDonorComponentShell,
+            restoreExistingFieldRecipe,
             stageName: "GraftedPartStage",
             reportFileName: "selected-part-graft-report.json");
     }
@@ -77,6 +83,8 @@ public sealed class PartGraftService
         string targetSlot,
         string cloneSlot,
         string attachSocket,
+        bool preferDonorComponentShell,
+        bool restoreExistingFieldRecipe,
         string stageName,
         string reportFileName)
     {
@@ -151,6 +159,29 @@ public sealed class PartGraftService
                 cutscenePart,
                 mappingsPath);
 
+        if (!CanRestoreExistingFieldRecipe(
+                restoreExistingFieldRecipe,
+                playablePart is not null,
+                playableSlotExists,
+                playableCanRepoint,
+                cutscenePart is not null,
+                cutsceneSlotExists,
+                cutsceneCanRepoint))
+        {
+            var rejectedRoles = new List<string>();
+            if (playablePart is not null && (!playableSlotExists || !playableCanRepoint))
+            {
+                rejectedRoles.Add("playable");
+            }
+            if (cutscenePart is not null && (!cutsceneSlotExists || !cutsceneCanRepoint))
+            {
+                rejectedRoles.Add("cutscene");
+            }
+            throw new InvalidOperationException(
+                $"The certified paired-cape visual overlay cannot restore existing field '{targetSlot}' for {string.Join(" and ", rejectedRoles)}: " +
+                "the live authored field is missing or has an incompatible component class. Batcomputer refused to append a replacement reflected field.");
+        }
+
         // A retry can arrive after the playable write succeeded but the cutscene package was
         // locked. In that state only the playable owns the requested slot. Repoint the role that
         // already exists and ADD the missing role under the same name; deciding from playable
@@ -165,7 +196,8 @@ public sealed class PartGraftService
                     playablePart,
                     cutscenePart,
                     applyToPlayable: playableSlotExists,
-                    applyToCutscene: cutsceneSlotExists);
+                    applyToCutscene: cutsceneSlotExists,
+                    restoreExistingFieldRecipe: restoreExistingFieldRecipe);
                 batch.PackageResults.AddRange(repoint.PackageResults);
             }
 
@@ -179,6 +211,7 @@ public sealed class PartGraftService
                     targetSlot,
                     cloneSlot,
                     attachSocket,
+                    preferDonorComponentShell,
                     mappingsPath));
             }
             if (cutscenePart is not null && !cutsceneSlotExists)
@@ -191,6 +224,7 @@ public sealed class PartGraftService
                     targetSlot,
                     cloneSlot,
                     attachSocket,
+                    preferDonorComponentShell,
                     mappingsPath));
             }
 
@@ -233,6 +267,7 @@ public sealed class PartGraftService
                 targetSlot: actualTargetSlot,
                 cloneSlot: cloneSlot,
                 attachSocket: attachSocket,
+                preferDonorComponentShell: preferDonorComponentShell,
                 mappingsPath: mappingsPath));
         }
 
@@ -246,6 +281,7 @@ public sealed class PartGraftService
                 targetSlot: actualTargetSlot,
                 cloneSlot: cloneSlot,
                 attachSocket: attachSocket,
+                preferDonorComponentShell: preferDonorComponentShell,
                 mappingsPath: mappingsPath));
         }
 
@@ -256,6 +292,34 @@ public sealed class PartGraftService
         batch.ReportPath = TryWriteBatchReport(reportPath, batch);
         return batch;
     }
+
+    private static bool CanRestoreExistingFieldRecipe(
+        bool restoreExistingFieldRecipe,
+        bool playableRequested,
+        bool playableExists,
+        bool playableCanRepoint,
+        bool cutsceneRequested,
+        bool cutsceneExists,
+        bool cutsceneCanRepoint) =>
+        !restoreExistingFieldRecipe ||
+        ((!playableRequested || playableExists && playableCanRepoint) &&
+         (!cutsceneRequested || cutsceneExists && cutsceneCanRepoint));
+
+    internal static bool CanRestoreExistingFieldRecipeForTest(
+        bool playableRequested,
+        bool playableExists,
+        bool playableCanRepoint,
+        bool cutsceneRequested,
+        bool cutsceneExists,
+        bool cutsceneCanRepoint) =>
+        CanRestoreExistingFieldRecipe(
+            restoreExistingFieldRecipe: true,
+            playableRequested,
+            playableExists,
+            playableCanRepoint,
+            cutsceneRequested,
+            cutsceneExists,
+            cutsceneCanRepoint);
 
     private static string TryWriteBatchReport(string reportPath, PartGraftBatchResult batch)
     {
@@ -548,7 +612,8 @@ public sealed class PartGraftService
         NativeSuitPartRecord? playablePart,
         NativeSuitPartRecord? cutscenePart,
         bool applyToPlayable = true,
-        bool applyToCutscene = true)
+        bool applyToCutscene = true,
+        bool restoreExistingFieldRecipe = false)
     {
         var batch = new PartGraftBatchResult { Status = "created", CreatedUtc = DateTime.UtcNow };
         var graftedContentRoot = Path.Combine(GuiOutputRoot, project.SlotId, "GraftedPartStage", "LEGOBatmanLotDK", "Content");
@@ -633,7 +698,14 @@ public sealed class PartGraftService
                     continue;
                 }
 
-                SetComponentTemplateDataLive(asset, comp, part, meshImport, animImport, materialImports, existingTags);
+                SetComponentTemplateDataLive(
+                    asset,
+                    comp,
+                    part,
+                    meshImport,
+                    animImport,
+                    materialImports,
+                    ComponentTagsForExistingFieldRepoint(existingTags, part.ComponentTags, restoreExistingFieldRecipe));
                 comp.CreateBeforeSerializationDependencies = BuildCreateBeforeSerializationDependenciesLive(meshImport, animImport, materialImports);
 
                 // For a GLIDER repoint, also move the SCS node's attach socket to the part's
@@ -643,13 +715,35 @@ public sealed class PartGraftService
                 // so ordinary component repoints (head/torso/etc.) are untouched. Only applied
                 // when the node actually has an AttachToName (root nodes don't).
                 var isGliderRepoint = GliderService.IsNativeGliderPart(part);
-                if (isGliderRepoint && !string.IsNullOrWhiteSpace(part.AttachSocket))
+                if ((isGliderRepoint || restoreExistingFieldRecipe) &&
+                    !string.IsNullOrWhiteSpace(part.AttachSocket))
                 {
                     var nodeIndex = FindScsNodeBySlotLive(asset, componentName);
-                    if (nodeIndex != 0 && asset.Exports[nodeIndex - 1] is NormalExport scsNode &&
-                        FindPropertyLive<NamePropertyData>(scsNode.Data, "AttachToName") is not null)
+                    if (nodeIndex != 0 && asset.Exports[nodeIndex - 1] is NormalExport scsNode)
                     {
-                        SetNamePropertyValueLive(asset, scsNode.Data, "AttachToName", part.AttachSocket);
+                        if (restoreExistingFieldRecipe)
+                        {
+                            SetNamePropertyValueLive(asset, scsNode.Data, "AttachToName", part.AttachSocket);
+                            if (string.IsNullOrWhiteSpace(part.ParentComponentOrVariableName))
+                            {
+                                throw new InvalidOperationException(
+                                    $"The certified visual-base recipe for '{componentName}' has no SCS parent identity.");
+                            }
+                            SetNamePropertyValueLive(
+                                asset,
+                                scsNode.Data,
+                                "ParentComponentOrVariableName",
+                                part.ParentComponentOrVariableName);
+                        }
+                        else if (FindPropertyLive<NamePropertyData>(scsNode.Data, "AttachToName") is not null)
+                        {
+                            SetNamePropertyValueLive(asset, scsNode.Data, "AttachToName", part.AttachSocket);
+                        }
+                    }
+                    else if (restoreExistingFieldRecipe)
+                    {
+                        throw new InvalidOperationException(
+                            $"The certified visual-base field '{componentName}' is not linked to a live SCS node.");
                     }
                 }
 
@@ -674,6 +768,18 @@ public sealed class PartGraftService
         return batch;
     }
 
+    private static IReadOnlyCollection<string>? ComponentTagsForExistingFieldRepoint(
+        IReadOnlyCollection<string>? existingTags,
+        IReadOnlyCollection<string>? donorTags,
+        bool restoreExistingFieldRecipe) =>
+        restoreExistingFieldRecipe ? donorTags ?? [] : existingTags;
+
+    internal static IReadOnlyList<string> ComponentTagsForExistingFieldRepointForTest(
+        IReadOnlyCollection<string>? existingTags,
+        IReadOnlyCollection<string>? donorTags,
+        bool restoreExistingFieldRecipe) =>
+        ComponentTagsForExistingFieldRepoint(existingTags, donorTags, restoreExistingFieldRecipe)?.ToList() ?? [];
+
     private NativeSuitPartRecord? ResolveTemplateRecipe(NativeSuitPartRecord? part, string role)
     {
         if (part is null)
@@ -696,7 +802,21 @@ public sealed class PartGraftService
                  candidate.MeshObjectName.Equals(part.MeshObjectName, StringComparison.OrdinalIgnoreCase)))
             .ToList();
 
+        // Shared meshes (especially SK_CAPE_Glide) appear on many character BPs. Preserve the
+        // exact selected donor whenever it is present instead of silently taking the first row for
+        // that mesh/context; certified cape pairs depend on their component shell coming from the
+        // same playable/cutscene package as the saved recipe.
         var template = candidates.FirstOrDefault(candidate =>
+                candidate.Context.Equals(role, StringComparison.OrdinalIgnoreCase) &&
+                candidate.SourcePackagePath.Equals(
+                    part.SourcePackagePath,
+                    StringComparison.OrdinalIgnoreCase))
+            ?? candidates.FirstOrDefault(candidate =>
+                candidate.Context.Equals(role, StringComparison.OrdinalIgnoreCase) &&
+                candidate.SourcePackagePath.Equals(
+                    part.TemplatePackagePath,
+                    StringComparison.OrdinalIgnoreCase))
+            ?? candidates.FirstOrDefault(candidate =>
                 candidate.Context.Equals(role, StringComparison.OrdinalIgnoreCase))
             ?? candidates.FirstOrDefault();
 
@@ -750,6 +870,7 @@ public sealed class PartGraftService
         string targetSlot,
         string cloneSlot,
         string attachSocket,
+        bool preferDonorComponentShell,
         string? mappingsPath)
     {
         var result = new PartGraftPackageResult
@@ -792,7 +913,24 @@ public sealed class PartGraftService
             NormalExport newComponent;
             NormalExport newNode;
             var cloneNodeIndex = FindCloneNodeForPartLive(asset, cloneSlot, donorPart);
-            if (cloneNodeIndex != 0)
+            if (preferDonorComponentShell)
+            {
+                // Certified adapters need the authentic native cape shell, not merely another
+                // skeletal component from the gameplay donor with mesh/material fields replaced.
+                if (!TryBuildComponentShellFromDonorLive(
+                        asset,
+                        donorPart,
+                        mappings,
+                        out newComponent,
+                        out newNode))
+                {
+                    throw new InvalidOperationException(
+                        $"Could not clone the authentic donor component shell for '{donorPart.Slot}' " +
+                        $"from '{donorPart.SourcePackagePath}'. The paired-cape adapter will not " +
+                        "fall back to an unrelated local skeletal component.");
+                }
+            }
+            else if (cloneNodeIndex != 0)
             {
                 var cloneNode = asset.Exports[cloneNodeIndex - 1] as NormalExport
                     ?? throw new InvalidOperationException($"Clone SCS slot '{cloneSlot}' was not a NormalExport.");
@@ -811,7 +949,7 @@ public sealed class PartGraftService
             }
             else if (EnableDonorStaticShellGrafts &&
                      donorPart.MeshKind.Equals("StaticMesh", StringComparison.OrdinalIgnoreCase) &&
-                     TryBuildStaticShellFromDonorLive(asset, donorPart, mappings, out newComponent, out newNode))
+                     TryBuildComponentShellFromDonorLive(asset, donorPart, mappings, out newComponent, out newNode))
             {
                 // The donor template supplies the StaticMeshComponent shape the base lacks.
             }
@@ -1137,15 +1275,13 @@ public sealed class PartGraftService
     }
 
     /// <summary>
-    /// Builds a StaticMeshComponent SCS node + template for grafting when the TARGET base
-    /// has no static component of its own to clone (e.g. Batman, whose pegs are inherited
-    /// from a parent class). We load the donor asset (e.g. ThomasWayne's playable), lift its
-    /// genuine static component template + SCS node, and rebase their class + name references
-    /// into the target. This is NOT class conversion - the donor template is authentically a
-    /// StaticMeshComponent, so its serialized property set is already correct; we only remap
-    /// cross-asset indices/names. The caller overwrites mesh/materials/tags/wiring afterward.
+    /// Builds an authentic component SCS node + template from the donor package. Static parts use
+    /// this when the target has no static shell; certified paired-cape adapters also use it for an
+    /// appended skeletal cosmetic cape so no unrelated face/body/glider shell is repurposed. This
+    /// is not class conversion: the donor template's native class and serialized property shape are
+    /// retained, while cross-package references are rebased and visual fields are overwritten.
     /// </summary>
-    private static bool TryBuildStaticShellFromDonorLive(
+    private static bool TryBuildComponentShellFromDonorLive(
         UAsset target,
         NativeSuitPartRecord donorPart,
         Usmap? mappings,
@@ -1186,7 +1322,7 @@ public sealed class PartGraftService
         var donorNodeIndex = FindScsNodeBySlotLive(donor, templateSlot);
         if (donorNodeIndex == 0)
         {
-            donorNodeIndex = FindCloneNodeForMeshKindLive(donor, templateSlot, "StaticMesh");
+            donorNodeIndex = FindCloneNodeForMeshKindLive(donor, templateSlot, donorPart.MeshKind);
         }
         if (donorNodeIndex == 0 || donor.Exports[donorNodeIndex - 1] is not NormalExport donorNode)
         {
@@ -1200,9 +1336,13 @@ public sealed class PartGraftService
             return false;
         }
 
-        // Guard: only accept an authentically static template.
+        // Guard: the donor shell must authentically match the requested mesh kind.
         var donorTemplateClass = donorTemplate.GetExportClassType().Value?.ToString() ?? "";
-        if (!donorTemplateClass.Contains("StaticMesh", StringComparison.OrdinalIgnoreCase))
+        var donorIsStatic = donorTemplateClass.Contains("StaticMesh", StringComparison.OrdinalIgnoreCase);
+        var donorIsSkeletal = donorTemplateClass.Contains("Skeletal", StringComparison.OrdinalIgnoreCase) ||
+                              donorTemplateClass.Contains("SkinnedMesh", StringComparison.OrdinalIgnoreCase);
+        var wantsStatic = donorPart.MeshKind.Equals("StaticMesh", StringComparison.OrdinalIgnoreCase);
+        if (wantsStatic ? !donorIsStatic : !donorIsSkeletal)
         {
             return false;
         }
@@ -1223,16 +1363,24 @@ public sealed class PartGraftService
         newComponent.Data = DeepCloneProperties(donorTemplate.Data);
         newComponent.Asset = target;
         newComponent.ClassIndex = EnsureImportFromDonorLive(target, donor, donorTemplate.ClassIndex);
-        // CRITICAL FIX (2026-07-10): the CDO archetype link. Thomas's WORKING native hair template
-        // is instantiated against its archetype `Default__StaticMeshComponent` - visible as the
-        // preload dep serBeforeCreate=[StaticMeshComponent, Default__StaticMeshComponent]. In these
-        // cooked assets the template's own TemplateIndex field is 0 (the archetype is carried by
-        // that dependency array, which the caller rebuilds from [ClassIndex, TemplateIndex]).
-        // So we must set TemplateIndex to the CDO import EXPLICITLY, derived from the class name -
-        // rebasing the donor's TemplateIndex yields 0 and drops the CDO, leaving the loader with no
-        // archetype to instantiate → crash on menu HOVER (the exact repeated failure).
-        newComponent.TemplateIndex = EnsureObjectImportLive(
-            target, "/Script/Engine", "Default__" + donorTemplateClass, "/Script/Engine", donorTemplateClass);
+        // Preserve the donor's explicit component archetype when present. Some cooked templates
+        // serialize TemplateIndex=0 and carry the class CDO only through preload dependencies, so
+        // synthesize that exact class CDO import as a fallback (the static-hair hover crash was the
+        // original proof that this link is mandatory).
+        newComponent.TemplateIndex = EnsureImportFromDonorLive(target, donor, donorTemplate.TemplateIndex);
+        if (newComponent.TemplateIndex.IsNull() && donorTemplate.ClassIndex.IsImport())
+        {
+            var donorClass = donorTemplate.ClassIndex.ToImport(donor);
+            var classPackagePath = !donorClass.OuterIndex.IsNull() && donorClass.OuterIndex.IsImport()
+                ? donorClass.OuterIndex.ToImport(donor).ObjectName.ToString()
+                : "/Script/Engine";
+            newComponent.TemplateIndex = EnsureObjectImportLive(
+                target,
+                classPackagePath,
+                "Default__" + donorTemplateClass,
+                classPackagePath,
+                donorTemplateClass);
+        }
         newComponent.SuperIndex = FPackageIndex.FromRawIndex(0);
         // Names are copied above (FNames resolve by string), but a few properties can still
         // carry FPackageIndex OBJECT refs into the DONOR's tables. The caller overwrites
@@ -1255,9 +1403,8 @@ public sealed class PartGraftService
         // Preserve the SCS node's archetype link too (mirror the donor).
         newNode.TemplateIndex = EnsureImportFromDonorLive(target, donor, donorNode.TemplateIndex);
         newNode.SuperIndex = FPackageIndex.FromRawIndex(0);
-        // The SCS node's ComponentClass ObjectProperty still points at the donor's class
-        // import - repoint it to the target StaticMeshComponent class (same as the new
-        // component's class), else the node references a wrong index → crash.
+        // The SCS node's ComponentClass ObjectProperty still points at the donor's class import;
+        // repoint it to the rebased target component class or the node carries a wrong index.
         var nodeComponentClass = newNode.Data.OfType<ObjectPropertyData>()
             .FirstOrDefault(p => p.Name.ToString().Equals("ComponentClass", StringComparison.OrdinalIgnoreCase));
         if (nodeComponentClass is not null)

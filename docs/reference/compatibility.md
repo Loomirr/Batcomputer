@@ -10,9 +10,12 @@
 - Game-material templates and face tools.
 - Character, mask, normal/packed, and verified UI texture cooking.
 - Supported equipment, glider, and animation-data grafting.
-- A separate regular cape plus a replacement glide cape when the indexed animation controller uses
-  the game's verified paired-cape visibility contract. Glide-only wingsuits and character gliders
-  are supported when the regular `Cape` is removed.
+- A separate regular cape plus a replacement glide cape when both come from the same indexed native
+  donor pair and its animation controller uses the game's verified paired-cape visibility contract.
+  On a glide-only gameplay donor, apply the glide preset first and its matching regular cape second;
+  Batcomputer preserves non-glide behavior while replacing the donor's glide-only animation
+  categories. Glide-only wingsuits and character gliders are supported when the regular `Cape` is
+  removed.
 - Custom OBJ static-mesh attachments.
 - Direct installation, build checks, and installable ZIPs.
 
@@ -23,8 +26,9 @@
 - Arbitrary new gameplay powers or code-driven character mechanics.
 - Physical collectible placement in levels.
 - Perfect shader/lighting parity between the 3D viewer and the game.
-- Combining a separate regular cape with a wingsuit or other glide-only controller. Those
-  controllers animate their glide visual but cannot hide and restore another cape.
+- Combining a separate regular cape with a mismatched wingsuit or glide-only controller. The
+  supported adapter requires a proven native glide-cape preset and its matching regular cape from
+  the same indexed donor pair.
 
 ## Content that needs extra testing
 

@@ -173,24 +173,87 @@ public sealed class SuitProjectService
     public string CreateUnpatchedStage(NativeSuitProject project)
     {
         var stageRoot = Path.Combine(ProjectOutputDirectory(project), "UnpatchedStage", "LEGOBatmanLotDK", "Content");
-        CopyPackagePair(project.PlayableTemplate, project.TargetPackages.Playable, stageRoot);
-        CopyPackagePair(project.CutsceneTemplate, project.TargetPackages.Cutscene, stageRoot);
+        CopyPackagePair(EffectiveCharacterTemplate(project, playable: true), project.TargetPackages.Playable, stageRoot);
+        CopyPackagePair(EffectiveCharacterTemplate(project, playable: false), project.TargetPackages.Cutscene, stageRoot);
         CopyPackagePair(project.DcmdTemplate, project.TargetPackages.Dcmd, stageRoot);
 
         // Stage the donor archetype for the name-map clone pass.
         var customArchetypePkg = UAssetPatchService.CustomArchetypePackage(project);
         if (customArchetypePkg is not null)
         {
-            CopyArchetypeDonor(customArchetypePkg, stageRoot);
+            CopyArchetypeDonor(
+                UAssetPatchService.StageArchetypeDonorPackage(project),
+                customArchetypePkg,
+                stageRoot);
         }
 
         return stageRoot;
     }
 
-    private static void CopyArchetypeDonor(string targetPackagePath, string stageContentRoot)
+    private static TemplateRecord? EffectiveCharacterTemplate(NativeSuitProject project, bool playable)
+    {
+        var fallback = playable ? project.PlayableTemplate : project.CutsceneTemplate;
+        if (!GliderService.TryGetAuthoredPairedCapeShell(
+                project,
+                out var shellPlayable,
+                out var shellCutscene,
+                out var shellDetail))
+        {
+            if (project.PairedCapeAdapter is not null)
+            {
+                throw new InvalidOperationException(
+                    "The declared paired-cape adapter could not resolve its certified authored scaffold. " +
+                    "Batcomputer refused to stage the glide-only base as a fallback because its cooked component layout cannot safely host the Cape + Torso pair. " +
+                    shellDetail);
+            }
+            return fallback;
+        }
+
+        var package = playable ? shellPlayable : shellCutscene;
+        if (UnrealPathUtil.NormalizePackagePath(fallback?.PackagePath ?? "").Equals(
+                package,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return fallback;
+        }
+
+        var relative = GamePackageRelativePath(package)
+            ?? throw new InvalidOperationException($"Authored paired-cape shell must be a /Game package: '{package}'.");
+        var sourceBase = Path.Combine(AppSettings.Current.EffectiveExtractedContentRoot(), relative);
+        var uasset = sourceBase + ".uasset";
+        if (!File.Exists(uasset))
+        {
+            throw new FileNotFoundException(
+                $"The authored paired-cape { (playable ? "playable" : "cutscene") } shell is not present in the active extract.",
+                uasset);
+        }
+
+        var uexp = sourceBase + ".uexp";
+        var ubulk = sourceBase + ".ubulk";
+        return new TemplateRecord
+        {
+            PackagePath = package,
+            ContentRelative = relative,
+            Stem = UnrealPathUtil.AssetName(package),
+            Character = fallback?.Character ?? "",
+            Role = playable ? "playable" : "cutscene",
+            Uasset = uasset,
+            Uexp = File.Exists(uexp) ? uexp : null,
+            Ubulk = File.Exists(ubulk) ? ubulk : null,
+            UassetLength = new FileInfo(uasset).Length,
+            UexpLength = File.Exists(uexp) ? new FileInfo(uexp).Length : 0,
+            HasSplitPair = File.Exists(uexp),
+            HasPair = File.Exists(uexp),
+        };
+    }
+
+    private static void CopyArchetypeDonor(
+        string sourcePackagePath,
+        string targetPackagePath,
+        string stageContentRoot)
     {
         var extractedRoot = AppSettings.Current.EffectiveExtractedContentRoot();
-        var donorRel = GamePackageRelativePath(UAssetPatchService.DonorArchetypePackage);
+        var donorRel = GamePackageRelativePath(sourcePackagePath);
         if (donorRel is null)
         {
             return;

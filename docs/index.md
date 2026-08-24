@@ -7,8 +7,8 @@ metadata the game needs, and packages the finished mod for Loomirr's LOTDK UE4SS
 ![Batcomputer's mod workspace](assets/screenshots/home-mods.jpg){ .bc-doc-shot loading=lazy }
 
 !!! info "Public beta"
-    The current build is **0.9.0-beta.6**. Suit creation and packaging work in-game, but this is the
-    first public beta. Back up your projects, and include copied diagnostics when reporting a
+    The current build is **0.9.0-beta.7**. Suit creation and packaging work in-game, but the project
+    remains in public beta. Back up your projects, and include copied diagnostics when reporting a
     repeatable problem.
 
 ## Start here

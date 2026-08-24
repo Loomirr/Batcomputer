@@ -144,6 +144,7 @@ public sealed partial class MainForm
                 EnsureProject();
                 if (_currentProject is null) { AppendLog("Set a base suit first."); return; }
                 _currentProject.UseCustomArchetype = !_currentProject.UseCustomArchetype;
+                _currentProject.GliderAutoEnabledCustomArchetype = false;
                 RecordChange("Animations", "archetype", _currentProject.UseCustomArchetype ? "custom archetype enabled" : "custom archetype disabled", status: "staged");
                 AppendLog($"Custom archetype {(_currentProject.UseCustomArchetype ? "ENABLED" : "disabled")}. Clones this suit's family archetype + anim sets and reparents the playable/cutscene on next package.");
                 RefreshToyboxTiles();
@@ -401,6 +402,7 @@ public sealed partial class MainForm
         if (dlg.ShowDialog(this) != DialogResult.OK || list.SelectedItem is null) return;
 
         _currentProject.AnimationOverrides.RemoveAll(o => o.Category == category);
+        _currentProject.GliderAutoEnabledCustomArchetype = false;
         var choice = list.SelectedItem.ToString()!;
         if (choice.StartsWith("("))
         {

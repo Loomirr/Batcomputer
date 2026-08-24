@@ -4,7 +4,7 @@ Batcomputer is a Windows tool for creating playable suit mods for
 *LEGO Batman: Legacy of the Dark Knight*. It builds suits from character assets in your own copy of
 the game, then packages and installs them.
 
-> **Current release:** `0.9.0-beta.6`
+> **Current release:** `0.9.0-beta.7`
 > **Documentation:** [loomirr.github.io/Batcomputer](https://loomirr.github.io/Batcomputer/)
 
 This repository contains Batcomputer only. It does not contain game files, extracted assets, Oodle,
@@ -14,6 +14,8 @@ or Loomirr's LOTDK UE4SS.
 
 - Starts a suit from a playable donor and any playable or cutscene character.
 - Adds hair, hats, capes, torsos, accessories, equipment, and compatible animation data.
+- Adapts verified native cape/glider pairs across compatible gameplay donors without replacing the
+  donor's general play style or visual identity.
 - Copies working game materials and applies new textures to individual mesh slots.
 - Creates the PawnTag, DCMD, UIMD, StringTable, and Asset Registry data the game needs.
 - Builds one or more suits into a single mod release.

@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 using UAssetAPI;
 using UAssetAPI.UnrealTypes;
 using UAssetAPI.Unversioned;
@@ -7,6 +9,7 @@ namespace Batcomputer;
 
 public sealed class UAssetPatchService
 {
+    private const string PatchedStageIdentityFileName = ".batcomputer-source-identity";
     private const CustomSerializationFlags NameMapOnlyPatchFlags =
         CustomSerializationFlags.SkipParsingExports |
         CustomSerializationFlags.SkipPreloadDependencyLoading;
@@ -30,6 +33,11 @@ public sealed class UAssetPatchService
         var suitProjectService = new SuitProjectService(ProjectRoot);
         var unpatchedContentRoot = suitProjectService.CreateUnpatchedStage(project);
         var patchedContentRoot = Path.Combine(GuiOutputRoot, project.SlotId, "PatchedNameMapStage", "LEGOBatmanLotDK", "Content");
+        var identityPath = PatchedStageIdentityPath(project);
+        if (File.Exists(identityPath))
+        {
+            File.Delete(identityPath);
+        }
 
         if (Directory.Exists(patchedContentRoot))
         {
@@ -59,12 +67,64 @@ public sealed class UAssetPatchService
             }
         }
 
+        if (batch.PackageResults.Count > 0 && batch.PackageResults.All(package => package.Success))
+        {
+            AtomicFileUtil.WriteAllText(identityPath, BuildStageIdentity(project));
+        }
+
         var reportPath = Path.Combine(GuiOutputRoot, project.SlotId, "uassetapi-name-map-patch-report.json");
         Directory.CreateDirectory(Path.GetDirectoryName(reportPath)!);
         File.WriteAllText(reportPath, JsonSerializer.Serialize(batch, JsonOptions));
         batch.ReportPath = reportPath;
 
         return batch;
+    }
+
+    public bool IsPatchedStageCurrent(NativeSuitProject project)
+    {
+        var path = PatchedStageIdentityPath(project);
+        if (!File.Exists(path))
+        {
+            return false;
+        }
+        try
+        {
+            return File.ReadAllText(path).Trim().Equals(
+                BuildStageIdentity(project),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private string PatchedStageIdentityPath(NativeSuitProject project) =>
+        Path.Combine(GuiOutputRoot, project.SlotId, "PatchedNameMapStage", PatchedStageIdentityFileName);
+
+    internal static string BuildStageIdentityForTest(NativeSuitProject project) => BuildStageIdentity(project);
+
+    private static string BuildStageIdentity(NativeSuitProject project)
+    {
+        var sourcePlayable = EffectiveCharacterSourcePackage(project, playable: true);
+        var sourceCutscene = EffectiveCharacterSourcePackage(project, playable: false);
+        var identity = string.Join("\n", new[]
+        {
+            "batcomputer-patched-stage-v2",
+            sourcePlayable,
+            sourceCutscene,
+            UnrealPathUtil.NormalizePackagePath(project.DcmdTemplate?.PackagePath ?? ""),
+            UnrealPathUtil.NormalizePackagePath(project.TargetPackages.Playable),
+            UnrealPathUtil.NormalizePackagePath(project.TargetPackages.Cutscene),
+            UnrealPathUtil.NormalizePackagePath(project.TargetPackages.Dcmd),
+            UnrealPathUtil.NormalizePackagePath(project.BaseProfile?.GameplayDonorPackage ?? project.PlayableTemplate?.PackagePath ?? ""),
+            project.UseCustomArchetype ? "custom-archetype" : "native-archetype",
+        });
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
     }
 
     // Donor family archetype for mod-local clones.
@@ -97,14 +157,80 @@ public sealed class UAssetPatchService
     }
 
     // Point playable and cutscene parent refs at the mod-local archetype.
-    private static void AddArchetypeReparentReplacements(Dictionary<string, string> extra, string customArchetypePkg)
+    private static void AddArchetypeReparentReplacements(
+        Dictionary<string, string> extra,
+        string customArchetypePkg,
+        string sourcePlayablePackage)
     {
         var customStem = UnrealPathUtil.AssetName(customArchetypePkg);
+        var donorPackage = DetectSourceArchetypePackage(sourcePlayablePackage) ?? DonorArchetypePackage;
+        var donorStem = UnrealPathUtil.AssetName(donorPackage);
         // Longest-first ordering is handled downstream in CreateReplacements.
-        extra[DonorArchetypePackage] = customArchetypePkg;
-        extra["Default__" + DonorArchetypeStem + "_C"] = "Default__" + customStem + "_C";
-        extra[DonorArchetypeStem + "_C"] = customStem + "_C";
-        extra[DonorArchetypeStem] = customStem;
+        extra[donorPackage] = customArchetypePkg;
+        extra["Default__" + donorStem + "_C"] = "Default__" + customStem + "_C";
+        extra[donorStem + "_C"] = customStem + "_C";
+        extra[donorStem] = customStem;
+    }
+
+    internal static string? DetectSourceArchetypePackage(string sourcePlayablePackage)
+    {
+        try
+        {
+            var package = UnrealPathUtil.NormalizePackagePath(sourcePlayablePackage);
+            if (!package.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+            var path = Path.Combine(
+                AppSettings.Current.EffectiveExtractedContentRoot(),
+                package["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar)) + ".uasset";
+            return AnimArchetypeGraftService.DetectDonor(
+                path,
+                AppSettings.Current.EffectiveExtractedContentRoot(),
+                mappings: null)?.ArchetypePackage;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    internal static string EffectiveCharacterSourcePackage(NativeSuitProject project, bool playable)
+    {
+        if (GliderService.TryGetAuthoredPairedCapeShell(
+                project,
+                out var shellPlayable,
+                out var shellCutscene,
+                out var shellDetail))
+        {
+            return playable ? shellPlayable : shellCutscene;
+        }
+        if (project.PairedCapeAdapter is not null)
+        {
+            throw new InvalidOperationException(
+                "The declared paired-cape adapter could not resolve its certified authored scaffold. " +
+                "Batcomputer refused to fall back to the glide-only base because replaying Cape/Torso on that cooked layout can crash. " +
+                shellDetail);
+        }
+        return UnrealPathUtil.NormalizePackagePath(
+            playable ? project.PlayableTemplate?.PackagePath : project.CutsceneTemplate?.PackagePath);
+    }
+
+    internal static string StageArchetypeDonorPackage(NativeSuitProject project)
+    {
+        var sourcePlayable = EffectiveCharacterSourcePackage(project, playable: true);
+        var detected = DetectSourceArchetypePackage(sourcePlayable);
+        if (!string.IsNullOrWhiteSpace(detected))
+        {
+            return detected;
+        }
+        if (project.PairedCapeAdapter is not null)
+        {
+            throw new InvalidOperationException(
+                $"Could not detect the authored paired-cape shell's parent archetype from '{sourcePlayable}'. " +
+                "The shell cannot be staged safely with a guessed superclass.");
+        }
+        return DonorArchetypePackage;
     }
 
     private static List<UAssetPackagePatchRequest> CreatePackagePatchRequests(NativeSuitProject project)
@@ -113,16 +239,14 @@ public sealed class UAssetPatchService
         var customArchetypePkg = CustomArchetypePackage(project);
         if (project.PlayableTemplate is not null)
         {
-            var sourcePackage = UnrealPathUtil.NormalizePackagePath(project.PlayableTemplate.PackagePath);
+            var sourcePackage = EffectiveCharacterSourcePackage(project, playable: true);
             var targetPackage = UnrealPathUtil.NormalizePackagePath(project.TargetPackages.Playable);
-            var sourceStem = string.IsNullOrWhiteSpace(project.PlayableTemplate.Stem)
-                ? UnrealPathUtil.AssetName(sourcePackage)
-                : project.PlayableTemplate.Stem;
+            var sourceStem = UnrealPathUtil.AssetName(sourcePackage);
             var targetStem = UnrealPathUtil.AssetName(targetPackage);
             var playableExtra = new Dictionary<string, string>();
             if (customArchetypePkg is not null)
             {
-                AddArchetypeReparentReplacements(playableExtra, customArchetypePkg);
+                AddArchetypeReparentReplacements(playableExtra, customArchetypePkg, sourcePackage);
             }
             requests.Add(new UAssetPackagePatchRequest
             {
@@ -138,16 +262,17 @@ public sealed class UAssetPatchService
         }
         if (project.CutsceneTemplate is not null)
         {
-            var sourcePackage = UnrealPathUtil.NormalizePackagePath(project.CutsceneTemplate.PackagePath);
+            var sourcePackage = EffectiveCharacterSourcePackage(project, playable: false);
             var targetPackage = UnrealPathUtil.NormalizePackagePath(project.TargetPackages.Cutscene);
-            var sourceStem = string.IsNullOrWhiteSpace(project.CutsceneTemplate.Stem)
-                ? UnrealPathUtil.AssetName(sourcePackage)
-                : project.CutsceneTemplate.Stem;
+            var sourceStem = UnrealPathUtil.AssetName(sourcePackage);
             var targetStem = UnrealPathUtil.AssetName(targetPackage);
             var cutsceneExtra = new Dictionary<string, string>();
             if (customArchetypePkg is not null)
             {
-                AddArchetypeReparentReplacements(cutsceneExtra, customArchetypePkg);
+                AddArchetypeReparentReplacements(
+                    cutsceneExtra,
+                    customArchetypePkg,
+                    EffectiveCharacterSourcePackage(project, playable: true));
             }
             requests.Add(new UAssetPackagePatchRequest
             {
@@ -185,15 +310,17 @@ public sealed class UAssetPatchService
         // Clone the donor archetype for the reparented blueprints.
         if (customArchetypePkg is not null)
         {
+            var archetypeSourcePackage = StageArchetypeDonorPackage(project);
+            var archetypeSourceStem = UnrealPathUtil.AssetName(archetypeSourcePackage);
             var customStem = UnrealPathUtil.AssetName(customArchetypePkg);
             requests.Add(new UAssetPackagePatchRequest
             {
                 Role = "archetype",
-                SourcePackagePath = DonorArchetypePackage,
+                SourcePackagePath = archetypeSourcePackage,
                 TargetPackagePath = customArchetypePkg,
-                SourceStem = DonorArchetypeStem,
+                SourceStem = archetypeSourceStem,
                 TargetStem = customStem,
-                SourceGeneratedClassName = DonorArchetypeStem + "_C",
+                SourceGeneratedClassName = archetypeSourceStem + "_C",
                 TargetGeneratedClassName = customStem + "_C"
             });
         }

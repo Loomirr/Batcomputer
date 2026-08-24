@@ -204,9 +204,25 @@ public sealed class NativeSuitProject
     // Prevents duplicate glider components after later material edits.
     public bool GliderGrafted { get; set; }
 
+    // True only when applying a glider automatically enabled UseCustomArchetype. A completed
+    // paired-cape adapter can safely turn that temporary switch back off; explicit animation or
+    // foreign-equipment edits clear this flag so their custom archetype is preserved.
+    public bool GliderAutoEnabledCustomArchetype { get; set; }
+
     // Donor glide animation sets for cross-type glider parts.
     public string GliderAnimLas { get; set; } = "";   // /Game/Animation/LayerAnimSets/Traversal/LAS_Traversal_<Char>
     public string GliderAnimMas { get; set; } = "";   // /Game/Animation/MontageAnimSets/Traversal/MAS_Glide_<Char>
+
+    // A capability-checked adapter that lets a native glide-only gameplay donor keep its own
+    // archetype/loadout while using a separate regular cape plus ABP_Cape_Glide visual. This is
+    // deliberately richer than a bool: changing the base or either graft invalidates the stored
+    // identities and makes package validation fail closed.
+    public PairedCapeAdapterProfile? PairedCapeAdapter { get; set; }
+
+    // Release-regression fixtures can exercise certificate logic without a 20+ GB extracted part
+    // index. This is never serialized and cannot let a saved/user project bypass its visual overlay.
+    [JsonIgnore]
+    internal bool AllowSyntheticPairedCapeVisualOverlayFixture { get; set; }
 
     // Clone a mod-local archetype before applying animation changes.
     public bool UseCustomArchetype { get; set; }
@@ -455,6 +471,67 @@ public sealed class SavedPartGraft
     // remove-component button map a removed component precisely back to its graft entry, without
     // confusing "Head_2" (the hair) with "Head" (the base cowl).
     public string ResolvedComponent { get; set; } = "";
+
+    // Legacy schema-1 paired-cape projects used this to append a donor component/SCS shell.
+    // Current adapters deliberately require false and repoint fields on an already-authored Blueprint
+    // shell instead; ordinary non-adapter grafts may still use this compatibility switch.
+    public bool PreferDonorComponentShell { get; set; }
+}
+
+/// <summary>
+/// Persisted proof intent for adapting a native glide-only gameplay base to the game's paired
+/// regular-cape/glide-cape contract. The final cooked assets are still reopened and verified;
+/// this record only binds that verification to the exact base and exact declarative grafts.
+/// </summary>
+public sealed class PairedCapeAdapterProfile
+{
+    public int SchemaVersion { get; set; } = 3;
+    public string AdapterId { get; set; } = "";
+    public string GameplayDonorPackage { get; set; } = "";
+    public string NativeGliderComponent { get; set; } = "";
+    // The generated playable/cutscene use this already-authored two-component Blueprint shell.
+    // Its exact parent-archetype schema is retained while a mod-local clone redirects the
+    // MAS/LAS/runtime-data behavior references to the selected gameplay donor. This avoids
+    // synthesizing a reflected field or reinterpreting an opaque cooked CDO under another schema.
+    public string AuthoredShellPlayablePackage { get; set; } = "";
+    public string AuthoredShellCutscenePackage { get; set; } = "";
+    public string CosmeticCapeGraftInstanceId { get; set; } = "";
+    public string GlideCapeGraftInstanceId { get; set; } = "";
+    public string CosmeticPlayableSourcePackage { get; set; } = "";
+    public string CosmeticCutsceneSourcePackage { get; set; } = "";
+    public string GliderPlayableSourcePackage { get; set; } = "";
+    public string GliderCutsceneSourcePackage { get; set; } = "";
+    public string PairedAnimClassObjectName { get; set; } = "";
+    // Exact traversal/montage blocks owned by the authored glide-cape donor. A glide-only
+    // gameplay donor (for example Nightwing) keeps its DPRD, equipment, movement, and all other
+    // animation parents while these two blocks replace its native glide-only categories. Binding
+    // them into the certificate prevents a saved project from retaining two competing glide
+    // controllers or silently falling back to the gameplay donor's wingsuit pose.
+    public string GlideAnimLasPackage { get; set; } = "";
+    public string GlideAnimMasPackage { get; set; } = "";
+    // The authored Cape + Torso scaffold can belong to a different costume than the visual
+    // base. Keep an exact declarative overlay for the base's existing Head/Face fields and body
+    // materials so choosing a safe scaffold never turns (for example) Nightwing into Batman.
+    public PairedCapeVisualOverlayProfile? VisualOverlay { get; set; }
+    public string ResolvedCosmeticComponent { get; set; } = "";
+    public string ResolvedGliderComponent { get; set; } = "";
+}
+
+/// <summary>
+/// Exact, replayable visual-base overlay used by the paired-cape adapter. Component grafts are
+/// deliberately restricted to fields that already exist with compatible component classes in the
+/// selected authored scaffold; Cape and Torso remain exclusively owned by the adapter part pair.
+/// </summary>
+public sealed class PairedCapeVisualOverlayProfile
+{
+    public int SchemaVersion { get; set; } = 1;
+    public string VisualPlayableSourcePackage { get; set; } = "";
+    public string VisualCutsceneSourcePackage { get; set; } = "";
+    public List<SavedPartGraft> ComponentGrafts { get; set; } = new();
+    public string PlayableBodyMaterialPackage { get; set; } = "";
+    public string CutsceneBodyMaterialPackage { get; set; } = "";
+    public string PlayableFaceMaterialPackage { get; set; } = "";
+    public string CutsceneFaceMaterialPackage { get; set; } = "";
 }
 
 /// <summary>A project-owned static OBJ attachment and its authored import transform.</summary>
@@ -507,6 +584,7 @@ public sealed class SavedPartGraftDonor
     public string TemplateComponentClass { get; set; } = "";
     public string ParentComponentOrVariableName { get; set; } = "";
     public string AttachSocket { get; set; } = "";
+    public List<NativeSuitObjectRef> Materials { get; set; } = new();
     public List<string> ComponentTags { get; set; } = new();
 }
 

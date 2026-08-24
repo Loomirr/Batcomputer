@@ -1460,6 +1460,7 @@ public sealed partial class MainForm : AdaptiveForm
 
         var pick = PickAnimReplacement($"Replace {donorName} with…");
         _currentProject.LocomotionOverrides.RemoveAll(o => o.DonorSequence == donorName);
+        _currentProject.GliderAutoEnabledCustomArchetype = false;
         if (pick is null)
         {
             RecordChange("Animations", donorName, "reverted to donor default", status: "staged");
@@ -2452,6 +2453,7 @@ public sealed partial class MainForm : AdaptiveForm
     /// <summary>Rebuilds the clean graft stage, then replays parts, removals, and materials.</summary>
     // Serialize stage-file reads and writes.
     private static readonly System.Threading.SemaphoreSlim RebuildGate = new(1, 1);
+    private static readonly System.Threading.SemaphoreSlim PartIndexGate = new(1, 1);
 
     /// <summary>Reports a packaging step to whichever progress window is active (single or bulk).</summary>
     private ProgressDialog? _packageProgress;

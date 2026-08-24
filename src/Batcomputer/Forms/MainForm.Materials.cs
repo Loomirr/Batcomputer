@@ -71,29 +71,40 @@ public sealed partial class MainForm
         {
             AppendLog("  note: no staged content for this suit yet — use Base → Set base suit to (re)build the stage before editing materials.");
         }
-        else if (project.PartGrafts.Count > 0)
+        else if (ProjectRequiresCompletedGraftStage(project))
         {
-            // The suit has declarative part grafts - rebuild the graft stage from the clean base
-            // and replay ALL parts (+ removals + materials). This is the authoritative restore:
-            // it guarantees what you see matches the saved part list regardless of the on-disk
-            // stage's staleness. (Fire-and-forget: the rebuild's awaits resume on the UI thread;
-            // it's guarded to no-op safely if the part index can't resolve a donor.)
+            // Every declarative edit uses the same clean, transactional replay. Material-only and
+            // removal-only projects must not patch a previously certified stage in place: a role
+            // failure there could leave a partial payload behind an old completion marker.
             AppendLog($"  restoring {project.PartGrafts.Count} part(s) + {project.MaterialAssignments.Count} material(s) + saved removals…");
-            _ = RebuildGraftStageFromDeclarativeAsync();
-        }
-        else if (project.MaterialAssignments.Count > 0 || project.Requirements.Any(r => r.Kind.Equals("remove-component", StringComparison.OrdinalIgnoreCase)))
-        {
-            // Sync the existing stage with the suit's saved edits so what you see
-            // (and can re-edit) matches what was saved.
-            AppendLog($"  restoring {project.MaterialAssignments.Count} material assignment(s) + saved removals…");
-            ApplySavedMaterials(project, logIfNone: false);
-            ApplySavedComponentRemovals(project, logNoRemovals: false);
+            _ = RestoreLoadedProjectStageAsync(project, _projectRootText.Text.Trim());
         }
 
         SelectComboValue(_toyboxCategoryCombo, "Materials");
         _session.RaiseChanged();
         RefreshToyboxTiles();
         UpdateToyboxChips();
+    }
+
+    private async Task RestoreLoadedProjectStageAsync(NativeSuitProject project, string projectRoot)
+    {
+        try
+        {
+            await RebuildGraftStageFromDeclarativeAsync(project, projectRoot);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Saved suit restore failed for '{project.DisplayName}': {ex.Message}");
+            if (_currentProject is not null &&
+                _currentProject.SlotId.Equals(project.SlotId, StringComparison.OrdinalIgnoreCase))
+            {
+                Dialog.Error(
+                    this,
+                    "Saved suit restore incomplete",
+                    "Batcomputer kept the saved project, restored the prior generated payload where possible, and blocked packaging because the saved edits could not be replayed completely.\n\n" +
+                    ex.Message);
+            }
+        }
     }
 
     private static string SuggestedMaterialOutputPackage(string? playablePackage)
@@ -429,6 +440,96 @@ public sealed partial class MainForm
             }
         }
         AppendLog($"  re-applied {reapplied}/{project.MaterialAssignments.Count} saved material assignment(s).");
+        return outcome;
+    }
+
+    /// <summary>
+    /// Restores the selected visual base's role-specific identity materials after a paired-cape
+    /// scaffold substitution. This runs before ordinary saved removals/material assignments, so an
+    /// explicit user edit remains authoritative and is never overwritten by the automatic overlay.
+    /// </summary>
+    private DeclarativeReplayOutcome ApplyPairedCapeVisualOverlayMaterials(
+        NativeSuitProject project,
+        string projectRoot)
+    {
+        var outcome = new DeclarativeReplayOutcome();
+        var overlay = project.PairedCapeAdapter?.VisualOverlay;
+        if (overlay is null)
+        {
+            return outcome;
+        }
+
+        var assignments = new[]
+        {
+            new MaterialReplaceService.Assignment
+            {
+                Component = "CharacterMesh0",
+                Slot = 0,
+                MiPackagePath = overlay.PlayableBodyMaterialPackage,
+                ApplyToPlayable = true,
+                ApplyToCutscene = false,
+            },
+            new MaterialReplaceService.Assignment
+            {
+                Component = "CharacterMesh0",
+                Slot = 0,
+                MiPackagePath = overlay.CutsceneBodyMaterialPackage,
+                ApplyToPlayable = false,
+                ApplyToCutscene = true,
+            },
+            new MaterialReplaceService.Assignment
+            {
+                Component = "Face",
+                Slot = 0,
+                MiPackagePath = overlay.PlayableFaceMaterialPackage,
+                ApplyToPlayable = true,
+                ApplyToCutscene = false,
+            },
+            new MaterialReplaceService.Assignment
+            {
+                Component = "Face",
+                Slot = 0,
+                MiPackagePath = overlay.CutsceneFaceMaterialPackage,
+                ApplyToPlayable = false,
+                ApplyToCutscene = true,
+            },
+        };
+        var service = new MaterialReplaceService(projectRoot);
+        var applied = 0;
+        foreach (var assignment in assignments)
+        {
+            var role = assignment.ApplyToPlayable ? "playable" : "cutscene";
+            if (string.IsNullOrWhiteSpace(assignment.MiPackagePath) ||
+                !assignment.MiPackagePath.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+            {
+                outcome.Failures.Add(
+                    $"{assignment.Component}:0/{role}: certified visual-base material path is invalid ({assignment.MiPackagePath})");
+                continue;
+            }
+
+            var result = RunWithStructuredFileLockRetry(
+                () => service.Apply(
+                    project.SlotId,
+                    project.TargetPackages.Playable,
+                    project.TargetPackages.Cutscene,
+                    assignment),
+                materialResult => materialResult.TransientFileLock ||
+                                  materialResult.Files.Any(file => file.TransientFileLock),
+                $"restore paired-cape visual-base {assignment.Component} material for {role}");
+            var file = result.Files.FirstOrDefault(candidate =>
+                candidate.Role.Equals(role, StringComparison.OrdinalIgnoreCase));
+            if (file?.Success == true)
+            {
+                applied++;
+                continue;
+            }
+
+            outcome.Failures.Add(
+                $"{assignment.Component}:0/{role}: {file?.Error ?? result.Error ?? "no result was returned"}");
+            outcome.TransientFileLock |= file?.TransientFileLock == true || result.TransientFileLock;
+        }
+
+        AppendLog($"  restored {applied}/{assignments.Length} paired-cape visual-base identity material(s).");
         return outcome;
     }
 

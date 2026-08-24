@@ -284,6 +284,139 @@ public sealed partial class MainForm
             : graft.Slot;
     }
 
+    private static bool GraftTargetsComponent(SavedPartGraft graft, string component)
+    {
+        if (string.IsNullOrWhiteSpace(component))
+        {
+            return false;
+        }
+
+        return (!string.IsNullOrWhiteSpace(graft.ResolvedComponent) &&
+                string.Equals(graft.ResolvedComponent, component, StringComparison.OrdinalIgnoreCase)) ||
+               (string.IsNullOrWhiteSpace(graft.ResolvedComponent) &&
+                string.Equals(graft.Slot, component, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool PairedCapeAdapterTargetsComponent(NativeSuitProject project, string component)
+    {
+        var adapter = project.PairedCapeAdapter;
+        if (adapter is null || string.IsNullOrWhiteSpace(component))
+        {
+            return false;
+        }
+
+        if (string.Equals(adapter.ResolvedCosmeticComponent, component, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(adapter.ResolvedGliderComponent, component, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return project.PartGrafts.Any(graft =>
+            (string.Equals(graft.InstanceId, adapter.CosmeticCapeGraftInstanceId, StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(graft.InstanceId, adapter.GlideCapeGraftInstanceId, StringComparison.OrdinalIgnoreCase)) &&
+            GraftTargetsComponent(graft, component));
+    }
+
+    /// <summary>
+    /// The authored paired-cape shell is one atomic runtime layout. Once either member is removed,
+    /// retaining the other member would replay a shell-only Cape/Torso slot onto the glide-only
+    /// gameplay Blueprint and could synthesize a reflected field into its opaque cooked CDO.
+    /// Remove both declarations together and only disable the custom archetype when the glider
+    /// itself automatically enabled it; explicit animation/equipment ownership remains intact.
+    /// </summary>
+    private static List<string> RemovePairedCapeAdapterAtomically(NativeSuitProject project)
+    {
+        var adapter = project.PairedCapeAdapter;
+        if (adapter is null)
+        {
+            return [];
+        }
+
+        var grafts = project.PartGrafts ??
+            throw new InvalidOperationException(
+                "The paired-cape adapter cannot be removed safely because its declarative graft list is missing.");
+        static bool SamePackage(string? left, string? right) =>
+            !string.IsNullOrWhiteSpace(left) &&
+            !string.IsNullOrWhiteSpace(right) &&
+            UnrealPathUtil.NormalizePackagePath(left).Equals(
+                UnrealPathUtil.NormalizePackagePath(right),
+                StringComparison.OrdinalIgnoreCase);
+        static bool MatchesRole(
+            SavedPartGraft graft,
+            bool isGlider,
+            string? playableSource,
+            string? cutsceneSource,
+            string expectedSlot)
+        {
+            if (graft.IsGlider != isGlider)
+            {
+                return false;
+            }
+            // An instance ID is never sufficient by itself: malformed JSON could point the
+            // cosmetic ID at an unrelated non-glider Head. Resolve both current and stale IDs by
+            // the complete authored field + playable/cutscene source recipe instead.
+            return string.Equals(graft.Slot, expectedSlot, StringComparison.OrdinalIgnoreCase) &&
+                   graft.Playable is not null && graft.Cutscene is not null &&
+                   SamePackage(graft.Playable.SourcePackagePath, playableSource) &&
+                   SamePackage(graft.Cutscene.SourcePackagePath, cutsceneSource);
+        }
+
+        var cosmeticMatches = grafts.Where(graft => graft is not null && MatchesRole(
+                graft,
+                isGlider: false,
+                adapter.CosmeticPlayableSourcePackage,
+                adapter.CosmeticCutsceneSourcePackage,
+                expectedSlot: "Cape"))
+            .Take(2)
+            .ToList();
+        var gliderMatches = grafts.Where(graft => graft is not null && MatchesRole(
+                graft,
+                isGlider: true,
+                adapter.GliderPlayableSourcePackage,
+                adapter.GliderCutsceneSourcePackage,
+                expectedSlot: "Torso"))
+            .Take(2)
+            .ToList();
+        if (cosmeticMatches.Count != 1 || gliderMatches.Count != 1 ||
+            ReferenceEquals(cosmeticMatches[0], gliderMatches[0]))
+        {
+            throw new InvalidOperationException(
+                "The paired-cape adapter could not resolve exactly one bound cosmetic Cape and one distinct bound Torso glider. " +
+                "No adapter state was changed; refresh the part index and rebuild or re-apply the pair before changing the base/glider.");
+        }
+        var boundGrafts = new[] { cosmeticMatches[0], gliderMatches[0] };
+        var removedComponents = boundGrafts
+            .Select(graft => !string.IsNullOrWhiteSpace(graft.ResolvedComponent)
+                ? graft.ResolvedComponent
+                : graft.Slot)
+            .Concat(new[]
+            {
+                adapter.ResolvedCosmeticComponent,
+                adapter.ResolvedGliderComponent,
+            })
+            .Where(component => !string.IsNullOrWhiteSpace(component))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        project.PartGrafts.RemoveAll(graft => boundGrafts.Any(bound => ReferenceEquals(bound, graft)));
+        project.PairedCapeAdapter = null;
+        project.GliderType = "";
+        project.GliderMaterial = "";
+        project.GliderGrafted = false;
+        project.GliderAnimLas = "";
+        project.GliderAnimMas = "";
+        if (project.GliderAutoEnabledCustomArchetype)
+        {
+            project.UseCustomArchetype = false;
+        }
+        project.GliderAutoEnabledCustomArchetype = false;
+
+        return removedComponents;
+    }
+
+    internal static IReadOnlyList<string> RemovePairedCapeAdapterAtomicallyForTest(NativeSuitProject project) =>
+        RemovePairedCapeAdapterAtomically(project);
+
     private static bool RequirementTargetsComponent(string targetComponent, string component)
     {
         if (string.IsNullOrWhiteSpace(targetComponent) || string.IsNullOrWhiteSpace(component))
@@ -513,19 +646,13 @@ public sealed partial class MainForm
         if (BlockUnsupportedCapeGliderPairing(
                 project,
                 capeGlideContract,
-                incomingGlider: playable ?? cutscene,
-                addingCosmeticCape: false,
+                incomingGraft: ProspectivePartGraft(
+                    isGlider: true,
+                    playable,
+                    cutscene),
                 windowTitle: "Gliders"))
         {
             return;
-        }
-
-        // A glider material takes precedence over old component overrides. Do this only after all
-        // compatibility rejection paths so selecting a blocked preset cannot mutate the project.
-        if (!string.IsNullOrWhiteSpace(glideComponent) &&
-            ClearMaterialAssignmentsForComponent(project, glideComponent))
-        {
-            AppendLog($"Glider: cleared saved material override on glide component '{glideComponent}' (the glider provides its own material; recolor via the glider decal).");
         }
 
         if (!string.IsNullOrWhiteSpace(materialOverride))
@@ -538,22 +665,24 @@ public sealed partial class MainForm
             {
                 cutscene = GliderService.WithWingsuitDecalOverride(cutscene, materialOverride);
             }
-            project.GliderMaterial = materialOverride;
         }
-        else
-        {
-            project.GliderMaterial = (playable ?? cutscene)?.Materials.FirstOrDefault()?.PackagePath ?? "";
-        }
+        var selectedGliderMaterial = !string.IsNullOrWhiteSpace(materialOverride)
+            ? materialOverride
+            : (playable ?? cutscene)?.Materials.FirstOrDefault()?.PackagePath ?? "";
 
         var presetName = GliderService.GliderPresetLabel(playable ?? cutscene!);
-        project.GliderType = $"native:{presetName}";
-        project.GliderGrafted = false;
         _selectedPlayablePart = playable;
         _selectedCutscenePart = cutscene;
         UpdateSelectedPartLabels();
 
         AppendLog($"Glider: applying native preset '{presetName}' to base glide component '{glideComponent}' ({GliderService.GliderPresetSubtitle(playable ?? cutscene!)})…");
-        await GraftSelectedPartsAsync();
+        if (!await GraftSelectedPartsAsync())
+        {
+            AppendLog("Glider: the preset was not marked active because its declarative rebuild did not complete.");
+            return;
+        }
+        project.GliderType = $"native:{presetName}";
+        project.GliderMaterial = selectedGliderMaterial;
         project.GliderGrafted = true;
         RecordChange("Gliders", "Native glider preset", presetName, status: "staged");
         try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(project); } catch { /* keep the staged result usable */ }
@@ -1050,9 +1179,11 @@ public sealed partial class MainForm
 
         ReadFieldsIntoProject(_currentProject);
 
+        var removingPairedCapeMember = PairedCapeAdapterTargetsComponent(_currentProject, component);
         var protectedGliderComponent = ActiveGliderVisualComponent(_currentProject);
         if (!string.IsNullOrWhiteSpace(protectedGliderComponent) &&
-            protectedGliderComponent.Equals(component, StringComparison.OrdinalIgnoreCase))
+            protectedGliderComponent.Equals(component, StringComparison.OrdinalIgnoreCase) &&
+            !removingPairedCapeMember)
         {
             Dialog.Warn(null, "Glider component is protected", $"'{component}' is this base suit's native glide-visual component. The wingsuit system needs that component to stay constructed.\n\nChange the glider type back to base/none before removing it.");
             AppendLog($"Remove blocked: '{component}' is the active native glider component for this suit.");
@@ -1091,13 +1222,51 @@ public sealed partial class MainForm
         // If the removed component was a DECLARATIVE part graft, drop its entry so a rebuild
         // (load / re-base / next drop) won't re-add it. Match on the resolved component name
         // recorded at graft time (e.g. "Head_2"); fall back to the requested slot for legacy suits.
-        var removedGrafts = _currentProject.PartGrafts.RemoveAll(pg =>
-            (!string.IsNullOrWhiteSpace(pg.ResolvedComponent) &&
-             pg.ResolvedComponent.Equals(component, StringComparison.OrdinalIgnoreCase)) ||
-            (string.IsNullOrWhiteSpace(pg.ResolvedComponent) &&
-             pg.Slot.Equals(component, StringComparison.OrdinalIgnoreCase)));
-        if (removedGrafts > 0)
+        List<string> atomicallyRemovedComponents = [];
+        var removedGrafts = 0;
+        if (removingPairedCapeMember)
         {
+            var before = _currentProject.PartGrafts.Count;
+            try
+            {
+                atomicallyRemovedComponents = RemovePairedCapeAdapterAtomically(_currentProject);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _currentProject = previousProjectSnapshot;
+                ApplyProjectToFields(_currentProject);
+                UpdateSelectedLabels();
+                AppendLog("Remove/hide stopped before staging: " + ex.Message);
+                Dialog.Error(
+                    this,
+                    "Paired cape could not be removed safely",
+                    ex.Message,
+                    windowTitle: "Parts");
+                _session.RaiseChanged();
+                RefreshInspector();
+                RefreshToyboxTiles();
+                return;
+            }
+            removedGrafts = before - _currentProject.PartGrafts.Count;
+            AppendLog("  removed the authored paired-cape adapter atomically; its cosmetic Cape and Torso glider cannot be replayed independently on a glide-only base.");
+        }
+        else
+        {
+            removedGrafts = _currentProject.PartGrafts.RemoveAll(pg =>
+                GraftTargetsComponent(pg, component));
+        }
+        if (removedGrafts > 0 || removingPairedCapeMember)
+        {
+            if (removingPairedCapeMember)
+            {
+                // The inspector just created a remove-component rule for the clicked graft. Neither
+                // adapter member remains after the atomic removal, so no shell-only removal may be
+                // carried onto the restored gameplay Blueprint.
+                foreach (var removedComponent in atomicallyRemovedComponents)
+                {
+                    RemoveSavedRemovalForComponent(_currentProject, removedComponent);
+                }
+            }
             // The part no longer exists declaratively, so the remove-component rule we just added
             // is redundant (nothing will graft that component to remove) - drop it too.
             _currentProject.Requirements.RemoveAll(r =>
@@ -2221,23 +2390,124 @@ public sealed partial class MainForm
         }
 
         var activeComponent = ActiveGliderVisualComponent(project);
-        project.PartGrafts.RemoveAll(graft => graft.IsGlider);
-        project.GliderType = "";
-        project.GliderMaterial = "";
-        project.GliderGrafted = false;
-        project.GliderAnimLas = "";
-        project.GliderAnimMas = "";
-        if (!string.IsNullOrWhiteSpace(activeComponent))
+        NativeSuitProject previousProjectSnapshot;
+        try
         {
-            RemoveSavedRemovalForComponent(project, activeComponent);
+            previousProjectSnapshot = JsonSerializer.Deserialize<NativeSuitProject>(
+                JsonSerializer.Serialize(project))
+                ?? throw new InvalidOperationException("Could not snapshot the suit before clearing its glider.");
+        }
+        catch (Exception ex)
+        {
+            AppendLog("Clear glider stopped before staging: " + ex.Message);
+            return;
         }
 
-        RecordChange("Gliders", "Glide visual", "restored gameplay donor default", status: "staged");
-        (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(project);
-        AppendLog("Glider: removed the custom preset and restored the gameplay donor's default glide visual.");
-        await RebuildGraftStageFromDeclarativeAsync();
-        _session.RaiseChanged();
-        RefreshToyboxTiles();
+        var projectRoot = _projectRootText.Text.Trim();
+        BaseStageFilesystemSnapshot? stageFilesystemSnapshot = null;
+        var saveAttempted = false;
+        await RebuildGate.WaitAsync();
+        try
+        {
+            if (!ReferenceEquals(_currentProject, project))
+            {
+                AppendLog("Clear glider stopped because the active suit changed while it was waiting to stage.");
+                return;
+            }
+            stageFilesystemSnapshot = await CaptureBaseStageFilesystemAsync(
+                projectRoot,
+                project.SlotId,
+                new[] { "UnpatchedStage", "PatchedNameMapStage", "GraftedPartStage" });
+
+            var adapterComponents = project.PairedCapeAdapter is null
+                ? []
+                : RemovePairedCapeAdapterAtomically(project);
+            if (adapterComponents.Count == 0)
+            {
+                project.PartGrafts.RemoveAll(graft => graft.IsGlider);
+                project.GliderType = "";
+                project.GliderMaterial = "";
+                project.GliderGrafted = false;
+                project.GliderAnimLas = "";
+                project.GliderAnimMas = "";
+                if (project.GliderAutoEnabledCustomArchetype)
+                {
+                    project.UseCustomArchetype = false;
+                }
+                project.GliderAutoEnabledCustomArchetype = false;
+            }
+            if (!string.IsNullOrWhiteSpace(activeComponent))
+            {
+                RemoveSavedRemovalForComponent(project, activeComponent);
+            }
+            foreach (var adapterComponent in adapterComponents)
+            {
+                RemoveSavedRemovalForComponent(project, adapterComponent);
+            }
+
+            RecordChange("Gliders", "Glide visual", "restored gameplay donor default", status: "staged");
+            await RebuildGraftStageCoreAsync(project, projectRoot, persistProject: false);
+            saveAttempted = true;
+            await RunWithFileLockRetryAsync(
+                () => (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(project),
+                "save the cleared glider");
+            await FinalizeDeclarativeGraftStageAsync(project, projectRoot);
+            await DiscardBaseStageFilesystemBackupAsync(stageFilesystemSnapshot, logFailure: true);
+            stageFilesystemSnapshot = null;
+
+            AppendLog(adapterComponents.Count > 0
+                ? "Glider: removed the authored cosmetic Cape + Torso glide pair atomically and restored the gameplay donor's default glide visual."
+                : "Glider: removed the custom preset and restored the gameplay donor's default glide visual.");
+            _session.RaiseChanged();
+            RefreshToyboxTiles();
+        }
+        catch (Exception ex)
+        {
+            Exception reportedFailure = ex;
+            try
+            {
+                if (saveAttempted)
+                {
+                    await RunWithFileLockRetryAsync(
+                        () => (_projectService ??= new SuitProjectService(projectRoot))
+                            .SaveProject(previousProjectSnapshot),
+                        "restore the prior project after a failed glider clear");
+                }
+                _currentProject = previousProjectSnapshot;
+                ApplyProjectToFields(_currentProject);
+                UpdateSelectedLabels();
+                if (stageFilesystemSnapshot is not null)
+                {
+                    await RestoreBaseStageFilesystemAsync(
+                        stageFilesystemSnapshot,
+                        discardBackup: false);
+                    await DiscardBaseStageFilesystemBackupAsync(stageFilesystemSnapshot, logFailure: true);
+                    stageFilesystemSnapshot = null;
+                }
+            }
+            catch (Exception restoreFailure)
+            {
+                reportedFailure = new AggregateException(
+                    "Clearing the glider failed and the previous project/stage could not be fully restored.",
+                    ex,
+                    restoreFailure);
+            }
+
+            AppendLog("Clear glider failed; the prior project and generated stages were restored: " + reportedFailure.Message);
+            Dialog.Error(
+                this,
+                "Glider was not cleared",
+                "Batcomputer could not rebuild and save the complete glider removal. The previous project and generated stage remain active.\n\n" +
+                reportedFailure.Message,
+                windowTitle: "Gliders");
+            _session.RaiseChanged();
+            RefreshInspector();
+            RefreshToyboxTiles();
+        }
+        finally
+        {
+            RebuildGate.Release();
+        }
     }
 
     private void ShowGliderPresetDetail(NativeSuitPartRecord part)
@@ -2755,31 +3025,49 @@ public sealed partial class MainForm
         grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Source package", DataPropertyName = nameof(PartRow.SourcePackagePath), AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
     }
 
-    private async Task<bool> EnsurePartIndexAsync()
+    private async Task<bool> EnsurePartIndexAsync(string? projectRootOverride = null)
     {
-        if (_partIndex is { Parts.Count: > 0 })
-        {
-            return true;
-        }
-
-        var service = new PartIndexService(_projectRootText.Text.Trim());
-        _partIndex = service.LoadPartIndex();
-        if (_partIndex is { Parts.Count: > 0 })
-        {
-            return true;
-        }
-
-        AppendLog("Building the part index so the visual base can bring over its attachments…");
+        var projectRoot = string.IsNullOrWhiteSpace(projectRootOverride)
+            ? _projectRootText.Text.Trim()
+            : projectRootOverride.Trim();
+        await PartIndexGate.WaitAsync();
         try
         {
-            _partIndex = await Task.Run(() => service.BuildPartIndex());
-            AppendLog($"Parts indexed: {_partIndex.Parts.Count}");
-            return _partIndex.Parts.Count > 0;
+            var service = new PartIndexService(projectRoot);
+            try
+            {
+                // Always reload the cache for this project root. Viewer/acceptance builds can use a
+                // disposable root while the main window still has another workspace index in memory.
+                _partIndex = service.LoadPartIndex();
+            }
+            catch (Exception ex)
+            {
+                _partIndex = null;
+                AppendLog($"Part index cache could not be read and will be rebuilt: {ex.Message}");
+            }
+
+            if (_partIndex is { Parts.Count: > 0 })
+            {
+                return true;
+            }
+
+            AppendLog("Part index is missing, stale, empty, or unreadable; rebuilding it from the extracted character assets…");
+            try
+            {
+                _partIndex = await Task.Run(() => service.BuildPartIndex());
+                AppendLog($"Part index status: {_partIndex.Status}; parts indexed: {_partIndex.Parts.Count}");
+                return _partIndex.Parts.Count > 0;
+            }
+            catch (Exception ex)
+            {
+                _partIndex = null;
+                AppendLog($"Part index build failed: {ex.Message}");
+                return false;
+            }
         }
-        catch (Exception ex)
+        finally
         {
-            AppendLog($"Part index build failed: {ex.Message}");
-            return false;
+            PartIndexGate.Release();
         }
     }
 
@@ -2790,6 +3078,7 @@ public sealed partial class MainForm
 
         AppendLog("Building native suit part index from extracted cooked character BPs…");
         _buildPartIndexButton.Enabled = false;
+        await PartIndexGate.WaitAsync();
         try
         {
             var index = await Task.Run(() => service.BuildPartIndex());
@@ -2836,6 +3125,7 @@ public sealed partial class MainForm
         }
         finally
         {
+            PartIndexGate.Release();
             _buildPartIndexButton.Enabled = true;
         }
     }
@@ -3041,34 +3331,66 @@ public sealed partial class MainForm
     private bool BlockUnsupportedCapeGliderPairing(
         NativeSuitProject project,
         AnimArchetypeGraftService.CapeGlideContractStatus baseContract,
-        NativeSuitPartRecord? incomingGlider,
-        bool addingCosmeticCape,
+        SavedPartGraft? incomingGraft,
         string windowTitle)
     {
+        // Projects saved before complete donor recipes were persisted can be repaired from the
+        // current exact-source part index before adapter preflight. This is metadata migration only;
+        // fail closed rather than borrowing a same-mesh or same-package donor recipe.
+        foreach (var savedGraft in project.PartGrafts)
+        {
+            BackfillSavedDonorRecipe(savedGraft.Playable, ResolveExactLivePart(savedGraft.Playable));
+            BackfillSavedDonorRecipe(savedGraft.Cutscene, ResolveExactLivePart(savedGraft.Cutscene));
+        }
+
+        var incomingGlider = incomingGraft?.IsGlider == true;
+        var addingCosmeticCape = incomingGraft is not null &&
+                                 !incomingGraft.IsGlider &&
+                                 (GliderService.IsCosmeticCapeAttachment(incomingGraft.Playable) ||
+                                  GliderService.IsCosmeticCapeAttachment(incomingGraft.Cutscene));
         if (!GliderService.HasCapeAndGliderCombination(
                 project,
                 baseContract,
                 addingCosmeticCape: addingCosmeticCape,
-                addingGlider: incomingGlider is not null))
+                addingGlider: incomingGlider))
         {
             return false;
         }
 
-        var hasReplacementGlider = incomingGlider is not null ||
+        var hasReplacementGlider = incomingGlider ||
                                    GliderService.ProjectHasReplacementGlider(project);
-        var driver = incomingGlider is not null
-            ? GliderService.PairedCapeDriverForPart(incomingGlider)
+        var driver = incomingGlider
+            ? GliderService.PairedCapeDriverForDonor(
+                incomingGraft!.Playable ?? incomingGraft.Cutscene)
             : hasReplacementGlider
                 ? GliderService.ProjectReplacementGliderDriver(project)
-                : PairedCapeVisibilityDriver.PairedCapable;
+                : baseContract == AnimArchetypeGraftService.CapeGlideContractStatus.Paired
+                    ? PairedCapeVisibilityDriver.PairedCapable
+                    : baseContract == AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly
+                        ? PairedCapeVisibilityDriver.GlideOnly
+                        : PairedCapeVisibilityDriver.Unknown;
         if (baseContract != AnimArchetypeGraftService.CapeGlideContractStatus.Paired)
         {
+            if (incomingGraft is not null &&
+                driver == PairedCapeVisibilityDriver.PairedCapable &&
+                GliderService.CanConfigurePairedCapeAdapterWithIncoming(
+                    project,
+                    baseContract,
+                    incomingGraft,
+                    out var adapterDetail))
+            {
+                AppendLog("Cape adapter preflight: " + adapterDetail);
+                return false;
+            }
+
             var detail = baseContract == AnimArchetypeGraftService.CapeGlideContractStatus.Unknown
                 ? "Batcomputer could not verify that this playable base owns the native two-component cape visibility setup. Refresh the character assets and run the build check before pairing a regular cape with a glider."
-                : "This playable base does not natively own separate regular-cape and glide-visual components. Adding both is not a proven runtime layout and may crash or leave the regular cape visible during gliding.";
+                : baseContract == AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly
+                    ? "This gameplay donor owns only a native glide visual. To preserve its play style, first apply a proven ABP_Cape_Glide preset, then add the matching native regular cape from that same playable/cutscene donor pair. Batcomputer will construct and verify a dynamic paired-cape adapter."
+                    : "This playable base does not natively own separate regular-cape and glide-visual components. Adding both is not a proven runtime layout and may crash or leave the regular cape visible during gliding.";
             Dialog.Error(this,
                 "Cape and glider are not compatible with this base",
-                detail + "\n\nPick the visual base again and choose a verified two-cape playable donor, or remove the regular Cape before adding this glider.",
+                detail + "\n\nIf the adapter requirements cannot be met, choose a verified two-cape playable donor or remove the regular Cape.",
                 windowTitle: windowTitle);
             return true;
         }
@@ -3094,21 +3416,48 @@ public sealed partial class MainForm
         return true;
     }
 
-    private async Task GraftSelectedPartsAsync()
+    private bool _graftSelectedPartInProgress;
+
+    private async Task<bool> GraftSelectedPartsAsync()
+    {
+        if (_graftSelectedPartInProgress)
+        {
+            AppendLog("A selected-part graft is already running; the second request was ignored.");
+            return false;
+        }
+
+        _graftSelectedPartInProgress = true;
+        var workspaceWasEnabled = _mainWorkspaceHost.Enabled;
+        _mainWorkspaceHost.Enabled = false;
+        try
+        {
+            return await GraftSelectedPartsCoreAsync();
+        }
+        finally
+        {
+            _mainWorkspaceHost.Enabled = workspaceWasEnabled;
+            _graftSelectedPartInProgress = false;
+        }
+    }
+
+    private async Task<bool> GraftSelectedPartsCoreAsync()
     {
         EnsureProject();
         if (_currentProject is null)
         {
-            return;
+            return false;
         }
+        var transactionProject = _currentProject;
+        var selectedPlayablePart = _selectedPlayablePart;
+        var selectedCutscenePart = _selectedCutscenePart;
 
-        if (_selectedPlayablePart is null && _selectedCutscenePart is null)
+        if (selectedPlayablePart is null && selectedCutscenePart is null)
         {
             AppendLog("No selected part donors. Pick a row in the Part picker tab, then click Use for playable and/or Use for cutscene.");
-            return;
+            return false;
         }
 
-        var samplePart = _selectedPlayablePart ?? _selectedCutscenePart!;
+        var samplePart = selectedPlayablePart ?? selectedCutscenePart!;
         var targetSlot = samplePart.Slot;
 
         // Glider/cape parts (GA_Glider_*, GA_Wingsuit_*, SK_CAPE_Glide - they come in
@@ -3119,12 +3468,12 @@ public sealed partial class MainForm
         var isGliderPart = IsGliderVisualPart(samplePart);
         var isCosmeticCape = GliderService.IsCosmeticCapeAttachment(samplePart);
         var contract = isGliderPart || isCosmeticCape
-            ? new AnimArchetypeGraftService().BaseCapeGlideContract(_currentProject)
+            ? new AnimArchetypeGraftService().BaseCapeGlideContract(transactionProject)
             : AnimArchetypeGraftService.CapeGlideContractStatus.Unknown;
         var additiveCapeConflict =
             (isGliderPart || isCosmeticCape) &&
             GliderService.HasAdditiveCapeAndGliderCombination(
-                _currentProject,
+                transactionProject,
                 contract,
                 addingGlider: isGliderPart);
         if (additiveCapeConflict)
@@ -3134,116 +3483,250 @@ public sealed partial class MainForm
                 "This suit has a custom static mesh attached to Cape. Custom meshes are additive components and are not driven by the playable base's native cape/glider visibility wiring, even on a native two-cape base.\n\n" +
                 "Remove the custom Cape attachment or the glider before adding this part.",
                 windowTitle: "Parts");
-            return;
+            return false;
         }
         if ((isGliderPart || isCosmeticCape) &&
             BlockUnsupportedCapeGliderPairing(
-                _currentProject,
+                transactionProject,
                 contract,
-                incomingGlider: isGliderPart ? samplePart : null,
-                addingCosmeticCape: isCosmeticCape,
+                incomingGraft: ProspectivePartGraft(
+                    isGliderPart,
+                    selectedPlayablePart,
+                    selectedCutscenePart),
                 windowTitle: "Parts"))
         {
-            return;
-        }
-        if (isGliderPart)
-        {
-            if (!_currentProject.UseCustomArchetype)
-            {
-                _currentProject.UseCustomArchetype = true;
-                RecordChange("Animations", "archetype", "enabled for glider dependencies", status: "staged");
-                AppendLog("Glider: enabled the custom archetype for its gameplay and pose dependencies.");
-            }
-
-            var glideComp = new AnimArchetypeGraftService().BaseGlideVisualComponent(_currentProject);
-            if (!string.IsNullOrWhiteSpace(glideComp))
-            {
-                // Base HAS a native glide visual (Batman Torso, Catwoman/Nightwing/Gordon
-                // Cape) → repoint it.
-                if (RemoveSavedRemovalForComponent(_currentProject, glideComp))
-                {
-                    AppendLog($"Glider part: removed stale remove-component rule for native glide component '{glideComp}'.");
-                    try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject); } catch { /* best effort */ }
-                }
-
-                RestoreProtectedGliderComponent(_currentProject, glideComp);
-
-                // The glider owns the glide component's materials (its own decal + solid). Drop
-                // any saved material override on that component (e.g. a leftover cape recolor)
-                // so the post-graft ApplySavedMaterials can't paint over the glider - this runs
-                // for BOTH the click path and the drag path (both funnel through here).
-                if (ClearMaterialAssignmentsForComponent(_currentProject, glideComp))
-                {
-                    AppendLog($"Glider part: cleared saved material override on glide component '{glideComp}' (the glider provides its own material; recolor via the glider decal).");
-                    try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject); } catch { /* best effort */ }
-                }
-
-                if (!glideComp.Equals(targetSlot, StringComparison.OrdinalIgnoreCase))
-                {
-                    AppendLog($"Glider part → retargeting to the base's glide-visual component '{glideComp}' so it replaces the real glide (not a stray Cape).");
-                    targetSlot = glideComp!;
-                }
-            }
-            else
-            {
-                targetSlot = "Glider";
-                AppendLog("Glider: adding a dedicated 'Glider' component so no existing torso or cape component is replaced.");
-                ClearMaterialAssignmentsForComponent(_currentProject, targetSlot);
-            }
-
-            // Cross-type glide: record the donor character's glide anim sets so the package
-            // step injects them into the suit's LAS_Char/MAS_Char. Without the matching body
-            // glide pose the wingsuit membrane collapses (invisible). This includes Batman
-            // and Batgirl donors because a custom base may not inherit their traversal set.
-            // Runs for BOTH the click and drag paths.
-            var (gliderLas, gliderMas) = GliderService.GliderAnimSetsForPart(samplePart);
-            _currentProject.GliderAnimLas = gliderLas;
-            _currentProject.GliderAnimMas = gliderMas;
-            if (!string.IsNullOrWhiteSpace(gliderLas))
-            {
-                AppendLog($"Glider: glide animation will switch to the '{samplePart.CharacterFolder}' style ({gliderLas[(gliderLas.LastIndexOf('/') + 1)..]} + {gliderMas[(gliderMas.LastIndexOf('/') + 1)..]}) so the wingsuit poses correctly.");
-            }
-            else
-            {
-                AppendLog("Glider: the donor character did not expose a resolvable glide-animation set.");
-            }
-            try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject); } catch { /* best effort */ }
+            return false;
         }
 
-        // Static head/hair/hat attachments are native Head-slot parts
-        // (TtCharacterAsset.Head) attached to HeadStud_Attach_Socket. Do not retarget
-        // them to NeckPeg: NeckPeg is not a native character-asset slot and can produce
-        // generated BPs that load in the tool but crash during in-game preview spawn.
-
-        if (_selectedPlayablePart is not null &&
-            _selectedCutscenePart is not null &&
-            !_selectedPlayablePart.Slot.Equals(_selectedCutscenePart.Slot, StringComparison.OrdinalIgnoreCase))
-        {
-            AppendLog($"Warning: selected playable slot '{_selectedPlayablePart.Slot}' and cutscene slot '{_selectedCutscenePart.Slot}' differ. Target slot will use '{targetSlot}'.");
-        }
-
-        var cloneSlot = GuessCloneSlot(samplePart);
-        var attachSocket = GuessAttachSocket(samplePart);
-
-        ReadFieldsIntoProject(_currentProject);
-        AppendLog($"Drop: recording part in slot '{targetSlot}' (clone {cloneSlot}, attach {attachSocket}); rebuilding graft stage from clean base…");
-        _graftSelectedPartButton.Enabled = false;
+        // Part/glider selection mutates several declarative fields before staging. Snapshot the
+        // fully synchronized project so a failed donor-shell clone or role replay cannot leave a
+        // certified-looking adapter in memory (or be saved later by an unrelated UI action).
+        ReadFieldsIntoProject(transactionProject);
+        NativeSuitProject previousProjectSnapshot;
         try
         {
-            // Rebuild the clean stage from the saved graft list.
-            UpsertPartGraft(targetSlot, isGliderPart, _selectedPlayablePart, _selectedCutscenePart);
-            var donor = System.IO.Path.GetFileNameWithoutExtension(samplePart.SourceUasset);
-            RecordChange("Parts", $"{targetSlot} @ {attachSocket}", $"graft {donor} (clone {cloneSlot})");
-            await RebuildGraftStageFromDeclarativeAsync();
-            RefreshToyboxTiles();
+            previousProjectSnapshot = JsonSerializer.Deserialize<NativeSuitProject>(
+                JsonSerializer.Serialize(transactionProject))
+                ?? throw new InvalidOperationException("Could not snapshot the suit before grafting the selected part.");
         }
         catch (Exception ex)
         {
-            AppendLog("Selected-part graft failed:");
-            AppendLog(ex.ToString());
+            AppendLog("Selected-part graft stopped before staging: " + ex.Message);
+            return false;
+        }
+        _graftSelectedPartButton.Enabled = false;
+        var projectRoot = _projectRootText.Text.Trim();
+        var projectSaved = false;
+        var gateHeld = false;
+        BaseStageFilesystemSnapshot? stageFilesystemSnapshot = null;
+        try
+        {
+            // Own the rebuild gate for the complete project/stage transaction. The snapshot is
+            // captured before RestoreProtectedGliderComponent or any declarative field mutation.
+            await RebuildGate.WaitAsync();
+            gateHeld = true;
+            if (!ReferenceEquals(_currentProject, transactionProject))
+            {
+                AppendLog("Selected-part graft stopped because the active suit changed while it was waiting to stage.");
+                return false;
+            }
+            stageFilesystemSnapshot = await CaptureBaseStageFilesystemAsync(
+                projectRoot,
+                transactionProject.SlotId,
+                // RebuildGraftStageCoreAsync can refresh the clean authored base before it
+                // recreates the graft stage. Snapshot every stage it can mutate so a later
+                // part/material failure cannot leave a tentative PatchedNameMapStage behind.
+                new[] { "UnpatchedStage", "PatchedNameMapStage", "GraftedPartStage" });
+
+            if (isGliderPart)
+            {
+                if (!transactionProject.UseCustomArchetype)
+                {
+                    transactionProject.UseCustomArchetype = true;
+                    transactionProject.GliderAutoEnabledCustomArchetype = true;
+                    RecordChange("Animations", "archetype", "enabled for glider dependencies", status: "staged");
+                    AppendLog("Glider: enabled the custom archetype for its gameplay and pose dependencies.");
+                }
+
+                var glideComp = new AnimArchetypeGraftService().BaseGlideVisualComponent(transactionProject);
+                if (!string.IsNullOrWhiteSpace(glideComp))
+                {
+                    // Base HAS a native glide visual (Batman Torso, Catwoman/Nightwing/Gordon
+                    // Cape) → repoint it.
+                    if (RemoveSavedRemovalForComponent(transactionProject, glideComp))
+                    {
+                        AppendLog($"Glider part: removed stale remove-component rule for native glide component '{glideComp}'.");
+                    }
+
+                    RestoreProtectedGliderComponent(transactionProject, glideComp);
+
+                    // The glider owns the glide component's materials (its own decal + solid).
+                    // Drop any saved material override so replay cannot paint over the glider.
+                    if (ClearMaterialAssignmentsForComponent(transactionProject, glideComp))
+                    {
+                        AppendLog($"Glider part: cleared saved material override on glide component '{glideComp}' (the glider provides its own material; recolor via the glider decal).");
+                    }
+
+                    if (!glideComp.Equals(targetSlot, StringComparison.OrdinalIgnoreCase))
+                    {
+                        AppendLog($"Glider part → retargeting to the base's glide-visual component '{glideComp}' so it replaces the real glide (not a stray Cape).");
+                        targetSlot = glideComp!;
+                    }
+                }
+                else
+                {
+                    targetSlot = "Glider";
+                    AppendLog("Glider: adding a dedicated 'Glider' component so no existing torso or cape component is replaced.");
+                    ClearMaterialAssignmentsForComponent(transactionProject, targetSlot);
+                }
+
+                // Cross-type glide: record the donor character's glide anim sets so the package
+                // step injects them into the suit's LAS_Char/MAS_Char. The paired-cape adapter
+                // re-derives and certifies these paths from its exact Cape + Torso donor.
+                var (gliderLas, gliderMas) = GliderService.GliderAnimSetsForPart(samplePart);
+                transactionProject.GliderAnimLas = gliderLas;
+                transactionProject.GliderAnimMas = gliderMas;
+                if (!string.IsNullOrWhiteSpace(gliderLas))
+                {
+                    AppendLog($"Glider: glide animation will switch to the '{samplePart.CharacterFolder}' style ({gliderLas[(gliderLas.LastIndexOf('/') + 1)..]} + {gliderMas[(gliderMas.LastIndexOf('/') + 1)..]}) so the wingsuit poses correctly.");
+                }
+                else
+                {
+                    AppendLog("Glider: the donor character did not expose a resolvable glide-animation set.");
+                }
+            }
+
+            // Static head/hair/hat attachments are native Head-slot parts attached to
+            // HeadStud_Attach_Socket. Do not retarget them to the non-native NeckPeg slot.
+            if (selectedPlayablePart is not null &&
+                selectedCutscenePart is not null &&
+                !selectedPlayablePart.Slot.Equals(selectedCutscenePart.Slot, StringComparison.OrdinalIgnoreCase))
+            {
+                AppendLog($"Warning: selected playable slot '{selectedPlayablePart.Slot}' and cutscene slot '{selectedCutscenePart.Slot}' differ. Target slot will use '{targetSlot}'.");
+            }
+
+            var cloneSlot = GuessCloneSlot(samplePart);
+            var attachSocket = GuessAttachSocket(samplePart);
+            AppendLog($"Drop: recording part in slot '{targetSlot}' (clone {cloneSlot}, attach {attachSocket}); rebuilding graft stage from clean base…");
+
+            // Rebuild the clean stage from the saved graft list.
+            UpsertPartGraft(transactionProject, targetSlot, isGliderPart, selectedPlayablePart, selectedCutscenePart);
+            if (isGliderPart || isCosmeticCape)
+            {
+                var nowHasPair = GliderService.HasCapeAndGliderCombination(
+                    transactionProject,
+                    contract);
+                if (contract == AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly && nowHasPair)
+                {
+                    var nativeGliderComponent = new AnimArchetypeGraftService()
+                        .BaseGlideVisualComponent(transactionProject);
+                     if (!GliderService.TryConfigurePairedCapeAdapter(
+                             transactionProject,
+                             contract,
+                             nativeGliderComponent,
+                             out var adapterDetail,
+                             _partIndex))
+                    {
+                        throw new InvalidOperationException(
+                            "The dynamic paired-cape adapter could not be certified after recording both parts. " +
+                            adapterDetail);
+                    }
+
+                    AppendLog("Cape adapter: " + adapterDetail);
+                    RecordChange(
+                        "Gliders",
+                        "dynamic paired-cape adapter",
+                        $"preserve {transactionProject.BaseProfile?.GameplayFamily ?? "gameplay donor"} gameplay + use {UnrealPathUtil.AssetName(transactionProject.GliderAnimMas)} glide",
+                        status: "staged");
+                }
+                else if (transactionProject.PairedCapeAdapter is not null)
+                {
+                    if (contract == AnimArchetypeGraftService.CapeGlideContractStatus.Unknown)
+                    {
+                        throw new InvalidOperationException(
+                            "The active base's cape/glider contract could not be verified, so the existing paired-cape adapter was kept unchanged. " +
+                            "Refresh the character assets and part index, then retry this edit.");
+                    }
+                    var removedAdapterComponents = RemovePairedCapeAdapterAtomically(transactionProject);
+                    AppendLog(
+                        "Cape adapter: removed its certified Cape + Torso pair atomically because the known base/part combination no longer satisfies the adapter" +
+                        (removedAdapterComponents.Count > 0
+                            ? $" ({string.Join(", ", removedAdapterComponents)})"
+                            : "") + ".");
+                }
+            }
+            var donor = System.IO.Path.GetFileNameWithoutExtension(samplePart.SourceUasset);
+            RecordChange("Parts", $"{targetSlot} @ {attachSocket}", $"graft {donor} (clone {cloneSlot})");
+            await RebuildGraftStageCoreAsync(
+                transactionProject,
+                projectRoot,
+                persistProject: false);
+            await RunWithFileLockRetryAsync(
+                () => (_projectService ??= new SuitProjectService(projectRoot))
+                    .SaveProject(transactionProject),
+                "save the completed selected-part graft");
+            projectSaved = true;
+            await FinalizeDeclarativeGraftStageAsync(transactionProject, projectRoot);
+            await DiscardBaseStageFilesystemBackupAsync(stageFilesystemSnapshot, logFailure: true);
+            stageFilesystemSnapshot = null;
+            RefreshToyboxTiles();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Exception reportedFailure = ex;
+            if (!projectSaved && stageFilesystemSnapshot is not null)
+            {
+                var recoveryBackupRoot = stageFilesystemSnapshot.BackupRoot;
+                try
+                {
+                    await RestoreBaseStageFilesystemAsync(stageFilesystemSnapshot);
+                    AppendLog("  restored the previous generated part stage after the failed graft.");
+                    stageFilesystemSnapshot = null;
+                }
+                catch (Exception restoreFailure)
+                {
+                    reportedFailure = new AggregateException(
+                        "The selected-part graft failed and its previous generated stage could not be fully restored. " +
+                        $"Recovery backup: {recoveryBackupRoot}",
+                        ex,
+                        restoreFailure);
+                }
+            }
+            if (!projectSaved)
+            {
+                if (ReferenceEquals(_currentProject, transactionProject))
+                {
+                    _currentProject = previousProjectSnapshot;
+                    ApplyProjectToFields(_currentProject);
+                    UpdateSelectedLabels();
+                }
+                else
+                {
+                    AppendLog("  the active suit changed, so its UI state was not overwritten during rollback.");
+                }
+            }
+            AppendLog(projectSaved
+                ? "Selected-part graft was saved, but its completed stage could not be certified:"
+                : stageFilesystemSnapshot is null
+                    ? "Selected-part graft failed; the prior saved project and generated stage were restored:"
+                    : "Selected-part graft failed; packaging remains blocked because stage rollback was incomplete:");
+            if (projectSaved && stageFilesystemSnapshot is not null)
+            {
+                AppendLog($"  recovery backup retained at {stageFilesystemSnapshot.BackupRoot}");
+            }
+            AppendLog(reportedFailure.ToString());
+            _session.RaiseChanged();
+            RefreshInspector();
+            RefreshToyboxTiles();
+            return false;
         }
         finally
         {
+            if (gateHeld)
+            {
+                RebuildGate.Release();
+            }
             _graftSelectedPartButton.Enabled = true;
         }
     }
@@ -3255,9 +3738,31 @@ public sealed partial class MainForm
     /// all stay). Each instance gets a stable <c>InstanceId</c> for per-instance right-click removal.
     /// Gliders keep the legacy slot-keyed replace (a suit has one glide visual).
     /// </summary>
-    private void UpsertPartGraft(string slot, bool isGlider, NativeSuitPartRecord? playable, NativeSuitPartRecord? cutscene)
+    private static SavedPartGraft ProspectivePartGraft(
+        bool isGlider,
+        NativeSuitPartRecord? playable,
+        NativeSuitPartRecord? cutscene)
     {
-        if (_currentProject is null || string.IsNullOrWhiteSpace(slot))
+        var sample = playable ?? cutscene;
+        return new SavedPartGraft
+        {
+            Slot = sample?.Slot ?? (isGlider ? "Glider" : "Cape"),
+            IsGlider = isGlider,
+            InstanceId = "prospective-" + Guid.NewGuid().ToString("N"),
+            OccupancyGroup = isGlider ? "glider.primary" : OccupancyGroupOf(sample),
+            Playable = PartToDonor(playable, "playable"),
+            Cutscene = PartToDonor(cutscene, "cutscene"),
+        };
+    }
+
+    private static void UpsertPartGraft(
+        NativeSuitProject project,
+        string slot,
+        bool isGlider,
+        NativeSuitPartRecord? playable,
+        NativeSuitPartRecord? cutscene)
+    {
+        if (string.IsNullOrWhiteSpace(slot))
         {
             return;
         }
@@ -3268,13 +3773,13 @@ public sealed partial class MainForm
 
         // Replace within the same occupancy group only (glider replaces by its own group too);
         // parts in other groups are left untouched, so "add hair" no longer deletes the cowl.
-        _currentProject.PartGrafts.RemoveAll(pg =>
+        project.PartGrafts.RemoveAll(pg =>
             (string.IsNullOrWhiteSpace(pg.OccupancyGroup)
                 ? OccupancyGroupOf(pg.Playable ?? pg.Cutscene)
                 : pg.OccupancyGroup)
             .Equals(group, StringComparison.OrdinalIgnoreCase));
 
-        _currentProject.PartGrafts.Add(new SavedPartGraft
+        project.PartGrafts.Add(new SavedPartGraft
         {
             Slot = slot,
             IsGlider = isGlider,
@@ -3334,6 +3839,13 @@ public sealed partial class MainForm
             TemplateComponentClass = part.TemplateComponentClass,
             ParentComponentOrVariableName = part.ParentComponentOrVariableName,
             AttachSocket = part.AttachSocket,
+            Materials = part.Materials.Select(material => new NativeSuitObjectRef
+            {
+                ObjectName = material.ObjectName,
+                PackagePath = material.PackagePath,
+                ObjectPath = material.ObjectPath,
+                ClassName = material.ClassName,
+            }).ToList(),
             ComponentTags = part.ComponentTags.ToList(),
         };
     }
@@ -3392,11 +3904,48 @@ public sealed partial class MainForm
     }
 
     /// <summary>
-    /// Projects saved before AnimClass became part of the declarative donor record can recover it
-    /// from the live index during their next successful replay. This makes the package-time cape
-    /// visibility guard independent of a future index refresh.
+    /// Resolves only an unambiguous donor with the same saved source package, mesh, and context.
+    /// Adapter certification uses this stricter path so migration can never borrow component-shell
+    /// metadata from another character that happens to share a cape mesh.
     /// </summary>
-    private static void BackfillSavedDonorAnimClass(
+    private NativeSuitPartRecord? ResolveExactLivePart(SavedPartGraftDonor? donor)
+    {
+        if (donor is null ||
+            _partIndex is null ||
+            string.IsNullOrWhiteSpace(donor.SourcePackagePath) ||
+            string.IsNullOrWhiteSpace(donor.MeshObjectPath) ||
+            string.IsNullOrWhiteSpace(donor.Context))
+        {
+            return null;
+        }
+
+        var matches = _partIndex.Parts
+            .Where(part =>
+                part.SourcePackagePath.Equals(donor.SourcePackagePath, StringComparison.OrdinalIgnoreCase) &&
+                part.MeshObjectPath.Equals(donor.MeshObjectPath, StringComparison.OrdinalIgnoreCase) &&
+                part.Context.Equals(donor.Context, StringComparison.OrdinalIgnoreCase))
+            .Take(2)
+            .ToList();
+        return matches.Count == 1 ? PartRecipeService.Clone(matches[0]) : null;
+    }
+
+    private static bool IsAdapterBoundGraft(NativeSuitProject project, SavedPartGraft graft)
+    {
+        var adapter = project.PairedCapeAdapter;
+        return adapter is not null &&
+               (graft.InstanceId.Equals(
+                    adapter.CosmeticCapeGraftInstanceId,
+                    StringComparison.OrdinalIgnoreCase) ||
+                graft.InstanceId.Equals(
+                    adapter.GlideCapeGraftInstanceId,
+                    StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Projects saved before complete native component recipes were persisted can recover missing
+    /// metadata from the exact live-index donor. Existing donor identity is never replaced.
+    /// </summary>
+    private static void BackfillSavedDonorRecipe(
         SavedPartGraftDonor? donor,
         NativeSuitPartRecord? resolved)
     {
@@ -3405,6 +3954,16 @@ public sealed partial class MainForm
             return;
         }
 
+        if (string.IsNullOrWhiteSpace(donor.Context)) donor.Context = resolved.Context;
+        if (string.IsNullOrWhiteSpace(donor.Stem)) donor.Stem = resolved.Stem;
+        if (string.IsNullOrWhiteSpace(donor.MeshKind)) donor.MeshKind = resolved.MeshKind;
+        if (string.IsNullOrWhiteSpace(donor.SemanticKind)) donor.SemanticKind = resolved.SemanticKind;
+        if (string.IsNullOrWhiteSpace(donor.TemplatePackagePath)) donor.TemplatePackagePath = resolved.TemplatePackagePath;
+        if (string.IsNullOrWhiteSpace(donor.TemplateUasset)) donor.TemplateUasset = resolved.TemplateUasset;
+        if (string.IsNullOrWhiteSpace(donor.TemplateSlot)) donor.TemplateSlot = resolved.TemplateSlot;
+        if (string.IsNullOrWhiteSpace(donor.TemplateComponentClass)) donor.TemplateComponentClass = resolved.TemplateComponentClass;
+        if (string.IsNullOrWhiteSpace(donor.ParentComponentOrVariableName)) donor.ParentComponentOrVariableName = resolved.ParentComponentOrVariableName;
+        if (string.IsNullOrWhiteSpace(donor.AttachSocket)) donor.AttachSocket = resolved.AttachSocket;
         if (string.IsNullOrWhiteSpace(donor.AnimClassObjectName))
         {
             donor.AnimClassObjectName = resolved.AnimClassObjectName;
@@ -3416,6 +3975,20 @@ public sealed partial class MainForm
         if (string.IsNullOrWhiteSpace(donor.AnimClassObjectPath))
         {
             donor.AnimClassObjectPath = resolved.AnimClassObjectPath;
+        }
+        if ((donor.Materials is null || donor.Materials.Count == 0) && resolved.Materials.Count > 0)
+        {
+            donor.Materials = resolved.Materials.Select(material => new NativeSuitObjectRef
+            {
+                ObjectName = material.ObjectName,
+                PackagePath = material.PackagePath,
+                ObjectPath = material.ObjectPath,
+                ClassName = material.ClassName,
+            }).ToList();
+        }
+        if ((donor.ComponentTags is null || donor.ComponentTags.Count == 0) && resolved.ComponentTags.Count > 0)
+        {
+            donor.ComponentTags = resolved.ComponentTags.ToList();
         }
     }
 
@@ -3431,10 +4004,62 @@ public sealed partial class MainForm
         {
             return;
         }
+        var projectRoot = string.IsNullOrWhiteSpace(projectRootOverride)
+            ? _projectRootText.Text.Trim()
+            : projectRootOverride.Trim();
         await RebuildGate.WaitAsync();
+        BaseStageFilesystemSnapshot? stageFilesystemSnapshot = null;
         try
         {
-            await RebuildGraftStageCoreAsync(project, projectRootOverride, persistProject);
+            // Saved-project restore, material replay, removals, and custom meshes all enter through
+            // this wrapper. Their replay can fail after the clean/grafted stages were already
+            // replaced, so keep a complete payload snapshot until the new stage is certified.
+            stageFilesystemSnapshot = await CaptureBaseStageFilesystemAsync(
+                projectRoot,
+                project.SlotId,
+                new[] { "UnpatchedStage", "PatchedNameMapStage", "GraftedPartStage" });
+            await RebuildGraftStageCoreAsync(project, projectRoot, persistProject);
+            await DiscardBaseStageFilesystemBackupAsync(stageFilesystemSnapshot, logFailure: true);
+            stageFilesystemSnapshot = null;
+        }
+        catch (Exception rebuildFailure)
+        {
+            if (stageFilesystemSnapshot is not null)
+            {
+                var recoveryBackupRoot = stageFilesystemSnapshot.BackupRoot;
+                try
+                {
+                    await RestoreBaseStageFilesystemAsync(
+                        stageFilesystemSnapshot,
+                        discardBackup: false);
+
+                    if (persistProject)
+                    {
+                        // Most callers persist declarative intent before asking for a replay. The
+                        // restored payload may therefore represent the prior intent, so retain the
+                        // fail-closed sentinel until a complete retry certifies the saved project.
+                        await MarkDeclarativeStageIncompleteAsync(project, projectRoot);
+                        AppendLog("  restored the previous generated payload after the failed replay; packaging remains blocked until the saved edits replay successfully.");
+                    }
+                    else
+                    {
+                        // Transactional callers using persistProject:false keep the prior project
+                        // JSON too, so the snapshot's original marker state is authoritative.
+                        AppendLog("  restored the previous generated payload and project after the failed replay.");
+                    }
+                    await DiscardBaseStageFilesystemBackupAsync(stageFilesystemSnapshot, logFailure: true);
+                    stageFilesystemSnapshot = null;
+                }
+                catch (Exception restoreFailure)
+                {
+                    throw new AggregateException(
+                        "The declarative replay failed and its previous generated payload could not be fully restored. " +
+                        $"Recovery backup: {recoveryBackupRoot}",
+                        rebuildFailure,
+                        restoreFailure);
+                }
+            }
+            throw;
         }
         finally
         {
@@ -3465,21 +4090,167 @@ public sealed partial class MainForm
         var projectStageRoot = Directory.GetParent(graftStage)?.FullName
             ?? throw new InvalidOperationException("Could not resolve the generated suit stage root.");
         var incompleteMarker = Path.Combine(projectStageRoot, IncompleteDeclarativeStageMarkerName);
+
+        // Mark the transaction incomplete before any awaited index work. Some callers have already
+        // saved new declarative intent, so an older completed stage must never remain packageable
+        // against newer JSON if refreshing the cache fails.
         try
         {
             await RunWithFileLockRetryAsync(
                 () =>
                 {
-                    // Establish a durable fail-closed state before touching any package. This
-                    // sentinel is outside GraftedPartStage, so clearing/replacing that directory
-                    // can never accidentally make an interrupted replay packageable.
                     Directory.CreateDirectory(projectStageRoot);
                     File.WriteAllText(
                         incompleteMarker,
                         DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+                    return true;
+                },
+                "mark the declarative stage rebuild incomplete");
+        }
+        catch (Exception ex)
+        {
+            if (FileLockUtil.IsTransient(ex))
+            {
+                throw new TransientFileLockException(
+                    "Could not mark the declarative stage rebuild as incomplete because its transaction file stayed locked. " +
+                    "Close any viewer opened on this suit and retry.",
+                    ex);
+            }
+            throw new InvalidOperationException(
+                "Could not establish the declarative-stage transaction guard before rebuilding it.", ex);
+        }
+
+        // Adapter migration and visual-overlay replay both require exact live recipes. Load the
+        // index before migrating an older certificate so a saved schema-2 project cannot silently
+        // fall back to its Batman scaffold when its Nightwing overlay is unavailable.
+        if ((project.PairedCapeAdapter is not null ||
+             project.PartGrafts.Any(graft => graft.Playable is not null || graft.Cutscene is not null)) &&
+            !await EnsurePartIndexAsync(projectRoot))
+        {
+            throw new InvalidOperationException(
+                "The native part index could not be loaded or rebuilt from the extracted character assets. " +
+                "Refresh game assets, then rebuild the part index and retry. The previous generated payload was left in place, " +
+                "but packaging remains blocked until the saved edits can be replayed.");
+        }
+
+        if (project.PairedCapeAdapter is not null &&
+            project.PairedCapeAdapter.SchemaVersion != GliderService.PairedCapeAdapterSchemaVersion)
+        {
+            // Migrate a disposable model copy. TryConfigure intentionally clears a rejected
+            // certificate, and donor hydration mutates saved records; doing either on the live
+            // project before all checks pass could leave an orphan Cape/Torso pair after failure.
+            var migrationProject = JsonSerializer.Deserialize<NativeSuitProject>(
+                JsonSerializer.Serialize(project))
+                ?? throw new InvalidOperationException(
+                    "This suit's retired paired-cape adapter could not be copied for an atomic migration.");
+            migrationProject.AllowSyntheticPairedCapeVisualOverlayFixture =
+                project.AllowSyntheticPairedCapeVisualOverlayFixture;
+            var retiredAdapter = migrationProject.PairedCapeAdapter
+                ?? throw new InvalidOperationException("The retired paired-cape adapter disappeared from its migration snapshot.");
+            var boundGrafts = migrationProject.PartGrafts.Where(graft =>
+                    graft.InstanceId.Equals(retiredAdapter.CosmeticCapeGraftInstanceId, StringComparison.OrdinalIgnoreCase) ||
+                    graft.InstanceId.Equals(retiredAdapter.GlideCapeGraftInstanceId, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            var exactHydration = boundGrafts.Select(graft => new
+            {
+                Graft = graft,
+                Playable = ResolveExactLivePart(graft.Playable),
+                Cutscene = ResolveExactLivePart(graft.Cutscene),
+            }).ToList();
+            if (boundGrafts.Count != 2 || exactHydration.Any(item =>
+                    item.Graft.Playable is null || item.Graft.Cutscene is null ||
+                    item.Playable is null || item.Cutscene is null))
+            {
+                throw new InvalidOperationException(
+                    "This suit's retired paired-cape adapter could not resolve both exact playable/cutscene donor recipes. " +
+                    "Refresh the part index, or remove and re-apply its regular cape and glide cape before packaging.");
+            }
+
+            // Do not partially mutate a legacy donor record: resolve all four exact recipes first,
+            // then hydrate missing schema-2 metadata (notably Materials) as one in-memory unit.
+            foreach (var item in exactHydration)
+            {
+                BackfillSavedDonorRecipe(item.Graft.Playable, item.Playable);
+                BackfillSavedDonorRecipe(item.Graft.Cutscene, item.Cutscene);
+            }
+
+            var contract = new AnimArchetypeGraftService().BaseCapeGlideContract(migrationProject);
+            var nativeGlider = new AnimArchetypeGraftService().BaseGlideVisualComponent(migrationProject);
+            if (!GliderService.TryConfigurePairedCapeAdapter(
+                     migrationProject,
+                     contract,
+                     nativeGlider,
+                     out var migrationDetail,
+                     _partIndex))
+            {
+                throw new InvalidOperationException(
+                    "This suit contains a retired paired-cape adapter certificate that could not be migrated to the " +
+                    "component-compatible visual overlay. Remove and re-apply its regular cape and glide cape before packaging. " +
+                     migrationDetail);
+            }
+            project.PartGrafts = migrationProject.PartGrafts;
+            project.PairedCapeAdapter = migrationProject.PairedCapeAdapter;
+            project.GliderAnimLas = migrationProject.GliderAnimLas;
+            project.GliderAnimMas = migrationProject.GliderAnimMas;
+            project.UseCustomArchetype = migrationProject.UseCustomArchetype;
+            project.GliderAutoEnabledCustomArchetype = migrationProject.GliderAutoEnabledCustomArchetype;
+            AppendLog("  migrated retired paired-cape layout: " + migrationDetail);
+        }
+
+        // Resolve every donor before deleting the last generated payload. This catches a genuinely
+        // missing legacy donor while the old files are still available for recovery; the root-level
+        // incomplete marker above keeps those files safely non-packageable.
+        var replayParts = new List<(
+            SavedPartGraft Graft,
+            bool AdapterBound,
+            bool AutomaticVisualOverlay,
+            NativeSuitPartRecord? Playable,
+            NativeSuitPartRecord? Cutscene)>();
+        var visualOverlayGrafts = project.PairedCapeAdapter?.VisualOverlay?.ComponentGrafts ?? [];
+        var allReplayGrafts = visualOverlayGrafts.Concat(project.PartGrafts).ToList();
+        foreach (var graft in allReplayGrafts)
+        {
+            var automaticVisualOverlay = visualOverlayGrafts.Contains(graft);
+            var adapterBound = automaticVisualOverlay || IsAdapterBoundGraft(project, graft);
+            var playable = adapterBound
+                ? ResolveExactLivePart(graft.Playable)
+                : ResolveLivePart(graft.Playable);
+            var cutscene = adapterBound
+                ? ResolveExactLivePart(graft.Cutscene)
+                : ResolveLivePart(graft.Cutscene);
+            BackfillSavedDonorRecipe(graft.Playable, playable);
+            BackfillSavedDonorRecipe(graft.Cutscene, cutscene);
+            var missingPlayable = graft.Playable is not null && playable is null;
+            var missingCutscene = graft.Cutscene is not null && cutscene is null;
+            if ((graft.Playable is null && graft.Cutscene is null) || missingPlayable || missingCutscene)
+            {
+                var missing = string.Join(" and ", new[]
+                {
+                    missingPlayable ? "playable donor" : "",
+                    missingCutscene ? "cutscene donor" : "",
+                    graft.Playable is null && graft.Cutscene is null ? "saved donor record" : "",
+                }.Where(value => !string.IsNullOrWhiteSpace(value)));
+                throw new InvalidOperationException(
+                    $"Part '{graft.Label}' (slot {graft.Slot}) could not resolve its {missing} from the part index. " +
+                    (adapterBound
+                        ? "Its paired-cape adapter requires the exact saved source, mesh, and role; refresh the part index or re-apply the cape pair. "
+                        : "Rebuild the part index and retry; ") +
+                    "the previous generated payload was retained and packaging is blocked until the declarative stage is complete.");
+            }
+
+            replayParts.Add((graft, adapterBound, automaticVisualOverlay, playable, cutscene));
+        }
+
+        await EnsurePatchedBaseStageCurrentAsync(project, projectRoot);
+
+        try
+        {
+            await RunWithFileLockRetryAsync(
+                () =>
+                {
                     // A rebuild is packageable only after every declarative operation succeeds.
-                    // Removing the marker first prevents an older good stage from masking a newer
-                    // partial replay.
+                    // Removing the stage marker before the tree prevents an older good stage from
+                    // masking a newer partial replay.
                     DeleteCompletedGraftStageMarkerIfPresent(graftStage);
                     if (Directory.Exists(graftStage))
                     {
@@ -3532,27 +4303,23 @@ public sealed partial class MainForm
                 "seed the declarative stage from the clean patched base");
         }
 
-        AppendLog($"  replaying {project.PartGrafts.Count} declared part(s) onto a clean base…");
-        foreach (var pg in project.PartGrafts.ToList())
+        AppendLog($"  replaying {replayParts.Count} declared part(s) onto a clean base…");
+        var pairedCapeVisualMaterialsApplied = false;
+        foreach (var replay in replayParts)
         {
-            var playable = ResolveLivePart(pg.Playable);
-            var cutscene = ResolveLivePart(pg.Cutscene);
-            BackfillSavedDonorAnimClass(pg.Playable, playable);
-            BackfillSavedDonorAnimClass(pg.Cutscene, cutscene);
-            var missingPlayable = pg.Playable is not null && playable is null;
-            var missingCutscene = pg.Cutscene is not null && cutscene is null;
-            if ((pg.Playable is null && pg.Cutscene is null) || missingPlayable || missingCutscene)
+            if (!replay.AutomaticVisualOverlay && !pairedCapeVisualMaterialsApplied)
             {
-                var missing = string.Join(" and ", new[]
-                {
-                    missingPlayable ? "playable donor" : "",
-                    missingCutscene ? "cutscene donor" : "",
-                    pg.Playable is null && pg.Cutscene is null ? "saved donor record" : "",
-                }.Where(value => !string.IsNullOrWhiteSpace(value)));
-                throw new InvalidOperationException(
-                    $"Part '{pg.Label}' (slot {pg.Slot}) could not resolve its {missing} from the part index. " +
-                    "Rebuild the part index and retry; packaging is blocked until the declarative stage is complete.");
+                // The visual overlay is the authored-scaffold baseline, not a final user edit.
+                // Apply its identity materials immediately after its automatic Head/Face grafts
+                // and before every ordinary part graft. A later user Face/Body graft must keep its
+                // own donor material until an explicit saved material assignment says otherwise.
+                var adapterVisualMaterials = ApplyPairedCapeVisualOverlayMaterials(project, projectRoot);
+                RequireCompleteDeclarativeReplay(adapterVisualMaterials, "Paired-cape visual-base material replay");
+                pairedCapeVisualMaterialsApplied = true;
             }
+            var pg = replay.Graft;
+            var playable = replay.Playable;
+            var cutscene = replay.Cutscene;
             var sample = playable ?? cutscene!;
             var cloneSlot = GuessCloneSlot(sample);
             var attachSocket = GuessAttachSocket(sample);
@@ -3562,7 +4329,14 @@ public sealed partial class MainForm
                     () =>
                     {
                         var graft = new PartGraftService(projectRoot).CreateSelectedPartGraftedStage(
-                            project, playable, cutscene, pg.Slot, cloneSlot, attachSocket);
+                            project,
+                            playable,
+                            cutscene,
+                            pg.Slot,
+                            cloneSlot,
+                            attachSocket,
+                            pg.PreferDonorComponentShell,
+                            restoreExistingFieldRecipe: replay.AutomaticVisualOverlay);
                         var locked = graft.PackageResults.FirstOrDefault(package => package.TransientFileLock);
                         if (locked is not null)
                         {
@@ -3603,13 +4377,15 @@ public sealed partial class MainForm
                     }
                     // Don't let a saved removal strip the component we just (re)grafted.
                     foreach (var graftedSlot in result.PackageResults
-                                 .Where(p => p.Success && !string.IsNullOrWhiteSpace(p.TargetSlot))
+                                 .Where(p => !replay.AutomaticVisualOverlay &&
+                                             p.Success &&
+                                             !string.IsNullOrWhiteSpace(p.TargetSlot))
                                  .Select(p => p.TargetSlot)
                                  .Distinct(StringComparer.OrdinalIgnoreCase))
                     {
                         RemoveSavedRemovalForComponent(project, graftedSlot);
                     }
-                    if (EnsureCrossKindHeadGraftHidesBaseHead(project))
+                    if (!replay.AutomaticVisualOverlay && EnsureCrossKindHeadGraftHidesBaseHead(project))
                     {
                         AppendLog("  cross-kind head graft replaces the donor cowl; queued Head:0 for removal.");
                     }
@@ -3632,6 +4408,14 @@ public sealed partial class MainForm
             }
         }
 
+        if (!pairedCapeVisualMaterialsApplied)
+        {
+            var adapterVisualMaterials = ApplyPairedCapeVisualOverlayMaterials(project, projectRoot);
+            RequireCompleteDeclarativeReplay(adapterVisualMaterials, "Paired-cape visual-base material replay");
+        }
+
+        GliderService.RefreshPairedCapeAdapterResolvedComponents(project);
+
         SyncCustomStaticMeshHeadRemoval(project);
         await StageCustomStaticMeshesAsync(project);
 
@@ -3648,6 +4432,57 @@ public sealed partial class MainForm
             await FinalizeDeclarativeGraftStageAsync(project, projectRoot);
         }
         _session.RaiseChanged();
+    }
+
+    private async Task EnsurePatchedBaseStageCurrentAsync(
+        NativeSuitProject project,
+        string projectRoot)
+    {
+        var patchService = new UAssetPatchService(projectRoot);
+        if (patchService.IsPatchedStageCurrent(project))
+        {
+            return;
+        }
+
+        var snapshot = await CaptureBaseStageFilesystemAsync(
+            projectRoot,
+            project.SlotId,
+            new[] { "UnpatchedStage", "PatchedNameMapStage" });
+        try
+        {
+            await ClearBaseStageFilesystemAsync(snapshot);
+            var result = await RunWithFileLockRetryAsync(
+                () => patchService.CreateNameMapPatchedStage(project),
+                "rebuild the clean authored base stage");
+            var failed = result.PackageResults.Where(package => !package.Success).ToList();
+            if (result.PackageResults.Count == 0 || failed.Count > 0 || !patchService.IsPatchedStageCurrent(project))
+            {
+                var detail = failed.Count == 0
+                    ? "no complete character-package patch was produced"
+                    : string.Join(" | ", failed.Select(package =>
+                        $"{package.Role}: {package.Error ?? "unknown patch failure"}"));
+                throw new InvalidOperationException(
+                    "The clean base stage could not be rebuilt for the current component shell: " + detail);
+            }
+
+            AppendLog("  refreshed the clean base stage for the current playable/cutscene component shell.");
+            await DiscardBaseStageFilesystemBackupAsync(snapshot, logFailure: true);
+        }
+        catch (Exception stageFailure)
+        {
+            try
+            {
+                await RestoreBaseStageFilesystemAsync(snapshot);
+            }
+            catch (Exception restoreFailure)
+            {
+                throw new AggregateException(
+                    $"The clean base-stage refresh failed and its previous stages could not be fully restored. Recovery backup: {snapshot.BackupRoot}",
+                    stageFailure,
+                    restoreFailure);
+            }
+            throw;
+        }
     }
 
     /// <summary>
@@ -3669,6 +4504,18 @@ public sealed partial class MainForm
         }
 
         File.Delete(marker);
+        return true;
+    }
+
+    internal static bool DeleteGeneratedStageDirectoryIfPresent(string stagePath)
+    {
+        if (!Directory.Exists(stagePath))
+        {
+            return false;
+        }
+
+        DeleteCompletedGraftStageMarkerIfPresent(stagePath);
+        Directory.Delete(stagePath, recursive: true);
         return true;
     }
 

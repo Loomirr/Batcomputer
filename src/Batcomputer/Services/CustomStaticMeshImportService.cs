@@ -149,15 +149,49 @@ public sealed class CustomStaticMeshImportService
             throw new InvalidOperationException("Custom static mesh import currently supports Wavefront OBJ files only.");
         }
 
-        NormalizeImport(import);
-        var destinationDirectory = Path.Combine(new SuitProjectService(projectRoot).ProjectOutputDirectory(project), "ImportedMeshes");
+        var destination = PrepareProjectSourceDestination(projectRoot, project, import);
+        var destinationDirectory = Path.GetDirectoryName(destination)
+            ?? throw new InvalidOperationException("The custom mesh destination directory could not be resolved.");
         Directory.CreateDirectory(destinationDirectory);
-        var destinationName = MakeSafeToken(import.Id) + ".obj";
-        var destination = Path.Combine(destinationDirectory, destinationName);
         if (!Path.GetFullPath(sourceObjPath).Equals(Path.GetFullPath(destination), StringComparison.OrdinalIgnoreCase))
         {
             File.Copy(sourceObjPath, destination, overwrite: true);
         }
+        return destination;
+    }
+
+    /// <summary>
+    /// Resolves the exact project-owned OBJ destination without creating or replacing it. Base-slot
+    /// migrations use this so their filesystem transaction can copy atomically and roll back only
+    /// the files that transaction actually created.
+    /// </summary>
+    internal static string PrepareProjectSourceDestination(
+        string projectRoot,
+        NativeSuitProject project,
+        CustomStaticMeshImport import)
+    {
+        NormalizeImport(import);
+        var projectService = new SuitProjectService(projectRoot);
+        var projectDirectory = Path.GetFullPath(projectService.ProjectOutputDirectory(project));
+        var guiOutputRoot = Path.GetFullPath(projectService.GuiOutputRoot);
+        if (!FileSystemPathUtil.IsWithinDirectory(projectDirectory, guiOutputRoot))
+        {
+            throw new InvalidOperationException("The custom mesh destination points outside this suit project.");
+        }
+
+        var destinationDirectory = Path.GetFullPath(Path.Combine(projectDirectory, "ImportedMeshes"));
+        if (!FileSystemPathUtil.IsWithinDirectory(destinationDirectory, projectDirectory))
+        {
+            throw new InvalidOperationException("The custom mesh destination points outside this suit project.");
+        }
+
+        var destinationName = MakeSafeToken(import.Id) + ".obj";
+        var destination = Path.GetFullPath(Path.Combine(destinationDirectory, destinationName));
+        if (!FileSystemPathUtil.IsWithinDirectory(destination, destinationDirectory))
+        {
+            throw new InvalidOperationException("The custom mesh destination points outside ImportedMeshes.");
+        }
+
         import.SourceObjRelativePath = Path.Combine("ImportedMeshes", destinationName);
         return destination;
     }

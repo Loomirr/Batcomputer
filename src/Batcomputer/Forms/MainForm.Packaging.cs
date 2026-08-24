@@ -132,6 +132,7 @@ public sealed partial class MainForm
         menu.Items.Add("Update ALL mods…", null, (_, _) => { _ = UpdateAllModsAsync(); });
         // Reuse the existing refresh menu (it already carries the research-profile warning).
         menu.Items.Add(new ToolStripMenuItem("Refresh game assets") { DropDown = BuildAssetRefreshMenu() });
+        menu.Items.Add("Refresh part index", null, async (_, _) => await BuildPartIndexAsync());
         menu.Items.Add(new ToolStripSeparator());
 
         menu.Items.Add("Settings…", null, (_, _) => OpenSettings());
@@ -1237,7 +1238,11 @@ public sealed partial class MainForm
         }
         catch (Exception ex)
         {
-            warnings.Add($"stage structural validation could not run: {ex.Message}");
+            // This validator is the final proof against cooked-schema/component crashes and
+            // missing runtime animation dependencies. Treat an unexpected parse/mappings failure
+            // as a blocker: warning-and-continue would let an unverified paired-cape (or any other
+            // structurally unreadable suit) reach IoStore packaging.
+            errors.Add($"stage structural validation could not run, so packaging is blocked: {ex.Message}");
         }
 
         // Package-PATH collision: every suit ships its assets under

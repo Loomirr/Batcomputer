@@ -64,7 +64,7 @@ public sealed class AnimGraftService
 
             var array = export.Data.OfType<ArrayPropertyData>().First(p => p.Name.ToString() == "ParentSetsArray");
             var items = array.Value.ToList();
-            var newItems = new List<PropertyData>();
+            var newItems = new List<(PropertyData Item, string ObjectName)>();
 
             foreach (var raw in parentSetPackages)
             {
@@ -75,36 +75,39 @@ public sealed class AnimGraftService
                 }
                 var objName = UnrealPathUtil.AssetName(pkg);
 
-                if (ArrayContainsImport(asset, items, pkg) || ArrayContainsImport(asset, newItems, pkg))
+                if (ArrayContainsImport(asset, items, pkg) ||
+                    newItems.Any(item => item.ObjectName.Equals(objName, StringComparison.OrdinalIgnoreCase)))
                 {
                     result.Skipped.Add($"{objName} (already present)");
                     continue;
                 }
 
                 var importIndex = EnsureObjectImport(asset, pkg, objName, AnimClassPackage, className);
-                newItems.Add(new ObjectPropertyData(MakeName(asset, "0")) { Value = importIndex });
+                newItems.Add((
+                    new ObjectPropertyData(MakeName(asset, "0")) { Value = importIndex },
+                    objName));
                 result.Added.Add(objName);
             }
 
             if (newItems.Count > 0)
             {
-                // PRIORITY: insert injected sets BEFORE the first "*_Playable" default
-                // container (LAS_Playable / MAS_Playable), which carries the minifig
-                // defaults incl. the cape glide. Earlier in ParentSetsArray = higher
-                // priority - verified against Catwoman's native LAS_Char (LAS_Traversal_
-                // Catwoman[4] sits before LAS_Playable[5]) and MAS_Char (MAS_Glide[3] before
-                // MAS_Playable[11]). A glide set APPENDED after the default loses the
-                // contest and the wingsuit stays in cape pose (collapsed/invisible).
-                // Equipment sets are unaffected by position (nothing competes) but also
-                // become correctly high-priority here. Append if no default container.
-                var anchor = items.FindIndex(it =>
-                    it is ObjectPropertyData op && !op.Value.IsNull() && op.Value.IsImport() &&
-                    op.Value.ToImport(asset).ObjectName.ToString().EndsWith("_Playable", StringComparison.OrdinalIgnoreCase));
-                if (anchor < 0)
+                // PRIORITY: a certified glide/traversal block must precede any native block in
+                // the same category, regardless of where a particular cooked build places its
+                // *_Playable default container. Other injected sets retain the established rule
+                // of sitting before *_Playable. Iterate in reverse so additions sharing an anchor
+                // preserve caller order.
+                foreach (var addition in newItems.AsEnumerable().Reverse())
                 {
-                    anchor = items.Count;
+                    var existingNames = items.Select(item =>
+                            item is ObjectPropertyData objectProperty &&
+                            !objectProperty.Value.IsNull() &&
+                            objectProperty.Value.IsImport()
+                                ? objectProperty.Value.ToImport(asset).ObjectName.ToString()
+                                : "")
+                        .ToList();
+                    var anchor = ParentSetInsertionIndex(existingNames, addition.ObjectName);
+                    items.Insert(anchor, addition.Item);
                 }
-                items.InsertRange(anchor, newItems);
 
                 // Keep the positional element-name labels sequential after the insert.
                 for (var i = 0; i < items.Count; i++)
@@ -125,6 +128,57 @@ public sealed class AnimGraftService
             return result;
         }
     }
+
+    private static int ParentSetInsertionIndex(
+        IReadOnlyList<string> existingObjectNames,
+        string incomingObjectName)
+    {
+        var categoryPrefix = incomingObjectName.StartsWith("MAS_Glide_", StringComparison.OrdinalIgnoreCase)
+            ? "MAS_Glide_"
+            : incomingObjectName.StartsWith("LAS_Traversal_", StringComparison.OrdinalIgnoreCase)
+                ? "LAS_Traversal_"
+                : "";
+        var categoryIndex = -1;
+        if (!string.IsNullOrWhiteSpace(categoryPrefix))
+        {
+            for (var index = 0; index < existingObjectNames.Count; index++)
+            {
+                if (existingObjectNames[index].StartsWith(categoryPrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    categoryIndex = index;
+                    break;
+                }
+            }
+        }
+
+        var playableIndex = -1;
+        for (var index = 0; index < existingObjectNames.Count; index++)
+        {
+            if (existingObjectNames[index].EndsWith("_Playable", StringComparison.OrdinalIgnoreCase))
+            {
+                playableIndex = index;
+                break;
+            }
+        }
+        if (categoryIndex >= 0 && playableIndex >= 0)
+        {
+            return Math.Min(categoryIndex, playableIndex);
+        }
+        if (categoryIndex >= 0)
+        {
+            return categoryIndex;
+        }
+        if (playableIndex >= 0)
+        {
+            return playableIndex;
+        }
+        return existingObjectNames.Count;
+    }
+
+    internal static int ParentSetInsertionIndexForTest(
+        IReadOnlyList<string> existingObjectNames,
+        string incomingObjectName) =>
+        ParentSetInsertionIndex(existingObjectNames, incomingObjectName);
 
     /// <summary>
     /// Replaces (or appends) the equipment-definition class at 0-based
@@ -312,9 +366,16 @@ public sealed class AnimGraftService
     /// Replaces a parent set in a composite's ParentSetsArray by object name
     /// (e.g. LAS_Default_Batman → LAS_Default_Catwoman) so the suit uses another
     /// family's animations for that category. Parent sets are object refs, so no
-    /// CDO needed. If the donor set isn't present, the replacement is appended.
+    /// CDO needed. If the donor set isn't present, the replacement is appended unless
+    /// <paramref name="requireExisting"/> is true. Certified bridges use the strict mode so a
+    /// second category controller can never be added beside an unresolved native controller.
     /// </summary>
-    public GraftResult ReplaceParentSet(string charSetUassetPath, string className, string donorSetName, string replacementPackage)
+    public GraftResult ReplaceParentSet(
+        string charSetUassetPath,
+        string className,
+        string donorSetName,
+        string replacementPackage,
+        bool requireExisting = false)
     {
         var result = new GraftResult();
         try
@@ -347,6 +408,12 @@ public sealed class AnimGraftService
             }
             if (!replaced)
             {
+                if (requireExisting)
+                {
+                    result.Status = "missing-donor-parent";
+                    result.Error = $"Required parent set '{donorSetName}' is absent; no replacement was written.";
+                    return result;
+                }
                 items.Add(new ObjectPropertyData(MakeName(asset, items.Count.ToString())) { Value = newImport });
             }
             array.Value = items.ToArray();
