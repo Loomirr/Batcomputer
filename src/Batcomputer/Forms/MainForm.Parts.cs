@@ -4,6 +4,8 @@ using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Text;
 using System.Text.Json;
+using UAssetAPI;
+using UAssetAPI.UnrealTypes;
 using UAssetAPI.Unversioned;
 
 namespace Batcomputer;
@@ -492,6 +494,7 @@ public sealed partial class MainForm
             .ToList();
 
         project.PartGrafts.RemoveAll(graft => boundGrafts.Any(bound => ReferenceEquals(bound, graft)));
+        ClearMaterialAssignmentsForComponents(project, removedComponents);
         project.PairedCapeAdapter = null;
         project.GliderType = "";
         project.GliderMaterial = "";
@@ -536,6 +539,106 @@ public sealed partial class MainForm
         return project.Requirements.Count != before;
     }
 
+    private bool TryGetPairedCapeAuthoredShellComponents(
+        NativeSuitProject project,
+        out HashSet<string> components,
+        out string detail)
+    {
+        components = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        detail = "";
+        if (project.PairedCapeAdapter is null)
+        {
+            return true;
+        }
+        if (!GliderService.TryGetAuthoredPairedCapeShell(
+                project,
+                out var playablePackage,
+                out var cutscenePackage,
+                out detail))
+        {
+            return false;
+        }
+
+        try
+        {
+            var extractedRoot = AppSettings.Current.EffectiveExtractedContentRoot();
+            foreach (var package in new[] { playablePackage, cutscenePackage })
+            {
+                var normalized = UnrealPathUtil.NormalizePackagePath(package);
+                if (!normalized.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException($"Authored shell package '{package}' is not under /Game/.");
+                }
+                var relative = normalized[6..].Replace('/', Path.DirectorySeparatorChar);
+                var source = new UAsset(
+                    Path.Combine(extractedRoot, relative) + ".uasset",
+                    EngineVersion.VER_UE5_6,
+                    UiMappings(),
+                    CustomSerializationFlags.SkipPreloadDependencyLoading);
+                components.UnionWith(StageValidationService.LiveScsComponentNames(source));
+            }
+            if (components.Count == 0)
+            {
+                detail = "The authored cape shell did not expose any live construction nodes.";
+                return false;
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            detail = ex.Message;
+            components.Clear();
+            return false;
+        }
+    }
+
+    internal static IReadOnlyList<string> RemoveUnsafePairedCapeRemovalRulesForTest(
+        NativeSuitProject project,
+        IEnumerable<string> authoredShellComponents)
+    {
+        var protectedComponents = authoredShellComponents.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var removed = new List<string>();
+        project.Requirements.RemoveAll(requirement =>
+        {
+            if (requirement is null ||
+                !requirement.Kind.Equals("remove-component", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+            var match = protectedComponents.FirstOrDefault(component =>
+                RequirementTargetsComponent(requirement.TargetComponent, component));
+            if (string.IsNullOrWhiteSpace(match))
+            {
+                return false;
+            }
+            removed.Add(match);
+            return true;
+        });
+        return removed.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private void RestorePairedCapeAuthoredShellRemovalRules(NativeSuitProject project)
+    {
+        if (project.PairedCapeAdapter is null)
+        {
+            return;
+        }
+        if (!TryGetPairedCapeAuthoredShellComponents(project, out var protectedComponents, out var detail))
+        {
+            if (!string.IsNullOrWhiteSpace(detail))
+            {
+                AppendLog("  paired-cape shell removal repair deferred to final validation: " + detail);
+            }
+            return;
+        }
+
+        var restored = RemoveUnsafePairedCapeRemovalRulesForTest(project, protectedComponents);
+        if (restored.Count > 0)
+        {
+            AppendLog("  restored authored paired-cape construction node(s): " + string.Join(", ", restored));
+        }
+    }
+
     /// <summary>
     /// A static hair/helmet cloned into a Batman-style base cannot reuse the occupied
     /// <c>Head</c> SCS slot, so it is added as (for example) <c>Head_2</c>. In that
@@ -553,7 +656,11 @@ public sealed partial class MainForm
 
     private bool EnsureCrossKindHeadGraftHidesBaseHead(NativeSuitProject project)
     {
-        if (!HasCrossKindHeadGraft(project) || project.Requirements.Any(requirement =>
+        // The paired-cape adapter inherits a certified authored Blueprint shell. Its visual-base
+        // Head must stay constructed even when a later Head_2 attachment coexists; orphaning that
+        // authored field produced packages that passed export-only checks and crashed on load.
+        if (project.PairedCapeAdapter is not null ||
+            !HasCrossKindHeadGraft(project) || project.Requirements.Any(requirement =>
                 requirement.Kind.Equals("remove-component", StringComparison.OrdinalIgnoreCase) &&
                 RequirementTargetsComponent(requirement.TargetComponent, "Head")))
         {
@@ -598,7 +705,7 @@ public sealed partial class MainForm
     /// (e.g. an old cape material) would paint over the glider. Recolor via the glider decal
     /// override instead, not a component material assignment.
     /// </summary>
-    private bool ClearMaterialAssignmentsForComponent(NativeSuitProject project, string component)
+    private static bool ClearMaterialAssignmentsForComponent(NativeSuitProject project, string component)
     {
         if (string.IsNullOrWhiteSpace(component))
         {
@@ -608,6 +715,119 @@ public sealed partial class MainForm
         project.MaterialAssignments.RemoveAll(a =>
             a.Component.Equals(component, StringComparison.OrdinalIgnoreCase));
         return project.MaterialAssignments.Count != before;
+    }
+
+    private static IReadOnlyList<string> ClearMaterialAssignmentsForComponents(
+        NativeSuitProject project,
+        IEnumerable<string?> components)
+    {
+        var cleared = new List<string>();
+        foreach (var component in components
+                     .Where(component => !string.IsNullOrWhiteSpace(component))
+                     .Select(component => component!.Trim())
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (ClearMaterialAssignmentsForComponent(project, component))
+            {
+                cleared.Add(component);
+            }
+        }
+        return cleared;
+    }
+
+    internal static IReadOnlyList<string> ReconcileResolvedPartMaterialAssignmentsForTest(
+        NativeSuitProject project,
+        IEnumerable<KeyValuePair<string, string>> resolvedChanges)
+    {
+        var activeComponents = (project.PartGrafts ?? [])
+            .Where(graft => graft is not null && !string.IsNullOrWhiteSpace(graft.ResolvedComponent))
+            .Select(graft => graft.ResolvedComponent.Trim())
+            .Concat((project.CustomStaticMeshes ?? [])
+                .Where(mesh => mesh is not null && !string.IsNullOrWhiteSpace(mesh.ResolvedComponent))
+                .Select(mesh => mesh.ResolvedComponent.Trim()))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var changes = resolvedChanges
+            .Where(change =>
+                !string.IsNullOrWhiteSpace(change.Key) &&
+                !string.IsNullOrWhiteSpace(change.Value) &&
+                !change.Key.Equals(change.Value, StringComparison.OrdinalIgnoreCase))
+            .GroupBy(change => change.Key.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Where(group => !activeComponents.Contains(group.Key))
+            .Select(group => new
+            {
+                Old = group.Key,
+                Targets = group.Select(change => change.Value.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList()
+            })
+            .Where(change => change.Targets.Count == 1)
+            .ToList();
+
+        var migrated = new List<string>();
+        foreach (var change in changes)
+        {
+            var target = change.Targets[0];
+            var matches = (project.MaterialAssignments ?? [])
+                .Where(assignment => assignment is not null &&
+                    assignment.Component.Equals(change.Old, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            foreach (var assignment in matches)
+            {
+                assignment.Component = target;
+            }
+            if (matches.Count > 0)
+            {
+                migrated.Add($"{change.Old}→{target} ({matches.Count})");
+            }
+        }
+
+        // Some failed legacy rebuilds persisted the graft's new resolved name before rolling the
+        // stage back, so a later retry no longer has an in-memory old→new transition to observe.
+        // Recover only suffixed generated fields (Cape_2, Head_2, …) with one unambiguous current
+        // non-glider graft for the same logical slot. Core/native component assignments remain
+        // fail-closed and are never guessed.
+        var staleComponents = (project.MaterialAssignments ?? [])
+            .Select(assignment => assignment?.Component?.Trim() ?? "")
+            .Where(component => !string.IsNullOrWhiteSpace(component) &&
+                                !activeComponents.Contains(component))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        foreach (var stale in staleComponents)
+        {
+            var separator = stale.LastIndexOf('_');
+            if (separator <= 0 ||
+                !int.TryParse(stale[(separator + 1)..], out var suffix) ||
+                suffix < 2)
+            {
+                continue;
+            }
+            var logicalSlot = stale[..separator];
+            var targets = (project.PartGrafts ?? [])
+                .Where(graft => graft is not null &&
+                                !graft.IsGlider &&
+                                graft.Slot.Equals(logicalSlot, StringComparison.OrdinalIgnoreCase) &&
+                                !string.IsNullOrWhiteSpace(graft.ResolvedComponent))
+                .Select(graft => graft.ResolvedComponent.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (targets.Count != 1 || targets[0].Equals(stale, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            var matches = (project.MaterialAssignments ?? [])
+                .Where(assignment => assignment is not null &&
+                                     assignment.Component.Equals(stale, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            foreach (var assignment in matches)
+            {
+                assignment.Component = targets[0];
+            }
+            if (matches.Count > 0)
+            {
+                migrated.Add($"{stale}→{targets[0]} ({matches.Count}, recovered)");
+            }
+        }
+        return migrated;
     }
 
     private DeclarativeReplayOutcome RestoreProtectedGliderComponent(
@@ -1283,6 +1503,24 @@ public sealed partial class MainForm
             return;
         }
 
+        if (!removingPairedCapeMember &&
+            _currentProject.PairedCapeAdapter is not null &&
+            TryGetPairedCapeAuthoredShellComponents(
+                _currentProject,
+                out var authoredShellComponents,
+                out _) &&
+            authoredShellComponents.Contains(component))
+        {
+            Dialog.Warn(
+                this,
+                "Cape shell component is protected",
+                $"'{component}' belongs to the authored cape-and-glider shell this cape-less glide base needs. " +
+                "Batcomputer will keep that component constructed so the suit cannot produce a crash-prone Blueprint.\n\n" +
+                "You can still add a compatible attachment, or remove the regular cape/glide-cape pair first.");
+            AppendLog($"Remove blocked: '{component}' is required by the active authored paired-cape shell.");
+            return;
+        }
+
         AppendLog($"Removing {label} ({component} slot {slot}) from staged playable/cutscene assets…");
 
         NativeSuitProject previousProjectSnapshot;
@@ -1316,6 +1554,7 @@ public sealed partial class MainForm
         // (load / re-base / next drop) won't re-add it. Match on the resolved component name
         // recorded at graft time (e.g. "Head_2"); fall back to the requested slot for legacy suits.
         List<string> atomicallyRemovedComponents = [];
+        List<string> removedGraftComponents = [];
         var removedGrafts = 0;
         if (removingPairedCapeMember)
         {
@@ -1345,6 +1584,14 @@ public sealed partial class MainForm
         }
         else
         {
+            removedGraftComponents = _currentProject.PartGrafts
+                .Where(pg => GraftTargetsComponent(pg, component))
+                .Select(pg => !string.IsNullOrWhiteSpace(pg.ResolvedComponent)
+                    ? pg.ResolvedComponent
+                    : pg.Slot)
+                .Where(target => !string.IsNullOrWhiteSpace(target))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
             removedGrafts = _currentProject.PartGrafts.RemoveAll(pg =>
                 GraftTargetsComponent(pg, component));
         }
@@ -1366,6 +1613,17 @@ public sealed partial class MainForm
                 r.Kind.Equals("remove-component", StringComparison.OrdinalIgnoreCase) &&
                 r.TargetComponent.Equals(key, StringComparison.OrdinalIgnoreCase));
             AppendLog($"  cleared the declarative part graft for '{component}' — it won't be re-added on rebuild.");
+        }
+
+        var clearedMaterialComponents = ClearMaterialAssignmentsForComponents(
+            _currentProject,
+            new[] { component }
+                .Concat(removedGraftComponents)
+                .Concat(atomicallyRemovedComponents));
+        if (clearedMaterialComponents.Count > 0)
+        {
+            AppendLog("  cleared saved material assignment(s) for removed component(s): " +
+                      string.Join(", ", clearedMaterialComponents));
         }
 
         try
@@ -3458,6 +3716,64 @@ public sealed partial class MainForm
         return GliderService.IsNativeGliderPart(part);
     }
 
+    internal static bool TryFindMatchingCosmeticCapeForGliderForTest(
+        NativeSuitPartIndex? index,
+        NativeSuitPartRecord? playableGlider,
+        NativeSuitPartRecord? cutsceneGlider,
+        out NativeSuitPartRecord? playableCape,
+        out NativeSuitPartRecord? cutsceneCape,
+        out string detail)
+    {
+        playableCape = null;
+        cutsceneCape = null;
+        detail = "";
+        if (index is null || playableGlider is null || cutsceneGlider is null)
+        {
+            detail = "Both playable and cutscene glide-cape recipes are required before Batcomputer can add their matching regular cape.";
+            return false;
+        }
+        if (!GliderService.IsNativeGliderPart(playableGlider) ||
+            !GliderService.IsNativeGliderPart(cutsceneGlider) ||
+            GliderService.PairedCapeDriverForPart(playableGlider) != PairedCapeVisibilityDriver.PairedCapable ||
+            GliderService.PairedCapeDriverForPart(cutsceneGlider) != PairedCapeVisibilityDriver.PairedCapable)
+        {
+            detail = "The selected visual is not a proven paired-cape glide recipe.";
+            return false;
+        }
+
+        static List<NativeSuitPartRecord> Matches(
+            NativeSuitPartIndex partIndex,
+            NativeSuitPartRecord glider,
+            string context) =>
+            partIndex.Parts
+                .Where(part =>
+                    part.Context.Equals(context, StringComparison.OrdinalIgnoreCase) &&
+                    part.SourcePackagePath.Equals(glider.SourcePackagePath, StringComparison.OrdinalIgnoreCase) &&
+                    part.Slot.Equals("Cape", StringComparison.OrdinalIgnoreCase) &&
+                    GliderService.IsCosmeticCapeAttachment(part))
+                .GroupBy(part => new
+                {
+                    Source = part.SourcePackagePath.ToUpperInvariant(),
+                    Mesh = part.MeshObjectPath.ToUpperInvariant(),
+                    Slot = part.Slot.ToUpperInvariant(),
+                })
+                .Select(group => group.First())
+                .ToList();
+
+        var playableMatches = Matches(index, playableGlider, "playable");
+        var cutsceneMatches = Matches(index, cutsceneGlider, "cutscene");
+        if (playableMatches.Count != 1 || cutsceneMatches.Count != 1)
+        {
+            detail = "The selected glide cape did not expose one unambiguous matching regular Cape in both its playable and cutscene donor packages.";
+            return false;
+        }
+
+        playableCape = playableMatches[0];
+        cutsceneCape = cutsceneMatches[0];
+        detail = "Found the selected glide cape's exact playable/cutscene regular-cape pair.";
+        return true;
+    }
+
     /// <summary>
     /// A base having separate Cape + Glider components is necessary but not sufficient: the
     /// replacement glider's AnimBlueprint must also emit the paired-cape visibility signal.
@@ -3621,6 +3937,31 @@ public sealed partial class MainForm
                 windowTitle: "Parts");
             return false;
         }
+        var requiresAutomaticPairedCape =
+            isGliderPart &&
+            contract == AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly &&
+            !GliderService.ProjectHasCosmeticCape(transactionProject) &&
+            GliderService.PairedCapeDriverForPart(samplePart) == PairedCapeVisibilityDriver.PairedCapable;
+        NativeSuitPartRecord? matchingPlayableCape = null;
+        NativeSuitPartRecord? matchingCutsceneCape = null;
+        var matchingCapeDetail = "";
+        if (requiresAutomaticPairedCape &&
+            !TryFindMatchingCosmeticCapeForGliderForTest(
+                _partIndex,
+                selectedPlayablePart,
+                selectedCutscenePart,
+                out matchingPlayableCape,
+                out matchingCutsceneCape,
+                out matchingCapeDetail))
+        {
+            var message =
+                "This Batman-style glide cape must be added with its exact playable and cutscene regular-cape pair. " +
+                "Batcomputer will not place it in the cape-less base's native glide field by itself because that produces an invalid one-field layout.\n\n" +
+                matchingCapeDetail + "\n\nRefresh the part index, then select the glide cape for both roles and retry.";
+            AppendLog("Glide-cape selection stopped before staging: " + message.Replace('\n', ' '));
+            Dialog.Error(this, "Matching regular Cape was not found", message, windowTitle: "Parts");
+            return false;
+        }
         if ((isGliderPart || isCosmeticCape) &&
             BlockUnsupportedCapeGliderPairing(
                 transactionProject,
@@ -3674,6 +4015,30 @@ public sealed partial class MainForm
                 // part/material failure cannot leave a tentative PatchedNameMapStage behind.
                 new[] { "UnpatchedStage", "PatchedNameMapStage", "GraftedPartStage" });
 
+            var autoPairedCape = false;
+            if (requiresAutomaticPairedCape)
+            {
+                // A paired-capable Batman glide cape is authored as Torso and depends on the
+                // matching regular Cape. Applying it alone to a cape-less base's native glide field creates the
+                // misleading (and unsafe to package) one-field layout shown in the inspector.
+                // Record the exact authored pair as one transaction so the adapter can switch to
+                // its certified Cape + Torso shell before either component is staged.
+                UpsertPartGraft(
+                    transactionProject,
+                    "Cape",
+                    isGlider: false,
+                    matchingPlayableCape,
+                    matchingCutsceneCape);
+                targetSlot = "Torso";
+                autoPairedCape = true;
+                AppendLog("Glide cape: automatically added its matching regular Cape and reserved Torso for the glide mesh. " + matchingCapeDetail);
+                RecordChange(
+                    "Parts",
+                    "Cape + Torso",
+                    "added the selected donor's authored regular-cape and glide-cape pair",
+                    status: "staged");
+            }
+
             if (isGliderPart)
             {
                 if (!transactionProject.UseCustomArchetype)
@@ -3685,7 +4050,12 @@ public sealed partial class MainForm
                 }
 
                 var glideComp = new AnimArchetypeGraftService().BaseGlideVisualComponent(transactionProject);
-                if (!string.IsNullOrWhiteSpace(glideComp))
+                if (autoPairedCape)
+                {
+                    ClearMaterialAssignmentsForComponent(transactionProject, "Torso");
+                    AppendLog("Glider part → paired-cape adapter will place the glide visual on authored component 'Torso' and keep the regular cape on 'Cape'.");
+                }
+                else if (!string.IsNullOrWhiteSpace(glideComp))
                 {
                     // Base HAS a native glide visual (Batman Torso, Catwoman/Nightwing/Gordon
                     // Cape) → repoint it.
@@ -3909,11 +4279,21 @@ public sealed partial class MainForm
 
         // Replace within the same occupancy group only (glider replaces by its own group too);
         // parts in other groups are left untouched, so "add hair" no longer deletes the cowl.
+        var replacedComponents = project.PartGrafts
+            .Where(pg =>
+                (string.IsNullOrWhiteSpace(pg.OccupancyGroup)
+                    ? OccupancyGroupOf(pg.Playable ?? pg.Cutscene)
+                    : pg.OccupancyGroup)
+                .Equals(group, StringComparison.OrdinalIgnoreCase))
+            .Select(pg => pg.ResolvedComponent)
+            .Where(component => !string.IsNullOrWhiteSpace(component))
+            .ToList();
         project.PartGrafts.RemoveAll(pg =>
             (string.IsNullOrWhiteSpace(pg.OccupancyGroup)
                 ? OccupancyGroupOf(pg.Playable ?? pg.Cutscene)
                 : pg.OccupancyGroup)
             .Equals(group, StringComparison.OrdinalIgnoreCase));
+        ClearMaterialAssignmentsForComponents(project, replacedComponents);
 
         project.PartGrafts.Add(new SavedPartGraft
         {
@@ -4258,7 +4638,7 @@ public sealed partial class MainForm
 
         // Adapter migration and visual-overlay replay both require exact live recipes. Load the
         // index before migrating an older certificate so a saved schema-2 project cannot silently
-        // fall back to its Batman scaffold when its Nightwing overlay is unavailable.
+        // fall back to its Batman scaffold when the selected base's visual overlay is unavailable.
         if ((project.PairedCapeAdapter is not null ||
              project.PartGrafts.Any(graft => graft.Playable is not null || graft.Cutscene is not null)) &&
             !await EnsurePartIndexAsync(projectRoot))
@@ -4333,11 +4713,18 @@ public sealed partial class MainForm
             AppendLog("  migrated retired paired-cape layout: " + migrationDetail);
         }
 
+        // A visual-base selection made before the adapter exists can leave saved hide rules for
+        // Head or support components. Once an authored cape shell is selected those nodes are part
+        // of its certified construction graph and must stay live. Repair the declarative intent so
+        // both the current rebuild and all later rebuilds preserve that graph.
+        RestorePairedCapeAuthoredShellRemovalRules(project);
+
         // Resolve every donor before deleting the last generated payload. This catches a genuinely
         // missing legacy donor while the old files are still available for recovery; the root-level
         // incomplete marker above keeps those files safely non-packageable.
         var replayParts = new List<(
             SavedPartGraft Graft,
+            string PriorResolvedComponent,
             bool AdapterBound,
             bool AutomaticVisualOverlay,
             NativeSuitPartRecord? Playable,
@@ -4374,7 +4761,13 @@ public sealed partial class MainForm
                     "the previous generated payload was retained and packaging is blocked until the declarative stage is complete.");
             }
 
-            replayParts.Add((graft, adapterBound, automaticVisualOverlay, playable, cutscene));
+            replayParts.Add((
+                graft,
+                graft.ResolvedComponent ?? "",
+                adapterBound,
+                automaticVisualOverlay,
+                playable,
+                cutscene));
         }
 
         await EnsurePatchedBaseStageCurrentAsync(project, projectRoot);
@@ -4459,6 +4852,7 @@ public sealed partial class MainForm
 
         AppendLog($"  replaying {replayParts.Count} declared part(s) onto a clean base…");
         var pairedCapeVisualMaterialsApplied = false;
+        var resolvedComponentChanges = new List<KeyValuePair<string, string>>();
         foreach (var replay in replayParts)
         {
             if (!replay.AutomaticVisualOverlay && !pairedCapeVisualMaterialsApplied)
@@ -4528,6 +4922,14 @@ public sealed partial class MainForm
                     if (!string.IsNullOrWhiteSpace(resolved))
                     {
                         pg.ResolvedComponent = resolved;
+                        if (!replay.AutomaticVisualOverlay &&
+                            !string.IsNullOrWhiteSpace(replay.PriorResolvedComponent) &&
+                            !replay.PriorResolvedComponent.Equals(resolved, StringComparison.OrdinalIgnoreCase))
+                        {
+                            resolvedComponentChanges.Add(new KeyValuePair<string, string>(
+                                replay.PriorResolvedComponent,
+                                resolved));
+                        }
                     }
                     // Don't let a saved removal strip the component we just (re)grafted.
                     foreach (var graftedSlot in result.PackageResults
@@ -4569,6 +4971,15 @@ public sealed partial class MainForm
         }
 
         GliderService.RefreshPairedCapeAdapterResolvedComponents(project);
+
+        var migratedMaterialAssignments = ReconcileResolvedPartMaterialAssignmentsForTest(
+            project,
+            resolvedComponentChanges);
+        if (migratedMaterialAssignments.Count > 0)
+        {
+            AppendLog("  migrated saved material assignment target(s) after component layout changed: " +
+                      string.Join(", ", migratedMaterialAssignments));
+        }
 
         SyncCustomStaticMeshHeadRemoval(project);
         await StageCustomStaticMeshesAsync(project);

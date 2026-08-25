@@ -32,7 +32,7 @@ same suit builds without the newest texture, material, part, or custom mesh.
 ## A good minimal report
 
 ```text
-Batcomputer: 0.9.0-beta.7
+Batcomputer: 0.9.0-beta.8
 Game/mappings: <build and date>
 Action: Build Mod
 Expected: release installs

@@ -38,6 +38,304 @@ internal static class ReleaseRegressionChecks
             failures,
             output);
 
+        var textureMipRecipeRoot = Path.Combine(
+            Path.GetTempPath(),
+            "Batcomputer-texture-mip-recipe-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var generated = Path.Combine(textureMipRecipeRoot, "Generated");
+            var worldFolder = Path.Combine(generated, "TextureStandaloneTemplate_DroneControlBGRA8");
+            var worldBase = Path.Combine(worldFolder, "T_GA_DroneControl_BatGirl_AO");
+            Directory.CreateDirectory(worldFolder);
+            CreateSizedTextureFixture(worldBase + ".uasset", 1348);
+            CreateSizedTextureFixture(worldBase + ".uexp", 22165, packageFooter: true);
+            CreateSizedTextureFixture(worldBase + ".ubulk", 22347776);
+
+            var worldJson = TextureCookTemplateService.TemplateJsonPath(
+                textureMipRecipeRoot,
+                "TextureStandaloneTemplate_DroneControlBGRA8");
+            var rejectedFakeDonor = TextureCookTemplateService.NormalizeCoreTemplates(textureMipRecipeRoot) == 0;
+            var wroteCanonicalRecipe = TextureCookTemplateService.WriteCanonicalTemplateForRegression(
+                "TextureStandaloneTemplate_DroneControlBGRA8",
+                worldJson);
+            using var worldDocument = System.Text.Json.JsonDocument.Parse(File.ReadAllText(worldJson));
+            var worldRoot = worldDocument.RootElement;
+            var worldMips = worldRoot.GetProperty("Mips").EnumerateArray().ToArray();
+            var worldInline = worldMips.Skip(5).ToArray();
+            var worldLayoutOk =
+                rejectedFakeDonor &&
+                wroteCanonicalRecipe &&
+                worldRoot.GetProperty("InlinePayloadOffsetBias").GetInt32() == 0 &&
+                worldMips.Length == 12 &&
+                worldMips[0].GetProperty("SizeX").GetInt32() == 2048 &&
+                worldMips[^1].GetProperty("SizeX").GetInt32() == 1 &&
+                worldMips.Take(5).All(mip => mip.GetProperty("BulkData").GetProperty("BulkDataFlags").GetString()!
+                    .Contains("PayloadInSep", StringComparison.OrdinalIgnoreCase)) &&
+                worldInline.All(mip => mip.GetProperty("BulkData").GetProperty("BulkDataFlags").GetString()!
+                    .Contains("ForceInlinePayload", StringComparison.OrdinalIgnoreCase)) &&
+                worldInline[0].GetProperty("BulkData").GetProperty("OffsetInFile").GetInt32() == 197;
+            for (var i = 1; i < worldInline.Length && worldLayoutOk; i++)
+            {
+                var priorBulk = worldInline[i - 1].GetProperty("BulkData");
+                var currentBulk = worldInline[i].GetProperty("BulkData");
+                worldLayoutOk = currentBulk.GetProperty("OffsetInFile").GetInt32() ==
+                    priorBulk.GetProperty("OffsetInFile").GetInt32() +
+                    priorBulk.GetProperty("SizeOnDisk").GetInt32() + 0x10;
+            }
+            Check(
+                worldLayoutOk,
+                "world Texture2D donors require exact identity and canonical recipes cover the complete 12-mip chain",
+                failures,
+                output);
+
+            var syntheticWorldPayload = Enumerable.Repeat((byte)0xCC, 22165).ToArray();
+            syntheticWorldPayload[^4] = 0xC1;
+            syntheticWorldPayload[^3] = 0x83;
+            syntheticWorldPayload[^2] = 0x2A;
+            syntheticWorldPayload[^1] = 0x9E;
+            var rewrittenWorldPayload = TextureCookService.RewriteInlineMipsForRegression(
+                worldJson,
+                syntheticWorldPayload);
+            var worldWriterOk = true;
+            for (var i = 0; i < worldInline.Length && worldWriterOk; i++)
+            {
+                var bulk = worldInline[i].GetProperty("BulkData");
+                var offset = bulk.GetProperty("OffsetInFile").GetInt32();
+                var size = bulk.GetProperty("SizeOnDisk").GetInt32();
+                var expectedFill = (byte)(6 + i);
+                worldWriterOk = Enumerable.Range(offset, size).All(index =>
+                    rewrittenWorldPayload[index] == expectedFill);
+                if (i + 1 < worldInline.Length)
+                {
+                    worldWriterOk = worldWriterOk && Enumerable.Range(offset + size, 0x10).All(index =>
+                        rewrittenWorldPayload[index] == 0xCC);
+                }
+            }
+            var worldLastBulk = worldInline[^1].GetProperty("BulkData");
+            var worldFinalPayloadEnd =
+                worldLastBulk.GetProperty("OffsetInFile").GetInt32() +
+                worldLastBulk.GetProperty("SizeOnDisk").GetInt32();
+            worldWriterOk = worldWriterOk &&
+                Enumerable.Range(worldFinalPayloadEnd, rewrittenWorldPayload.Length - 4 - worldFinalPayloadEnd)
+                    .All(index => rewrittenWorldPayload[index] == 0xCC) &&
+                rewrittenWorldPayload[^4..].SequenceEqual(new byte[] { 0xC1, 0x83, 0x2A, 0x9E });
+            Check(
+                worldWriterOk,
+                "mixed world Texture2D writes every bias-zero inline mip without touching record gaps or the split-export tail",
+                failures,
+                output);
+
+            var mmrJson = TextureCookTemplateService.TemplateJsonPath(
+                textureMipRecipeRoot,
+                TextureCookTemplateService.NativeMmrTemplateFolder);
+            var wroteNativeMmrRecipe = TextureCookTemplateService.WriteCanonicalTemplateForRegression(
+                TextureCookTemplateService.NativeMmrTemplateFolder,
+                mmrJson);
+            using var mmrDocument = System.Text.Json.JsonDocument.Parse(File.ReadAllText(mmrJson));
+            var mmrRoot = mmrDocument.RootElement;
+            var mmrMips = mmrRoot.GetProperty("Mips").EnumerateArray().ToArray();
+            var mmrLastBulk = mmrMips[^1].GetProperty("BulkData");
+            var mmrLayoutOk =
+                wroteNativeMmrRecipe &&
+                TextureCookTemplateService.RequiredPackageExtensionsForRegression(
+                    TextureCookTemplateService.NativeMmrTemplateFolder)
+                    .SequenceEqual(new[] { ".uasset", ".uexp" }) &&
+                mmrRoot.GetProperty("Package").GetString() ==
+                    "/Game/Characters/Textures/EoM/T_TPAGE_OswaldCobblepot_DIST_MMR" &&
+                mmrRoot.GetProperty("PixelFormat").GetString() == "PF_DXT1" &&
+                mmrRoot.GetProperty("SizeX").GetInt32() == 2048 &&
+                mmrRoot.GetProperty("InlinePayloadOffsetBias").GetInt32() == 0 &&
+                mmrMips.Length == 12 &&
+                mmrMips.All(mip => mip.GetProperty("BulkData").GetProperty("BulkDataFlags").GetString()!
+                    .Contains("ForceInlinePayload", StringComparison.OrdinalIgnoreCase)) &&
+                mmrMips[0].GetProperty("BulkData").GetProperty("SizeOnDisk").GetInt32() == 2_097_152 &&
+                mmrMips[0].GetProperty("BulkData").GetProperty("OffsetInFile").GetInt32() == 119 &&
+                mmrMips[^1].GetProperty("SizeX").GetInt32() == 1 &&
+                mmrLastBulk.GetProperty("SizeOnDisk").GetInt32() == 8 &&
+                mmrLastBulk.GetProperty("OffsetInFile").GetInt32() +
+                    mmrLastBulk.GetProperty("SizeOnDisk").GetInt32() == 2_796_539 - 28;
+            for (var i = 1; i < mmrMips.Length && mmrLayoutOk; i++)
+            {
+                var priorBulk = mmrMips[i - 1].GetProperty("BulkData");
+                var currentBulk = mmrMips[i].GetProperty("BulkData");
+                mmrLayoutOk = currentBulk.GetProperty("OffsetInFile").GetInt32() ==
+                    priorBulk.GetProperty("OffsetInFile").GetInt32() +
+                    priorBulk.GetProperty("SizeOnDisk").GetInt32() + 0x10;
+            }
+            Check(
+                mmrLayoutOk,
+                "native MMR profile keeps the donor's full 2K PF_DXT1 inline mip layout",
+                failures,
+                output);
+            Check(
+                MainForm.GuessTextureImportKind("CowlMMR") == "Roughness/spec mask" &&
+                MainForm.GuessTextureImportKind("T_Body_ORM") == "Roughness/spec mask" &&
+                MainForm.GuessTextureImportKind("Uniform") == "Character texture" &&
+                MainForm.GuessTextureImportKind("Storm") == "Character texture" &&
+                MainForm.TextureKindForCookProfileChange(
+                    "Character texture",
+                    "CowlMMR",
+                    "C:/legacy/CowlMMR.png",
+                    "/Game/Mods/Test/CowlMMR") == "Roughness/spec mask" &&
+                MainForm.TextureKindForCookProfileChange(
+                    "Character texture",
+                    "StormBody",
+                    "C:/legacy/UniformBase.png") == "Character texture",
+                "bare MMR and delimited ORM suffixes select surface masks without matching ordinary names",
+                failures,
+                output);
+
+            var mmrCookTemplateFolder = Path.Combine(generated, "MmrCookFixture");
+            var mmrCookJson = Path.Combine(mmrCookTemplateFolder, "T_MmrFixture.json");
+            Directory.CreateDirectory(mmrCookTemplateFolder);
+            TextureCookTemplateService.WriteCanonicalTemplateForRegression(
+                TextureCookTemplateService.NativeMmrTemplateFolder,
+                mmrCookJson);
+            var mmrCookTemplateBase = Path.Combine(mmrCookTemplateFolder, "T_MmrFixture");
+            CreateSizedTextureFixture(mmrCookTemplateBase + ".uasset", 1326);
+            CreateSizedTextureFixture(mmrCookTemplateBase + ".uexp", 2_796_539, packageFooter: true);
+            var mmrSourcePng = Path.Combine(textureMipRecipeRoot, "mmr-regression-source.png");
+            using (var bitmap = new System.Drawing.Bitmap(64, 64, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+            using (var graphics = System.Drawing.Graphics.FromImage(bitmap))
+            {
+                graphics.Clear(System.Drawing.Color.FromArgb(255, 0, 127, 255));
+                bitmap.Save(mmrSourcePng, System.Drawing.Imaging.ImageFormat.Png);
+            }
+
+            var mmrCookedRoot = Path.Combine(textureMipRecipeRoot, "MmrCookedContent");
+            var mmrCookResult = new TextureCookService(textureMipRecipeRoot).Cook(new TextureCookService.Request
+            {
+                SourceImagePath = mmrSourcePng,
+                TemplateJsonPath = mmrCookJson,
+                OutputContentRoot = mmrCookedRoot,
+                OutputPackagePath = mmrRoot.GetProperty("Package").GetString()!,
+                WriteInlineMips = true,
+            });
+            var mmrCookedBase = Path.Combine(
+                mmrCookedRoot,
+                "Characters",
+                "Textures",
+                "EoM",
+                "T_TPAGE_OswaldCobblepot_DIST_MMR");
+            Check(
+                mmrCookResult.Status.Equals("created", StringComparison.OrdinalIgnoreCase) &&
+                mmrCookResult.PixelFormat == "PF_DXT1" &&
+                mmrCookResult.MipCount == 12 &&
+                mmrCookResult.ExternalMipCount == 0 &&
+                mmrCookResult.InlineMipCount == 12 &&
+                string.IsNullOrWhiteSpace(mmrCookResult.OutputUbulk) &&
+                File.Exists(mmrCookedBase + ".uasset") &&
+                File.Exists(mmrCookedBase + ".uexp") &&
+                !File.Exists(mmrCookedBase + ".ubulk") &&
+                MainForm.TextureCookReportOutputMatchesFiles(
+                    mmrCookedBase + ".texture-cook-report.json",
+                    mmrCookedBase,
+                    mmrCookJson),
+                "native MMR recipes cook and hash a complete all-inline output without optional bulk files",
+                failures,
+                output);
+
+            var uiFolder = Path.Combine(generated, TextureCookTemplateService.NativeSuitIconTemplateFolder);
+            var uiBase = Path.Combine(uiFolder, "T_SuitIcon_NULL_BCA");
+            Directory.CreateDirectory(uiFolder);
+            CreateSizedTextureFixture(uiBase + ".uasset", 1616);
+            CreateSizedTextureFixture(uiBase + ".uexp", 87708, packageFooter: true);
+            var uiNormalized = TextureCookTemplateService.NormalizeNativeSuitIconTemplate(textureMipRecipeRoot);
+            var uiJson = TextureCookTemplateService.TemplateJsonPath(
+                textureMipRecipeRoot,
+                TextureCookTemplateService.NativeSuitIconTemplateFolder);
+            using var uiDocument = System.Text.Json.JsonDocument.Parse(File.ReadAllText(uiJson));
+            var uiRoot = uiDocument.RootElement;
+            var uiMips = uiRoot.GetProperty("Mips").EnumerateArray().ToArray();
+            var uiLast = uiMips[^1].GetProperty("BulkData");
+            Check(
+                uiNormalized &&
+                uiRoot.GetProperty("InlinePayloadOffsetBias").GetInt32() == 0x11 &&
+                uiMips.Length == 9 &&
+                uiMips[0].GetProperty("BulkData").GetProperty("OffsetInFile").GetInt32() == 0x7F &&
+                0x11L + uiLast.GetProperty("OffsetInFile").GetInt64() + uiLast.GetProperty("SizeOnDisk").GetInt64() == 87708 - 28,
+                "native suit-icon recipes keep their explicit +0x11 inline payload bias and package footer",
+                failures,
+                output);
+
+            var sourcePng = Path.Combine(textureMipRecipeRoot, "texture-regression-source.png");
+            using (var bitmap = new System.Drawing.Bitmap(256, 256, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+            using (var graphics = System.Drawing.Graphics.FromImage(bitmap))
+            {
+                graphics.Clear(System.Drawing.Color.FromArgb(255, 12, 34, 56));
+                graphics.FillRectangle(System.Drawing.Brushes.Gold, 0, 0, 128, 128);
+                graphics.FillRectangle(System.Drawing.Brushes.MediumPurple, 128, 128, 128, 128);
+                bitmap.Save(sourcePng, System.Drawing.Imaging.ImageFormat.Png);
+            }
+
+            var cookedRoot = Path.Combine(textureMipRecipeRoot, "CookedContent");
+            var cookResult = new TextureCookService(textureMipRecipeRoot).Cook(new TextureCookService.Request
+            {
+                SourceImagePath = sourcePng,
+                TemplateJsonPath = uiJson,
+                OutputContentRoot = cookedRoot,
+                OutputPackagePath = "/Game/UI/Icons/Suits/T_SuitIcon_NULL_BCA",
+                WriteInlineMips = true,
+                Bc7Quality = "fast",
+            });
+            var cookedBase = Path.Combine(cookedRoot, "UI", "Icons", "Suits", "T_SuitIcon_NULL_BCA");
+            var cookedReport = cookedBase + ".texture-cook-report.json";
+            var cookedUexpPath = cookedBase + ".uexp";
+            var uiPayloadLayoutPreserved = false;
+            if (File.Exists(cookedUexpPath))
+            {
+                var cookedUexp = File.ReadAllBytes(cookedUexpPath);
+                var uiBias = uiRoot.GetProperty("InlinePayloadOffsetBias").GetInt32();
+                uiPayloadLayoutPreserved = true;
+                for (var i = 0; i < uiMips.Length && uiPayloadLayoutPreserved; i++)
+                {
+                    var bulk = uiMips[i].GetProperty("BulkData");
+                    var offset = uiBias + bulk.GetProperty("OffsetInFile").GetInt32();
+                    var size = bulk.GetProperty("SizeOnDisk").GetInt32();
+                    uiPayloadLayoutPreserved = Enumerable.Range(offset, size).Any(index => cookedUexp[index] != 0);
+                    if (i + 1 < uiMips.Length)
+                    {
+                        uiPayloadLayoutPreserved = uiPayloadLayoutPreserved &&
+                            Enumerable.Range(offset + size, 0x10).All(index => cookedUexp[index] == 0);
+                    }
+                }
+                var uiFinalPayloadEnd =
+                    uiBias + uiLast.GetProperty("OffsetInFile").GetInt32() + uiLast.GetProperty("SizeOnDisk").GetInt32();
+                uiPayloadLayoutPreserved = uiPayloadLayoutPreserved &&
+                    Enumerable.Range(uiFinalPayloadEnd, cookedUexp.Length - 4 - uiFinalPayloadEnd)
+                        .All(index => cookedUexp[index] == 0) &&
+                    cookedUexp[^4..].SequenceEqual(new byte[] { 0xC1, 0x83, 0x2A, 0x9E });
+            }
+            var completeCookAccepted =
+                cookResult.Status.Equals("created", StringComparison.OrdinalIgnoreCase) &&
+                uiPayloadLayoutPreserved &&
+                MainForm.TextureCookReportOutputMatchesFiles(cookedReport, cookedBase, uiJson);
+            var tamperedCookRejected = false;
+            if (File.Exists(cookedBase + ".uexp"))
+            {
+                var tamperedUexp = File.ReadAllBytes(cookedUexpPath);
+                if (tamperedUexp.Length > 0x90)
+                {
+                    tamperedUexp[0x90] ^= 0xFF;
+                    File.WriteAllBytes(cookedUexpPath, tamperedUexp);
+                    tamperedCookRejected =
+                        !MainForm.TextureCookReportOutputMatchesFiles(cookedReport, cookedBase, uiJson);
+                }
+            }
+            Check(
+                completeCookAccepted && tamperedCookRejected,
+                "texture cooks write every inline mip atomically and staging rejects payloads changed after the cook report",
+                failures,
+                output);
+        }
+        finally
+        {
+            if (Directory.Exists(textureMipRecipeRoot))
+            {
+                Directory.Delete(textureMipRecipeRoot, recursive: true);
+            }
+        }
+
         var movedExtractRoot = Path.Combine(
             Path.GetTempPath(),
             "Batcomputer-template-path-regression-" + Guid.NewGuid().ToString("N"));
@@ -945,6 +1243,94 @@ internal static class ReleaseRegressionChecks
             failures,
             output);
 
+        const string autoPairPlayablePackage =
+            "/Game/Characters/Minifig/Batman/BP_Batman_AutoPair_Playable";
+        const string autoPairCutscenePackage =
+            "/Game/Characters/Minifig/Batman/BP_Batman_AutoPair_Cutscene";
+        var autoPairPlayableGlider = new NativeSuitPartRecord
+        {
+            Context = "playable",
+            SourcePackagePath = autoPairPlayablePackage,
+            Slot = "Torso",
+            MeshObjectName = "SK_CAPE_Glide",
+            MeshPackagePath = "/Game/Characters/Attachments/Cape/SK_CAPE_Glide",
+            MeshObjectPath = "/Game/Characters/Attachments/Cape/SK_CAPE_Glide.SK_CAPE_Glide",
+            AnimClassObjectName = "ABP_Cape_Glide_C",
+            ComponentTags = ["Glider"],
+        };
+        var autoPairCutsceneGlider = new NativeSuitPartRecord
+        {
+            Context = "cutscene",
+            SourcePackagePath = autoPairCutscenePackage,
+            Slot = "Torso",
+            MeshObjectName = "SK_CAPE_Glide",
+            MeshPackagePath = "/Game/Characters/Attachments/Cape/SK_CAPE_Glide",
+            MeshObjectPath = "/Game/Characters/Attachments/Cape/SK_CAPE_Glide.SK_CAPE_Glide",
+            AnimClassObjectName = "ABP_Cape_Glide_C",
+            ComponentTags = ["Glider"],
+        };
+        var autoPairPlayableCape = new NativeSuitPartRecord
+        {
+            Context = "playable",
+            SourcePackagePath = autoPairPlayablePackage,
+            Slot = "Cape",
+            MeshObjectName = "SK_CAPE_Spiked",
+            MeshPackagePath = "/Game/Characters/Attachments/Cape/SK_CAPE_Spiked",
+            MeshObjectPath = "/Game/Characters/Attachments/Cape/SK_CAPE_Spiked.SK_CAPE_Spiked",
+            ComponentTags = ["TtCharacterAsset.Cape"],
+        };
+        var autoPairCutsceneCape = new NativeSuitPartRecord
+        {
+            Context = "cutscene",
+            SourcePackagePath = autoPairCutscenePackage,
+            Slot = "Cape",
+            MeshObjectName = "SK_CAPE_Spiked_Advanced",
+            MeshPackagePath = "/Game/Characters/Attachments/Cape/SK_CAPE_Spiked_Advanced",
+            MeshObjectPath = "/Game/Characters/Attachments/Cape/SK_CAPE_Spiked_Advanced.SK_CAPE_Spiked_Advanced",
+            ComponentTags = ["TtCharacterAsset.Cape"],
+        };
+        var autoPairIndex = new NativeSuitPartIndex
+        {
+            Parts =
+            [
+                autoPairPlayableGlider,
+                autoPairCutsceneGlider,
+                autoPairPlayableCape,
+                autoPairCutsceneCape,
+                new NativeSuitPartRecord
+                {
+                    Context = "playable",
+                    SourcePackagePath = "/Game/Characters/Minifig/Batman/BP_Batman_Decoy_Playable",
+                    Slot = "Cape",
+                    MeshObjectName = "SK_CAPE_Decoy",
+                    MeshPackagePath = "/Game/Characters/Attachments/Cape/SK_CAPE_Decoy",
+                    ComponentTags = ["Cape"],
+                }
+            ]
+        };
+        var exactAutoPairFound = MainForm.TryFindMatchingCosmeticCapeForGliderForTest(
+            autoPairIndex,
+            autoPairPlayableGlider,
+            autoPairCutsceneGlider,
+            out var resolvedAutoPairPlayableCape,
+            out var resolvedAutoPairCutsceneCape,
+            out _);
+        var incompleteAutoPairRejected = !MainForm.TryFindMatchingCosmeticCapeForGliderForTest(
+            autoPairIndex,
+            autoPairPlayableGlider,
+            null,
+            out _,
+            out _,
+            out _);
+        Check(
+            exactAutoPairFound &&
+            ReferenceEquals(resolvedAutoPairPlayableCape, autoPairPlayableCape) &&
+            ReferenceEquals(resolvedAutoPairCutsceneCape, autoPairCutsceneCape) &&
+            incompleteAutoPairRejected,
+            "selecting a paired-capable glide cape can atomically recover its exact Cape plus Torso donor pair",
+            failures,
+            output);
+
         var certifiedNightwingCapePair = CreateCertifiedNightwingCapeAdapterProject();
         var adapterConfigured = GliderService.TryConfigurePairedCapeAdapter(
             certifiedNightwingCapePair,
@@ -1006,6 +1392,40 @@ internal static class ReleaseRegressionChecks
             output.WriteLine(
                 $"  paired-cape adapter detail: configure='{adapterConfigureDetail}', validate='{adapterValidationDetail}'");
         }
+
+        var genericCapeLessPair = CreateCertifiedNightwingCapeAdapterProject();
+        const string genericCapeLessPlayable =
+            "/Game/Characters/Minifig/Catwoman/BP_Catwoman_Default_Playable";
+        genericCapeLessPair.PlayableTemplate!.PackagePath = genericCapeLessPlayable;
+        genericCapeLessPair.BaseProfile!.GameplayDonorPackage = genericCapeLessPlayable;
+        genericCapeLessPair.BaseProfile.GameplayFamily = "Catwoman";
+        genericCapeLessPair.BaseProfile.VisualBasePackage =
+            "/Game/Characters/Minifig/Catwoman/BP_Catwoman_Default_Cutscene";
+        genericCapeLessPair.BaseProfile.VisualFamily = "Catwoman";
+        var genericCapeLessConfigured = GliderService.TryConfigurePairedCapeAdapter(
+            genericCapeLessPair,
+            AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
+            nativeGliderComponent: "Cape",
+            out _);
+        foreach (var graft in genericCapeLessPair.PartGrafts)
+        {
+            graft.ResolvedComponent = graft.Slot;
+        }
+        GliderService.RefreshPairedCapeAdapterResolvedComponents(genericCapeLessPair);
+        Check(
+            genericCapeLessConfigured &&
+            genericCapeLessPair.PairedCapeAdapter is not null &&
+            genericCapeLessPair.PairedCapeAdapter.GameplayDonorPackage.Equals(
+                genericCapeLessPlayable,
+                StringComparison.OrdinalIgnoreCase) &&
+            GliderService.IsDeclaredPairedCapeAdapterValid(
+                genericCapeLessPair,
+                AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
+                requireResolvedComponents: true,
+                out _),
+            "the paired-cape adapter is driven by the cape-less glide contract rather than a Nightwing identity",
+            failures,
+            output);
 
         const string certifiedBatmanMas =
             "/Game/Animation/MontageAnimSets/Traversal/MAS_Glide_Batman";
@@ -1614,6 +2034,64 @@ internal static class ReleaseRegressionChecks
             failures,
             output);
 
+        var shellRemovalRepairProject = CreateCertifiedNightwingCapeAdapterProject();
+        shellRemovalRepairProject.Requirements =
+        [
+            new NativeSuitRequirement { Kind = "remove-component", TargetComponent = "Head:0" },
+            new NativeSuitRequirement { Kind = "remove-component", TargetComponent = "TtCharacterAssetMinion:0" },
+            new NativeSuitRequirement { Kind = "remove-component", TargetComponent = "UnrelatedAttachment:0" },
+        ];
+        var repairedShellRemovals = MainForm.RemoveUnsafePairedCapeRemovalRulesForTest(
+            shellRemovalRepairProject,
+            ["Head", "TtCharacterAssetMinion", "Cape", "Torso"]);
+        Check(
+            repairedShellRemovals.ToHashSet(StringComparer.OrdinalIgnoreCase)
+                .SetEquals(["Head", "TtCharacterAssetMinion"]) &&
+            shellRemovalRepairProject.Requirements.Count == 1 &&
+            shellRemovalRepairProject.Requirements[0].TargetComponent == "UnrelatedAttachment:0" &&
+            StageValidationService.AuthoredShellLiveComponentsRemainForTest(
+                ["Face", "Head", "Cape", "Torso"],
+                ["Head_2", "Torso", "Cape", "Head", "Face"]) &&
+            !StageValidationService.AuthoredShellLiveComponentsRemainForTest(
+                ["Face", "Head", "Cape", "Torso"],
+                ["Head_2", "Cape", "Head", "Face"]),
+            "paired-cape rebuilds restore authored SCS removal rules and final validation requires every authored live node",
+            failures,
+            output);
+
+        var staleMaterialTargetProject = new NativeSuitProject
+        {
+            PartGrafts =
+            [
+                new SavedPartGraft
+                {
+                    Slot = "Cape",
+                    ResolvedComponent = "Cape",
+                    IsGlider = false,
+                }
+            ],
+            MaterialAssignments =
+            [
+                new SavedMaterialAssignment { Component = "Cape_2", Slot = 0, MiPackagePath = "/Game/Test/MI_Cape0" },
+                new SavedMaterialAssignment { Component = "Cape_2", Slot = 1, MiPackagePath = "/Game/Test/MI_Cape1" },
+                new SavedMaterialAssignment { Component = "CharacterMesh0", Slot = 0, MiPackagePath = "/Game/Test/MI_Body" },
+            ]
+        };
+        var recoveredMaterialTargets = MainForm.ReconcileResolvedPartMaterialAssignmentsForTest(
+            staleMaterialTargetProject,
+            Array.Empty<KeyValuePair<string, string>>());
+        Check(
+            recoveredMaterialTargets.Count == 1 &&
+            staleMaterialTargetProject.MaterialAssignments.Count(assignment =>
+                assignment.Component.Equals("Cape", StringComparison.OrdinalIgnoreCase)) == 2 &&
+            staleMaterialTargetProject.MaterialAssignments.Any(assignment =>
+                assignment.Component.Equals("CharacterMesh0", StringComparison.OrdinalIgnoreCase)) &&
+            staleMaterialTargetProject.MaterialAssignments.All(assignment =>
+                !assignment.Component.Equals("Cape_2", StringComparison.OrdinalIgnoreCase)),
+            "legacy suffixed part material targets recover to one unambiguous current graft without guessing core fields",
+            failures,
+            output);
+
         var baseChangeProject = CreateCertifiedNightwingCapeAdapterProject();
         var baseChangeAdapterConfigured = GliderService.TryConfigurePairedCapeAdapter(
             baseChangeProject,
@@ -1626,6 +2104,12 @@ internal static class ReleaseRegressionChecks
         baseChangeProject.GliderType = "native:Batman Animated glide cape";
         baseChangeProject.GliderMaterial = "/Game/Regression/Materials/MI_Glide";
         baseChangeProject.GliderGrafted = true;
+        baseChangeProject.MaterialAssignments =
+        [
+            new SavedMaterialAssignment { Component = "Cape", Slot = 0, MiPackagePath = "/Game/Test/MI_Cape" },
+            new SavedMaterialAssignment { Component = "Torso", Slot = 0, MiPackagePath = "/Game/Test/MI_Torso" },
+            new SavedMaterialAssignment { Component = "CharacterMesh0", Slot = 0, MiPackagePath = "/Game/Test/MI_Body" },
+        ];
         baseChangeProject.PartGrafts.Add(new SavedPartGraft
         {
             Slot = "Head",
@@ -1645,6 +2129,8 @@ internal static class ReleaseRegressionChecks
             !baseChangeProject.GliderGrafted &&
             !baseChangeProject.GliderAutoEnabledCustomArchetype &&
             !baseChangeProject.UseCustomArchetype &&
+            baseChangeProject.MaterialAssignments.Count == 1 &&
+            baseChangeProject.MaterialAssignments[0].Component == "CharacterMesh0" &&
             removedAdapterFields.Contains("Cape", StringComparer.OrdinalIgnoreCase) &&
             removedAdapterFields.Contains("Torso", StringComparer.OrdinalIgnoreCase),
             "changing a visual/base identity removes the bound Cape/Torso pair and all adapter-derived glider state atomically",
@@ -2196,6 +2682,8 @@ internal static class ReleaseRegressionChecks
         var sharedReferencesDetected = false;
         var sharedLibraryRoundTrip = false;
         var legacyMaterialWasAdopted = false;
+        var legacyAssignmentWasReleaseStaged = false;
+        var incompleteReleaseMaterialWasRejected = false;
         var unsafeMaterialPathRejected = false;
         var previousSettings = AppSettings.Current;
         try
@@ -2285,15 +2773,55 @@ internal static class ReleaseRegressionChecks
                 StringComparison.OrdinalIgnoreCase));
             Directory.Delete(projects.ProjectOutputDirectory(legacyProject), recursive: true);
             var legacyPackageStage = Path.Combine(materialReferenceRoot, "LegacyPackageStage");
-            var legacyCopies = library.CopyPackageToContentRoot(legacyPackage, legacyPackageStage);
+            var legacyCopies = MainForm.StageReferencedToolMaterialsForRelease(
+                legacyProject,
+                library,
+                legacyPackageStage);
             legacyMaterialWasAdopted =
                 adopted &&
                 library.LoadAvailable().Any(material => material.PackagePath.Equals(
                     legacyPackage,
                     StringComparison.OrdinalIgnoreCase)) &&
-                legacyCopies.Count == 2 &&
+                legacyCopies == 2 &&
                 File.Exists(Path.Combine(legacyPackageStage, "Mods", "Legacy", "MI_LegacyBody.uasset")) &&
                 File.Exists(Path.Combine(legacyPackageStage, "Mods", "Legacy", "MI_LegacyBody.uexp"));
+            legacyAssignmentWasReleaseStaged =
+                legacyProject.GeneratedMaterials.Count == 0 &&
+                legacyCopies == 2 &&
+                MainForm.ReferencedGeneratedMaterialPackagesForRelease(
+                        legacyProject,
+                        library.LoadAvailable().Select(material => material.PackagePath))
+                    .SequenceEqual([legacyPackage], StringComparer.OrdinalIgnoreCase);
+
+            const string incompletePackage = "/Game/Mods/Legacy/MI_Incomplete";
+            var incompleteProject = new NativeSuitProject
+            {
+                GeneratedMaterials = [],
+                MaterialAssignments =
+                [
+                    new SavedMaterialAssignment
+                    {
+                        Component = "Head",
+                        Slot = 0,
+                        Context = "both",
+                        MiPackagePath = incompletePackage,
+                    },
+                ],
+            };
+            try
+            {
+                MainForm.StageReferencedToolMaterialsForRelease(
+                    incompleteProject,
+                    library,
+                    Path.Combine(materialReferenceRoot, "IncompletePackageStage"));
+            }
+            catch (InvalidOperationException ex)
+            {
+                incompleteReleaseMaterialWasRejected =
+                    ex.Message.Contains(incompletePackage, StringComparison.OrdinalIgnoreCase) &&
+                    ex.Message.Contains(".uasset", StringComparison.OrdinalIgnoreCase) &&
+                    ex.Message.Contains(".uexp", StringComparison.OrdinalIgnoreCase);
+            }
 
             var unsafeMaterial = new GeneratedMaterialEntry
             {
@@ -2335,6 +2863,11 @@ internal static class ReleaseRegressionChecks
         Check(
             legacyMaterialWasAdopted,
             "legacy suit assignments are adopted into the durable workspace material library",
+            failures,
+            output);
+        Check(
+            legacyAssignmentWasReleaseStaged && incompleteReleaseMaterialWasRejected,
+            "legacy assignment-only materials are copied from the shared library and incomplete release packages fail closed",
             failures,
             output);
         Check(
@@ -2737,6 +3270,18 @@ internal static class ReleaseRegressionChecks
         ObjectPath = packagePath + "." + objectName,
         ClassName = "MaterialInstanceConstant"
     };
+
+    private static void CreateSizedTextureFixture(string path, long length, bool packageFooter = false)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None);
+        stream.SetLength(length);
+        if (packageFooter)
+        {
+            stream.Seek(-4, SeekOrigin.End);
+            stream.Write([0xC1, 0x83, 0x2A, 0x9E]);
+        }
+    }
 
     private static void Check(
         bool condition,

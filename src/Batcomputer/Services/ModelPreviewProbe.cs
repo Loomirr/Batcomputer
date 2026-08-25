@@ -52,7 +52,7 @@ internal static class ModelPreviewProbe
             return 0;
         }
 
-        // "texturefind:<path needle>|<width>|<format>|<limit>" scans cooked Texture2D
+        // "texturefind:<path needle>|<width>|<format>|<limit>|<lod group>" scans cooked Texture2D
         // assets by their actual first mip and pixel format. It is deliberately read-only:
         // used to locate a same-role native donor before any texture cooking experiment.
         if (objectPath.StartsWith("texturefind:", StringComparison.OrdinalIgnoreCase))
@@ -62,13 +62,16 @@ internal static class ModelPreviewProbe
             var wantedWidth = int.TryParse(spec.ElementAtOrDefault(1), out var parsedWidth) ? parsedWidth : 0;
             var wantedFormat = spec.ElementAtOrDefault(2) ?? "";
             var limit = int.TryParse(spec.ElementAtOrDefault(3), out var parsedLimit) ? Math.Clamp(parsedLimit, 1, 500) : 80;
+            var wantedLodGroup = spec.ElementAtOrDefault(4) ?? "";
             var candidates = provider.Files.Keys
                 .Where(path => path.EndsWith(".uasset", StringComparison.OrdinalIgnoreCase))
                 .Where(path => Path.GetFileNameWithoutExtension(path).StartsWith("T_", StringComparison.OrdinalIgnoreCase))
                 .Where(path => string.IsNullOrWhiteSpace(needle) || path.Contains(needle, StringComparison.OrdinalIgnoreCase))
                 .OrderBy(path => path)
                 .ToList();
-            Console.WriteLine($"scanning {candidates.Count} Texture2D candidate(s): needle='{needle}', width={wantedWidth}, format='{wantedFormat}'");
+            Console.WriteLine(
+                $"scanning {candidates.Count} Texture2D candidate(s): needle='{needle}', width={wantedWidth}, " +
+                $"format='{wantedFormat}', lodGroup='{wantedLodGroup}'");
 
             var matches = 0;
             var loaded = 0;
@@ -83,12 +86,16 @@ internal static class ModelPreviewProbe
                     loaded++;
                     var mip = texture.GetFirstMip();
                     if (mip is null || (wantedWidth > 0 && (mip.SizeX != wantedWidth || mip.SizeY != wantedWidth)) ||
-                        (!string.IsNullOrWhiteSpace(wantedFormat) && !texture.Format.ToString().Equals(wantedFormat, StringComparison.OrdinalIgnoreCase)))
+                        (!string.IsNullOrWhiteSpace(wantedFormat) && !texture.Format.ToString().Equals(wantedFormat, StringComparison.OrdinalIgnoreCase)) ||
+                        (!string.IsNullOrWhiteSpace(wantedLodGroup) &&
+                         !texture.LODGroup.ToString().Contains(wantedLodGroup, StringComparison.OrdinalIgnoreCase)))
                     {
                         continue;
                     }
 
-                    Console.WriteLine($"  {file[..file.LastIndexOf('.')]}  {mip.SizeX}x{mip.SizeY} {texture.Format}");
+                    Console.WriteLine(
+                        $"  {file[..file.LastIndexOf('.')]}  {mip.SizeX}x{mip.SizeY} {texture.Format} " +
+                        $"srgb={texture.SRGB} compression={texture.CompressionSettings} lodGroup={texture.LODGroup}");
                     matches++;
                     if (matches >= limit)
                     {
@@ -101,6 +108,51 @@ internal static class ModelPreviewProbe
                 }
             }
             Console.WriteLine($"texture matches: {matches} (loaded {loaded} of {candidates.Count})");
+            return 0;
+        }
+
+        // "texmeta:<texturePath>" prints the complete cooked mip table. This is
+        // useful when a texture looks correct at Epic quality but changes at a
+        // lower scalability setting, because those settings can select a
+        // different resident mip from the same package.
+        if (objectPath.StartsWith("texmeta:", StringComparison.OrdinalIgnoreCase))
+        {
+            var texturePath = objectPath["texmeta:".Length..];
+            if (provider.LoadPackageObject(texturePath) is not CUE4Parse.UE4.Assets.Exports.Texture.UTexture2D texture)
+            {
+                Console.WriteLine("not a Texture2D");
+                return 1;
+            }
+
+            var platform = texture.PlatformData;
+            if (platform is null)
+            {
+                Console.WriteLine("Texture2D has no cooked platform data");
+                return 1;
+            }
+            var mips = platform.Mips ?? Array.Empty<CUE4Parse.UE4.Assets.Exports.Texture.FTexture2DMipMap>();
+            Console.WriteLine($"texture={texturePath}");
+            Console.WriteLine($"size={platform.SizeX}x{platform.SizeY} format={texture.Format} pixelFormat={platform.PixelFormat}");
+            Console.WriteLine(
+                $"srgb={texture.SRGB} compression={texture.CompressionSettings} lodGroup={texture.LODGroup} " +
+                $"firstMipToSerialize={platform.FirstMipToSerialize} mipTail={platform.GetNumMipsInTail()} packed=0x{platform.PackedData:X8}");
+            Console.WriteLine($"mips={mips.Length}");
+            for (var i = 0; i < mips.Length; i++)
+            {
+                var mip = mips[i];
+                if (mip?.BulkData is not { } bulk)
+                {
+                    Console.WriteLine($"  [{i}] missing mip/bulk data");
+                    continue;
+                }
+                var header = bulk.Header;
+                var data = bulk.Data ?? Array.Empty<byte>();
+                var dataHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(data));
+                Console.WriteLine(
+                    $"  [{i}] {mip.SizeX}x{mip.SizeY}x{mip.SizeZ} " +
+                    $"flags={header.BulkDataFlags} elements={header.ElementCount} disk={header.SizeOnDisk} " +
+                    $"offset={header.OffsetInFile} loaded={data.Length} sha256={dataHash}");
+            }
             return 0;
         }
 

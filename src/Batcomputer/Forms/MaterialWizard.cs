@@ -774,7 +774,12 @@ public sealed partial class MaterialWizard : AdaptiveForm
     {
         var kind = textureKind ?? "";
         if (kind.Contains("normal", StringComparison.OrdinalIgnoreCase)) return TextureRole.Normal;
-        if (kind.Contains("rough", StringComparison.OrdinalIgnoreCase) || kind.Contains("spec", StringComparison.OrdinalIgnoreCase)) return TextureRole.SurfaceMask;
+        if (kind.Contains("mmr", StringComparison.OrdinalIgnoreCase) ||
+            kind.Contains("orm", StringComparison.OrdinalIgnoreCase) ||
+            kind.Contains("rough", StringComparison.OrdinalIgnoreCase) ||
+            kind.Contains("spec", StringComparison.OrdinalIgnoreCase) ||
+            kind.Contains("metal", StringComparison.OrdinalIgnoreCase) ||
+            kind.Contains("packed", StringComparison.OrdinalIgnoreCase)) return TextureRole.SurfaceMask;
         if (kind.Contains("color mask", StringComparison.OrdinalIgnoreCase) || kind.Contains("colour mask", StringComparison.OrdinalIgnoreCase)) return TextureRole.ColourMask;
         if (kind.Contains("character", StringComparison.OrdinalIgnoreCase)) return TextureRole.BaseColour;
         if (kind.Contains("ui", StringComparison.OrdinalIgnoreCase) || kind.Contains("icon", StringComparison.OrdinalIgnoreCase)) return TextureRole.UiIcon;

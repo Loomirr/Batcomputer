@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using UAssetAPI.Unversioned;
@@ -14,6 +15,7 @@ namespace Batcomputer;
 public sealed partial class MainForm
 {
     private const string NativeUimdIconCookProfile = "ui-suit-256-bc7";
+    internal const string NativeMmrCookProfile = "mmr-2k-dxt1-native";
 
     private enum TextureProfileSafety
     {
@@ -285,7 +287,7 @@ public sealed partial class MainForm
                 ? UnrealPathUtil.AssetName(texture.PackagePath)
                 : texture.DisplayName;
             var exists = !string.IsNullOrWhiteSpace(texture.IoStoreRoot) && Directory.Exists(texture.IoStoreRoot);
-            var safety = TextureProfileSafetyFor(texture.CookProfile);
+            var safety = TextureProfileSafetyFor(texture.CookProfile, texture.Kind);
             tiles.Add(new VirtualTilePanel.Tile
             {
                 Title = TrimMiddle(title, 30),
@@ -297,7 +299,7 @@ public sealed partial class MainForm
                     $"Package: {texture.PackagePath}\n" +
                     $"Object: {TextureObjectPath(texture)}\n" +
                     $"Safety: {TextureProfileSafetyLabel(safety)}\n" +
-                    $"Note: {TextureProfileValidationNote(texture.CookProfile)}\n" +
+                    $"Note: {TextureProfileValidationNote(texture.CookProfile, texture.Kind)}\n" +
                     $"Cook: {TextureCookDetail(texture)}\n" +
                     $"PNG: {texture.SourcePng}\n" +
                     $"IoStore: {texture.IoStoreRoot}",
@@ -594,7 +596,7 @@ public sealed partial class MainForm
             var nearestMips = UseNearestNeighborMipsForTextureKind(textureKind, cookPreset.Id);
             AppendLog(nearestMips
                 ? "  mip mode: nearest-neighbor"
-                : "  mip mode: high-quality UI mips (alpha-safe)");
+                : "  mip mode: high-quality filtered mips (complete chain)");
 
             var cookedContentRoot = Path.Combine(outputRoot, "Cooked", "LEGOBatmanLotDK", "Content");
             var cookResult = await Task.Run(() => new TextureCookService(projectRoot).Cook(new TextureCookService.Request
@@ -604,7 +606,8 @@ public sealed partial class MainForm
                 OutputContentRoot = cookedContentRoot,
                 OutputPackagePath = outputPackagePath,
                 NearestNeighborMips = nearestMips,
-                WriteInlineMips = IsColorMaskTextureKind(textureKind) || IsNativeUimdIconCookProfile(cookPreset.Id),
+                BleedTransparentRgb = IsUiTextureKind(textureKind),
+                WriteInlineMips = true,
                 Bc7InputLayout = "rgba",
                 Bc7Quality = IsNativeUimdIconCookProfile(cookPreset.Id)
                     ? "best"
@@ -775,10 +778,17 @@ public sealed partial class MainForm
 
     private static List<TextureCookPreset> AvailableTextureCookPresets(string projectRoot, string textureKind)
     {
+        if (IsSurfaceMaskTextureKind(textureKind))
+        {
+            TextureCookTemplateService.NormalizeNativeMmrTemplate(
+                projectRoot,
+                AppSettings.Current.EffectiveExtractedContentRoot());
+        }
+        TextureCookTemplateService.NormalizeCoreTemplates(projectRoot);
         var bgraPath = TextureCookTemplateService.TemplateJsonPath(projectRoot, "TextureStandaloneTemplate_DroneControlBGRA8");
-        var bgra1kPath = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_CloudMaskBGRA8_1K", "T_CloudMask.json");
         var bc5Path = TextureCookTemplateService.TemplateJsonPath(projectRoot, "TextureStandaloneTemplate_BatarangBC5");
         var dxt5Path = TextureCookTemplateService.TemplateJsonPath(projectRoot, "TextureStandaloneTemplate_BatclawLogo_DXT5");
+        var nativeMmrPath = TextureCookTemplateService.TemplateJsonPath(projectRoot, TextureCookTemplateService.NativeMmrTemplateFolder);
         var nativeSuitIconPath = TextureCookTemplateService.TemplateJsonPath(projectRoot, TextureCookTemplateService.NativeSuitIconTemplateFolder);
         var dxt1Path = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_EoMColorMask_DXT1", "T_TPAGE_Batman_TheBatman2025_ColourMask.json");
         var candidates = new List<TextureCookPreset>();
@@ -812,29 +822,24 @@ public sealed partial class MainForm
         else if (IsColorMaskTextureKind(textureKind))
         {
             Add("mask-2k-bgra8", "2K BGRA8 mask", bgraPath, 2048, 2048, "PF_B8G8R8A8",
-                TextureProfileSafety.Verified, "Verified on Electric's current colour mask.");
-            Add("mask-1k-bgra8", "1K BGRA8 mask", bgra1kPath, 1024, 1024, "PF_B8G8R8A8",
-                TextureProfileSafety.Experimental, "Lower-resolution mask; verify the intended character material.");
+                TextureProfileSafety.Verified, "Complete 12-mip native chain; verified on Electric's current colour mask.");
             Add("mask-1k-dxt1-legacy", "1K DXT1 colour mask", dxt1Path, 1024, 1024, "PF_DXT1",
                 TextureProfileSafety.Experimental, "Legacy Electric-compatible donor. Test this exact texture role in game first.");
         }
-        else if (textureKind.Contains("rough", StringComparison.OrdinalIgnoreCase) ||
-                 textureKind.Contains("spec", StringComparison.OrdinalIgnoreCase) ||
-                 textureKind.Contains("metal", StringComparison.OrdinalIgnoreCase))
+        else if (IsSurfaceMaskTextureKind(textureKind))
         {
-            Add("mask-2k-bgra8", "2K BGRA8 packed map", bgraPath, 2048, 2048, "PF_B8G8R8A8",
-                TextureProfileSafety.Experimental, "Current Electric-compatible route; confirm the target material's MMR response in game.");
-            Add("mask-1k-bgra8", "1K BGRA8 packed map", bgra1kPath, 1024, 1024, "PF_B8G8R8A8",
-                TextureProfileSafety.Experimental, "Lower-resolution packed map; verify roughness and metallic response in game.");
+            Add(NativeMmrCookProfile, "Native 2K DXT1 MMR", nativeMmrPath, 2048, 2048, "PF_DXT1",
+                TextureProfileSafety.Experimental,
+                "Native EoM MMR metadata and the complete 12-mip layout are structurally verified; in-game material response is pending acceptance. R is metalness and B is roughness; G is unused.");
+            Add("mask-2k-bgra8", "2K BGRA8 packed map (legacy)", bgraPath, 2048, 2048, "PF_B8G8R8A8",
+                TextureProfileSafety.Experimental, "Legacy AO-donor route. It does not carry the game's native MMR sampling metadata.");
             Add("packed-2k-dxt5-legacy", "2K DXT5 packed map", dxt5Path, 2048, 2048, "PF_DXT5",
                 TextureProfileSafety.Experimental, "Legacy Electric-compatible donor. Test the target material in game first.");
         }
         else
         {
             Add("character-2k-bgra8", "2K BGRA8 colour", bgraPath, 2048, 2048, "PF_B8G8R8A8",
-                TextureProfileSafety.Verified, "Verified on Electric's base-colour maps in game.");
-            Add("character-1k-bgra8", "1K BGRA8 colour", bgra1kPath, 1024, 1024, "PF_B8G8R8A8",
-                TextureProfileSafety.Experimental, "Lower-resolution character colour; verify visual quality in game.");
+                TextureProfileSafety.Verified, "Complete 12-mip native chain; verified on Electric's base-colour maps in game.");
             Add("character-2k-dxt5-legacy", "2K DXT5 colour / packed map", dxt5Path, 2048, 2048, "PF_DXT5",
                 TextureProfileSafety.Experimental, "Legacy donor. Test this target texture role in game first.");
         }
@@ -842,24 +847,42 @@ public sealed partial class MainForm
         return candidates;
     }
 
-    private static TextureProfileSafety TextureProfileSafetyFor(string? profileId) => profileId?.ToLowerInvariant() switch
+    private static TextureProfileSafety TextureProfileSafetyFor(string? profileId, string? textureKind = null)
     {
-        "normal-2k-bc5-legacy" => TextureProfileSafety.Verified,
-        "character-2k-bgra8" => TextureProfileSafety.Verified,
-        "mask-2k-bgra8" => TextureProfileSafety.Verified,
-        NativeUimdIconCookProfile => TextureProfileSafety.Verified,
-        _ => TextureProfileSafety.Experimental,
-    };
+        if (string.Equals(profileId, "mask-2k-bgra8", StringComparison.OrdinalIgnoreCase) &&
+            IsSurfaceMaskTextureKind(textureKind))
+        {
+            return TextureProfileSafety.Experimental;
+        }
+
+        return profileId?.ToLowerInvariant() switch
+        {
+            "normal-2k-bc5-legacy" => TextureProfileSafety.Verified,
+            "character-2k-bgra8" => TextureProfileSafety.Verified,
+            "mask-2k-bgra8" => TextureProfileSafety.Verified,
+            NativeUimdIconCookProfile => TextureProfileSafety.Verified,
+            _ => TextureProfileSafety.Experimental,
+        };
+    }
 
     private static string TextureProfileSafetyLabel(TextureProfileSafety safety) => safety == TextureProfileSafety.Verified
         ? "Verified"
         : "Experimental";
 
-    private static string TextureProfileValidationNote(string? profileId) => profileId?.ToLowerInvariant() switch
+    private static string TextureProfileValidationNote(string? profileId, string? textureKind = null)
     {
+        if (string.Equals(profileId, "mask-2k-bgra8", StringComparison.OrdinalIgnoreCase) &&
+            IsSurfaceMaskTextureKind(textureKind))
+        {
+            return "Legacy AO-donor packed-map route. It does not carry the game's native linear MMR sampling metadata; use Native 2K DXT1 MMR instead.";
+        }
+
+        return profileId?.ToLowerInvariant() switch
+        {
         "normal-2k-bc5-legacy" => "Verified on Electric's body normal map in game.",
         "character-2k-bgra8" => "Verified on Electric's base-colour maps in game.",
         "mask-2k-bgra8" => "Verified on Electric's current colour mask.",
+        NativeMmrCookProfile => "Native linear PF_DXT1 MMR with a complete 2048px-to-1px mip chain. R is metalness and B is roughness; G is unused. In-game acceptance is pending.",
         NativeUimdIconCookProfile => "Verified native UIMD icon layout: 256px BC7 with nine inline mips.",
         "ui-2k-dxt5-legacy" => "Retired for UIMD icons: its world/decal layout corrupts suit-menu images.",
         "ui-2k-bgra8" => "Retired for UIMD icons: its external-mip world-texture layout corrupts suit-menu images.",
@@ -870,8 +893,9 @@ public sealed partial class MainForm
         "character-2k-dxt5-legacy" => "Legacy donor. Test the target texture role in game first.",
         "packed-2k-dxt5-legacy" => "Legacy donor. Test the target material response in game first.",
         "mask-1k-dxt1-legacy" => "Legacy colour-mask donor. Test the target material in game first.",
-        _ => "This saved recipe is not recognized yet. Keep it unless you are testing a new profile.",
-    };
+            _ => "This saved recipe is not recognized yet. Keep it unless you are testing a new profile.",
+        };
+    }
 
     private bool ConfirmTextureProfileSafety(TextureCookPreset preset, string action)
     {
@@ -887,7 +911,7 @@ public sealed partial class MainForm
 
     private void ShowTextureRecipeSafety(GeneratedTextureEntry texture)
     {
-        var safety = TextureProfileSafetyFor(texture.CookProfile);
+        var safety = TextureProfileSafetyFor(texture.CookProfile, texture.Kind);
         Dialog.Show(this, new Dialog.Model
         {
             Title = "Texture recipe",
@@ -905,7 +929,7 @@ public sealed partial class MainForm
                 ("Package", texture.PackagePath),
             },
             CalloutTitle = TextureProfileSafetyLabel(safety),
-            CalloutDetail = TextureProfileValidationNote(texture.CookProfile),
+            CalloutDetail = TextureProfileValidationNote(texture.CookProfile, texture.Kind),
             PrimaryText = "Done",
         });
     }
@@ -951,14 +975,23 @@ public sealed partial class MainForm
         }
 
         var projectRoot = _projectRootText.Text.Trim();
-        var preset = PromptForTextureCookPreset(texture.Kind, projectRoot, texture.CookProfile);
+        var profileKind = TextureKindForCookProfileChange(
+            texture.Kind,
+            texture.DisplayName,
+            texture.SourcePng,
+            texture.PackagePath);
+        var preset = PromptForTextureCookPreset(profileKind, projectRoot, texture.CookProfile);
         if (preset is null)
         {
             return;
         }
 
+        var desiredKind = preset.Id.Equals(NativeMmrCookProfile, StringComparison.OrdinalIgnoreCase)
+            ? profileKind
+            : texture.Kind;
         if (string.Equals(texture.TemplateJson, preset.TemplateJson, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(texture.CookProfile, preset.Id, StringComparison.OrdinalIgnoreCase))
+            string.Equals(texture.CookProfile, preset.Id, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(texture.Kind, desiredKind, StringComparison.OrdinalIgnoreCase))
         {
             AppendLog($"Texture '{texture.DisplayName}' already uses {preset.Label}.");
             return;
@@ -987,6 +1020,7 @@ public sealed partial class MainForm
         var oldWidth = texture.CookWidth;
         var oldHeight = texture.CookHeight;
         var oldPixelFormat = texture.CookPixelFormat;
+        var oldKind = texture.Kind;
         texture.TemplateJson = preset.TemplateJson;
         texture.CookProfile = preset.Id;
         texture.CookWidth = preset.Width;
@@ -1000,9 +1034,14 @@ public sealed partial class MainForm
             texture.CookWidth = oldWidth;
             texture.CookHeight = oldHeight;
             texture.CookPixelFormat = oldPixelFormat;
+            texture.Kind = oldKind;
             AppendLog($"Texture '{texture.DisplayName}' kept its previous cook profile because the recook failed.");
             return;
         }
+        // Legacy MMR entries were often saved as Character texture. Reclassify
+        // only after the native MMR recook succeeds so a failed attempt leaves
+        // every persisted field on the old, still-usable recipe.
+        texture.Kind = desiredKind;
 
         try
         {
@@ -1196,7 +1235,7 @@ public sealed partial class MainForm
         return Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "BatcomputerRawTextureProbe");
     }
 
-    private static string GuessTextureImportKind(string suggestedName)
+    internal static string GuessTextureImportKind(string suggestedName)
     {
         var name = suggestedName ?? "";
         if (name.Contains("normal", StringComparison.OrdinalIgnoreCase) ||
@@ -1237,8 +1276,8 @@ public sealed partial class MainForm
             return "UI artwork";
         }
 
-        if (name.Contains("_mmr", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("_orm", StringComparison.OrdinalIgnoreCase) ||
+        if (HasMmrNameSuffix(name) ||
+            HasDelimitedOrmNameSuffix(name) ||
             name.Contains("rough", StringComparison.OrdinalIgnoreCase) ||
             name.Contains("metal", StringComparison.OrdinalIgnoreCase) ||
             name.Contains("spec", StringComparison.OrdinalIgnoreCase) ||
@@ -1248,6 +1287,41 @@ public sealed partial class MainForm
         }
 
         return "Character texture";
+    }
+
+    internal static string TextureKindForCookProfileChange(
+        string? currentKind,
+        params string?[] identityCandidates)
+    {
+        foreach (var candidate in identityCandidates)
+        {
+            var assetName = Path.GetFileNameWithoutExtension((candidate ?? "").Trim());
+            if (HasMmrNameSuffix(assetName) || HasDelimitedOrmNameSuffix(assetName))
+            {
+                return "Roughness/spec mask";
+            }
+        }
+
+        return string.IsNullOrWhiteSpace(currentKind) ? "Texture" : currentKind;
+    }
+
+    private static bool HasMmrNameSuffix(string? name) =>
+        (name ?? "").Trim().EndsWith("MMR", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasDelimitedOrmNameSuffix(string? name)
+    {
+        var value = (name ?? "").Trim();
+        if (value.Equals("ORM", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!value.EndsWith("ORM", StringComparison.OrdinalIgnoreCase) || value.Length <= 3)
+        {
+            return false;
+        }
+
+        return !char.IsLetterOrDigit(value[^4]);
     }
 
     private static bool IsUiTextureKind(string? textureKind) =>
@@ -1269,9 +1343,7 @@ public sealed partial class MainForm
     private static bool IsNativeUimdIconCookProfile(string? cookProfile) =>
         string.Equals(cookProfile, NativeUimdIconCookProfile, StringComparison.OrdinalIgnoreCase);
 
-    private static bool UseNearestNeighborMipsForTextureKind(string? textureKind, string? cookProfile = null) =>
-        !IsUiTextureKind(textureKind) ||
-        string.Equals(cookProfile, "ui-2k-dxt5-legacy", StringComparison.OrdinalIgnoreCase);
+    private static bool UseNearestNeighborMipsForTextureKind(string? textureKind, string? cookProfile = null) => false;
 
     private bool AutoAssignGeneratedUiIconSlots(NativeSuitProject project)
     {
@@ -1994,15 +2066,13 @@ public sealed partial class MainForm
         var hasCompleteOutput = GeneratedTextureRequiredCookedFilesExist(sourceBase, texture.TemplateJson);
         if (string.IsNullOrWhiteSpace(texture.CookProfile))
         {
-            if (!hasCompleteOutput)
+            if (!hasCompleteOutput && !File.Exists(texture.SourcePng))
             {
                 error = $"Legacy texture '{label}' has no cook profile and no complete existing cooked output. Choose a cook profile before packaging; Batcomputer will not silently migrate it.";
                 return false;
             }
 
-            AppendLog($"Legacy texture preserved '{label}': staging its existing cooked output without changing the donor or profile.");
-            error = "";
-            return true;
+            AppendLog($"Legacy texture safety check '{label}': validating its full mip recipe before staging.");
         }
 
         // Always validate a recorded recipe against its cook report. This is
@@ -2011,12 +2081,16 @@ public sealed partial class MainForm
         // structurally complete while containing the retired payload layout.
         if (!EnsureGeneratedTextureCooked(texture, cookedContentRoot))
         {
-            error = $"'{label}' could not regenerate its saved recipe. Check its PNG source and donor template, then try again.";
+            error = string.IsNullOrWhiteSpace(texture.CookProfile)
+                ? $"Legacy texture '{label}' could not be proven safe across texture-quality settings. Restore its source PNG and choose Change cook profile so Batcomputer can rebuild the complete mip chain."
+                : $"'{label}' could not regenerate its saved recipe. Check its PNG source and donor template, then try again.";
             return false;
         }
-        if (!GeneratedTextureRequiredCookedFilesExist(sourceBase, texture.TemplateJson))
+        var reportPath = sourceBase + ".texture-cook-report.json";
+        if (!GeneratedTextureRequiredCookedFilesExist(sourceBase, texture.TemplateJson) ||
+            !TextureCookReportOutputMatchesFiles(reportPath, sourceBase, texture.TemplateJson))
         {
-            error = $"'{label}' is still missing required cooked output files after staging preparation.";
+            error = $"'{label}' still has missing or unverified cooked output files after staging preparation.";
             return false;
         }
 
@@ -2033,13 +2107,15 @@ public sealed partial class MainForm
             return false;
         }
 
+        TextureCookTemplateService.NormalizeCoreTemplates(_projectRootText.Text.Trim());
         var sourceBase = PackagePathToContentPath(cookedContentRoot, texture.PackagePath);
         var reportPath = sourceBase + ".texture-cook-report.json";
         var needsRecook =
             !GeneratedTextureRequiredCookedFilesExist(sourceBase, texture.TemplateJson) ||
             ReadTextureEncoderVersion(reportPath) < TextureCookService.CurrentEncoderVersion ||
             !TextureCookReportPixelFormatMatchesTemplate(reportPath, texture.TemplateJson) ||
-            !TextureCookReportTemplateMatchesTemplate(reportPath, texture.TemplateJson);
+            !TextureCookReportTemplateMatchesTemplate(reportPath, texture.TemplateJson) ||
+            !TextureCookReportOutputMatchesFiles(reportPath, sourceBase, texture.TemplateJson);
 
         if (!needsRecook)
         {
@@ -2059,7 +2135,7 @@ public sealed partial class MainForm
         }
 
         var nearestMips = UseNearestNeighborMipsForTextureKind(texture.Kind, texture.CookProfile);
-        AppendLog($"Recooking texture '{texture.DisplayName}' with encoder v{TextureCookService.CurrentEncoderVersion} ({(nearestMips ? "nearest mips" : "high-quality UI mips")})…");
+        AppendLog($"Recooking texture '{texture.DisplayName}' with encoder v{TextureCookService.CurrentEncoderVersion} ({(nearestMips ? "nearest mips" : "complete high-quality mip chain")})…");
         var result = new TextureCookService(_projectRootText.Text.Trim()).Cook(new TextureCookService.Request
         {
             SourceImagePath = texture.SourcePng,
@@ -2067,10 +2143,11 @@ public sealed partial class MainForm
             OutputContentRoot = cookedContentRoot,
             OutputPackagePath = texture.PackagePath,
             NearestNeighborMips = nearestMips,
-            // Native EoM ColorMask templates contain both external and inline
-            // mips. Rewrite the inline tail too; otherwise the lower mips remain
-            // the donor image and the game's material sampling can fall back to stale data.
-            WriteInlineMips = IsColorMaskTextureKind(texture.Kind) || IsNativeUimdIconCookProfile(texture.CookProfile),
+            BleedTransparentRgb = IsUiTextureKind(texture.Kind),
+            // Streamed and inline mips are one atomic texture cook. Keeping the
+            // donor's inline tail makes lower texture-quality settings display
+            // unrelated pixels even when the top mip looks correct on Epic.
+            WriteInlineMips = true,
             Bc7InputLayout = "rgba",
             Bc7Quality = IsNativeUimdIconCookProfile(texture.CookProfile)
                 ? "best"
@@ -2095,6 +2172,14 @@ public sealed partial class MainForm
     private static bool IsColorMaskTextureKind(string? kind) =>
         (kind ?? "").Contains("color mask", StringComparison.OrdinalIgnoreCase) ||
         (kind ?? "").Contains("colour mask", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsSurfaceMaskTextureKind(string? kind) =>
+        (kind ?? "").Contains("mmr", StringComparison.OrdinalIgnoreCase) ||
+        (kind ?? "").Contains("orm", StringComparison.OrdinalIgnoreCase) ||
+        (kind ?? "").Contains("rough", StringComparison.OrdinalIgnoreCase) ||
+        (kind ?? "").Contains("spec", StringComparison.OrdinalIgnoreCase) ||
+        (kind ?? "").Contains("metal", StringComparison.OrdinalIgnoreCase) ||
+        (kind ?? "").Contains("packed", StringComparison.OrdinalIgnoreCase);
 
     private static int ReadTextureEncoderVersion(string reportPath)
     {
@@ -2240,12 +2325,119 @@ public sealed partial class MainForm
                 ? template.GetString() ?? ""
                 : "";
             var expectedTemplate = TextureTemplatePackagePath(templateJson);
+            var (expectedMips, expectedExternal, expectedInline) = TextureTemplateMipCounts(templateJson);
+            var cookedMips = reportDoc.RootElement.TryGetProperty("MipCount", out var mipCount) && mipCount.TryGetInt32(out var mipValue)
+                ? mipValue
+                : -1;
+            var cookedExternal = reportDoc.RootElement.TryGetProperty("ExternalMipCount", out var externalCount) && externalCount.TryGetInt32(out var externalValue)
+                ? externalValue
+                : -1;
+            var cookedInline = reportDoc.RootElement.TryGetProperty("InlineMipCount", out var inlineCount) && inlineCount.TryGetInt32(out var inlineValue)
+                ? inlineValue
+                : -1;
+            var cookedFingerprint = reportDoc.RootElement.TryGetProperty("RecipeFingerprint", out var fingerprint)
+                ? fingerprint.GetString() ?? ""
+                : "";
+            var expectedFingerprint = TextureCookService.RecipeFingerprintFor(templateJson);
             return !string.IsNullOrWhiteSpace(cookedTemplate) &&
-                   cookedTemplate.Equals(expectedTemplate, StringComparison.OrdinalIgnoreCase);
+                   cookedTemplate.Equals(expectedTemplate, StringComparison.OrdinalIgnoreCase) &&
+                   cookedMips == expectedMips &&
+                   cookedExternal == expectedExternal &&
+                   cookedInline == expectedInline &&
+                   !string.IsNullOrWhiteSpace(cookedFingerprint) &&
+                   cookedFingerprint.Equals(expectedFingerprint, StringComparison.OrdinalIgnoreCase);
         }
         catch
         {
             return false;
+        }
+    }
+
+    internal static bool TextureCookReportOutputMatchesFiles(
+        string reportPath,
+        string sourceBase,
+        string? templateJson)
+    {
+        if (!File.Exists(reportPath) || string.IsNullOrWhiteSpace(templateJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var reportDoc = JsonDocument.Parse(File.ReadAllText(reportPath));
+            foreach (var extension in GeneratedTextureRequiredExtensions(templateJson))
+            {
+                var suffix = extension switch
+                {
+                    ".uasset" => "Uasset",
+                    ".uexp" => "Uexp",
+                    ".ubulk" => "Ubulk",
+                    _ => throw new InvalidOperationException($"Unsupported generated texture extension '{extension}'."),
+                };
+                var path = sourceBase + extension;
+                if (!File.Exists(path) ||
+                    !reportDoc.RootElement.TryGetProperty("Output" + suffix + "Bytes", out var bytesElement) ||
+                    !bytesElement.TryGetInt64(out var expectedBytes) || expectedBytes <= 0 ||
+                    !reportDoc.RootElement.TryGetProperty("Output" + suffix + "Sha256", out var hashElement))
+                {
+                    return false;
+                }
+
+                var expectedHash = hashElement.GetString() ?? "";
+                using var stream = File.OpenRead(path);
+                if (stream.Length != expectedBytes ||
+                    expectedHash.Length != 64 ||
+                    !Convert.ToHexString(SHA256.HashData(stream)).Equals(expectedHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static (int Total, int External, int Inline) TextureTemplateMipCounts(string templateJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(templateJson));
+            var root = doc.RootElement.ValueKind == JsonValueKind.Array
+                ? doc.RootElement.EnumerateArray().FirstOrDefault(element =>
+                    element.TryGetProperty("Type", out var type) &&
+                    type.GetString()?.Equals("Texture2D", StringComparison.OrdinalIgnoreCase) == true)
+                : doc.RootElement;
+            if (root.ValueKind == JsonValueKind.Undefined && doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                root = doc.RootElement.EnumerateArray().First();
+            }
+
+            var total = 0;
+            var external = 0;
+            var inline = 0;
+            foreach (var mip in root.GetProperty("Mips").EnumerateArray())
+            {
+                total++;
+                var flags = mip.GetProperty("BulkData").GetProperty("BulkDataFlags").GetString() ?? "";
+                if (flags.Contains("ForceInlinePayload", StringComparison.OrdinalIgnoreCase))
+                {
+                    inline++;
+                }
+                else if (flags.Contains("PayloadInSep", StringComparison.OrdinalIgnoreCase))
+                {
+                    external++;
+                }
+            }
+            return (total, external, inline);
+        }
+        catch
+        {
+            return (-1, -1, -1);
         }
     }
 

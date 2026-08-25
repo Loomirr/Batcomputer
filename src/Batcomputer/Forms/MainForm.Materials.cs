@@ -1435,47 +1435,91 @@ public sealed partial class MainForm
         }
 
         var library = new ToolMaterialLibraryService(_projectRootText.Text.Trim());
-        var libraryCopies = 0;
-        foreach (var package in ReferencedGeneratedMaterialPackagesForRelease(project))
-        {
-            libraryCopies += library.CopyPackageToContentRoot(package, contentRootToPackage).Count;
-        }
+        var libraryCopies = StageReferencedToolMaterialsForRelease(
+            project,
+            library,
+            contentRootToPackage);
         if (libraryCopies > 0)
         {
             AppendLog($"Staged {libraryCopies} referenced tool-material package file(s), including shared cross-suit materials.");
         }
+    }
 
-        var missing = MissingReferencedGeneratedMaterialFiles(project, contentRootToPackage);
+    internal static IReadOnlyList<string> ReferencedGeneratedMaterialPackagesForRelease(
+        NativeSuitProject project,
+        IEnumerable<string>? availableToolMaterialPackages = null)
+    {
+        var releasablePackages = (project.GeneratedMaterials ?? new List<GeneratedMaterialEntry>())
+            .Select(entry => UnrealPathUtil.NormalizePackagePath(entry.PackagePath))
+            .Where(package => !string.IsNullOrWhiteSpace(package))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var package in availableToolMaterialPackages ?? Enumerable.Empty<string>())
+        {
+            var normalized = UnrealPathUtil.NormalizePackagePath(package);
+            if (!string.IsNullOrWhiteSpace(normalized))
+            {
+                releasablePackages.Add(normalized);
+            }
+        }
+
+        return (project.MaterialAssignments ?? new List<SavedMaterialAssignment>())
+            .Select(assignment => UnrealPathUtil.NormalizePackagePath(assignment.MiPackagePath))
+            .Where(package => releasablePackages.Contains(package))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(package => package, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    internal static int StageReferencedToolMaterialsForRelease(
+        NativeSuitProject project,
+        ToolMaterialLibraryService library,
+        string contentRoot)
+    {
+        // Older Material Forge projects saved only the assignment. LoadAvailable migrates those
+        // packages into the durable library, so the assignment remains sufficient declarative
+        // ownership even when GeneratedMaterials is empty.
+        var availablePackages = library.LoadAvailable()
+            .Select(material => material.PackagePath)
+            .ToList();
+        var referencedPackages = ReferencedGeneratedMaterialPackagesForRelease(
+            project,
+            availablePackages);
+
+        var copied = 0;
+        foreach (var package in referencedPackages)
+        {
+            copied += library.CopyPackageToContentRoot(package, contentRoot).Count;
+        }
+
+        // Every assigned /Game/Mods material must exist in the fresh stage,
+        // even when an older project did not retain GeneratedMaterials and the
+        // shared library can no longer recover it. Filtering the validation to
+        // known library entries would let an assignment disappear silently.
+        var requiredAssignedPackages = AssignedModMaterialPackagesForRelease(project);
+        var missing = MissingReferencedGeneratedMaterialFiles(requiredAssignedPackages, contentRoot);
         if (missing.Count > 0)
         {
             throw new InvalidOperationException(
                 "Project-generated material staging is incomplete. Missing or empty cooked package files: " +
                 string.Join("; ", missing));
         }
+        return copied;
     }
 
-    internal static IReadOnlyList<string> ReferencedGeneratedMaterialPackagesForRelease(
-        NativeSuitProject project)
-    {
-        var generatedPackages = (project.GeneratedMaterials ?? new List<GeneratedMaterialEntry>())
-            .Select(entry => UnrealPathUtil.NormalizePackagePath(entry.PackagePath))
-            .Where(package => !string.IsNullOrWhiteSpace(package))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        return (project.MaterialAssignments ?? new List<SavedMaterialAssignment>())
+    internal static IReadOnlyList<string> AssignedModMaterialPackagesForRelease(NativeSuitProject project) =>
+        (project.MaterialAssignments ?? new List<SavedMaterialAssignment>())
             .Select(assignment => UnrealPathUtil.NormalizePackagePath(assignment.MiPackagePath))
-            .Where(package => generatedPackages.Contains(package))
+            .Where(package => package.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(package => package, StringComparer.OrdinalIgnoreCase)
             .ToList();
-    }
 
     private static List<string> MissingReferencedGeneratedMaterialFiles(
-        NativeSuitProject project,
+        IEnumerable<string> referencedPackages,
         string contentRoot)
     {
         var missing = new List<string>();
-        foreach (var package in ReferencedGeneratedMaterialPackagesForRelease(project))
+        foreach (var package in referencedPackages)
         {
             var packageBase = PackagePathToContentPath(contentRoot, package);
             var missingExtensions = new[] { ".uasset", ".uexp" }

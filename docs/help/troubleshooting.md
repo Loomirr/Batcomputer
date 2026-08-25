@@ -103,6 +103,34 @@ if it is missing, Batcomputer cannot rebuild that attachment.
 A texture showing `PF_Unknown`, zero dimensions, missing mips, or nonsensical mip sizes is not safe
 to test in-game.
 
+## A suit texture is corrupt unless Texture Quality is Epic
+
+Epic quality can hide a broken lower mip; it does not repair the texture. Rebuild the texture with
+the current cook profile:
+
+1. Keep or restore the original source PNG.
+2. Open the texture and confirm its role is correct: color, mask/packed, normal, or UI.
+3. Use **Change cook profile** if this is an older project with no saved profile.
+4. Build again. Batcomputer will recook older output and require one verified file set before it can
+   be staged.
+5. Check the new asset in FModel. A 2K character texture should list every mip from 2048 through 1.
+
+Do not tell users to leave Texture Quality on Epic as the workaround. If the current cook still
+changes appearance between quality levels, include the source PNG, texture role, cook profile, and
+Batcomputer diagnostics in the report.
+
+## Metalness or roughness looks wrong
+
+Check that the packed texture uses **Native 2K DXT1 MMR**, not a Character texture or the older
+BGRA8 packed-map route. The native MMR layout reads red as metalness and blue as roughness; green is
+unused. For an older saved texture named like `BodyMMR` or `T_Body_ORM`, right-click it and use
+**Change cook profile**. The current build recognizes that suffix, offers the MMR profile, and only
+updates the saved role after a successful recook.
+
+If the channels are correct but the material still looks wrong, confirm that the material's MMR
+parameter points at the newly cooked `/Game/Mods/...` texture rather than the old donor or a base
+game texture.
+
 ## The suit does not appear in the menu
 
 1. Fully restart the game.

@@ -1,6 +1,6 @@
 # Changelog
 
-## In development
+## 0.9.0-beta.8 — 2026-08-24
 
 - Adds the exact shipped Minifig and Smallfig root-body profiles while preserving the selected
   gameplay donor's runtime setup and shared native skeleton.
@@ -11,6 +11,14 @@
 - Relocates saved base-template paths to the active extract by exact `/Game` package when an older
   cache folder has been replaced.
 - Keeps Diagnostics in place while reading older lines instead of forcing the log back to the end.
+- Rebuilds generated textures with their complete streamed and inline mip chain, so lower texture
+  quality settings no longer reveal untouched donor pixels.
+- Adds a native 2K DXT1 MMR profile with linear sampling, the game's packed red-metalness and
+  blue-roughness channels, and safe recovery for older MMRs saved as Character textures.
+- Treats each cooked texture package as one verified file set and blocks stale, partial, or changed
+  output from being staged under an old success report.
+- Packages assignment-only tool materials from the shared workspace library, fixing older suits
+  that lost a generated material such as a custom cowl during a fresh build.
 
 ## 0.9.0-beta.7 — 2026-08-24
 

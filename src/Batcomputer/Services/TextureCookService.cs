@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using BCnEncoder.Encoder;
@@ -20,7 +21,7 @@ namespace Batcomputer;
 /// </summary>
 public sealed class TextureCookService
 {
-    public const int CurrentEncoderVersion = 7;
+    public const int CurrentEncoderVersion = 8;
 
     private const CustomSerializationFlags NameMapOnlyPatchFlags =
         CustomSerializationFlags.SkipParsingExports |
@@ -32,8 +33,9 @@ public sealed class TextureCookService
         public string TemplateJsonPath { get; set; } = "";
         public string OutputContentRoot { get; set; } = "";
         public string OutputPackagePath { get; set; } = "";
-        public bool NearestNeighborMips { get; set; } = true;
-        public bool WriteInlineMips { get; set; } = false;
+        public bool NearestNeighborMips { get; set; } = false;
+        public bool BleedTransparentRgb { get; set; } = false;
+        public bool WriteInlineMips { get; set; } = true;
         public string Bc7InputLayout { get; set; } = "rgba";
         public string Bc7Quality { get; set; } = "balanced";
         public string ForcePixelFormat { get; set; } = "";
@@ -54,6 +56,14 @@ public sealed class TextureCookService
         public int MipCount { get; set; }
         public int ExternalMipCount { get; set; }
         public int InlineMipCount { get; set; }
+        public int InlinePayloadOffsetBias { get; set; }
+        public string RecipeFingerprint { get; set; } = "";
+        public long OutputUassetBytes { get; set; }
+        public string OutputUassetSha256 { get; set; } = "";
+        public long OutputUexpBytes { get; set; }
+        public string OutputUexpSha256 { get; set; } = "";
+        public long OutputUbulkBytes { get; set; }
+        public string OutputUbulkSha256 { get; set; } = "";
         public int EncoderVersion { get; set; } = CurrentEncoderVersion;
         public List<string> Warnings { get; set; } = new();
         public List<string> Log { get; set; } = new();
@@ -65,6 +75,7 @@ public sealed class TextureCookService
         int SizeX,
         int SizeY,
         string PixelFormat,
+        int InlinePayloadOffsetBias,
         List<MipTemplate> Mips);
 
     private sealed record MipTemplate(
@@ -93,6 +104,7 @@ public sealed class TextureCookService
     public Result Cook(Request request)
     {
         var result = new Result();
+        string? attemptBase = null;
         try
         {
             if (!File.Exists(request.SourceImagePath))
@@ -100,9 +112,9 @@ public sealed class TextureCookService
                 return Fail(result, $"Source image not found: {request.SourceImagePath}");
             }
 
-            if (!File.Exists(request.TemplateJsonPath))
+            if (!TextureCookTemplateService.IsTemplateReady(request.TemplateJsonPath))
             {
-                return Fail(result, $"Template JSON not found: {request.TemplateJsonPath}");
+                return Fail(result, $"Verified Texture2D template is incomplete or has an unrecognized layout: {request.TemplateJsonPath}");
             }
 
             var templateBase = Path.Combine(
@@ -117,6 +129,7 @@ public sealed class TextureCookService
             }
 
             var template = ReadTemplate(request.TemplateJsonPath);
+            var donorPixelFormat = NormalizePixelFormat(template.PixelFormat);
             if (!string.IsNullOrWhiteSpace(request.ForcePixelFormat))
             {
                 var forcedPixelFormat = NormalizePixelFormat(request.ForcePixelFormat);
@@ -125,9 +138,27 @@ public sealed class TextureCookService
                     return Fail(result, $"Unsupported forced Texture2D pixel format: {request.ForcePixelFormat}.");
                 }
 
-                result.Log.Add($"forced pixel format: {template.PixelFormat} -> {forcedPixelFormat}");
-                template = template with { PixelFormat = forcedPixelFormat };
+                // A format override must also rewrite the donor package's format
+                // name. The only verified conversion is the native BC7 UI shell
+                // to same-block-size BC3/DXT5. Treat an identity force as a no-op
+                // and reject every other header/payload mismatch.
+                if (!forcedPixelFormat.Equals(donorPixelFormat, StringComparison.OrdinalIgnoreCase) &&
+                    !(donorPixelFormat.Equals("PF_BC7", StringComparison.OrdinalIgnoreCase) &&
+                      forcedPixelFormat.Equals("PF_DXT5", StringComparison.OrdinalIgnoreCase)))
+                {
+                    return Fail(result,
+                        $"Unsafe forced Texture2D pixel-format conversion {donorPixelFormat} -> {forcedPixelFormat} was blocked. " +
+                        "Only the verified PF_BC7 -> PF_DXT5 UI-shell conversion is supported.");
+                }
+
+                if (!forcedPixelFormat.Equals(donorPixelFormat, StringComparison.OrdinalIgnoreCase))
+                {
+                    result.Log.Add($"forced pixel format: {donorPixelFormat} -> {forcedPixelFormat}");
+                    template = template with { PixelFormat = forcedPixelFormat };
+                }
             }
+            result.RecipeFingerprint = RecipeFingerprintFor(request.TemplateJsonPath, template.PixelFormat);
+            ValidateMipRecipe(template);
             if (template.Mips.Any(m => m.IsExternal) && !File.Exists(templateUbulk))
             {
                 return Fail(result, $"Template has external mip payloads but .ubulk was not found beside JSON: {templateUbulk}");
@@ -140,6 +171,12 @@ public sealed class TextureCookService
             result.MipCount = template.Mips.Count;
             result.ExternalMipCount = template.Mips.Count(m => m.IsExternal);
             result.InlineMipCount = template.Mips.Count(m => m.IsInline);
+            result.InlinePayloadOffsetBias = template.InlinePayloadOffsetBias;
+            if (result.InlineMipCount > 0 && !request.WriteInlineMips)
+            {
+                return Fail(result,
+                    "This Texture2D recipe contains inline lower mips. Preserving the donor tail would make texture quality settings select unrelated pixels, so the cook was blocked.");
+            }
 
             if (!IsSupportedPixelFormat(template.PixelFormat))
             {
@@ -157,6 +194,10 @@ public sealed class TextureCookService
 
             var outputBase = PackagePathToBasePath(request.OutputContentRoot, outputPackagePath);
             Directory.CreateDirectory(Path.GetDirectoryName(outputBase)!);
+            attemptBase = outputBase + ".texture-cook-attempt-" + Guid.NewGuid().ToString("N");
+            var attemptUasset = attemptBase + ".uasset";
+            var attemptUexp = attemptBase + ".uexp";
+            var attemptUbulk = attemptBase + ".ubulk";
             result.OutputUasset = outputBase + ".uasset";
             result.OutputUexp = outputBase + ".uexp";
             result.OutputUbulk = outputBase + ".ubulk";
@@ -165,59 +206,51 @@ public sealed class TextureCookService
             byte[]? uexpBytes = File.Exists(templateUexp)
                 ? File.ReadAllBytes(templateUexp)
                 : null;
-            var encodedMips = EncodeAllMips(request.SourceImagePath, template.Mips, request.NearestNeighborMips, template.PixelFormat, request.Bc7InputLayout, request.Bc7Quality);
+            var encodedMips = EncodeAllMips(
+                request.SourceImagePath,
+                template.Mips,
+                request.NearestNeighborMips,
+                request.BleedTransparentRgb,
+                template.PixelFormat,
+                request.Bc7InputLayout,
+                request.Bc7Quality);
             if (template.PixelFormat.Equals("PF_BC7", StringComparison.OrdinalIgnoreCase))
             {
                 result.Log.Add($"BC7 input layout: {NormalizeBc7InputLayout(request.Bc7InputLayout)} quality={NormalizeBc7Quality(request.Bc7Quality)}");
             }
             result.Log.Add(request.NearestNeighborMips
                 ? "mip filter: nearest-neighbor"
-                : "mip filter: high-quality alpha-safe");
+                : request.BleedTransparentRgb
+                    ? "mip filter: high-quality, alpha-safe edge bleed"
+                    : "mip filter: high-quality");
             if (template.Mips.Any(m => m.IsExternal))
             {
-                WriteExternalMips(template.Mips, encodedMips, templateUbulk, result.OutputUbulk, result);
+                WriteExternalMips(template.Mips, encodedMips, templateUbulk, attemptUbulk, result);
             }
             else
             {
                 result.OutputUbulk = "";
-                if (File.Exists(outputBase + ".ubulk"))
-                {
-                    File.Delete(outputBase + ".ubulk");
-                    result.Log.Add($"deleted stale external payload {outputBase}.ubulk");
-                }
                 result.Log.Add("template has no external .ubulk mips");
             }
 
-            if (request.WriteInlineMips || template.Mips.All(m => m.IsInline))
+            var inlineMips = template.Mips.Where(m => m.IsInline).ToList();
+            if (inlineMips.Count > 0)
             {
                 if (uexpBytes is not null)
                 {
-                    WriteInlineMips(template.Mips, encodedMips, uexpBytes, ".uexp", result);
+                    WriteInlineMips(template.Mips, encodedMips, uexpBytes, ".uexp", template.InlinePayloadOffsetBias, result);
                 }
                 else
                 {
-                    WriteInlineMips(template.Mips, encodedMips, uassetBytes, ".uasset", result);
-                }
-            }
-            else
-            {
-                var inlineMips = template.Mips.Where(m => m.IsInline).ToList();
-                if (inlineMips.Count > 0)
-                {
-                    result.Warnings.Add("Inline .uasset mips were preserved from the template. This spike only replaces external .ubulk mips because inline payload boundaries need more research.");
-                    foreach (var mip in inlineMips)
-                    {
-                        result.Log.Add($"preserved inline mip {mip.SizeX}x{mip.SizeY}");
-                    }
+                    WriteInlineMips(template.Mips, encodedMips, uassetBytes, ".uasset", template.InlinePayloadOffsetBias, result);
                 }
             }
 
-            File.WriteAllBytes(result.OutputUasset, uassetBytes);
+            File.WriteAllBytes(attemptUasset, uassetBytes);
             if (uexpBytes is not null)
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(result.OutputUexp)!);
-                File.WriteAllBytes(result.OutputUexp, uexpBytes);
-                result.Log.Add($"wrote split export payload {result.OutputUexp}");
+                File.WriteAllBytes(attemptUexp, uexpBytes);
+                result.Log.Add("prepared complete split export payload");
             }
             if (template.Mips.Count > 0 &&
                 template.Mips.All(m => m.IsInline) &&
@@ -225,14 +258,14 @@ public sealed class TextureCookService
                 !RequiresNameMapTextureFormatRewrite(template))
             {
                 PatchSameLengthIdentity(template, outputPackagePath, uassetBytes, result);
-                File.WriteAllBytes(result.OutputUasset, uassetBytes);
+                File.WriteAllBytes(attemptUasset, uassetBytes);
                 result.Log.Add("same-length inline Texture2D identity patch complete; UAssetAPI rewrite skipped to preserve split-export offsets");
             }
             else
             {
                 try
                 {
-                    RewriteTextureIdentityWithUAssetApi(result.OutputUasset, template, outputPackagePath, result);
+                    RewriteTextureIdentityWithUAssetApi(attemptUasset, template, outputPackagePath, result);
                     // A name-map rewrite may grow the .uasset header. UAssetAPI
                     // needs the paired export loaded to update that header, but
                     // this deliberately raw Texture2D path keeps the cooked
@@ -241,7 +274,7 @@ public sealed class TextureCookService
                     // generated split payload.
                     if (uexpBytes is not null)
                     {
-                        File.WriteAllBytes(result.OutputUexp, uexpBytes);
+                        File.WriteAllBytes(attemptUexp, uexpBytes);
                         result.Log.Add("restored cooked split export payload after UAssetAPI header rewrite");
                     }
                 }
@@ -249,7 +282,7 @@ public sealed class TextureCookService
                 {
                     result.Warnings.Add($"UAssetAPI identity rewrite was not available for this template ({ex.Message.Split('\n')[0]}). Used same-length binary identity patch fallback.");
                     PatchSameLengthIdentity(template, outputPackagePath, uassetBytes, result);
-                    File.WriteAllBytes(result.OutputUasset, uassetBytes);
+                    File.WriteAllBytes(attemptUasset, uassetBytes);
                 }
             }
             result.Status = "created";
@@ -258,7 +291,17 @@ public sealed class TextureCookService
             {
                 result.Log.Add($"wrote {result.OutputUbulk}");
             }
-            WriteReport(result, outputBase + ".texture-cook-report.json");
+            PopulateOutputIntegrity(
+                result,
+                attemptBase,
+                includeUexp: uexpBytes is not null,
+                includeUbulk: template.Mips.Any(mip => mip.IsExternal));
+            WriteReport(result, attemptBase + ".texture-cook-report.json");
+            CommitCookAttempt(
+                attemptBase,
+                outputBase,
+                includeUexp: uexpBytes is not null,
+                includeUbulk: template.Mips.Any(mip => mip.IsExternal));
             return result;
         }
         catch (Exception ex)
@@ -267,6 +310,13 @@ public sealed class TextureCookService
             result.Error = ex.ToString();
             return result;
         }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(attemptBase))
+            {
+                DeleteCookAttemptFiles(attemptBase);
+            }
+        }
     }
 
     private static Result Fail(Result result, string error)
@@ -274,6 +324,38 @@ public sealed class TextureCookService
         result.Status = "error";
         result.Error = error;
         return result;
+    }
+
+    internal static string RecipeFingerprintFor(string templateJsonPath, string? effectivePixelFormat = null)
+    {
+        var templateBase = Path.Combine(
+            Path.GetDirectoryName(templateJsonPath)!,
+            Path.GetFileNameWithoutExtension(templateJsonPath));
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        AppendFingerprintFile(hash, "recipe", templateJsonPath);
+        AppendFingerprintFile(hash, "uasset", templateBase + ".uasset");
+        AppendFingerprintFile(hash, "uexp", templateBase + ".uexp");
+        var ubulk = templateBase + ".ubulk";
+        if (File.Exists(ubulk))
+        {
+            AppendFingerprintFile(hash, "ubulk", ubulk);
+        }
+        else
+        {
+            hash.AppendData(Encoding.UTF8.GetBytes("ubulk:none"));
+        }
+        effectivePixelFormat = string.IsNullOrWhiteSpace(effectivePixelFormat)
+            ? ReadTemplate(templateJsonPath).PixelFormat
+            : effectivePixelFormat;
+        hash.AppendData(Encoding.UTF8.GetBytes(
+            "effective-pixel-format:" + NormalizePixelFormat(effectivePixelFormat)));
+        return Convert.ToHexString(hash.GetHashAndReset());
+    }
+
+    private static void AppendFingerprintFile(IncrementalHash hash, string role, string path)
+    {
+        hash.AppendData(Encoding.UTF8.GetBytes(role + ":"));
+        hash.AppendData(File.ReadAllBytes(path));
     }
 
     private static TextureTemplate ReadTemplate(string jsonPath)
@@ -294,6 +376,9 @@ public sealed class TextureCookService
         var sizeX = root.GetProperty("SizeX").GetInt32();
         var sizeY = root.GetProperty("SizeY").GetInt32();
         var pixelFormat = root.GetProperty("PixelFormat").GetString() ?? "";
+        var inlinePayloadOffsetBias = root.TryGetProperty("InlinePayloadOffsetBias", out var bias) && bias.TryGetInt32(out var parsedBias)
+            ? parsedBias
+            : 0;
         var mips = new List<MipTemplate>();
         foreach (var mip in root.GetProperty("Mips").EnumerateArray())
         {
@@ -307,7 +392,7 @@ public sealed class TextureCookService
                 bulk.GetProperty("BulkDataFlags").GetString() ?? ""));
         }
 
-        return new TextureTemplate(name, package, sizeX, sizeY, pixelFormat, mips);
+        return new TextureTemplate(name, package, sizeX, sizeY, pixelFormat, inlinePayloadOffsetBias, mips);
     }
 
     private static bool IsSupportedPixelFormat(string pixelFormat) =>
@@ -316,6 +401,119 @@ public sealed class TextureCookService
         pixelFormat.Equals("PF_BC5", StringComparison.OrdinalIgnoreCase) ||
         pixelFormat.Equals("PF_BC7", StringComparison.OrdinalIgnoreCase) ||
         pixelFormat.Equals("PF_B8G8R8A8", StringComparison.OrdinalIgnoreCase);
+
+    private static void ValidateMipRecipe(TextureTemplate template)
+    {
+        if (template.SizeX <= 0 || template.SizeY <= 0 || template.Mips.Count == 0)
+        {
+            throw new InvalidOperationException("Texture2D recipe has invalid dimensions or no cooked mips.");
+        }
+        if (template.InlinePayloadOffsetBias < 0)
+        {
+            throw new InvalidOperationException("Texture2D inline payload offset bias cannot be negative.");
+        }
+
+        var expectedWidth = template.SizeX;
+        var expectedHeight = template.SizeY;
+        var sawInline = false;
+        MipTemplate? priorInline = null;
+        long expectedExternalOffset = 0;
+        foreach (var (mip, index) in template.Mips.Select((mip, index) => (mip, index)))
+        {
+            if (mip.SizeX != expectedWidth || mip.SizeY != expectedHeight)
+            {
+                throw new InvalidOperationException(
+                    $"Texture2D mip {index} is {mip.SizeX}x{mip.SizeY}; expected {expectedWidth}x{expectedHeight}.");
+            }
+
+            var expectedBytes = ExpectedMipBytes(template.PixelFormat, mip.SizeX, mip.SizeY);
+            if (mip.SizeOnDisk != expectedBytes || mip.ElementCount != expectedBytes)
+            {
+                throw new InvalidOperationException(
+                    $"Texture2D mip {index} ({mip.SizeX}x{mip.SizeY}) declares {mip.SizeOnDisk}/{mip.ElementCount} bytes; expected {expectedBytes} for {template.PixelFormat}.");
+            }
+
+            if (mip.IsExternal == mip.IsInline)
+            {
+                throw new InvalidOperationException(
+                    $"Texture2D mip {index} must declare exactly one supported storage location; flags were '{mip.BulkDataFlags}'.");
+            }
+
+            if (mip.IsInline)
+            {
+                sawInline = true;
+                if (priorInline is not null)
+                {
+                    var expectedOffset = checked(priorInline.OffsetInFile + priorInline.SizeOnDisk + 0x10L);
+                    if (mip.OffsetInFile != expectedOffset)
+                    {
+                        throw new InvalidOperationException(
+                            $"Texture2D inline mip {index} offset is {mip.OffsetInFile}; expected {expectedOffset} after the prior inline payload.");
+                    }
+                }
+                priorInline = mip;
+            }
+            else if (mip.IsExternal)
+            {
+                if (sawInline)
+                {
+                    throw new InvalidOperationException("Texture2D recipe moves back to external bulk data after its inline mip tail began.");
+                }
+                if (mip.OffsetInFile != expectedExternalOffset)
+                {
+                    throw new InvalidOperationException(
+                        $"Texture2D external mip {index} offset is {mip.OffsetInFile}; expected contiguous offset {expectedExternalOffset}.");
+                }
+                expectedExternalOffset = checked(expectedExternalOffset + mip.SizeOnDisk);
+            }
+            else
+            {
+                throw new InvalidOperationException($"Texture2D mip {index} has unsupported bulk-data flags '{mip.BulkDataFlags}'.");
+            }
+
+            expectedWidth = Math.Max(1, expectedWidth / 2);
+            expectedHeight = Math.Max(1, expectedHeight / 2);
+        }
+
+        var last = template.Mips[^1];
+        if (last.SizeX != 1 || last.SizeY != 1)
+        {
+            throw new InvalidOperationException(
+                $"Texture2D recipe stops at {last.SizeX}x{last.SizeY}. A complete mip chain through 1x1 is required so every texture-quality setting resolves authored pixels.");
+        }
+    }
+
+    internal static byte[] RewriteInlineMipsForRegression(string templateJsonPath, byte[] donorPayload)
+    {
+        var template = ReadTemplate(templateJsonPath);
+        ValidateMipRecipe(template);
+        var encoded = template.Mips
+            .Select((mip, index) => (Mip: mip, Fill: (byte)((index % 251) + 1)))
+            .Where(entry => entry.Mip.IsInline)
+            .ToDictionary(
+                entry => entry.Mip,
+                entry => Enumerable.Repeat(entry.Fill, entry.Mip.SizeOnDisk).ToArray());
+        var rewritten = donorPayload.ToArray();
+        WriteInlineMips(
+            template.Mips,
+            encoded,
+            rewritten,
+            ".uexp",
+            template.InlinePayloadOffsetBias,
+            new Result());
+        return rewritten;
+    }
+
+    private static int ExpectedMipBytes(string pixelFormat, int width, int height)
+    {
+        if (pixelFormat.Equals("PF_B8G8R8A8", StringComparison.OrdinalIgnoreCase))
+        {
+            return checked(width * height * 4);
+        }
+
+        var blockBytes = pixelFormat.Equals("PF_DXT1", StringComparison.OrdinalIgnoreCase) ? 8 : 16;
+        return checked(Math.Max(1, (width + 3) / 4) * Math.Max(1, (height + 3) / 4) * blockBytes);
+    }
 
     private static string NormalizePixelFormat(string? pixelFormat)
     {
@@ -487,7 +685,14 @@ public sealed class TextureCookService
         return hits;
     }
 
-    private static Dictionary<MipTemplate, byte[]> EncodeAllMips(string sourceImagePath, List<MipTemplate> mips, bool nearest, string pixelFormat, string bc7InputLayout, string bc7Quality)
+    private static Dictionary<MipTemplate, byte[]> EncodeAllMips(
+        string sourceImagePath,
+        List<MipTemplate> mips,
+        bool nearest,
+        bool bleedTransparentRgb,
+        string pixelFormat,
+        string bc7InputLayout,
+        string bc7Quality)
     {
         using var source = new Bitmap(sourceImagePath);
         var output = new Dictionary<MipTemplate, byte[]>();
@@ -495,9 +700,13 @@ public sealed class TextureCookService
         {
             using var resized = ResizeBitmap(source, mip.SizeX, mip.SizeY, nearest);
             var pixels = ReadRgba(resized);
-            if (!nearest)
+            if (bleedTransparentRgb)
             {
                 BleedTransparentRgb(pixels, mip.SizeX, mip.SizeY);
+            }
+            if (pixelFormat.Equals("PF_BC5", StringComparison.OrdinalIgnoreCase))
+            {
+                RenormalizeNormalMap(pixels);
             }
             var encoded = pixelFormat.ToUpperInvariant() switch
             {
@@ -516,6 +725,30 @@ public sealed class TextureCookService
             output[mip] = encoded;
         }
         return output;
+    }
+
+    private static void RenormalizeNormalMap(Rgba[] pixels)
+    {
+        for (var i = 0; i < pixels.Length; i++)
+        {
+            var x = pixels[i].R / 127.5f - 1f;
+            var y = pixels[i].G / 127.5f - 1f;
+            var z = pixels[i].B / 127.5f - 1f;
+            var length = MathF.Sqrt(x * x + y * y + z * z);
+            if (length < 0.0001f)
+            {
+                pixels[i] = new Rgba(128, 128, 255, pixels[i].A);
+                continue;
+            }
+
+            x /= length;
+            y /= length;
+            pixels[i] = new Rgba(
+                (byte)Math.Clamp((int)MathF.Round((x * 0.5f + 0.5f) * 255f), 0, 255),
+                (byte)Math.Clamp((int)MathF.Round((y * 0.5f + 0.5f) * 255f), 0, 255),
+                pixels[i].B,
+                pixels[i].A);
+        }
     }
 
     private static byte[] Bc7Encode(Rgba[] pixels, int width, int height, string inputLayout, string quality)
@@ -1064,6 +1297,7 @@ public sealed class TextureCookService
         IReadOnlyDictionary<MipTemplate, byte[]> encodedMips,
         byte[] uassetBytes,
         string payloadLabel,
+        int inlinePayloadOffsetBias,
         Result result)
     {
         var inline = mips.Where(m => m.IsInline).OrderBy(m => m.OffsetInFile).ToList();
@@ -1075,44 +1309,47 @@ public sealed class TextureCookService
         var last = inline[^1];
         var footerLength = SplitExportFooterLength(uassetBytes, payloadLabel);
         var writableLength = uassetBytes.Length - footerLength;
-        // For this game's split .uexp UI donor, OffsetInFile points at the
-        // serialized FByteBulkData record, not the first byte of the BC7
-        // payload. The first record's 0x7F value is followed by its 0x11-byte
-        // header, so its pixels begin at 0x90. Writing at 0x7F overwrites the
-        // serialized PF_BC7/platform-data fields and FModel consequently
-        // reports PF_Unknown. Every inline UI mip uses that same +0x11 base;
-        // the native inter-record bytes remain untouched between payloads.
-        // A non-split .uasset still derives its local base from the final mip.
+        // UAssetGUI/CUE4Parse recipes normally record the actual .uexp payload
+        // byte. The native inline-only UI recipe instead records the serialized
+        // FByteBulkData marker and explicitly carries a +0x11 payload bias.
+        // Keep that distinction in the recipe; applying the UI bias to mixed
+        // world textures crosses into the next mip's metadata.
         var inlineBase = payloadLabel.Equals(".uexp", StringComparison.OrdinalIgnoreCase)
-            ? 0x11
+            ? inlinePayloadOffsetBias
             : uassetBytes.Length - (last.OffsetInFile + last.SizeOnDisk);
         if (inlineBase < 0)
         {
             throw new InvalidOperationException("Could not derive inline mip base from template offsets.");
         }
 
+        if (payloadLabel.Equals(".uexp", StringComparison.OrdinalIgnoreCase))
+        {
+            if (footerLength != 4)
+            {
+                throw new InvalidOperationException("Split Texture2D export is missing its C1 83 2A 9E package footer.");
+            }
+
+            // Known UE5.6 split Texture2D layouts leave a 24-byte cooked tail
+            // between the final inline mip and the 4-byte package footer.
+            var finalPayloadEnd = checked(inlineBase + last.OffsetInFile + last.SizeOnDisk);
+            var expectedFinalPayloadEnd = uassetBytes.Length - 28L;
+            if (finalPayloadEnd != expectedFinalPayloadEnd)
+            {
+                throw new InvalidOperationException(
+                    $"Inline Texture2D payload layout mismatch: final mip ends at 0x{finalPayloadEnd:X}, expected 0x{expectedFinalPayloadEnd:X}. Refresh the verified cook template before retrying.");
+            }
+        }
+
         foreach (var mip in inline)
         {
             var absolute = inlineBase + mip.OffsetInFile;
-            if (absolute < 0 || absolute + mip.SizeOnDisk > uassetBytes.Length)
+            if (absolute < 0 || absolute + mip.SizeOnDisk > writableLength)
             {
                 throw new InvalidOperationException($"Inline mip {mip.SizeX}x{mip.SizeY} is outside the {payloadLabel} bounds.");
             }
 
-            var writeLength = mip.SizeOnDisk;
-            if (footerLength > 0 && absolute + writeLength > writableLength)
-            {
-                writeLength = checked((int)(writableLength - absolute));
-                if (writeLength <= 0)
-                {
-                    throw new InvalidOperationException($"Inline mip {mip.SizeX}x{mip.SizeY} overlaps only the {payloadLabel} footer.");
-                }
-            }
-
-            Buffer.BlockCopy(encodedMips[mip], 0, uassetBytes, checked((int)absolute), writeLength);
-            result.Log.Add(writeLength == mip.SizeOnDisk
-                ? $"inline mip {mip.SizeX}x{mip.SizeY}: {payloadLabel}+0x{absolute:X}"
-                : $"inline mip {mip.SizeX}x{mip.SizeY}: {payloadLabel}+0x{absolute:X} wrote={writeLength}/{mip.SizeOnDisk} preserved-footer-tail={mip.SizeOnDisk - writeLength}");
+            Buffer.BlockCopy(encodedMips[mip], 0, uassetBytes, checked((int)absolute), mip.SizeOnDisk);
+            result.Log.Add($"inline mip {mip.SizeX}x{mip.SizeY}: {payloadLabel}+0x{absolute:X}");
         }
 
         if (footerLength > 0)
@@ -1148,6 +1385,135 @@ public sealed class TextureCookService
         {
             WriteIndented = true
         }));
+    }
+
+    private static void PopulateOutputIntegrity(
+        Result result,
+        string attemptBase,
+        bool includeUexp,
+        bool includeUbulk)
+    {
+        (result.OutputUassetBytes, result.OutputUassetSha256) = FileIntegrity(attemptBase + ".uasset");
+        if (includeUexp)
+        {
+            (result.OutputUexpBytes, result.OutputUexpSha256) = FileIntegrity(attemptBase + ".uexp");
+        }
+        if (includeUbulk)
+        {
+            (result.OutputUbulkBytes, result.OutputUbulkSha256) = FileIntegrity(attemptBase + ".ubulk");
+        }
+    }
+
+    private static (long Bytes, string Sha256) FileIntegrity(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return (stream.Length, Convert.ToHexString(SHA256.HashData(stream)));
+    }
+
+    private static void CommitCookAttempt(
+        string attemptBase,
+        string outputBase,
+        bool includeUexp,
+        bool includeUbulk)
+    {
+        var reportExtension = ".texture-cook-report.json";
+        var extensions = new[] { ".uasset", ".uexp", ".ubulk", reportExtension };
+        // The report is the completeness marker and contains hashes for the
+        // payload trio, so it must be installed last. A process interruption at
+        // any earlier move leaves no acceptable report beside mixed files.
+        var desired = new List<string> { ".uasset" };
+        if (includeUexp) desired.Add(".uexp");
+        if (includeUbulk) desired.Add(".ubulk");
+        desired.Add(reportExtension);
+
+        foreach (var extension in desired)
+        {
+            if (!File.Exists(attemptBase + extension))
+            {
+                throw new InvalidOperationException($"Texture cook attempt is incomplete: missing {extension}.");
+            }
+        }
+
+        var backupBase = outputBase + ".texture-cook-backup-" + Guid.NewGuid().ToString("N");
+        var backups = new List<(string Final, string Backup)>();
+        var installed = new List<string>();
+        try
+        {
+            foreach (var extension in extensions)
+            {
+                var final = outputBase + extension;
+                if (!File.Exists(final))
+                {
+                    continue;
+                }
+                var backup = backupBase + extension;
+                File.Move(final, backup);
+                backups.Add((final, backup));
+            }
+
+            foreach (var extension in desired)
+            {
+                var final = outputBase + extension;
+                File.Move(attemptBase + extension, final);
+                installed.Add(final);
+            }
+        }
+        catch
+        {
+            foreach (var final in installed)
+            {
+                try
+                {
+                    if (File.Exists(final)) File.Delete(final);
+                }
+                catch
+                {
+                    // Continue restoring every recoverable prior file.
+                }
+            }
+            foreach (var (final, backup) in backups.AsEnumerable().Reverse())
+            {
+                try
+                {
+                    if (File.Exists(backup)) File.Move(backup, final, overwrite: true);
+                }
+                catch
+                {
+                    // Preserve the backup file for manual recovery if a lock
+                    // also prevents rollback.
+                }
+            }
+            throw;
+        }
+
+        foreach (var (_, backup) in backups)
+        {
+            try
+            {
+                if (File.Exists(backup)) File.Delete(backup);
+            }
+            catch
+            {
+                // A successful cook remains complete; an obsolete backup can
+                // be cleaned on the next workspace maintenance pass.
+            }
+        }
+    }
+
+    private static void DeleteCookAttemptFiles(string attemptBase)
+    {
+        foreach (var extension in new[] { ".uasset", ".uexp", ".ubulk", ".texture-cook-report.json" })
+        {
+            try
+            {
+                var path = attemptBase + extension;
+                if (File.Exists(path)) File.Delete(path);
+            }
+            catch
+            {
+                // Best-effort cleanup only; never hide the real cook result.
+            }
+        }
     }
 
     private static string PackagePathToBasePath(string contentRoot, string packagePath)

@@ -1,6 +1,6 @@
 # Changelog
 
-## In development
+## 0.9.0-beta.8
 
 - Added the exact native Minifig and Smallfig body choices without changing the selected gameplay
   donor's playstyle or shared skeleton.
@@ -12,6 +12,14 @@
   `/Game` package still exists.
 - Diagnostics keeps its reading position when new lines arrive, and the 3D viewer's material panel
   is smaller and starts in the lower-right corner.
+- Generated textures now include the complete mip chain through 1 pixel instead of leaving the
+  lower-quality inline levels from the donor.
+- A dedicated native 2K DXT1 MMR profile preserves linear packed-map sampling and recognizes older
+  MMR names that were previously saved as Character textures.
+- Cooked texture files are hashed and checked together before staging, so an interrupted or changed
+  output cannot reuse an old successful report.
+- Older assignment-only tool materials are recovered from the workspace library and included in a
+  fresh mod build instead of being left behind.
 
 ## 0.9.0-beta.7
 

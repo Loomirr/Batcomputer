@@ -67,6 +67,29 @@ Batcomputer records a cook profile with new texture entries. Select a profile th
 Do not assume all images are color masks. The texture kind controls how the result is validated and
 how materials consume it.
 
+Current cook profiles write the full mip chain, including the small inline mips Unreal can select
+when texture quality is lowered or the streaming pool is busy. A 2K character texture should carry
+all twelve levels from 2048 through 1 pixel. **Epic** texture quality is not a fix for a broken cook;
+it can simply keep one of the good larger mips resident and hide a bad lower level.
+
+Use the normal-map profile for normals and the matching color, mask, or packed-map profile for the
+other roles. Batcomputer uses filtered mip generation, preserves transparent UI edges, and
+renormalizes filtered BC5 normals before compression.
+
+### MMR packed maps
+
+Use **Native 2K DXT1 MMR** for the game's metalness/roughness packed maps. This profile keeps the
+native linear sampling metadata and all twelve mips from 2048 through 1 pixel. Its channels are:
+
+- Red: metalness.
+- Green: unused.
+- Blue: roughness.
+
+Do not cook an MMR as a Character texture. Older projects may have saved an MMR that way because
+names such as `CowlMMR` were not recognized. Right-click that texture, choose **Change cook
+profile**, and select **Native 2K DXT1 MMR**. Batcomputer backs up the prior cook and changes the
+saved texture role only after the native MMR recook succeeds.
+
 ### UI icons
 
 Use the current verified native suit-icon profile. Old experimental BC7/DXT5 outputs may look
@@ -80,9 +103,10 @@ plausible in an extractor while decoding incorrectly in-game. After cooking:
 
 ### Existing legacy textures
 
-An old project may contain cooked textures with no recorded profile. Batcomputer preserves complete
-legacy output rather than guessing how to recook it. Use **Change cook profile** before intentionally
-rebuilding that texture.
+Older tool-generated textures are rebuilt with the current complete-mip cooker when their saved PNG
+and profile are available. Batcomputer will not package an old output it cannot prove belongs to the
+current recipe. If the source PNG is missing or the project has no recorded profile, restore the PNG
+and use **Change cook profile** before building.
 
 ## Color masks and Red Brick previews
 

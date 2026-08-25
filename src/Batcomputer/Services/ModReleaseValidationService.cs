@@ -312,13 +312,16 @@ public sealed class ModReleaseValidationService
                 result.AddError("material", $"{target} points at a material from another mod root: {package}", suitId);
                 continue;
             }
-            var materialExists = materialSourceRoots
-                .Select(root => PackagePathToContentBase(root, package) + ".uasset")
-                .Any(File.Exists);
+            var materialExists = materialSourceRoots.Any(root =>
+            {
+                var packageBase = PackagePathToContentBase(root, package);
+                return HasNonEmptyFile(packageBase + ".uasset") &&
+                       HasNonEmptyFile(packageBase + ".uexp");
+            });
             if (!materialExists)
             {
                 result.AddError("material",
-                    $"{target} uses generated material '{package}', but its .uasset is missing from the export folder and this suit's saved material folders.",
+                    $"{target} uses generated material '{package}', but its complete cooked .uasset/.uexp pair is missing from the export folder, the shared tool-material library, and this suit's saved material folders.",
                     suitId);
             }
         }
@@ -335,17 +338,22 @@ public sealed class ModReleaseValidationService
         string generatedRoot)
     {
         var roots = new List<string> { exportContentRoot };
-        if (!string.IsNullOrWhiteSpace(generatedRoot) && !string.IsNullOrWhiteSpace(suit.SlotId))
+        if (!string.IsNullOrWhiteSpace(generatedRoot))
         {
-            var suitRoot = Path.Combine(generatedRoot, "NativeSuitGuiProjects", suit.SlotId);
-            foreach (var stage in new[] { "GraftedPartStage", "GraftedTorso2Stage", "PatchedNameMapStage" })
-            {
-                roots.Add(Path.Combine(suitRoot, stage, "LEGOBatmanLotDK", "Content"));
-            }
+            roots.Add(Path.Combine(generatedRoot, "NativeSuitMaterials", "Content"));
 
-            // Older saved projects can retain their last successful individual
-            // IoStore stage while their editable stage is being rebuilt.
-            roots.Add(Path.Combine(suitRoot, "IoStore", "Stage", "LEGOBatmanLotDK", "Content"));
+            if (!string.IsNullOrWhiteSpace(suit.SlotId))
+            {
+                var suitRoot = Path.Combine(generatedRoot, "NativeSuitGuiProjects", suit.SlotId);
+                foreach (var stage in new[] { "GraftedPartStage", "GraftedTorso2Stage", "PatchedNameMapStage" })
+                {
+                    roots.Add(Path.Combine(suitRoot, stage, "LEGOBatmanLotDK", "Content"));
+                }
+
+                // Older saved projects can retain their last successful individual
+                // IoStore stage while their editable stage is being rebuilt.
+                roots.Add(Path.Combine(suitRoot, "IoStore", "Stage", "LEGOBatmanLotDK", "Content"));
+            }
         }
 
         return roots
@@ -353,6 +361,9 @@ public sealed class ModReleaseValidationService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
+
+    private static bool HasNonEmptyFile(string path) =>
+        File.Exists(path) && new FileInfo(path).Length > 0;
 
     private static void ValidateInstalledCollisions(
         string? installedContentPacksRoot,

@@ -541,9 +541,17 @@ public sealed class StageValidationService
             return;
         }
 
+        UAsset sourcePlayable;
         UAsset sourceCutscene;
         try
         {
+            sourcePlayable = new UAsset(
+                PackagePathToBasePath(
+                    AppSettings.Current.EffectiveExtractedContentRoot(),
+                    shellPlayable) + ".uasset",
+                EngineVersion.VER_UE5_6,
+                _mappings,
+                CustomSerializationFlags.SkipPreloadDependencyLoading);
             sourceCutscene = new UAsset(
                 PackagePathToBasePath(
                     AppSettings.Current.EffectiveExtractedContentRoot(),
@@ -555,7 +563,7 @@ public sealed class StageValidationService
         catch (Exception ex)
         {
             findings.Add(new("ERROR",
-                "The authored paired-cape cutscene shell could not be read: " + ex.Message));
+                "The authored paired-cape playable/cutscene shell could not be read: " + ex.Message));
             return;
         }
 
@@ -589,6 +597,27 @@ public sealed class StageValidationService
                     role.Equals("playable", StringComparison.OrdinalIgnoreCase)
                         ? $"{role}: the authored paired-cape shell is not parented to its final mod-local archetype '{customArchetype}'."
                         : $"{role}: the authored paired-cape shell no longer preserves the source cutscene superclass."));
+            }
+
+            // A component-template export can survive after its SCS node is removed from
+            // RootNodes/AllNodes. Looking up that orphaned export made earlier builds appear
+            // valid even though Unreal would never construct the cape shell's complete graph.
+            // The adapter is certified against an authored Blueprint, so every one of that
+            // Blueprint's live construction nodes must remain live. User additions may coexist.
+            var sourceShell = role.Equals("playable", StringComparison.OrdinalIgnoreCase)
+                ? sourcePlayable
+                : sourceCutscene;
+            var requiredLiveComponents = LiveScsComponentNames(sourceShell);
+            var actualLiveComponents = LiveScsComponentNames(asset);
+            var missingLiveComponents = requiredLiveComponents
+                .Where(component => !actualLiveComponents.Contains(component))
+                .OrderBy(component => component, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (missingLiveComponents.Count > 0)
+            {
+                findings.Add(new("ERROR",
+                    $"{role}: the paired-cape authored shell has inactive construction node(s): " +
+                    string.Join(", ", missingLiveComponents) + ". Rebuild the suit so the authored cape shell can be restored."));
             }
         }
 
@@ -1605,6 +1634,42 @@ public sealed class StageValidationService
                 StringComparison.OrdinalIgnoreCase))?.Value?
             .OfType<ObjectPropertyData>()
             .ToList() ?? [];
+
+    /// <summary>
+    /// Returns only SCS fields that are referenced by a live construction array. Cooked removal
+    /// intentionally leaves the SCS node and component-template exports behind, so export lookup
+    /// alone cannot distinguish a constructed field from an orphan.
+    /// </summary>
+    internal static HashSet<string> LiveScsComponentNames(UAsset asset)
+    {
+        var liveNodeIndices = asset.Exports
+            .OfType<NormalExport>()
+            .SelectMany(export => export.Data.OfType<ArrayPropertyData>())
+            .Where(property =>
+                property.Name.ToString().Equals("RootNodes", StringComparison.OrdinalIgnoreCase) ||
+                property.Name.ToString().Equals("AllNodes", StringComparison.OrdinalIgnoreCase) ||
+                property.Name.ToString().Equals("ChildNodes", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(property => property.Value ?? Array.Empty<PropertyData>())
+            .OfType<ObjectPropertyData>()
+            .Select(property => property.Value.Index)
+            .Where(index => index > 0 && index <= asset.Exports.Count)
+            .ToHashSet();
+
+        return liveNodeIndices
+            .Select(index => asset.Exports[index - 1])
+            .OfType<NormalExport>()
+            .Where(export => export.ObjectName.ToString().StartsWith("SCS_Node", StringComparison.OrdinalIgnoreCase))
+            .Select(export => export.Data.OfType<NamePropertyData>().FirstOrDefault(property =>
+                property.Name.ToString().Equals("InternalVariableName", StringComparison.OrdinalIgnoreCase))?.Value.ToString() ?? "")
+            .Where(component => !string.IsNullOrWhiteSpace(component))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    internal static bool AuthoredShellLiveComponentsRemainForTest(
+        IEnumerable<string> required,
+        IEnumerable<string> actual) =>
+        required.ToHashSet(StringComparer.OrdinalIgnoreCase)
+            .IsSubsetOf(actual.ToHashSet(StringComparer.OrdinalIgnoreCase));
 
     private static NormalExport? FindActiveComponentExport(UAsset asset, string componentName)
     {

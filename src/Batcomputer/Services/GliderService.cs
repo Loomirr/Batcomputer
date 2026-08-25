@@ -412,9 +412,8 @@ public static class GliderService
         };
 
         // Keep the gameplay donor's controller, DPRD, equipment, and general animation graph, but
-        // replace its glide-only categories with the exact blocks belonging to the certified Cape + Torso donor. A Nightwing
-        // gameplay donor otherwise keeps MAS_Glide_Nightwing/LAS_Traversal_Nightwing and drives a
-        // Batman cape with the wingsuit body pose.
+        // replace its glide-only categories with the exact blocks belonging to the certified Cape + Torso donor. A cape-less
+        // gameplay donor otherwise keeps its own glide blocks and can drive a Batman cape with the wrong body pose.
         project.GliderAnimLas = glideAnimLas;
         project.GliderAnimMas = glideAnimMas;
         if (!project.UseCustomArchetype)

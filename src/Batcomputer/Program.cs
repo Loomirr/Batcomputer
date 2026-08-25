@@ -852,7 +852,7 @@ internal static class Program
     /// Cooking spike.
     ///
     /// Usage:
-    ///   --cook-texture &lt;source.png&gt; &lt;templateTexture.json&gt; &lt;outputContentRoot&gt; [outputPackagePath] [--linear] [--write-inline] [--bc7-input=rgba|bgra|argb|bgra-as-rgba] [--bc7-quality=fast|balanced|best] [--force-pixel-format=PF_DXT5]
+    ///   --cook-texture &lt;source.png&gt; &lt;templateTexture.json&gt; &lt;outputContentRoot&gt; [outputPackagePath] [--nearest] [--alpha-safe] [--bc7-input=rgba|bgra|argb|bgra-as-rgba] [--bc7-quality=fast|balanced|best] [--force-pixel-format=PF_DXT5]
     ///
     /// If outputPackagePath is omitted, the cooked texture keeps the donor template's
     /// original /Game package path. Standalone UAssetAPI-readable texture templates can
@@ -862,8 +862,7 @@ internal static class Program
     private static int CookTextureCli(string[] args)
     {
         var outputPackagePath = args.Skip(4).FirstOrDefault(x => !x.StartsWith("--", StringComparison.Ordinal)) ?? "";
-        var nearestNeighbor = !args.Any(x => x.Equals("--linear", StringComparison.OrdinalIgnoreCase));
-        var writeInline = args.Any(x => x.Equals("--write-inline", StringComparison.OrdinalIgnoreCase));
+        var nearestNeighbor = args.Any(x => x.Equals("--nearest", StringComparison.OrdinalIgnoreCase));
         var bc7InputLayout = args
             .FirstOrDefault(x => x.StartsWith("--bc7-input=", StringComparison.OrdinalIgnoreCase))?
             .Substring("--bc7-input=".Length) ?? "rgba";
@@ -881,7 +880,10 @@ internal static class Program
             OutputContentRoot = args[3],
             OutputPackagePath = outputPackagePath,
             NearestNeighborMips = nearestNeighbor,
-            WriteInlineMips = writeInline,
+            BleedTransparentRgb = args.Any(x => x.Equals("--alpha-safe", StringComparison.OrdinalIgnoreCase)),
+            // Inline lower mips are part of the same atomic texture cook. They
+            // must never be preserved from the donor package.
+            WriteInlineMips = true,
             Bc7InputLayout = bc7InputLayout,
             Bc7Quality = bc7Quality,
             ForcePixelFormat = forcePixelFormat,
