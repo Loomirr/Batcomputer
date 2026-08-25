@@ -25,6 +25,26 @@ a real `Characters` folder. Check:
 - Check the **active extracted Content** path in Setup. An empty `ExtractedPakData` folder from an
   older portable layout is not used automatically.
 
+## The Registry writer says Win64 is not a valid platform
+
+This UnrealBuildTool error happens before Batcomputer reads or packages the suit. It is not caused
+by the `.usmap`. Reinstalling Batcomputer or choosing another mapping file will not fix it.
+
+1. In Batcomputer Settings, confirm the UE path is the installation root containing
+   `Engine\Build\BatchFiles\Build.bat`.
+2. Confirm the complete release was extracted and that
+   `Tools\BatcomputerRegistryWriter\Prebuilt\Win64` still contains its manifest, DLL, and
+   `UnrealEditor.modules`. Check antivirus Protection History if the DLL is missing.
+3. In Epic Games Launcher, open the UE 5.6 installation menu and choose **Verify**.
+4. If Diagnostics says the selected UE `BuildId` differs from the bundled writer, open **Visual
+   Studio Installer** and choose **Modify** for Visual Studio 2022.
+5. Install **Game development with C++**, **MSVC v143**, and a current **Windows 10 or 11 SDK**.
+6. Restart Batcomputer and prepare the writer again.
+
+If this is a source or custom Unreal build, finish its Windows platform setup before retrying. A
+different UE patch `BuildId` can require Batcomputer to compile its included writer source even
+when another machine can use the bundled prebuilt writer without Visual Studio.
+
 ### The part browser is empty or has the wrong characters
 
 Open the main menu and choose **Refresh part index**. The index is tied to the active extracted
@@ -123,7 +143,8 @@ Batcomputer diagnostics in the report.
 
 Check that the packed texture uses **Native 2K DXT1 MMR**, not a Character texture or the older
 BGRA8 packed-map route. The native MMR layout reads red as metalness and blue as roughness; green is
-unused. For an older saved texture named like `BodyMMR` or `T_Body_ORM`, right-click it and use
+unused. This profile is verified in game on Electric at every texture-quality setting. For an older
+saved texture named like `BodyMMR` or `T_Body_ORM`, right-click it and use
 **Change cook profile**. The current build recognizes that suffix, offers the MMR profile, and only
 updates the saved role after a successful recook.
 

@@ -14,12 +14,15 @@
   is smaller and starts in the lower-right corner.
 - Generated textures now include the complete mip chain through 1 pixel instead of leaving the
   lower-quality inline levels from the donor.
-- A dedicated native 2K DXT1 MMR profile preserves linear packed-map sampling and recognizes older
-  MMR names that were previously saved as Character textures.
+- The native 2K DXT1 MMR profile is proven in game on Electric at every texture-quality setting. It
+  preserves linear packed-map sampling and recognizes older MMR names previously saved as
+  Character textures.
 - Cooked texture files are hashed and checked together before staging, so an interrupted or changed
   output cannot reuse an old successful report.
 - Older assignment-only tool materials are recovered from the workspace library and included in a
   fresh mod build instead of being left behind.
+- Registry writer failures now explain an unavailable Win64 SDK directly, and Diagnostics records
+  why the bundled prebuilt was rejected before trying a source build.
 
 ## 0.9.0-beta.7
 

@@ -261,12 +261,20 @@ public sealed class AppSettings
         var issues = new List<string>();
         var retoc = Path.Combine(ToolRoot, "Tools", "retoc-oodle", "retoc.exe");
         var indexer = Path.Combine(ToolRoot, "Tools", "Build-NativeSuitTemplateIndex.ps1");
-        var registryProject = Path.Combine(ToolRoot, "Tools", "BatcomputerRegistryWriter", "BatcomputerRegistryWriter.uproject");
+        var registryRoot = Path.Combine(ToolRoot, "Tools", "BatcomputerRegistryWriter");
+        var registryProject = Path.Combine(registryRoot, "BatcomputerRegistryWriter.uproject");
+        var registryPrebuilt = Path.Combine(registryRoot, "Prebuilt", "Win64");
         var gameData = Path.Combine(ToolRoot, "gamedata");
 
         if (!File.Exists(retoc)) issues.Add("Tools\\retoc-oodle\\retoc.exe");
         if (!File.Exists(indexer)) issues.Add("Tools\\Build-NativeSuitTemplateIndex.ps1");
         if (!File.Exists(registryProject)) issues.Add("Tools\\BatcomputerRegistryWriter\\BatcomputerRegistryWriter.uproject");
+        if (!File.Exists(Path.Combine(registryPrebuilt, "prebuilt-manifest.json")))
+            issues.Add("Tools\\BatcomputerRegistryWriter\\Prebuilt\\Win64\\prebuilt-manifest.json");
+        if (!File.Exists(Path.Combine(registryPrebuilt, "UnrealEditor-BatcomputerRegistryWriter.dll")))
+            issues.Add("Tools\\BatcomputerRegistryWriter\\Prebuilt\\Win64\\UnrealEditor-BatcomputerRegistryWriter.dll");
+        if (!File.Exists(Path.Combine(registryPrebuilt, "UnrealEditor.modules")))
+            issues.Add("Tools\\BatcomputerRegistryWriter\\Prebuilt\\Win64\\UnrealEditor.modules");
         if (!Directory.Exists(gameData) || !Directory.EnumerateFiles(gameData, "*.json").Any()) issues.Add("gamedata\\*.json");
         return issues;
     }

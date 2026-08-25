@@ -829,8 +829,8 @@ public sealed partial class MainForm
         else if (IsSurfaceMaskTextureKind(textureKind))
         {
             Add(NativeMmrCookProfile, "Native 2K DXT1 MMR", nativeMmrPath, 2048, 2048, "PF_DXT1",
-                TextureProfileSafety.Experimental,
-                "Native EoM MMR metadata and the complete 12-mip layout are structurally verified; in-game material response is pending acceptance. R is metalness and B is roughness; G is unused.");
+                TextureProfileSafety.Verified,
+                "Verified on Electric's MMR in game at all texture-quality settings. Uses native EoM MMR metadata and the complete 12-mip layout. R is metalness and B is roughness; G is unused.");
             Add("mask-2k-bgra8", "2K BGRA8 packed map (legacy)", bgraPath, 2048, 2048, "PF_B8G8R8A8",
                 TextureProfileSafety.Experimental, "Legacy AO-donor route. It does not carry the game's native MMR sampling metadata.");
             Add("packed-2k-dxt5-legacy", "2K DXT5 packed map", dxt5Path, 2048, 2048, "PF_DXT5",
@@ -860,10 +860,14 @@ public sealed partial class MainForm
             "normal-2k-bc5-legacy" => TextureProfileSafety.Verified,
             "character-2k-bgra8" => TextureProfileSafety.Verified,
             "mask-2k-bgra8" => TextureProfileSafety.Verified,
+            NativeMmrCookProfile => TextureProfileSafety.Verified,
             NativeUimdIconCookProfile => TextureProfileSafety.Verified,
             _ => TextureProfileSafety.Experimental,
         };
     }
+
+    internal static bool TextureProfileIsVerifiedForRegression(string? profileId, string? textureKind = null) =>
+        TextureProfileSafetyFor(profileId, textureKind) == TextureProfileSafety.Verified;
 
     private static string TextureProfileSafetyLabel(TextureProfileSafety safety) => safety == TextureProfileSafety.Verified
         ? "Verified"
@@ -882,7 +886,7 @@ public sealed partial class MainForm
         "normal-2k-bc5-legacy" => "Verified on Electric's body normal map in game.",
         "character-2k-bgra8" => "Verified on Electric's base-colour maps in game.",
         "mask-2k-bgra8" => "Verified on Electric's current colour mask.",
-        NativeMmrCookProfile => "Native linear PF_DXT1 MMR with a complete 2048px-to-1px mip chain. R is metalness and B is roughness; G is unused. In-game acceptance is pending.",
+        NativeMmrCookProfile => "Verified on Electric's MMR in game at all texture-quality settings. Native linear PF_DXT1 with a complete 2048px-to-1px mip chain. R is metalness and B is roughness; G is unused.",
         NativeUimdIconCookProfile => "Verified native UIMD icon layout: 256px BC7 with nine inline mips.",
         "ui-2k-dxt5-legacy" => "Retired for UIMD icons: its world/decal layout corrupts suit-menu images.",
         "ui-2k-bgra8" => "Retired for UIMD icons: its external-mip world-texture layout corrupts suit-menu images.",

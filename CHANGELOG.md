@@ -13,12 +13,17 @@
 - Keeps Diagnostics in place while reading older lines instead of forcing the log back to the end.
 - Rebuilds generated textures with their complete streamed and inline mip chain, so lower texture
   quality settings no longer reveal untouched donor pixels.
-- Adds a native 2K DXT1 MMR profile with linear sampling, the game's packed red-metalness and
-  blue-roughness channels, and safe recovery for older MMRs saved as Character textures.
+- Adds a proven, in-game-verified native 2K DXT1 MMR profile with linear sampling, the game's packed
+  red-metalness and blue-roughness channels, complete mips at every texture-quality setting, and
+  safe recovery for older MMRs saved as Character textures.
 - Treats each cooked texture package as one verified file set and blocks stale, partial, or changed
   output from being staged under an old success report.
 - Packages assignment-only tool materials from the shared workspace library, fixing older suits
   that lost a generated material such as a custom cowl during a fresh build.
+- Explains UnrealBuildTool's unavailable-Win64 failure with the exact Visual Studio C++, MSVC, and
+  Windows SDK repair steps instead of leaving users with a generic writer exit code.
+- Treats the bundled Registry writer prebuilt as part of the required portable layout and records
+  why it was rejected before attempting a source build.
 
 ## 0.9.0-beta.7 — 2026-08-24
 

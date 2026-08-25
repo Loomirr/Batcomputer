@@ -85,6 +85,9 @@ native linear sampling metadata and all twelve mips from 2048 through 1 pixel. I
 - Green: unused.
 - Blue: roughness.
 
+This is Batcomputer's proven native MMR template. It is verified in game on Electric at every
+texture-quality setting.
+
 Do not cook an MMR as a Character texture. Older projects may have saved an MMR that way because
 names such as `CowlMMR` were not recognized. Right-click that texture, choose **Change cook
 profile**, and select **Native 2K DXT1 MMR**. Batcomputer backs up the prior cook and changes the

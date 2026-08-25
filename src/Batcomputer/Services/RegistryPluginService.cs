@@ -480,6 +480,20 @@ public sealed class RegistryPluginService
             return new WriterEnsureResult(true, UsedCache: true);
         }
 
+        if (!forceBuild)
+        {
+            var sourceRoot = Path.GetDirectoryName(toolchain.SourceWriterProject) ?? "";
+            if (!TryGetCompatiblePrebuiltWriter(
+                    sourceRoot,
+                    toolchain.EngineRoot,
+                    out _,
+                    out var prebuiltRejection) &&
+                !string.IsNullOrWhiteSpace(prebuiltRejection))
+            {
+                log("Bundled writer was not used: " + prebuiltRejection);
+            }
+        }
+
         log(forceBuild
             ? "Rebuilding the UE 5.6 Asset Registry writer..."
             : "Preparing the UE 5.6 Asset Registry writer (first build)...");
@@ -627,16 +641,28 @@ public sealed class RegistryPluginService
     private static bool TryGetCompatiblePrebuiltWriter(
         string sourceRoot,
         string engineRoot,
-        out WriterPrebuiltPayload prebuilt)
+        out WriterPrebuiltPayload prebuilt) =>
+        TryGetCompatiblePrebuiltWriter(sourceRoot, engineRoot, out prebuilt, out _);
+
+    private static bool TryGetCompatiblePrebuiltWriter(
+        string sourceRoot,
+        string engineRoot,
+        out WriterPrebuiltPayload prebuilt,
+        out string rejectionReason)
     {
         prebuilt = null!;
+        rejectionReason = "";
         try
         {
             var directory = Path.Combine(sourceRoot, PrebuiltDirectoryName, "Win64");
             var manifestPath = Path.Combine(directory, PrebuiltManifestFileName);
             var modulePath = Path.Combine(directory, WriterModuleFileName);
             var modulesPath = Path.Combine(directory, WriterModulesFileName);
-            if (!File.Exists(manifestPath) || !File.Exists(modulePath) || !File.Exists(modulesPath)) return false;
+            if (!File.Exists(manifestPath) || !File.Exists(modulePath) || !File.Exists(modulesPath))
+            {
+                rejectionReason = "the portable prebuilt is incomplete; extract the full Batcomputer ZIP and check antivirus Protection History.";
+                return false;
+            }
 
             var manifest = JsonSerializer.Deserialize<WriterPrebuiltManifest>(File.ReadAllText(manifestPath));
             if (manifest is null ||
@@ -644,24 +670,38 @@ public sealed class RegistryPluginService
                 string.IsNullOrWhiteSpace(manifest.SourceFingerprint) ||
                 string.IsNullOrWhiteSpace(manifest.BinarySha256))
             {
+                rejectionReason = "the prebuilt manifest is invalid or belongs to an incomplete portable install.";
                 return false;
             }
 
-            if (!string.Equals(
-                    BuildWriterSourceFingerprint(Path.Combine(sourceRoot, "BatcomputerRegistryWriter.uproject")),
-                    manifest.SourceFingerprint,
-                    StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(FileSha256(modulePath), manifest.BinarySha256, StringComparison.OrdinalIgnoreCase) ||
-                !TryReadWriterModuleDescriptor(modulesPath, out var prebuiltBuildId) ||
+            var sourceFingerprint = BuildWriterSourceFingerprint(
+                Path.Combine(sourceRoot, "BatcomputerRegistryWriter.uproject"));
+            if (!string.Equals(sourceFingerprint, manifest.SourceFingerprint, StringComparison.OrdinalIgnoreCase))
+            {
+                rejectionReason = "the writer source and prebuilt came from different Batcomputer versions.";
+                return false;
+            }
+            if (!string.Equals(FileSha256(modulePath), manifest.BinarySha256, StringComparison.OrdinalIgnoreCase))
+            {
+                rejectionReason = "the prebuilt writer DLL is changed or incomplete; re-extract it and check antivirus Protection History.";
+                return false;
+            }
+            if (!TryReadWriterModuleDescriptor(modulesPath, out var prebuiltBuildId) ||
                 !string.Equals(prebuiltBuildId, manifest.EngineBuildId, StringComparison.Ordinal))
             {
+                rejectionReason = "the prebuilt writer module descriptor does not match its manifest.";
                 return false;
             }
 
             var engineModules = Path.Combine(engineRoot, "Engine", "Binaries", "Win64", WriterModulesFileName);
-            if (!TryReadModuleBuildId(engineModules, out var engineBuildId) ||
-                !string.Equals(engineBuildId, manifest.EngineBuildId, StringComparison.Ordinal))
+            if (!TryReadModuleBuildId(engineModules, out var engineBuildId))
             {
+                rejectionReason = "the selected UE folder has no readable Engine\\Binaries\\Win64\\UnrealEditor.modules BuildId.";
+                return false;
+            }
+            if (!string.Equals(engineBuildId, manifest.EngineBuildId, StringComparison.Ordinal))
+            {
+                rejectionReason = $"the selected UE BuildId is {engineBuildId}, but the bundled writer is for {manifest.EngineBuildId}; the source fallback needs a working Windows C++ SDK.";
                 return false;
             }
 
@@ -670,6 +710,7 @@ public sealed class RegistryPluginService
         }
         catch
         {
+            rejectionReason = "the prebuilt compatibility check could not be completed; verify the UE root and re-extract Batcomputer.";
             return false;
         }
     }
@@ -731,6 +772,16 @@ public sealed class RegistryPluginService
             return "The installed UE 5.6 editor rejected the local Asset Registry writer because its " +
                    ".NET Framework SDK metadata is unavailable, including Batcomputer's compatibility retry. " +
                    "In Visual Studio Installer, add the .NET Framework 4.8 SDK and targeting pack, then retry. " +
+                   $"UnrealBuildTool exited with code {exitCode}.";
+        }
+
+        if (output.Contains("Platform Win64 is not a valid platform to build", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Unreal Engine 5.6 was found, but UnrealBuildTool cannot use its Win64 platform. " +
+                   "This is unrelated to the .usmap. In Visual Studio Installer, modify Visual Studio 2022 " +
+                   "and add the Game development with C++ workload, MSVC v143, and a Windows 10 or 11 SDK. " +
+                   "Then verify the UE 5.6 installation in Epic Games Launcher, restart Batcomputer, and retry. " +
+                   "A source or custom engine must also have its Windows platform files prepared. " +
                    $"UnrealBuildTool exited with code {exitCode}.";
         }
 

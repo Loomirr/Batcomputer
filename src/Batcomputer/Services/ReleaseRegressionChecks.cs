@@ -168,6 +168,19 @@ internal static class ReleaseRegressionChecks
                 failures,
                 output);
             Check(
+                MainForm.TextureProfileIsVerifiedForRegression(
+                    MainForm.NativeMmrCookProfile,
+                    "Roughness/spec mask") &&
+                !MainForm.TextureProfileIsVerifiedForRegression(
+                    "mask-2k-bgra8",
+                    "Roughness/spec mask") &&
+                !MainForm.TextureProfileIsVerifiedForRegression(
+                    "packed-2k-dxt5-legacy",
+                    "Roughness/spec mask"),
+                "native MMR is the verified packed-map profile while legacy donor routes stay experimental",
+                failures,
+                output);
+            Check(
                 MainForm.GuessTextureImportKind("CowlMMR") == "Roughness/spec mask" &&
                 MainForm.GuessTextureImportKind("T_Body_ORM") == "Roughness/spec mask" &&
                 MainForm.GuessTextureImportKind("Uniform") == "Character texture" &&
@@ -721,6 +734,21 @@ internal static class ReleaseRegressionChecks
         Check(
             netFxMessage.Contains(".NET Framework 4.8 SDK", StringComparison.Ordinal),
             "registry writer gives an actionable NETFXSDK fallback message",
+            failures,
+            output);
+        var invalidWin64Message = RegistryPluginService.DescribeWriterBuildFailureForTest(
+            6,
+            "Platform Win64 is not a valid platform to build. Check that the SDK is installed properly and that you have the necessary platform support files.");
+        Check(
+            invalidWin64Message.Contains("unrelated to the .usmap", StringComparison.OrdinalIgnoreCase) &&
+            invalidWin64Message.Contains("Game development with C++", StringComparison.Ordinal) &&
+            invalidWin64Message.Contains("Windows 10 or 11 SDK", StringComparison.Ordinal),
+            "registry writer explains an unavailable Win64 SDK instead of reporting a generic exit code",
+            failures,
+            output);
+        Check(
+            AppSettings.PortableLayoutIssues().Count == 0,
+            "portable layout requires the complete bundled registry writer prebuilt",
             failures,
             output);
         var spacedPathMessage = RegistryPluginService.DescribeWriterBuildFailureForTest(
