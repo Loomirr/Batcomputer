@@ -5,8 +5,9 @@ namespace Batcomputer;
 /// <summary>
 /// Loads the shipped compatibility DB (gamedata/*.json next to the .exe) at
 /// runtime and answers family/equipment/animation compatibility questions.
-/// Everything here works with ZERO game extraction on the user's machine - it
-/// only reads the facts we mined once and ship in the tool.
+/// Structured compatibility facts remain available without an extraction; the
+/// broad material asset view additionally overlays the user's active extracted
+/// Content tree so a newer or more complete dump is never hidden by this file.
 /// </summary>
 public sealed class GameDataService
 {
@@ -63,12 +64,20 @@ public sealed class GameDataService
 
     /// <summary>
     /// Every cataloged asset whose top-level class matches <paramref name="className"/>
-    /// (case-insensitive). Powers zero-extraction pickers/browsers: pass
+    /// (case-insensitive). Powers pickers/browsers: pass
     /// "MaterialInstanceConstant", "Texture2D", "DinnerCharacterMetaData",
     /// "TtPawnUIMetaData", "StaticMesh", etc.
+    /// Material instances merge the shipped fallback with every MI discovered in the active
+    /// extracted Content tree; other classes currently use the shipped structured catalog.
     /// </summary>
-    public IEnumerable<GameDataAsset> AssetsOfClass(string className) =>
-        Db.Assets.Where(a => a.Class.Equals(className, StringComparison.OrdinalIgnoreCase));
+    public IEnumerable<GameDataAsset> AssetsOfClass(string className)
+    {
+        var shipped = Db.Assets
+            .Where(asset => asset.Class.Equals(className, StringComparison.OrdinalIgnoreCase));
+        return className.Equals("MaterialInstanceConstant", StringComparison.OrdinalIgnoreCase)
+            ? ExtractedMaterialCatalogService.MergeWithActiveExtraction(shipped)
+            : shipped;
+    }
 
     /// <summary>Catalog assets whose /Game path contains <paramref name="term"/>.</summary>
     public IEnumerable<GameDataAsset> AssetsMatching(string term) =>

@@ -127,7 +127,16 @@ public sealed partial class MainForm
         // behind it - it is read and set from ~30 places - but is never shown.
         _toyboxTypeCombo.DropDownStyle = ComboBoxStyle.DropDownList;
         _toyboxTypeCombo.Visible = false;
-        _toyboxTypeCombo.SelectedIndexChanged += (_, _) => { SyncFilterScope(); RefreshToyboxTiles(); };
+        _toyboxTypeCombo.SelectedIndexChanged += (_, _) =>
+        {
+            if (_populatingToyboxTypes)
+            {
+                return;
+            }
+
+            SyncFilterScope();
+            RefreshToyboxTiles();
+        };
 
         _toyboxFilters.Height = 30;
         _toyboxFilters.Margin = new Padding(0, 4, 6, 0);
@@ -149,8 +158,8 @@ public sealed partial class MainForm
         _toyboxPrimaryActionButton.Margin = new Padding(0, 4, 6, 0);
         _toyboxPrimaryActionButton.Click += (_, _) => RunPrimaryAction();
         var refreshTiles = new IconButton { Size = new Size(30, 30), Margin = new Padding(0, 4, 0, 0) };
-        _toyboxToolTip.SetToolTip(refreshTiles, "Rebuild the tiles for the current view");
-        refreshTiles.Click += (_, _) => RefreshToyboxTiles();
+        _toyboxToolTip.SetToolTip(refreshTiles, "Rescan active extracted materials and rebuild this view");
+        refreshTiles.Click += (_, _) => RescanToyboxCatalogs();
         // Hidden drivers: the nav rail sets the category, the filter button sets the type. Parented
         // so their events still fire.
         _toyboxCategoryCombo.Visible = false;
@@ -1683,105 +1692,136 @@ public sealed partial class MainForm
 
     private void PopulateToyboxTypes()
     {
-        _toyboxTypeCombo.Items.Clear();
-        switch (_toyboxCategoryCombo.SelectedItem?.ToString())
+        var wasPopulating = _populatingToyboxTypes;
+        _populatingToyboxTypes = true;
+        _toyboxTypeCombo.BeginUpdate();
+        try
         {
-            case "Home":
-                _toyboxTypeCombo.Items.Add("Overview");
-                break;
-            case "Build mod":
-                _toyboxTypeCombo.Items.Add("Release workspace");
-                break;
-            case "Base":
-                _toyboxTypeCombo.Items.Add("Base suit");
-                break;
-            case "Materials":
-                _toyboxTypeCombo.Items.Add("Your materials");
-                _toyboxTypeCombo.Items.Add("All tool materials");
-                _toyboxTypeCombo.Items.Add("<all game materials>");
-                foreach (var folder in GameMaterialFolders())
-                {
-                    _toyboxTypeCombo.Items.Add(folder);
-                }
-                break;
-            case "Textures":
-                _toyboxTypeCombo.Items.Add("Your textures");
-                _toyboxTypeCombo.Items.Add("Texture cooker notes");
-                break;
-            case "Parts":
-                _toyboxTypeCombo.Items.Add("Native body profiles");
-                if (_partIndex is null)
-                {
-                    LoadPartIndexAndRefreshGrid(logIfMissing: false);
-                }
-
-                if (_partIndex is null || _partIndex.Parts.Count == 0)
-                {
-                    _toyboxTypeCombo.Items.Add("Build part index first");
-                }
-                else
-                {
-                    _toyboxTypeCombo.Items.Add("<all parts>");
-                    foreach (var slot in _partIndex.Parts
-                        .Where(part => part.HasMesh)
-                        .Where(part => !IsGliderVisualPart(part))
-                        .Where(part => !part.Slot.Equals("Face", StringComparison.OrdinalIgnoreCase))
-                        .Select(part => part.Slot)
-                        .Where(slot => !string.IsNullOrWhiteSpace(slot))
-                        .Distinct(StringComparer.OrdinalIgnoreCase)
-                        .OrderBy(slot => SlotSortKey(slot, 0))
-                        .ThenBy(slot => slot, StringComparer.OrdinalIgnoreCase))
+            _toyboxTypeCombo.Items.Clear();
+            switch (_toyboxCategoryCombo.SelectedItem?.ToString())
+            {
+                case "Home":
+                    _toyboxTypeCombo.Items.Add("Overview");
+                    break;
+                case "Build mod":
+                    _toyboxTypeCombo.Items.Add("Release workspace");
+                    break;
+                case "Base":
+                    _toyboxTypeCombo.Items.Add("Base suit");
+                    break;
+                case "Materials":
+                    _toyboxTypeCombo.Items.Add("Your materials");
+                    _toyboxTypeCombo.Items.Add("All tool materials");
+                    _toyboxTypeCombo.Items.Add("<all game materials>");
+                    foreach (var folder in GameMaterialFolders())
                     {
-                        _toyboxTypeCombo.Items.Add(slot);
+                        _toyboxTypeCombo.Items.Add(folder);
                     }
-                }
-                // Attachment libraries come straight from the shipped catalog (no
-                // part index needed) - hair/hat static meshes graft like any part.
-                _toyboxTypeCombo.Items.Add("Attachment: Hair");
-                _toyboxTypeCombo.Items.Add("Attachment: Hat");
-                break;
-            case "Faces":
-                _toyboxTypeCombo.Items.Add("<all faces>");
-                foreach (var folder in AttachmentCatalogService.FaceCharacterFolders())
-                {
-                    _toyboxTypeCombo.Items.Add(folder);
-                }
-                break;
-            case "Equipment":
-                _toyboxTypeCombo.Items.AddRange(new object[]
-                {
-                    "Recommended",
-                    "Special controllers",
-                    "Family-only",
-                    "Testing / boss",
-                    "All gadgets"
-                });
-                break;
-            case "Gliders":
-                _toyboxTypeCombo.Items.AddRange(new object[] { "Glider presets", "Wingsuit decals" });
-                break;
-            case "Animations":
-                _toyboxTypeCombo.Items.Add("Overview & setup");
-                _toyboxTypeCombo.Items.Add("Replace idle/walk/run");
-                _toyboxTypeCombo.Items.Add("Swap category by family");
-                _toyboxTypeCombo.Items.Add("Browse: Montage composites");
-                _toyboxTypeCombo.Items.Add("Browse: Layer blocks");
-                foreach (var c in GameDataService.Instance.AnimCategories("Layer"))
-                {
-                    _toyboxTypeCombo.Items.Add($"Browse: Layer · {c}");
-                }
-                break;
-            case "Review":
-                _toyboxTypeCombo.Items.AddRange(new object[] { "All changes", "Base", "Materials", "Textures", "Parts", "Equipment" });
-                break;
-            case "Research":
-                _toyboxTypeCombo.Items.AddRange(new object[] { "Character assets", "Playable / cutscene", "Materials / ColorMask" });
-                break;
-            default:
-                _toyboxTypeCombo.Items.Add("(coming soon)");
-                break;
+                    break;
+                case "Textures":
+                    _toyboxTypeCombo.Items.Add("Your textures");
+                    _toyboxTypeCombo.Items.Add("Texture cooker notes");
+                    break;
+                case "Parts":
+                    _toyboxTypeCombo.Items.Add("Native body profiles");
+                    if (_partIndex is null)
+                    {
+                        LoadPartIndexAndRefreshGrid(logIfMissing: false, refreshToybox: false);
+                    }
+
+                    if (_partIndex is null || _partIndex.Parts.Count == 0)
+                    {
+                        _toyboxTypeCombo.Items.Add("Build part index first");
+                    }
+                    else
+                    {
+                        _toyboxTypeCombo.Items.Add("<all parts>");
+                        foreach (var slot in _partIndex.Parts
+                            .Where(part => part.HasMesh)
+                            .Where(part => !IsGliderVisualPart(part))
+                            .Where(part => !part.Slot.Equals("Face", StringComparison.OrdinalIgnoreCase))
+                            .Select(part => part.Slot)
+                            .Where(slot => !string.IsNullOrWhiteSpace(slot))
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .OrderBy(slot => SlotSortKey(slot, 0))
+                            .ThenBy(slot => slot, StringComparer.OrdinalIgnoreCase))
+                        {
+                            _toyboxTypeCombo.Items.Add(slot);
+                        }
+                    }
+                    // Attachment mesh metadata has a bundled fallback (no part index needed), while
+                    // sibling material lookups also merge the active extraction.
+                    _toyboxTypeCombo.Items.Add("Attachment: Hair");
+                    _toyboxTypeCombo.Items.Add("Attachment: Hat");
+                    break;
+                case "Faces":
+                    _toyboxTypeCombo.Items.Add("<all faces>");
+                    foreach (var folder in AttachmentCatalogService.FaceCharacterFolders())
+                    {
+                        _toyboxTypeCombo.Items.Add(folder);
+                    }
+                    break;
+                case "Equipment":
+                    _toyboxTypeCombo.Items.AddRange(new object[]
+                    {
+                        "Recommended",
+                        "Special controllers",
+                        "Family-only",
+                        "Testing / boss",
+                        "All gadgets"
+                    });
+                    break;
+                case "Gliders":
+                    _toyboxTypeCombo.Items.AddRange(new object[] { "Glider presets", "Wingsuit decals" });
+                    break;
+                case "Animations":
+                    _toyboxTypeCombo.Items.Add("Overview & setup");
+                    _toyboxTypeCombo.Items.Add("Replace idle/walk/run");
+                    _toyboxTypeCombo.Items.Add("Swap category by family");
+                    _toyboxTypeCombo.Items.Add("Browse: Montage composites");
+                    _toyboxTypeCombo.Items.Add("Browse: Layer blocks");
+                    foreach (var c in GameDataService.Instance.AnimCategories("Layer"))
+                    {
+                        _toyboxTypeCombo.Items.Add($"Browse: Layer · {c}");
+                    }
+                    break;
+                case "Review":
+                    _toyboxTypeCombo.Items.AddRange(new object[] { "All changes", "Base", "Materials", "Textures", "Parts", "Equipment" });
+                    break;
+                case "Research":
+                    _toyboxTypeCombo.Items.AddRange(new object[] { "Character assets", "Playable / cutscene", "Materials / ColorMask" });
+                    break;
+                default:
+                    _toyboxTypeCombo.Items.Add("(coming soon)");
+                    break;
+            }
+            _toyboxTypeCombo.SelectedIndex = 0;
         }
-        _toyboxTypeCombo.SelectedIndex = 0;
+        finally
+        {
+            _toyboxTypeCombo.EndUpdate();
+            _populatingToyboxTypes = wasPopulating;
+        }
+    }
+
+    private void PopulateToyboxTypesPreservingSelection(string? selectedType)
+    {
+        var wasPopulating = _populatingToyboxTypes;
+        _populatingToyboxTypes = true;
+        try
+        {
+            PopulateToyboxTypes();
+            if (!string.IsNullOrWhiteSpace(selectedType) &&
+                _toyboxTypeCombo.Items.Cast<object>().Any(item =>
+                    string.Equals(item?.ToString(), selectedType, StringComparison.OrdinalIgnoreCase)))
+            {
+                SelectComboValue(_toyboxTypeCombo, selectedType);
+            }
+        }
+        finally
+        {
+            _populatingToyboxTypes = wasPopulating;
+        }
     }
 
     private void ClearToyboxTiles()
@@ -3208,12 +3248,15 @@ public sealed partial class MainForm
                     new FilterGroup("Type", "Any type", new[] { "Glide cape", "Wingsuit", "Character glider" }));
                 break;
             case "Materials":
-                _toyboxFilters.SetGroups(
-                    new FilterGroup("Source", "Any source", GameMaterialFolders()));
+                // Material folders already are the scope choices. A second identical Source filter
+                // allowed contradictory folder selections that hid otherwise valid search results.
+                _toyboxFilters.SetGroups();
                 break;
             case "Faces":
-                _toyboxFilters.SetGroups(
-                    new FilterGroup("Source", "Any source", AttachmentCatalogService.FaceCharacterFolders()));
+                // The hidden scope already selects the character/folder. A second Source filter
+                // duplicated that dimension, allowed contradictory selections, and rebuilt the
+                // same face-folder catalog a second time whenever the view opened.
+                _toyboxFilters.SetGroups();
                 break;
             case "Animations":
                 // Only bites on the "Browse:" types; the overview and swap views ignore it.
@@ -3918,6 +3961,29 @@ public sealed partial class MainForm
         _detectedLabel.Text = "Base change did not complete; the previous saved project was kept.";
         _session.RaiseChanged();
         RefreshInspector();
+        RefreshToyboxTiles();
+    }
+
+    private void RescanToyboxCatalogs()
+    {
+        var selectedType = _toyboxTypeCombo.SelectedItem?.ToString();
+        ExtractedMaterialCatalogService.Invalidate();
+        _characterResearchService = null;
+        _characterResearchRoot = "";
+        var category = _toyboxCategoryCombo.SelectedItem?.ToString();
+        if (category is "Parts" or "Gliders")
+        {
+            try
+            {
+                _partIndex = new PartIndexService(_projectRootText.Text.Trim()).LoadPartIndex();
+            }
+            catch
+            {
+                _partIndex = null;
+            }
+        }
+        PopulateToyboxTypesPreservingSelection(selectedType);
+        ConfigureToyboxFilters();
         RefreshToyboxTiles();
     }
 

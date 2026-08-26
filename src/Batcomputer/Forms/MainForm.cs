@@ -179,6 +179,10 @@ public sealed partial class MainForm : AdaptiveForm
 
     private readonly ComboBox _toyboxTypeCombo = new();
 
+    // PopulateToyboxTypes owns the hidden scope model. Suppress its transient Clear/select events
+    // so changing category renders one final view instead of rebuilding a large catalog repeatedly.
+    private bool _populatingToyboxTypes;
+
     // One button holding every filter for the current category (ConfigureToyboxFilters).
     private readonly FilterBar _toyboxFilters = new();
 
@@ -239,6 +243,10 @@ public sealed partial class MainForm : AdaptiveForm
     private CharacterResearchService? _characterResearchService;
 
     private string _characterResearchRoot = "";
+
+    private Task? _activePartIndexBuildTask;
+
+    private int _partIndexBuildRequestCount;
 
     private Point _toyboxDragStartPoint;
 
@@ -2105,11 +2113,14 @@ public sealed partial class MainForm : AdaptiveForm
         if (dlg.ShowDialog(this) == DialogResult.OK)
         {
             AppSettings.Current = AppSettings.Load();
+            ExtractedMaterialCatalogService.Invalidate();
+            _partIndex = null;
             _projectRootText.Text = AppSettings.Current.EffectiveProjectRoot();
             RefreshHeaderWordmark();
             ApplyResearchToolsVisibility();
             PopulateToyboxSlots(); // picks up a changed "Your Character" panel style immediately
-            AppendLog("Settings saved. Tool paths reloaded.");
+            RescanToyboxCatalogs();
+            AppendLog("Settings saved. Tool paths and the active extracted catalog were reloaded.");
         }
     }
 
@@ -2163,7 +2174,9 @@ public sealed partial class MainForm : AdaptiveForm
             // Make the new version active only after extraction and validation have completed.
             AppSettings.Current.ExtractedContentRoot = result.ContentRoot;
             AppSettings.Current.Save();
+            ExtractedMaterialCatalogService.Invalidate();
             AppendLog($"New extracted Content root selected: {result.ContentRoot}");
+            AppendLog($"Active extracted material catalog: {ExtractedMaterialCatalogService.ExtractedForRoot(result.ContentRoot).Count} material instance(s).");
 
             progressWindow.SetIndeterminate("Preparing texture cook templates…");
             var templates = TextureCookTemplateService.PrepareFromContentRoot(projectRoot, result.ContentRoot);
@@ -2183,7 +2196,7 @@ public sealed partial class MainForm : AdaptiveForm
             await RunIndexerAsync();
 
             progressWindow.SetIndeterminate("Rebuilding native part index…");
-            await BuildPartIndexAsync();
+            await BuildPartIndexAsync(requiredForAssetRefresh: true);
 
             progressWindow.SetFinished("Refresh complete. Re-select the base suit before packaging.");
             AppendLog($"Game asset refresh complete: {result.AssetsExtracted} assets, {result.PairsFound} pairs, UAssetAPI parsed {result.AssetsValidated}.");

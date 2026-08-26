@@ -28,6 +28,7 @@ public sealed class InspectorControl : UserControl
         public string Mesh = "";
         public string DisplayMesh = "";
         public IReadOnlyList<SlotRow> Slots = Array.Empty<SlotRow>();
+        public bool CanRemove;
         public bool Customized => Slots.Any(s => s.Overridden);
     }
 
@@ -47,6 +48,7 @@ public sealed class InspectorControl : UserControl
     public event EventHandler? BreakdownRequested;
     public event EventHandler? RoleChanged;
     public event Action<string>? ComponentSelected;
+    public event Action<string>? ComponentRemoveRequested;
     public event Action<string, int>? SlotSelected;
     public event Action<string, int, string>? SlotMaterialDropped;
 
@@ -560,6 +562,25 @@ public sealed class InspectorControl : UserControl
         card.Controls.Add(name);
         card.Controls.Add(mesh);
         card.Controls.Add(count);
+
+        var componentMenu = new ContextMenuStrip();
+        var removeItem = new ToolStripMenuItem(comp.CanRemove
+            ? "Remove from suit…"
+            : "Inherited body — choose a replacement instead")
+        {
+            Enabled = comp.CanRemove,
+        };
+        if (comp.CanRemove)
+        {
+            removeItem.Click += (_, _) => ComponentRemoveRequested?.Invoke(comp.Name);
+        }
+        componentMenu.Items.Add(removeItem);
+        card.ContextMenuStrip = componentMenu;
+        caret.ContextMenuStrip = componentMenu;
+        name.ContextMenuStrip = componentMenu;
+        mesh.ContextMenuStrip = componentMenu;
+        count.ContextMenuStrip = componentMenu;
+        card.Disposed += (_, _) => componentMenu.Dispose();
 
         if (expanded)
         {

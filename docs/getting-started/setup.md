@@ -38,9 +38,10 @@ so installed mods cannot contaminate the base-game donor index.
 If you already have a current Content extraction, select it. Otherwise leave the field blank and
 accept the full extraction offered at the end of setup.
 
-The normal extraction includes character, shared animation, localization, supporting metadata, and
-the equipment/glider materials stored under `Content/Models/Gadgets`. It uses roughly 18 GB and can
-take several minutes.
+The normal extraction includes every character asset, the full shared
+`Content/Characters/Materials` tree, shared animation, localization, supporting metadata, and the
+equipment/glider materials stored under `Content/Models/Gadgets`. It uses roughly 18 GB and can take
+several minutes.
 
 Batcomputer reads the **active extracted Content** path shown in Setup. An old or empty
 `ExtractedPakData` folder beside a previous portable build is not an extraction destination unless

@@ -1,10 +1,9 @@
 namespace Batcomputer;
 
 /// <summary>
-/// Catalog-backed picker for a material instance to clone. This deliberately
-/// stays inside Batcomputer: package paths come from the shipped game catalog,
-/// while MaterialWizard resolves the selected asset to the extracted copy when
-/// it needs to read its native parameters.
+/// Catalog-backed picker for a material instance to clone. Package paths merge
+/// the active extracted Content tree with the bundled fallback catalog, while
+/// MaterialWizard resolves the selected asset to disk when it reads parameters.
 /// </summary>
 public sealed class MaterialCatalogPicker : AdaptiveForm
 {
@@ -68,7 +67,7 @@ public sealed class MaterialCatalogPicker : AdaptiveForm
         };
         var intro = new Label
         {
-            Text = "Choose an in-game material instance to clone. The forge reads its real texture and colour parameters.",
+            Text = "Choose an in-game material instance from the active extraction or bundled fallback. The forge reads its real texture and colour parameters.",
             Left = 18,
             Top = 72,
             Width = ClientSize.Width - 36,
@@ -241,7 +240,7 @@ public sealed class MaterialCatalogPicker : AdaptiveForm
         _list.EndUpdate();
 
         _count.Text = _all.Count == 0
-            ? "The game material catalog is not available."
+            ? "No material instances were found in the active extraction or bundled fallback."
             : $"{_view.Count:n0} material{(_view.Count == 1 ? "" : "s")}";
         if (_list.Items.Count > 0)
         {
@@ -345,14 +344,15 @@ public sealed class MaterialCatalogPicker : AdaptiveForm
         };
     }
 
-    private static bool MatchesCharacter(string packagePath, string character)
+    internal static bool MatchesCharacter(string packagePath, string character)
     {
         if (string.Equals(character, "All characters", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
 
-        return packagePath.Contains($"/Minifig/{character}/", StringComparison.OrdinalIgnoreCase);
+        return packagePath.Contains($"/Minifig/{character}/", StringComparison.OrdinalIgnoreCase) ||
+               packagePath.Contains(character, StringComparison.OrdinalIgnoreCase);
     }
 
     private static IEnumerable<string> CharacterFamilies(IEnumerable<GameDataAsset> assets) => assets

@@ -2,6 +2,15 @@
 
 ## 0.9.0-beta.8
 
+- Material searches now include every material instance in the active extracted Content tree, so
+  shared `Characters/Materials` assets appear in the Toybox and material forge alongside the
+  bundled fallback catalog.
+- First-time setup and **Full refresh** validate that recursive shared-material extraction before
+  activating a dump. **Refresh part index** now also rescans the active material catalog without
+  changing the current Toybox view.
+- Opening Faces builds compatibility metadata once for the whole view instead of reopening the
+  workspace library and scanning every indexed part for every face tile.
+
 - **Reimport all** safely recooks every saved texture recipe in the current suit and rolls the
   complete batch back if one source or cook fails.
 - **Repair materials** follows only live material parameters, recovers the required texture and

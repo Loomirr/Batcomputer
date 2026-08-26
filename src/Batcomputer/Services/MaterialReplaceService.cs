@@ -266,6 +266,7 @@ public sealed class MaterialReplaceService
         public string Name { get; set; } = "";
         public string Class { get; set; } = "";
         public string Mesh { get; set; } = "";
+        public bool IsScsCreated { get; set; }
         public List<InspectorSlot> Slots { get; } = new();
     }
 
@@ -300,6 +301,7 @@ public sealed class MaterialReplaceService
         var asset = new UAsset(uassetPath, EngineVersion.VER_UE5_6, LoadMappings(), CustomSerializationFlags.SkipPreloadDependencyLoading);
 
         var inactiveScsTemplates = InactiveScsTemplateExportIndices(asset);
+        var activeScsTemplates = ActiveScsTemplateExportIndices(asset);
         for (var exportIndex = 1; exportIndex <= asset.Exports.Count; exportIndex++)
         {
             if (asset.Exports[exportIndex - 1] is not NormalExport export ||
@@ -317,7 +319,8 @@ public sealed class MaterialReplaceService
             var info = new InspectorComponent
             {
                 Name = export.ObjectName.ToString().Replace("_GEN_VARIABLE", ""),
-                Class = cls
+                Class = cls,
+                IsScsCreated = activeScsTemplates.Contains(exportIndex),
             };
 
             // Surface the component's mesh (StaticMesh / SkeletalMesh / SkinnedAsset).
@@ -583,6 +586,34 @@ public sealed class MaterialReplaceService
 
         allTemplates.ExceptWith(activeTemplates);
         return allTemplates;
+    }
+
+    private static HashSet<int> ActiveScsTemplateExportIndices(UAsset asset)
+    {
+        var referencedNodeIndexes = ReferencedScsNodeExportIndices(asset);
+        var activeTemplates = new HashSet<int>();
+        foreach (var nodeIndex in referencedNodeIndexes)
+        {
+            if (nodeIndex <= 0 ||
+                nodeIndex > asset.Exports.Count ||
+                asset.Exports[nodeIndex - 1] is not NormalExport node ||
+                !node.ObjectName.ToString().StartsWith("SCS_Node", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var templateIndex = node.Data.OfType<ObjectPropertyData>()
+                .FirstOrDefault(property => property.Name.ToString().Equals(
+                    "ComponentTemplate",
+                    StringComparison.OrdinalIgnoreCase))
+                ?.Value.Index ?? 0;
+            if (templateIndex > 0 && templateIndex <= asset.Exports.Count)
+            {
+                activeTemplates.Add(templateIndex);
+            }
+        }
+
+        return activeTemplates;
     }
 
     private static HashSet<int> ReferencedScsNodeExportIndices(UAsset asset)

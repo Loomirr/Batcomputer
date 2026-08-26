@@ -15,6 +15,7 @@ public sealed class GameAssetRefreshService
 {
     public const string RetocEngineVersion = "UE5_6";
     public const string CharacterGadgetFilter = "Content/Models/Gadgets/";
+    public const string CharacterMaterialsFilter = "Content/Characters/Materials/";
     public const string CapeTransparentMaterialFilter =
         "Content/Art/TechnicalArt/Optimisation/M_Cape_Transparent";
 
@@ -316,6 +317,21 @@ public sealed class GameAssetRefreshService
         _ => BatmanFilters,
     };
 
+    internal static bool FiltersRecursivelyCover(
+        IEnumerable<string> filters,
+        string requiredFolder)
+    {
+        static string NormalizeFolder(string path)
+        {
+            var normalized = path.Replace('\\', '/').TrimStart('/');
+            return normalized.EndsWith('/') ? normalized : normalized + "/";
+        }
+
+        var required = NormalizeFolder(requiredFolder);
+        return filters.Any(filter =>
+            required.StartsWith(NormalizeFolder(filter), StringComparison.OrdinalIgnoreCase));
+    }
+
     private static async Task<ProcessResult> RunRetocAsync(
         string retoc,
         string paksRoot,
@@ -441,6 +457,26 @@ public sealed class GameAssetRefreshService
         {
             return;
         }
+
+        var characterMaterialsRoot = Path.Combine(contentRoot, "Characters", "Materials");
+        if (!Directory.Exists(characterMaterialsRoot))
+        {
+            throw new InvalidDataException(
+                "retoc completed, but the shared Content\\Characters\\Materials folder was not extracted. " +
+                "The previous extracted dump remains active. Verify the original game Content\\Paks folder and retry the refresh.");
+        }
+
+        var characterMaterialAssets = Directory
+            .EnumerateFiles(characterMaterialsRoot, "*.uasset", SearchOption.AllDirectories)
+            .Count();
+        if (characterMaterialAssets == 0)
+        {
+            throw new InvalidDataException(
+                "retoc created Content\\Characters\\Materials but extracted no material assets. " +
+                "The previous extracted dump remains active. Verify the original game Content\\Paks folder and retry the refresh.");
+        }
+
+        result.Logs.Add($"Shared character material assets={characterMaterialAssets}");
 
         var gadgetRoot = Path.Combine(contentRoot, "Models", "Gadgets");
         if (!Directory.Exists(gadgetRoot))

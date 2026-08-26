@@ -578,11 +578,6 @@ public sealed partial class MainForm
     private IEnumerable<string> GameMaterialFolders()
     {
         var gd = GameDataService.Instance;
-        if (!gd.HasCatalog)
-        {
-            yield break;
-        }
-
         var folders = gd.AssetsOfClass("MaterialInstanceConstant")
             .Select(a => MaterialGroupFolder(a.Path))
             .Where(f => f.Length > 0)
@@ -595,7 +590,7 @@ public sealed partial class MainForm
     }
 
     // Group MIs by the first two path segments under /Game (e.g. "Characters/Minifig").
-    private static string MaterialGroupFolder(string gamePath)
+    internal static string MaterialGroupFolder(string gamePath)
     {
         var p = gamePath.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase) ? gamePath["/Game/".Length..] : gamePath;
         var segs = p.Split('/');
@@ -606,9 +601,8 @@ public sealed partial class MainForm
     /// <summary>
     /// Materials rendered as a generated, searchable, paged tile grid - same UX
     /// as the Parts screen. "Your materials" = MIs you generated; a folder (or
-    /// &lt;all game materials&gt;) = base-game MIs straight from the shipped catalog
-    /// (zero extraction - applying only writes a /Game reference). Click a tile to
-    /// apply it to the selected slot.
+    /// &lt;all game materials&gt;) = base-game MIs merged from the active extracted Content tree and
+    /// the shipped fallback catalog. Click a tile to apply it to the selected slot.
     /// </summary>
     private void RefreshMaterialTiles(string? type)
     {
@@ -703,21 +697,20 @@ public sealed partial class MainForm
             return;
         }
 
-        // Game-material grid from the shipped catalog.
+        // Game-material grid from the active extraction plus the shipped fallback catalog.
         var gd = GameDataService.Instance;
-        if (!gd.HasCatalog)
+        var availableGameMaterials = gd.AssetsOfClass("MaterialInstanceConstant").ToList();
+        if (availableGameMaterials.Count == 0)
         {
             ShowVirtualTiles(
                 new List<VirtualTilePanel.Tile> { new() { Title = "Browse…", Subtitle = "game MI from disk", Accent = Theme.Materials, OnClick = BrowseAndApplyGameMaterial } },
-                "Asset catalog not loaded (ship gamedata/*.json). Use '＋ Create' or the disk browse instead.");
+                "No material instances were found in the active extracted Content tree or bundled fallback. Use '＋ Create' or the disk browse instead.");
             return;
         }
 
         var folderFilter = (type is null || type == "<all game materials>") ? null : type;
-        var sourceFilter = FilterVal(0);
-        var all = gd.AssetsOfClass("MaterialInstanceConstant")
+        var all = availableGameMaterials
             .Where(a => folderFilter is null || MaterialGroupFolder(a.Path).Equals(folderFilter, StringComparison.OrdinalIgnoreCase))
-            .Where(a => sourceFilter is null || MaterialGroupFolder(a.Path).Equals(sourceFilter, StringComparison.OrdinalIgnoreCase))
             .Where(a => MatchesToyboxSearch(search, a.Path, a.Path[(a.Path.LastIndexOf('/') + 1)..]))
             .OrderBy(a => a.Path, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -738,7 +731,7 @@ public sealed partial class MainForm
                         : BuildMaterialTileMenu(a.Path, isUserMade: false),
                 };
             }).ToList(),
-            header: $"Base-game materials{(folderFilter is null ? "" : $" · {folderFilter}")} for slot [{_toyboxSlotLabel}]. Drag onto a slot to apply (no extraction needed); right-click to use one as a base for a new material. Type in the search box to filter.",
+            header: $"Base-game materials{(folderFilter is null ? "" : $" · {folderFilter}")} from the active extraction plus the bundled fallback for slot [{_toyboxSlotLabel}]. Drag onto a slot to apply; right-click to use one as a base for a new material. Type in the search box to filter.",
             emptyMessage: "No game materials matched. Try <all game materials> or clear the search box.");
     }
 
@@ -1444,7 +1437,7 @@ public sealed partial class MainForm
 
     private void PickAndApplyCatalogMaterial()
     {
-        var path = PickFromCatalog("MaterialInstanceConstant", "Pick a game material (catalog · no extraction)");
+        var path = PickFromCatalog("MaterialInstanceConstant", "Pick a game material (active extraction + fallback)");
         if (path is not null)
         {
             ApplyToyboxMaterial(path);

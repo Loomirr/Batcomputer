@@ -176,6 +176,44 @@ public sealed class ToolMaterialLibraryService
         }
     }
 
+    /// <summary>
+    /// Reads only the already-recorded material metadata. Browsers use this lightweight snapshot
+    /// for compatibility labels; migration, package adoption, dependency repair, and availability
+    /// checks remain explicit work performed by <see cref="LoadAvailable"/> and build flows.
+    /// </summary>
+    public IReadOnlyList<GeneratedMaterialEntry> LoadMetadataSnapshot()
+    {
+        var gate = RepairGate;
+        // This is a best-effort browser hint, not a build prerequisite. Never freeze the UI behind
+        // a material registration/repair transaction; the next view refresh can read its metadata.
+        if (!gate.Wait(0))
+        {
+            return Array.Empty<GeneratedMaterialEntry>();
+        }
+        try
+        {
+            var entries = LoadCatalog().Materials;
+            // Keep browser labels independent of navigation order. A disposable catalog can be
+            // missing or stale, so merge the authoritative saved-suit metadata in memory without
+            // archiving packages, checking dependency files, or writing a repaired catalog.
+            MergeSavedSuitMaterials(entries);
+            return entries
+                .Where(entry => !string.IsNullOrWhiteSpace(
+                    UnrealPathUtil.NormalizePackagePath(entry.PackagePath)))
+                .GroupBy(
+                    entry => UnrealPathUtil.NormalizePackagePath(entry.PackagePath),
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(group => Clone(group.Last()))
+                .OrderBy(entry => entry.Kind, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(entry => entry.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
     private IReadOnlyList<GeneratedMaterialEntry> LoadAvailableCore()
     {
         var entries = LoadCatalog().Materials;

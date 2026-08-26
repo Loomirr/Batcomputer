@@ -2,6 +2,14 @@
 
 ## 0.9.0-beta.8 — 2026-08-25
 
+- Material searches now merge the active extracted Content tree with the bundled fallback catalog,
+  including the shared `Characters/Materials` instances previously missing from the Toybox and
+  material forge.
+- First-time extraction and **Full refresh** validate the complete recursive shared-material tree
+  before switching dumps, while **Refresh part index** also invalidates and reloads live materials.
+- Builds face compatibility once per view instead of reopening the workspace material library and
+  scanning the full part index for every face tile.
+
 - Adds **Reimport all** for safely recooking every saved texture recipe in one suit, with a complete
   rollback if any source or cook fails.
 - Adds **Repair materials** for recovering a suit's saved material closure and reapplying its

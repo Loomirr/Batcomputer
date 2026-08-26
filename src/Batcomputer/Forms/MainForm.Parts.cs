@@ -2376,35 +2376,61 @@ public sealed partial class MainForm
     /// </summary>
     private void RefreshFaceTiles(string? type)
     {
-        var gd = GameDataService.Instance;
-        if (!gd.HasCatalog)
-        {
-            ShowVirtualTiles(Array.Empty<VirtualTilePanel.Tile>(), emptyMessage: "Asset catalog not loaded (ship gamedata/*.json).");
-            return;
-        }
-
         var folder = (type is null || type == "<all faces>") ? null : type;
-        var faceSource = FilterVal(0);
         var search = CurrentToyboxSearch();
         var gameFaces = AttachmentCatalogService.FaceMaterials(folder)
-            .Where(a => faceSource is null || a.Path.Contains($"/{faceSource}/", StringComparison.OrdinalIgnoreCase))
             .Where(a => MatchesToyboxSearch(search, a.Path, AttachmentCatalogService.AssetName(a.Path)))
             .ToList();
 
         var mod = ExtractModFolder(_targetPlayableText.Text.Trim());
+        var compatibility = BuildFaceMaterialCompatibilityLookup();
         var userFaces = DiscoverUserMaterialPaths(mod)
-            .Where(IsFaceMaterialPackage)
+            .Where(path => IsFaceMaterialPackage(path, compatibility))
             .Where(path => MatchesToyboxSearch(search, path, UnrealPathUtil.AssetName(path)))
             .ToList();
 
         var tiles = new List<VirtualTilePanel.Tile>();
-        tiles.AddRange(userFaces.Select(path => BuildFaceMaterialTile(path, isUserMade: true, "Your face materials")));
-        tiles.AddRange(gameFaces.Select(asset => BuildFaceMaterialTile(asset.Path, isUserMade: false, "Base-game faces")));
+        tiles.AddRange(userFaces.Select(path => BuildFaceMaterialTile(
+            path,
+            isUserMade: true,
+            "Your face materials",
+            compatibleFaceMeshes: compatibility.Resolve(path))));
+        tiles.AddRange(gameFaces.Select(asset => BuildFaceMaterialTile(
+            asset.Path,
+            isUserMade: false,
+            "Base-game faces",
+            compatibleFaceMeshes: compatibility.Resolve(asset.Path))));
 
         ShowVirtualTiles(
             tiles,
             header: $"Faces{(folder is null ? "" : $" · {folder}")} — swaps the printed-expression material on the existing Face component. Matching mesh families apply directly; special face rigs are blocked. Click or drag a compatible face onto the Face row, or right-click to create a custom variant.",
             emptyMessage: "No face materials matched. Try <all faces> or clear the search.");
+    }
+
+    private FaceMaterialCompatibilityLookup BuildFaceMaterialCompatibilityLookup()
+    {
+        return FaceMaterialCompatibilityLookup.Build(
+            projectMaterialLoader: () =>
+                _currentProject?.GeneratedMaterials ?? Enumerable.Empty<GeneratedMaterialEntry>(),
+            workspaceMaterialLoader: () =>
+                new ToolMaterialLibraryService(_projectRootText.Text.Trim()).LoadMetadataSnapshot(),
+            partLoader: () =>
+            {
+                if (_partIndex is null)
+                {
+                    try
+                    {
+                        _partIndex = new PartIndexService(_projectRootText.Text.Trim()).LoadPartIndex();
+                    }
+                    catch
+                    {
+                        // Compatibility labels degrade to "unrecorded" if an older/corrupt index
+                        // cannot be loaded. The dedicated index rebuild reports the full error.
+                    }
+                }
+
+                return _partIndex?.Parts ?? Enumerable.Empty<NativeSuitPartRecord>();
+            });
     }
 
     private VirtualTilePanel.Tile BuildFaceMaterialTile(
@@ -2619,7 +2645,7 @@ public sealed partial class MainForm
         }
 
         var shared = new ToolMaterialLibraryService(_projectRootText.Text.Trim())
-            .LoadAvailable()
+            .LoadMetadataSnapshot()
             .FirstOrDefault(material => UnrealPathUtil.NormalizePackagePath(material.PackagePath)
                 .Equals(package, StringComparison.OrdinalIgnoreCase));
         if (shared?.CompatibleFaceMeshPackagePaths is { Count: > 0 })
@@ -2660,7 +2686,9 @@ public sealed partial class MainForm
             .ToList();
     }
 
-    private bool IsFaceMaterialPackage(string materialPath)
+    private bool IsFaceMaterialPackage(
+        string materialPath,
+        FaceMaterialCompatibilityLookup? compatibility = null)
     {
         var package = UnrealPathUtil.NormalizePackagePath(materialPath);
         var authored = _currentProject?.GeneratedMaterials?.FirstOrDefault(material =>
@@ -2669,7 +2697,7 @@ public sealed partial class MainForm
         if (authored?.Kind.Equals("Face", StringComparison.OrdinalIgnoreCase) == true ||
             package.Contains("/Attachments/Face/", StringComparison.OrdinalIgnoreCase) ||
             UnrealPathUtil.AssetName(package).StartsWith("MI_FACE_", StringComparison.OrdinalIgnoreCase) ||
-            FaceMeshesForMaterial(package).Count > 0)
+            (compatibility?.Resolve(package).Count ?? FaceMeshesForMaterial(package).Count) > 0)
         {
             return true;
         }
@@ -2757,17 +2785,10 @@ public sealed partial class MainForm
             return;
         }
 
-        var gd = GameDataService.Instance;
-        if (!gd.HasCatalog)
-        {
-            ShowVirtualTiles(Array.Empty<VirtualTilePanel.Tile>(), emptyMessage: "Asset catalog not loaded (ship gamedata/*.json).");
-            return;
-        }
-
         if (type == "Wingsuit decals")
         {
             var search = CurrentToyboxSearch();
-            var decals = gd.AssetsOfClass("MaterialInstanceConstant")
+            var decals = GameDataService.Instance.AssetsOfClass("MaterialInstanceConstant")
                 .Where(a => AttachmentCatalogService.AssetName(a.Path).StartsWith("MI_DECAL_Wingsuit_", StringComparison.OrdinalIgnoreCase))
                 .Where(a => MatchesToyboxSearch(search, a.Path, AttachmentCatalogService.AssetName(a.Path)))
                 .OrderBy(a => a.Path, StringComparer.OrdinalIgnoreCase)
@@ -2782,7 +2803,7 @@ public sealed partial class MainForm
                     MenuFactory = () => BuildMaterialTileMenu(a.Path, isUserMade: false),
                 }).ToList(),
                 header: "Per-character wingsuit decal materials (MI_DECAL_Wingsuit_*). Dropping one on the Glider row uses the matching native wingsuit component, then overrides only the decal material slot.",
-                emptyMessage: "No wingsuit decals in the catalog.");
+                emptyMessage: "No wingsuit decals were found in the active extraction or bundled fallback.");
             return;
         }
     }
@@ -3478,18 +3499,84 @@ public sealed partial class MainForm
         }
     }
 
-    private async Task BuildPartIndexAsync()
+    private async Task BuildPartIndexAsync(bool requiredForAssetRefresh = false)
+    {
+        var activeBuild = _activePartIndexBuildTask;
+        if (activeBuild is { IsCompleted: false } && !requiredForAssetRefresh)
+        {
+            AppendLog("Part index refresh is already running.");
+            return;
+        }
+
+        _partIndexBuildRequestCount++;
+        _buildPartIndexButton.Enabled = false;
+        Task? ownedBuild = null;
+        try
+        {
+            if (activeBuild is { IsCompleted: false })
+            {
+                // Full game-asset refresh must certify an index built from its newly activated root.
+                // Await the exact older build task, then run again rather than accepting an index
+                // created for the dump that was active when that user command began.
+                AppendLog("Waiting for the current part index refresh before rebuilding the new dump…");
+                try
+                {
+                    await activeBuild;
+                }
+                catch
+                {
+                    // The required follow-up below still gets one clean attempt against the new root.
+                }
+            }
+
+            // A different serialized caller may have become active while the prior continuation
+            // completed. A required refresh waits for every exact tracked predecessor.
+            while (_activePartIndexBuildTask is { IsCompleted: false } predecessor)
+            {
+                try
+                {
+                    await predecessor;
+                }
+                catch
+                {
+                    // Continue to the required build below.
+                }
+            }
+
+            ownedBuild = BuildPartIndexCoreAsync(requiredForAssetRefresh);
+            _activePartIndexBuildTask = ownedBuild;
+            await ownedBuild;
+        }
+        finally
+        {
+            if (ownedBuild is not null && ReferenceEquals(_activePartIndexBuildTask, ownedBuild))
+            {
+                _activePartIndexBuildTask = null;
+            }
+
+            _partIndexBuildRequestCount = Math.Max(0, _partIndexBuildRequestCount - 1);
+            _buildPartIndexButton.Enabled = _partIndexBuildRequestCount == 0;
+        }
+    }
+
+    private async Task BuildPartIndexCoreAsync(bool requiredForAssetRefresh)
     {
         var projectRoot = _projectRootText.Text.Trim();
         var service = new PartIndexService(projectRoot);
 
         AppendLog("Building native suit part index from extracted cooked character BPs…");
-        _buildPartIndexButton.Enabled = false;
-        await PartIndexGate.WaitAsync();
+        var gateHeld = false;
         try
         {
+            await PartIndexGate.WaitAsync();
+            gateHeld = true;
             var index = await Task.Run(() => service.BuildPartIndex());
             _partIndex = index;
+            // The hamburger command is also the explicit same-root catalog refresh. Make the next
+            // Materials/Faces/attachment query rescan extracted MIs before rebuilding the view.
+            ExtractedMaterialCatalogService.Invalidate();
+            _characterResearchService = null;
+            _characterResearchRoot = "";
             AppendLog($"Part index status: {index.Status}");
             AppendLog($"Part index path: {service.PartIndexPath}");
             AppendLog($"Assets found={index.AssetsFound} parsed={index.AssetsParsed} withParts={index.AssetsWithParts} errors={index.Errors.Count}");
@@ -3520,7 +3607,10 @@ public sealed partial class MainForm
 
             UpdatePartSlotChoices();
             RefreshPartGrid();
-            PopulateToyboxTypes();
+            // The progress window is modeless, so preserve what the user is viewing now—not the
+            // selection that happened to be active before the long-running scan started.
+            var selectedType = _toyboxTypeCombo.SelectedItem?.ToString();
+            PopulateToyboxTypesPreservingSelection(selectedType);
             // The source list is built from the index, so it has to be rebuilt now the index exists.
             ConfigureToyboxFilters();
             RefreshToyboxTiles();
@@ -3529,15 +3619,23 @@ public sealed partial class MainForm
         {
             AppendLog("Part index build failed:");
             AppendLog(ex.ToString());
+            if (requiredForAssetRefresh)
+            {
+                throw;
+            }
         }
         finally
         {
-            PartIndexGate.Release();
-            _buildPartIndexButton.Enabled = true;
+            if (gateHeld)
+            {
+                PartIndexGate.Release();
+            }
         }
     }
 
-    private void LoadPartIndexAndRefreshGrid(bool logIfMissing = true)
+    private void LoadPartIndexAndRefreshGrid(
+        bool logIfMissing = true,
+        bool refreshToybox = true)
     {
         var projectRoot = _projectRootText.Text.Trim();
         var service = new PartIndexService(projectRoot);
@@ -3557,9 +3655,12 @@ public sealed partial class MainForm
         AppendLog($"Loaded part index: {_partIndex.Parts.Count} parts.");
         UpdatePartSlotChoices();
         RefreshPartGrid();
-        PopulateToyboxTypes();
-        ConfigureToyboxFilters();
-        RefreshToyboxTiles();
+        if (refreshToybox)
+        {
+            PopulateToyboxTypes();
+            ConfigureToyboxFilters();
+            RefreshToyboxTiles();
+        }
     }
 
     private void UpdatePartSlotChoices()

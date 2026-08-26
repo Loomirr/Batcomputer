@@ -13,6 +13,8 @@ namespace Batcomputer;
 /// </summary>
 public sealed partial class MainForm
 {
+    private bool _inspectorRemovalInProgress;
+
     private void RecordChange(string category, string target, string detail, string status = "applied")
     {
         EnsureProject();
@@ -105,6 +107,8 @@ public sealed partial class MainForm
                 SelectToyboxSlot(first.Label, first.Component, first.Slot);
             }
         };
+        _inspector.ComponentRemoveRequested += component =>
+            _ = RemoveInspectorComponentAsync(component);
         _inspector.SlotSelected += (component, slot) =>
             SelectToyboxSlot(FriendlySlotLabel(component, slot), component, slot);
         _inspector.SlotMaterialDropped += (component, slot, materialPath) =>
@@ -115,6 +119,84 @@ public sealed partial class MainForm
             RefreshInspector();
         };
         return _inspector;
+    }
+
+    private async Task RemoveInspectorComponentAsync(string component)
+    {
+        if (string.IsNullOrWhiteSpace(component) || _inspectorRemovalInProgress)
+        {
+            return;
+        }
+
+        _inspectorRemovalInProgress = true;
+        try
+        {
+            var project = _currentProject;
+            var customMesh = FindCustomStaticMeshForComponent(project, component);
+            if (customMesh is not null)
+            {
+                await RemoveCustomStaticMeshAsync(customMesh);
+                return;
+            }
+
+            if (project is null)
+            {
+                Dialog.Warn(this, "No active suit", "Open a suit before removing one of its parts.");
+                return;
+            }
+
+            var activeGlider = ActiveGliderVisualComponent(project);
+            if (!string.IsNullOrWhiteSpace(activeGlider) &&
+                activeGlider.Equals(component, StringComparison.OrdinalIgnoreCase) &&
+                !PairedCapeAdapterTargetsComponent(project, component))
+            {
+                if (Dialog.Confirm(
+                        this,
+                        "Remove custom glider",
+                        "Remove this custom glider and restore the gameplay donor's original glide visual?"))
+                {
+                    await ClearCustomGliderAsync();
+                }
+                return;
+            }
+
+            const int componentSlot = 0;
+            var first = _characterSlots.FirstOrDefault(slot =>
+                slot.Component.Equals(component, StringComparison.OrdinalIgnoreCase));
+            var label = first.Component is null
+                ? FriendlySlotLabel(component, componentSlot)
+                : first.Label;
+            if (!Dialog.Confirm(
+                    this,
+                    "Remove part from suit",
+                    $"Remove '{label}' from this suit?\n\n" +
+                    "Batcomputer will rebuild both the playable and cutscene versions. " +
+                    "Your original game files are not changed."))
+            {
+                return;
+            }
+
+            if (first.Component is not null)
+            {
+                SelectToyboxSlot(label, component, componentSlot);
+            }
+
+            await RemoveToyboxPartAsync(label, component, componentSlot);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Inspector removal failed for '{component}': {ex}");
+            Dialog.Error(
+                this,
+                "Part was not removed",
+                "Batcomputer could not finish the inspector removal. The saved suit remains active.\n\n" +
+                ex.Message,
+                windowTitle: "Parts");
+        }
+        finally
+        {
+            _inspectorRemovalInProgress = false;
+        }
     }
 
     private Control CreateInspectorTabs()
@@ -141,7 +223,7 @@ public sealed partial class MainForm
         return _inspectorTabs;
     }
 
-    private static CustomStaticMeshImport? FindCustomStaticMeshForComponent(
+    internal static CustomStaticMeshImport? FindCustomStaticMeshForComponent(
         NativeSuitProject? project,
         string component)
     {
@@ -268,6 +350,7 @@ public sealed partial class MainForm
                         Class = comp.Class,
                         Mesh = comp.Mesh,
                         DisplayMesh = friendlyMesh,
+                        CanRemove = customMesh is not null || comp.IsScsCreated,
                         Slots = comp.Slots.OrderBy(s => s.Slot).Select(s => new InspectorControl.SlotRow
                         {
                             Slot = s.Slot,
@@ -337,25 +420,19 @@ public sealed partial class MainForm
     }
 
     /// <summary>
-    /// Lets the user pick any base-game asset of a class straight from the
-    /// shipped catalog - no extraction required. Returns the /Game object path
-    /// (Package.ObjectName) or null if cancelled.
+    /// Lets the user pick any base-game asset of a class. Material instances come from the active
+    /// extracted Content tree plus the bundled fallback; other classes use the bundled catalog.
+    /// Returns the /Game object path (Package.ObjectName) or null if cancelled.
     /// </summary>
     private string? PickFromCatalog(string className, string title)
     {
         var gd = GameDataService.Instance;
-        if (!gd.HasCatalog)
-        {
-            AppendLog("Asset catalog not loaded (ship gamedata/*.json). Falling back to file browse.");
-            return null;
-        }
-
         var assets = gd.AssetsOfClass(className)
             .OrderBy(a => a.Path, StringComparer.OrdinalIgnoreCase)
             .ToList();
         if (assets.Count == 0)
         {
-            AppendLog($"No '{className}' assets in the catalog.");
+            AppendLog($"No '{className}' assets were found in the active extraction or bundled catalog.");
             return null;
         }
 

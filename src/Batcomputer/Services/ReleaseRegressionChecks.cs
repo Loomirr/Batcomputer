@@ -28,6 +28,292 @@ internal static class ReleaseRegressionChecks
         Check(
             new[]
             {
+                GameAssetRefreshService.AllCharacterFilters,
+                GameAssetRefreshService.DeveloperResearchFilters,
+            }.All(filters => GameAssetRefreshService.FiltersRecursivelyCover(
+                filters,
+                GameAssetRefreshService.CharacterMaterialsFilter)),
+            "first-time and full refresh recursively extract Content/Characters/Materials",
+            failures,
+            output);
+
+        var materialCatalogRoot = Path.Combine(
+            Path.GetTempPath(),
+            "Batcomputer-extracted-material-catalog-" + Guid.NewGuid().ToString("N"));
+        var priorCatalogSettings = AppSettings.Current;
+        try
+        {
+            var contentA = Path.Combine(materialCatalogRoot, "A", "Content");
+            var contentB = Path.Combine(materialCatalogRoot, "B", "Content");
+            var deepCowl = Path.Combine(
+                contentA,
+                "Characters",
+                "Materials",
+                "MI_Instances",
+                "EoM",
+                "Controller",
+                "MI_BatmanCowlEyes_Hollow.uasset");
+            var attachmentCowl = Path.Combine(
+                contentA,
+                "Characters",
+                "Attachments",
+                "HAT",
+                "BatmanCowl_MoldedEyes",
+                "Materials",
+                "MI_BatmanCowlEyes_Molded_Black.uasset");
+            var faceMi = Path.Combine(
+                contentA,
+                "Characters",
+                "Attachments",
+                "Face",
+                "RegressionFace",
+                "MI_FACE_Regression.uasset");
+            var topLevelMi = Path.Combine(
+                contentA,
+                "Characters",
+                "Materials",
+                "MI_RegressionOnlyA_D71A4F9E.uasset");
+            var wingsuitMi = Path.Combine(contentA, "Models", "Gadgets", "MI_DECAL_Wingsuit_Test.uasset");
+            var masterMaterial = Path.Combine(contentA, "Characters", "Materials", "M_Master.uasset");
+            var wrongExtension = Path.Combine(contentA, "Characters", "Materials", "MI_NotCooked.txt");
+            var replacementMi = Path.Combine(contentB, "Characters", "Materials", "MI_Replacement.uasset");
+            foreach (var path in new[]
+                     {
+                         deepCowl,
+                         attachmentCowl,
+                         faceMi,
+                         topLevelMi,
+                         wingsuitMi,
+                         masterMaterial,
+                         wrongExtension,
+                         replacementMi,
+                     })
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllBytes(path, new byte[] { 0x42 });
+            }
+
+            ExtractedMaterialCatalogService.Invalidate();
+            var extractedA = ExtractedMaterialCatalogService.ExtractedForRoot(contentA);
+            var afterCacheMi = Path.Combine(
+                contentA,
+                "Characters",
+                "Materials",
+                "MI_AfterCacheRefresh.uasset");
+            File.WriteAllBytes(afterCacheMi, new byte[] { 0x43 });
+            var cachedA = ExtractedMaterialCatalogService.ExtractedForRoot(contentA);
+            ExtractedMaterialCatalogService.Invalidate();
+            var refreshedA = ExtractedMaterialCatalogService.ExtractedForRoot(contentA);
+            var extractedB = ExtractedMaterialCatalogService.ExtractedForRoot(contentB);
+            var shipped = new[]
+            {
+                new GameDataAsset
+                {
+                    Path = "/game/characters/materials/mi_instances/eom/controller/mi_batmancowleyes_hollow",
+                    Class = "MaterialInstanceConstant",
+                },
+                new GameDataAsset
+                {
+                    Path = "/Game/Characters/Attachments/HAT/MI_ShippedOnly",
+                    Class = "MaterialInstanceConstant",
+                },
+            };
+            var merged = ExtractedMaterialCatalogService.MergeForRegression(shipped, extractedA);
+            var missingRootFallback = ExtractedMaterialCatalogService.MergeForRegression(
+                shipped,
+                ExtractedMaterialCatalogService.ExtractedForRoot(Path.Combine(materialCatalogRoot, "missing")));
+
+            AppSettings.Current = new AppSettings { ExtractedContentRoot = contentA };
+            ExtractedMaterialCatalogService.Invalidate();
+            var centralizedA = GameDataService.Instance.AssetsOfClass("MaterialInstanceConstant").ToList();
+            var centralizedFaces = AttachmentCatalogService.FaceMaterials("RegressionFace").ToList();
+            AppSettings.Current = new AppSettings { ExtractedContentRoot = contentB };
+            var centralizedB = GameDataService.Instance.AssetsOfClass("MaterialInstanceConstant").ToList();
+
+            var deepPackage = "/Game/Characters/Materials/MI_Instances/EoM/Controller/MI_BatmanCowlEyes_Hollow";
+            var attachmentPackage = "/Game/Characters/Attachments/HAT/BatmanCowl_MoldedEyes/Materials/MI_BatmanCowlEyes_Molded_Black";
+            var rootAOnlyPackage = "/Game/Characters/Materials/MI_RegressionOnlyA_D71A4F9E";
+            var catalogOk =
+                extractedA.Count == 5 &&
+                cachedA.Count == 5 &&
+                refreshedA.Count == 6 &&
+                refreshedA.Any(asset => asset.Path.EndsWith(
+                    "/MI_AfterCacheRefresh",
+                    StringComparison.OrdinalIgnoreCase)) &&
+                extractedA.Any(asset => asset.Path.Equals(deepPackage, StringComparison.OrdinalIgnoreCase)) &&
+                extractedA.Any(asset => asset.Path.Equals(attachmentPackage, StringComparison.OrdinalIgnoreCase)) &&
+                extractedA.Any(asset => asset.Path.Equals(
+                    "/Game/Models/Gadgets/MI_DECAL_Wingsuit_Test",
+                    StringComparison.OrdinalIgnoreCase)) &&
+                extractedA.All(asset => !asset.Path.EndsWith("M_Master", StringComparison.OrdinalIgnoreCase) &&
+                                        !asset.Path.EndsWith("MI_NotCooked", StringComparison.OrdinalIgnoreCase)) &&
+                extractedB.Count == 1 &&
+                extractedB[0].Path.EndsWith("/MI_Replacement", StringComparison.OrdinalIgnoreCase) &&
+                merged.Count == 6 &&
+                merged.Count(asset => asset.Path.Equals(deepPackage, StringComparison.OrdinalIgnoreCase)) == 1 &&
+                merged.Count(asset => asset.Path.Contains("BatmanCowl", StringComparison.OrdinalIgnoreCase)) == 2 &&
+                merged.Select(asset => MainForm.MaterialGroupFolder(asset.Path))
+                    .Contains("Characters/Materials", StringComparer.OrdinalIgnoreCase) &&
+                MaterialCatalogPicker.MatchesCharacter(deepPackage, "Batman") &&
+                MaterialCatalogPicker.MatchesCharacter(attachmentPackage, "Batman") &&
+                missingRootFallback.Count == shipped.Length &&
+                centralizedA.Any(asset => asset.Path.Equals(deepPackage, StringComparison.OrdinalIgnoreCase)) &&
+                centralizedA.Any(asset => asset.Path.Equals(rootAOnlyPackage, StringComparison.OrdinalIgnoreCase)) &&
+                centralizedA.Any(asset => asset.Path.EndsWith(
+                    "/MI_DECAL_Wingsuit_Test",
+                    StringComparison.OrdinalIgnoreCase)) &&
+                centralizedFaces.Count == 1 &&
+                centralizedFaces[0].Path.EndsWith("/MI_FACE_Regression", StringComparison.OrdinalIgnoreCase) &&
+                centralizedB.Any(asset => asset.Path.EndsWith("/MI_Replacement", StringComparison.OrdinalIgnoreCase)) &&
+                centralizedB.All(asset => !asset.Path.Equals(rootAOnlyPackage, StringComparison.OrdinalIgnoreCase));
+            Check(
+                catalogOk,
+                "every material browser merges recursive active-extract MIs, deduplicates paths, and follows root changes",
+                failures,
+                output);
+        }
+        catch (Exception ex)
+        {
+            Check(
+                false,
+                $"every material browser merges recursive active-extract MIs, deduplicates paths, and follows root changes ({ex.Message})",
+                failures,
+                output);
+        }
+        finally
+        {
+            AppSettings.Current = priorCatalogSettings;
+            ExtractedMaterialCatalogService.Invalidate();
+            try { Directory.Delete(materialCatalogRoot, recursive: true); } catch { /* best effort */ }
+        }
+
+        var projectFaceLoaderCalls = 0;
+        var workspaceFaceLoaderCalls = 0;
+        var partFaceLoaderCalls = 0;
+        var projectFaceEnumerations = 0;
+        var workspaceFaceEnumerations = 0;
+        var partFaceEnumerations = 0;
+        const string faceMaterialA = "/Game/Mods/Test/MI_FACE_A";
+        const string faceMaterialB = "/Game/Mods/Test/MI_FACE_B";
+        const string faceMaterialC = "/Game/Characters/Attachments/Face/Test/MI_FACE_C";
+        const string faceMaterialD = "/Game/Mods/Test/MI_FACE_D";
+        var projectFaceMaterials = new[]
+        {
+            new GeneratedMaterialEntry
+            {
+                PackagePath = faceMaterialA,
+                CompatibleFaceMeshPackagePaths = ["/Game/Faces/SK_Current"],
+            },
+            new GeneratedMaterialEntry
+            {
+                PackagePath = faceMaterialD,
+                CompatibleFaceMeshPackagePaths = [],
+            },
+        };
+        var workspaceFaceMaterials = new[]
+        {
+            new GeneratedMaterialEntry
+            {
+                PackagePath = faceMaterialA.ToLowerInvariant(),
+                CompatibleFaceMeshPackagePaths = ["/Game/Faces/SK_WorkspaceA"],
+            },
+            new GeneratedMaterialEntry
+            {
+                PackagePath = faceMaterialB,
+                CompatibleFaceMeshPackagePaths = ["/Game/Faces/SK_WorkspaceB"],
+            },
+            new GeneratedMaterialEntry
+            {
+                PackagePath = faceMaterialD,
+                CompatibleFaceMeshPackagePaths = ["/Game/Faces/SK_WorkspaceD"],
+            },
+        };
+        var indexedFaceParts = new[]
+        {
+            new NativeSuitPartRecord
+            {
+                Slot = "Face",
+                SemanticKind = "Face",
+                MeshPackagePath = "/Game/Faces/SK_IndexA",
+                Materials = [new NativeSuitObjectRef { ObjectPath = faceMaterialA + ".MI_FACE_A" }],
+            },
+            new NativeSuitPartRecord
+            {
+                Slot = "Face",
+                SemanticKind = "Face",
+                MeshPackagePath = "/Game/Faces/SK_IndexC2",
+                Materials = [new NativeSuitObjectRef { PackagePath = faceMaterialC.ToLowerInvariant() }],
+            },
+            new NativeSuitPartRecord
+            {
+                Slot = "Face",
+                SemanticKind = "Face",
+                MeshPackagePath = "/Game/Faces/SK_IndexC1",
+                Materials = [new NativeSuitObjectRef { ObjectPath = faceMaterialC + ".MI_FACE_C" }],
+            },
+            new NativeSuitPartRecord
+            {
+                Slot = "Torso",
+                SemanticKind = "Body",
+                MeshPackagePath = "/Game/Faces/SK_MustBeIgnored",
+                Materials = [new NativeSuitObjectRef { PackagePath = faceMaterialC }],
+            },
+        };
+
+        IEnumerable<T> CountFaceEnumeration<T>(IEnumerable<T> source, Action increment)
+        {
+            increment();
+            foreach (var item in source)
+            {
+                yield return item;
+            }
+        }
+
+        var faceLookup = FaceMaterialCompatibilityLookup.Build(
+            projectMaterialLoader: () =>
+            {
+                projectFaceLoaderCalls++;
+                return CountFaceEnumeration(projectFaceMaterials, () => projectFaceEnumerations++);
+            },
+            workspaceMaterialLoader: () =>
+            {
+                workspaceFaceLoaderCalls++;
+                return CountFaceEnumeration(workspaceFaceMaterials, () => workspaceFaceEnumerations++);
+            },
+            partLoader: () =>
+            {
+                partFaceLoaderCalls++;
+                return CountFaceEnumeration(indexedFaceParts, () => partFaceEnumerations++);
+            });
+        for (var lookupIteration = 0; lookupIteration < 100; lookupIteration++)
+        {
+            _ = faceLookup.Resolve(faceMaterialA);
+            _ = faceLookup.Resolve(faceMaterialB);
+            _ = faceLookup.Resolve(faceMaterialC);
+            _ = faceLookup.Resolve(faceMaterialD);
+        }
+        Check(
+            faceLookup.Resolve(faceMaterialA).SequenceEqual(
+                new[] { "/Game/Faces/SK_Current" },
+                StringComparer.OrdinalIgnoreCase) &&
+            faceLookup.Resolve(faceMaterialB).SequenceEqual(
+                new[] { "/Game/Faces/SK_WorkspaceB" },
+                StringComparer.OrdinalIgnoreCase) &&
+            faceLookup.Resolve(faceMaterialC).SequenceEqual(
+                new[] { "/Game/Faces/SK_IndexC1", "/Game/Faces/SK_IndexC2" },
+                StringComparer.OrdinalIgnoreCase) &&
+            faceLookup.Resolve(faceMaterialD).SequenceEqual(
+                new[] { "/Game/Faces/SK_WorkspaceD" },
+                StringComparer.OrdinalIgnoreCase) &&
+            projectFaceLoaderCalls == 1 && workspaceFaceLoaderCalls == 1 && partFaceLoaderCalls == 1 &&
+            projectFaceEnumerations == 1 && workspaceFaceEnumerations == 1 && partFaceEnumerations == 1,
+            "face compatibility snapshots each metadata source once and preserves project/workspace/index priority",
+            failures,
+            output);
+
+        Check(
+            new[]
+            {
                 GameAssetRefreshService.BatmanFilters,
                 GameAssetRefreshService.AllCharacterFilters,
                 GameAssetRefreshService.DeveloperResearchFilters,
@@ -838,6 +1124,28 @@ internal static class ReleaseRegressionChecks
             !CustomStaticMeshImportService.HasCompleteCharacterGraft(partialCustomMeshGraft) &&
             !CustomStaticMeshImportService.HasCompleteCharacterGraft(completeCustomMeshGraft.Take(1)),
             "custom meshes require successful playable and cutscene grafts",
+            failures,
+            output);
+        var inspectorRemovalMesh = new CustomStaticMeshImport
+        {
+            Id = "inspector-removal",
+            DisplayName = "Inspector removal fixture",
+            ResolvedComponent = "CustomMesh_InspectorRemoval",
+        };
+        var inspectorRemovalProject = new NativeSuitProject
+        {
+            CustomStaticMeshes = [inspectorRemovalMesh],
+        };
+        Check(
+            ReferenceEquals(
+                MainForm.FindCustomStaticMeshForComponent(
+                    inspectorRemovalProject,
+                    "CustomMesh_InspectorRemoval:1"),
+                inspectorRemovalMesh) &&
+            MainForm.FindCustomStaticMeshForComponent(
+                inspectorRemovalProject,
+                "CharacterMesh0") is null,
+            "inspector component removal routes project-owned OBJ meshes through their owned cleanup path",
             failures,
             output);
         Check(
@@ -3424,6 +3732,7 @@ internal static class ReleaseRegressionChecks
         var malformedLegacyMaterialWasRejected = false;
         var incompleteReleaseMaterialWasRejected = false;
         var unsafeMaterialPathRejected = false;
+        var metadataSnapshotRecoveredSavedSuit = false;
         var previousSettings = AppSettings.Current;
         try
         {
@@ -3460,6 +3769,11 @@ internal static class ReleaseRegressionChecks
                 ],
             });
             var library = new ToolMaterialLibraryService(materialReferenceRoot);
+            metadataSnapshotRecoveredSavedSuit = library.LoadMetadataSnapshot().Any(material =>
+                material.PackagePath.Equals(newerMaterial.PackagePath, StringComparison.OrdinalIgnoreCase) &&
+                material.CompatibleFaceMeshPackagePaths.SequenceEqual(
+                    newerMaterial.CompatibleFaceMeshPackagePaths,
+                    StringComparer.OrdinalIgnoreCase));
             library.Register([newerMaterial]);
             var references = library.FindReferencingSuits(
                 newerMaterial.PackagePath,
@@ -3607,6 +3921,11 @@ internal static class ReleaseRegressionChecks
         Check(
             sharedLibraryRoundTrip,
             "a tool-created material can be discovered, imported, and staged by another suit without overwriting a fresh certified-stage package",
+            failures,
+            output);
+        Check(
+            metadataSnapshotRecoveredSavedSuit,
+            "read-only material browser metadata recovers saved-suit compatibility without a catalog repair pass",
             failures,
             output);
         Check(

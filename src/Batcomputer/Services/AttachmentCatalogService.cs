@@ -1,9 +1,9 @@
 namespace Batcomputer;
 
 /// <summary>
-/// Surfaces the character-attachment library (faces, hair, hats) straight from
-/// the shipped catalog (gamedata/*.json) so users never have to extract or build
-/// a part index for them. Everything here is derived from cataloged asset paths:
+/// Surfaces the character-attachment library (faces, hair, hats) from cataloged
+/// asset paths. Mesh and animation metadata retain the bundled fallback, while
+/// material lookups also include the active extracted Content tree:
 /// <list type="bullet">
 /// <item>Faces are just <c>MI_FACE_*</c> materials on the shared SK_LEGOface mesh
 /// - swapping a face = assigning that material to the Face slot.</item>
