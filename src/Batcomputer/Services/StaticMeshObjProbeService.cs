@@ -24,13 +24,16 @@ public sealed class StaticMeshObjProbeService
     private const int DonorSerializedBuffersSize = 16704;
     private const int SectionsCountOffset = 0x97;
     private const int SectionDataOffset = SectionsCountOffset + sizeof(int);
-    private const int SectionRecordSize = LodCookedOutOffset - SectionDataOffset;
+    // UE 5.6 FStaticMeshSection is five int32 values followed by five bool values serialized as
+    // int32, for a 0x28-byte cooked record. SourceMeshBounds and MaxDeviation follow the complete
+    // section array once per LOD; they are not part of each section.
+    private const int SectionRecordSize = 0x28;
     private const int SectionMaterialIndexRelativeOffset = 0x00;
     private const int SectionFirstIndexRelativeOffset = 0x04;
     private const int SectionTriangleCountRelativeOffset = 0x08;
     private const int SectionMinVertexIndexRelativeOffset = 0x0C;
     private const int SectionMaxVertexIndexRelativeOffset = 0x10;
-    private const int SectionRenderBoundsRelativeOffset = 0x28;
+    private const int SourceMeshBoundsOffset = SectionDataOffset + SectionRecordSize;
     private const int MaxMaterialSlots = 64;
     // UAssetAPI separates reflected properties from NormalExport.Extras. For the verified donor,
     // the raw cooked LOD tail begins 0x6F bytes into the export and the section table therefore
@@ -91,8 +94,15 @@ public sealed class StaticMeshObjProbeService
     private const int ReversedDepthIndexExpandTo32BitOffset = 0x42C5;
     private const int SectionSamplerProbabilityCountOffset = 0x42C9;
     private const int SectionSamplerAliasCountOffset = 0x42CD;
+    private const int SectionSamplerTotalWeightOffset = 0x42D1;
     private const int MeshSamplerProbabilityCountOffset = 0x42D5;
     private const int MeshSamplerAliasCountOffset = 0x42D9;
+    private const int MeshSamplerTotalWeightOffset = 0x42DD;
+    // FWeightedRandomSampler serializes TArray<float> Prob, TArray<int32> Alias, then
+    // TotalWeight. The verified donor has empty arrays, so every cooked sampler is a stable
+    // twelve-byte record (two zero array counts and one zero float). Unreal allocates and reads
+    // one section sampler for every FStaticMeshSection at load time.
+    private const int WeightedSamplerSerializedSize = 3 * sizeof(int);
     private const int SerializedBuffersSizeOffset = 0x42E1;
     private const int DepthOnlyBufferSizeOffset = 0x42E5;
     private const int ReversedBuffersSizeOffset = 0x42E9;
@@ -574,7 +584,6 @@ public sealed class StaticMeshObjProbeService
         EnsureMaterialSections(mesh);
         var sectionDelta = checked((mesh.Sections.Count - 1) * SectionRecordSize);
         var shiftedSectionDataOffset = checked(SectionDataOffset + sourceLayoutShift);
-        var shiftedLodCookedOutOffset = checked(LodCookedOutOffset + sourceLayoutShift);
         var shiftedPositionDataOffset = checked(PositionDataOffset + sourceLayoutShift);
         var shiftedTangentDataOffset = checked(TangentDataOffset + sourceLayoutShift);
         var shiftedUvDataOffset = checked(UvDataOffset + sourceLayoutShift);
@@ -597,8 +606,11 @@ public sealed class StaticMeshObjProbeService
         var uvDelta = checked((vertexCount - DonorVertexCount) * UvStride);
         var vertexDelta = checked(positionDelta + tangentDelta + uvDelta);
         var indexDelta = indexBytes - DonorIndexBytes;
-        var generatedShift = checked(sectionDelta + vertexDelta + 2 * indexDelta);
-        var totalLayoutShift = checked(sourceLayoutShift + generatedShift);
+        var preSamplerGeneratedShift = checked(sectionDelta + vertexDelta + 2 * indexDelta);
+        var samplerDelta = checked((mesh.Sections.Count - 1) * WeightedSamplerSerializedSize);
+        var generatedShift = checked(preSamplerGeneratedShift + samplerDelta);
+        var preSamplerLayoutShift = checked(sourceLayoutShift + preSamplerGeneratedShift);
+        var totalLayoutShift = checked(preSamplerLayoutShift + samplerDelta);
         // FStaticMeshBuffersSize counts raw position/tangent/UV bytes plus every active index
         // buffer. This donor carries main and depth-only indices; both are replaced below.
         var serializedBuffersSize = checked(
@@ -621,8 +633,8 @@ public sealed class StaticMeshObjProbeService
         }
         output.Write(
             source,
-            shiftedLodCookedOutOffset,
-            shiftedPositionDataOffset - shiftedLodCookedOutOffset);
+            shiftedSectionDataOffset + SectionRecordSize,
+            shiftedPositionDataOffset - (shiftedSectionDataOffset + SectionRecordSize));
         WritePositions(output, mesh.Vertices);
         output.Write(source, oldPositionEnd, shiftedTangentDataOffset - oldPositionEnd);
         WriteTangents(output, mesh.Vertices);
@@ -632,7 +644,24 @@ public sealed class StaticMeshObjProbeService
         WriteIndices(output, mesh.Indices);
         output.Write(source, oldIndex0End, shiftedIndex1DataOffset - oldIndex0End);
         WriteIndices(output, mesh.Indices);
-        output.Write(source, oldIndex1End, source.Length - oldIndex1End);
+        var shiftedSectionSamplerStart = checked(SectionSamplerProbabilityCountOffset + sourceLayoutShift);
+        var shiftedMeshSamplerStart = checked(MeshSamplerProbabilityCountOffset + sourceLayoutShift);
+        if (oldIndex1End > shiftedSectionSamplerStart ||
+            shiftedSectionSamplerStart + WeightedSamplerSerializedSize != shiftedMeshSamplerStart ||
+            shiftedMeshSamplerStart > source.Length)
+        {
+            throw new InvalidOperationException(
+                "The donor's area-weighted sampler layout no longer follows its verified LOD0 buffers.");
+        }
+        output.Write(source, oldIndex1End, shiftedSectionSamplerStart - oldIndex1End);
+        for (var sectionIndex = 0; sectionIndex < mesh.Sections.Count; sectionIndex++)
+        {
+            // Serialize one empty FWeightedRandomSampler per runtime section. Copying only the
+            // donor's single record makes Unreal consume the mesh-wide sampler as section two,
+            // then walk into FStaticMeshBuffersSize and crash while loading the package.
+            output.Write(source, shiftedSectionSamplerStart, WeightedSamplerSerializedSize);
+        }
+        output.Write(source, shiftedMeshSamplerStart, source.Length - shiftedMeshSamplerStart);
 
         var payload = output.ToArray();
         WriteInt32(payload, SectionsCountOffset + sourceLayoutShift, mesh.Sections.Count);
@@ -645,10 +674,10 @@ public sealed class StaticMeshObjProbeService
             WriteInt32(payload, recordOffset + SectionTriangleCountRelativeOffset, section.Indices.Count / 3);
             WriteInt32(payload, recordOffset + SectionMinVertexIndexRelativeOffset, section.Indices.Min(index => (int)index));
             WriteInt32(payload, recordOffset + SectionMaxVertexIndexRelativeOffset, section.Indices.Max(index => (int)index));
-            WriteRenderBounds(payload, recordOffset + SectionRenderBoundsRelativeOffset, section.Bounds);
         }
 
         var postSectionShift = checked(sourceLayoutShift + sectionDelta);
+        WriteRenderBounds(payload, SourceMeshBoundsOffset + postSectionShift, mesh.Bounds);
         WriteInt32(payload, PositionCountOffset0 + postSectionShift, vertexCount);
         WriteInt32(payload, PositionCountOffset1 + postSectionShift, vertexCount);
         WriteInt32(payload, TangentCountOffset0 + postSectionShift + positionDelta, vertexCount);
@@ -671,6 +700,7 @@ public sealed class StaticMeshObjProbeService
             tangentDelta,
             vertexDelta,
             indexDelta,
+            preSamplerLayoutShift,
             totalLayoutShift,
             indexBytes,
             serializedBuffersSize);
@@ -1233,8 +1263,10 @@ public sealed class StaticMeshObjProbeService
 
         RequireInt(SectionSamplerProbabilityCountOffset, 0, "section sampler probability count");
         RequireInt(SectionSamplerAliasCountOffset, 0, "section sampler alias count");
+        RequireInt(SectionSamplerTotalWeightOffset, 0, "section sampler total weight");
         RequireInt(MeshSamplerProbabilityCountOffset, 0, "mesh sampler probability count");
         RequireInt(MeshSamplerAliasCountOffset, 0, "mesh sampler alias count");
+        RequireInt(MeshSamplerTotalWeightOffset, 0, "mesh sampler total weight");
         RequireInt(SerializedBuffersSizeOffset, DonorSerializedBuffersSize, "serialized buffer-size summary");
         RequireInt(DepthOnlyBufferSizeOffset, DonorIndexBytes, "depth-only buffer-size summary");
         RequireInt(ReversedBuffersSizeOffset, 0, "reversed buffer-size summary");
@@ -1249,6 +1281,7 @@ public sealed class StaticMeshObjProbeService
         int tangentDelta,
         int vertexDelta,
         int indexDelta,
+        int preSamplerLayoutShift,
         int totalLayoutShift,
         int indexBytes,
         int serializedBuffersSize)
@@ -1315,16 +1348,25 @@ public sealed class StaticMeshObjProbeService
         RequireInt(Index1Is32BitOffset + firstIndexTailShift, 0, "depth-only index width flag");
         RequireInt(Index1ElementSizeOffset + firstIndexTailShift, 1, "depth-only index byte-array element size");
         RequireInt(Index1SizeOffset + firstIndexTailShift, indexBytes, "depth-only index byte count");
-        RequireInt(Index1ExpandTo32BitOffset + totalLayoutShift, 0, "depth-only index expansion flag");
-        RequireInt(ReversedDepthIndexIs32BitOffset + totalLayoutShift, 0, "reversed-depth index width flag");
-        RequireInt(ReversedDepthIndexElementSizeOffset + totalLayoutShift, 1, "reversed-depth index byte-array element size");
-        RequireInt(ReversedDepthIndexSizeOffset + totalLayoutShift, 0, "reversed-depth index byte count");
-        RequireInt(ReversedDepthIndexExpandTo32BitOffset + totalLayoutShift, 0, "reversed-depth index expansion flag");
+        RequireInt(Index1ExpandTo32BitOffset + preSamplerLayoutShift, 0, "depth-only index expansion flag");
+        RequireInt(ReversedDepthIndexIs32BitOffset + preSamplerLayoutShift, 0, "reversed-depth index width flag");
+        RequireInt(ReversedDepthIndexElementSizeOffset + preSamplerLayoutShift, 1, "reversed-depth index byte-array element size");
+        RequireInt(ReversedDepthIndexSizeOffset + preSamplerLayoutShift, 0, "reversed-depth index byte count");
+        RequireInt(ReversedDepthIndexExpandTo32BitOffset + preSamplerLayoutShift, 0, "reversed-depth index expansion flag");
 
-        RequireInt(SectionSamplerProbabilityCountOffset + totalLayoutShift, 0, "section sampler probability count");
-        RequireInt(SectionSamplerAliasCountOffset + totalLayoutShift, 0, "section sampler alias count");
+        for (var sectionIndex = 0; sectionIndex < mesh.Sections.Count; sectionIndex++)
+        {
+            var samplerOffset = checked(
+                SectionSamplerProbabilityCountOffset +
+                preSamplerLayoutShift +
+                sectionIndex * WeightedSamplerSerializedSize);
+            RequireInt(samplerOffset, 0, $"section {sectionIndex} sampler probability count");
+            RequireInt(samplerOffset + sizeof(int), 0, $"section {sectionIndex} sampler alias count");
+            RequireInt(samplerOffset + 2 * sizeof(int), 0, $"section {sectionIndex} sampler total weight");
+        }
         RequireInt(MeshSamplerProbabilityCountOffset + totalLayoutShift, 0, "mesh sampler probability count");
         RequireInt(MeshSamplerAliasCountOffset + totalLayoutShift, 0, "mesh sampler alias count");
+        RequireInt(MeshSamplerTotalWeightOffset + totalLayoutShift, 0, "mesh sampler total weight");
         RequireInt(SerializedBuffersSizeOffset + totalLayoutShift, serializedBuffersSize, "serialized buffer-size summary");
         RequireInt(DepthOnlyBufferSizeOffset + totalLayoutShift, indexBytes, "depth-only buffer-size summary");
         RequireInt(ReversedBuffersSizeOffset + totalLayoutShift, 0, "reversed buffer-size summary");
@@ -1578,6 +1620,27 @@ public sealed class StaticMeshObjProbeService
                 legacyExtras,
                 [new CustomStaticMeshMaterialSlot { Slot = 0, SourceMaterialName = "Default" }]);
 
+            var sectionDelta = SectionRecordSize;
+            var vertexDelta = (mesh.Vertices.Count - DonorVertexCount) *
+                              (PositionStride + TangentStride + UvStride);
+            var indexBytes = checked(mesh.Indices.Count * sizeof(ushort));
+            var indexDelta = checked(indexBytes - DonorIndexBytes);
+            var preSamplerShift = checked(sectionDelta + vertexDelta + 2 * indexDelta);
+            var secondSamplerOffset = checked(
+                SectionSamplerProbabilityCountOffset -
+                DonorReflectedPropertyBytes +
+                preSamplerShift +
+                WeightedSamplerSerializedSize);
+            var missingSectionSampler = new byte[extras.Length - WeightedSamplerSerializedSize];
+            extras.AsSpan(0, secondSamplerOffset).CopyTo(missingSectionSampler);
+            extras.AsSpan(secondSamplerOffset + WeightedSamplerSerializedSize)
+                .CopyTo(missingSectionSampler.AsSpan(secondSamplerOffset));
+            var badSectionSamplerWeight = extras.ToArray();
+            WriteInt32(
+                badSectionSamplerWeight,
+                secondSamplerOffset + 2 * sizeof(int),
+                1);
+
             static bool Rejects(Action validation)
             {
                 try
@@ -1612,9 +1675,6 @@ public sealed class StaticMeshObjProbeService
                 CookedSectionDataExtrasOffset + SectionMaxVertexIndexRelativeOffset,
                 3);
 
-            var sectionDelta = SectionRecordSize;
-            var vertexDelta = (mesh.Vertices.Count - DonorVertexCount) *
-                              (PositionStride + TangentStride + UvStride);
             var indexDataOffset = Index0DataOffset - DonorReflectedPropertyBytes + sectionDelta + vertexDelta;
             var badVertexIndex = extras.ToArray();
             BinaryPrimitives.WriteUInt16LittleEndian(
@@ -1644,6 +1704,8 @@ public sealed class StaticMeshObjProbeService
                    Rejects(() => ValidateCookedMaterialSectionBytes(badTriangleCount, declarations)) &&
                    Rejects(() => ValidateCookedMaterialSectionBytes(badStoredRange, declarations)) &&
                    Rejects(() => ValidateCookedMaterialSectionBytes(badVertexIndex, declarations)) &&
+                   Rejects(() => ValidateCookedMaterialSectionBytes(missingSectionSampler, declarations)) &&
+                   Rejects(() => ValidateCookedMaterialSectionBytes(badSectionSamplerWeight, declarations)) &&
                    Rejects(() => ValidateStaticMaterialSlotMetadata(nonStruct, declarations)) &&
                    Rejects(() => ValidateStaticMaterialSlotMetadata(missingField, declarations)) &&
                    Rejects(() => ValidateStaticMaterialSlotMetadata(noneField, declarations)) &&
@@ -1704,8 +1766,10 @@ public sealed class StaticMeshObjProbeService
 
         WriteInt32(source, SectionSamplerProbabilityCountOffset, 0);
         WriteInt32(source, SectionSamplerAliasCountOffset, 0);
+        WriteInt32(source, SectionSamplerTotalWeightOffset, 0);
         WriteInt32(source, MeshSamplerProbabilityCountOffset, 0);
         WriteInt32(source, MeshSamplerAliasCountOffset, 0);
+        WriteInt32(source, MeshSamplerTotalWeightOffset, 0);
         WriteInt32(source, SerializedBuffersSizeOffset, DonorSerializedBuffersSize);
         WriteInt32(source, DepthOnlyBufferSizeOffset, DonorIndexBytes);
         WriteInt32(source, ReversedBuffersSizeOffset, 0);
@@ -2056,6 +2120,57 @@ public sealed class StaticMeshObjProbeService
         {
             throw new InvalidOperationException(
                 $"Cooked LOD0 sections cover {nextFirstIndex} of {totalIndexCount} main indices.");
+        }
+
+        // FStaticMeshLODResources::Serialize resizes AreaWeightedSectionSamplers to
+        // Sections.Num() before reading this tail. Validate that exact runtime-sized sequence,
+        // not merely the section/index metadata, so a structurally readable but crash-on-load
+        // package cannot pass Batcomputer's build check.
+        var indexDelta = checked(indexBytes - DonorIndexBytes);
+        var preSamplerShift = checked(sectionDelta + vertexDelta + 2 * indexDelta);
+        var samplerDelta = checked((sectionCount - 1) * WeightedSamplerSerializedSize);
+        var totalGeneratedShift = checked(preSamplerShift + samplerDelta);
+        for (var sectionIndex = 0; sectionIndex < sectionCount; sectionIndex++)
+        {
+            var samplerOffset = checked(
+                SectionSamplerProbabilityCountOffset -
+                DonorReflectedPropertyBytes +
+                preSamplerShift +
+                sectionIndex * WeightedSamplerSerializedSize);
+            if (ReadInt(samplerOffset, $"section {sectionIndex} sampler probability count") != 0 ||
+                ReadInt(samplerOffset + sizeof(int), $"section {sectionIndex} sampler alias count") != 0 ||
+                ReadInt(samplerOffset + 2 * sizeof(int), $"section {sectionIndex} sampler total weight") != 0)
+            {
+                throw new InvalidOperationException(
+                    $"The generated StaticMesh section {sectionIndex} area-weighted sampler is not an empty twelve-byte record.");
+            }
+        }
+
+        var meshSamplerOffset = checked(
+            MeshSamplerProbabilityCountOffset - DonorReflectedPropertyBytes + totalGeneratedShift);
+        if (ReadInt(meshSamplerOffset, "mesh sampler probability count") != 0 ||
+            ReadInt(meshSamplerOffset + sizeof(int), "mesh sampler alias count") != 0 ||
+            ReadInt(meshSamplerOffset + 2 * sizeof(int), "mesh sampler total weight") != 0)
+        {
+            throw new InvalidOperationException(
+                "The generated StaticMesh mesh-wide area-weighted sampler is not an empty twelve-byte record.");
+        }
+
+        var expectedSerializedBuffersSize = checked(
+            vertexCount * (PositionStride + TangentStride + UvStride) +
+            2 * indexBytes);
+        if (ReadInt(
+                SerializedBuffersSizeOffset - DonorReflectedPropertyBytes + totalGeneratedShift,
+                "serialized buffer-size summary") != expectedSerializedBuffersSize ||
+            ReadInt(
+                DepthOnlyBufferSizeOffset - DonorReflectedPropertyBytes + totalGeneratedShift,
+                "depth-only buffer-size summary") != indexBytes ||
+            ReadInt(
+                ReversedBuffersSizeOffset - DonorReflectedPropertyBytes + totalGeneratedShift,
+                "reversed buffer-size summary") != 0)
+        {
+            throw new InvalidOperationException(
+                "The generated StaticMesh sampler tail does not end at its runtime buffer-size summary.");
         }
     }
 

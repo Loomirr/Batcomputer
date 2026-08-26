@@ -667,6 +667,17 @@ public sealed partial class MainForm
                     ? new() { Title = "＋ Create", Subtitle = "new material", Accent = Theme.Materials, Dashed = true, OnClick = OpenMaterialWizard }
                     : new() { Title = "Set base", Subtitle = "choose character", Accent = Theme.Base, Dashed = true, OnClick = () => SelectComboValue(_toyboxCategoryCombo, "Base") }
             };
+            if (_currentProject is not null)
+            {
+                tiles.Add(new VirtualTilePanel.Tile
+                {
+                    Title = "↻ Repair materials",
+                    Subtitle = "recover + reapply",
+                    Accent = Theme.Materials,
+                    OnClick = () => { _ = RepairCurrentSuitMaterialsAsync(); },
+                    ToolTip = "Recovers this suit's existing material packages and live custom-texture dependencies into the workspace library, then transactionally reapplies every saved material assignment. It does not erase or guess custom parameter values."
+                });
+            }
 
             foreach (var miPath in DiscoverUserMaterialPaths(mod))
             {
@@ -729,6 +740,201 @@ public sealed partial class MainForm
             }).ToList(),
             header: $"Base-game materials{(folderFilter is null ? "" : $" · {folderFilter}")} for slot [{_toyboxSlotLabel}]. Drag onto a slot to apply (no extraction needed); right-click to use one as a base for a new material. Type in the search box to filter.",
             emptyMessage: "No game materials matched. Try <all game materials> or clear the search box.");
+    }
+
+    private async Task RepairCurrentSuitMaterialsAsync()
+    {
+        EnsureProject();
+        if (_currentProject is null)
+        {
+            return;
+        }
+
+        var repairProject = _currentProject;
+        var projectRoot = _projectRootText.Text.Trim();
+        var repairSlotId = repairProject.SlotId;
+        var repairProjectService = new SuitProjectService(projectRoot);
+        var packages = AssignedModMaterialPackagesForRelease(repairProject);
+        if (packages.Count == 0)
+        {
+            Dialog.Info(this, "Repair materials", "This suit does not reference any tool-created /Game/Mods materials.");
+            return;
+        }
+
+        if (!Dialog.Confirm(
+                this,
+                "Repair materials",
+                $"Recover and validate {packages.Count} saved material package(s), then reapply every material assignment on a clean suit stage?\n\n" +
+                "This keeps each material's current authored parameters. If the original material file and workspace copy are both gone, Batcomputer will stop instead of guessing them.",
+                confirmText: "Repair materials",
+                severity: Dialog.Level.Warn))
+        {
+            return;
+        }
+
+        var priorProject = JsonSerializer.Deserialize<NativeSuitProject>(
+            JsonSerializer.Serialize(repairProject))
+            ?? throw new InvalidOperationException("Could not snapshot the suit before repairing its materials.");
+        BaseStageFilesystemSnapshot? stageSnapshot = null;
+        ToolMaterialLibraryService.MaterialLibraryRepairTransaction? libraryRepair = null;
+        Exception? reportedFailure = null;
+        var closurePackages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var completedPackages = 0;
+
+        bool RepairContextIsStillActive() =>
+            ReferenceEquals(_currentProject, repairProject) &&
+            string.Equals(_projectRootText.Text.Trim(), projectRoot, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(repairProject.SlotId, repairSlotId, StringComparison.OrdinalIgnoreCase);
+
+        void RequireRepairContext()
+        {
+            if (!RepairContextIsStillActive())
+            {
+                throw new InvalidOperationException(
+                    "The active suit changed while materials were being repaired. Batcomputer stopped before applying the repair to another suit.");
+            }
+        }
+
+        using (var progress = new ProgressDialog(this, "Repairing suit materials", packages.Count + 2))
+        {
+            try
+            {
+                progress.SetStep("Backing up the current suit stage");
+                progress.Report(repairProject.DisplayName);
+                stageSnapshot = await CaptureBaseStageFilesystemAsync(
+                    projectRoot,
+                    repairSlotId,
+                    new[] { "UnpatchedStage", "PatchedNameMapStage", "GraftedPartStage" });
+                RequireRepairContext();
+
+                progress.SetStep("Recovering the shared material library");
+                progress.Report($"Validating {packages.Count} material closure(s)…");
+                await Task.Yield();
+                RequireRepairContext();
+                var library = new ToolMaterialLibraryService(projectRoot);
+                libraryRepair = library.BeginRepairMaterialClosures(packages);
+                foreach (var dependency in libraryRepair.ClosurePackages)
+                {
+                    closurePackages.Add(dependency);
+                }
+
+                foreach (var package in packages)
+                {
+                    progress.SetStep($"Material {completedPackages + 1} of {packages.Count}");
+                    progress.Report(package);
+                    await Task.Yield();
+                    RequireRepairContext();
+
+                    AppendLog($"Repairing material closure: {package}");
+                    if (!libraryRepair.ImportIntoProject(repairProject, package))
+                    {
+                        throw new InvalidOperationException(
+                            $"Material '{package}' was recovered, but its workspace catalog entry could not be attached to this suit.");
+                    }
+
+                    completedPackages++;
+                    progress.Advance(completedPackages, package);
+                }
+
+                progress.SetStep("Reapplying saved assignments");
+                progress.Report("Rebuilding the clean declarative stage…");
+                RequireRepairContext();
+                await RebuildGraftStageFromDeclarativeAsync(
+                    repairProject,
+                    projectRoot,
+                    persistProject: false);
+                RequireRepairContext();
+                progress.Advance(packages.Count + 1, "Saving the repaired suit recipe…");
+                await RunWithFileLockRetryAsync(
+                    () => repairProjectService.SaveProject(repairProject),
+                    "save the repaired suit materials");
+                RequireRepairContext();
+
+                progress.SetStep("Certifying repaired stages");
+                progress.Report("Finalizing the declarative material stage…");
+                await FinalizeDeclarativeGraftStageAsync(repairProject, projectRoot);
+                RequireRepairContext();
+                libraryRepair.Commit();
+                libraryRepair = null;
+                progress.Advance(packages.Count + 2, "Repair complete");
+                await DiscardBaseStageFilesystemBackupAsync(stageSnapshot, logFailure: true);
+                stageSnapshot = null;
+            }
+            catch (Exception repairFailure)
+            {
+                reportedFailure = repairFailure;
+                if (libraryRepair is not null)
+                {
+                    try
+                    {
+                        libraryRepair.Dispose();
+                        libraryRepair = null;
+                    }
+                    catch (Exception libraryRestoreFailure)
+                    {
+                        reportedFailure = new AggregateException(
+                            "Material repair failed and the previous workspace material library could not be completely restored.",
+                            repairFailure,
+                            libraryRestoreFailure);
+                    }
+                }
+                if (stageSnapshot is not null)
+                {
+                    try
+                    {
+                        progress.SetStep("Restoring the previous suit stage");
+                        progress.Report(repairProject.DisplayName);
+                        await RestoreBaseStageFilesystemAsync(stageSnapshot);
+                        repairProjectService.SaveProject(priorProject);
+                    }
+                    catch (Exception restoreFailure)
+                    {
+                        reportedFailure = new AggregateException(
+                            "Material repair failed and the previous suit state could not be completely restored.",
+                            reportedFailure,
+                            restoreFailure);
+                    }
+                }
+            }
+        }
+
+        if (reportedFailure is null && !RepairContextIsStillActive())
+        {
+            reportedFailure = new InvalidOperationException(
+                "The active suit changed before the repaired suit could refresh the interface. The completed repair was not applied to the newly active suit.");
+        }
+
+        if (reportedFailure is null)
+        {
+            RecordChange("Materials", "Repair current suit", $"{packages.Count} material(s), {closurePackages.Count} package(s)", status: "repaired");
+            AppendLog($"Repaired and reapplied {packages.Count} material(s) with {closurePackages.Count} live package(s) in their dependency closures.");
+            _session.RaiseChanged();
+            RefreshInspector();
+            PopulateToyboxSlots();
+            RefreshToyboxTiles();
+            Dialog.Success(
+                this,
+                "Materials repaired",
+                $"Recovered and reapplied {packages.Count} material(s). The clean suit stage now carries {closurePackages.Count} live material/texture package(s).");
+            return;
+        }
+
+        if (RepairContextIsStillActive())
+        {
+            _currentProject = priorProject;
+            ApplyProjectToFields(priorProject);
+            _session.RaiseChanged();
+            RefreshInspector();
+            PopulateToyboxSlots();
+            RefreshToyboxTiles();
+        }
+
+        AppendLog("Material repair stopped; the prior suit was kept: " + reportedFailure.Message);
+        Dialog.Error(
+            this,
+            "Material repair failed",
+            "Batcomputer kept the prior suit project and generated stages where possible. No material values were guessed.\n\n" +
+            reportedFailure.Message);
     }
 
     /// <summary>

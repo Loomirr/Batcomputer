@@ -124,6 +124,13 @@ Edit the mesh in the current version, save its transform, and choose **Bake to g
 recipe is replayed during later part removals and base rebuilds. Keep the project-owned OBJ source;
 if it is missing, Batcomputer cannot rebuild that attachment.
 
+### A multi-material custom mesh crashes the game at startup
+
+Reopen the mesh in the current build, confirm every named slot has the intended material, and choose
+**Bake to game** again. Then rebuild the mod rather than reusing the older pak. Current builds verify
+the UE 5.6 section, shared-bounds, and area-weighted-sampler layout before packaging; an older
+two-slot cooked mesh can pass container verification while still being unsafe for Unreal to load.
+
 ## A UI icon is corrupt or crashes on hover
 
 - Recook it with the current verified native suit-icon profile.
@@ -149,6 +156,18 @@ the current cook profile:
 Do not tell users to leave Texture Quality on Epic as the workaround. If the current cook still
 changes appearance between quality levels, include the source PNG, texture role, cook profile, and
 Batcomputer diagnostics in the report.
+
+## A build says a material dependency is missing from the workspace source
+
+First open **Materials** → **Your materials** and choose **Repair materials**. This is the right
+repair for an older material that still contains abandoned import-table names after its live texture
+parameters were moved into `/Game/Mods/<mod>/Textures`. Reimporting the PNG alone cannot remove an
+unused historical name from the material package.
+
+The repair follows only the material's live parent and texture parameters, recovers those packages,
+and reapplies the saved assignments on a clean stage. If it says the material itself is gone, restore
+the project's material files or recreate that material; do not copy an unrelated texture to the
+missing path just to make the build check pass.
 
 ## Metalness or roughness looks wrong
 

@@ -69,6 +69,11 @@ does not:
 - Refresh the part index once more and retry.
 - Remove and reapply only the named part from the current index.
 - For a missing material donor, choose the current native material again.
+- If the error names a missing **workspace material source**, open **Materials** → **Your
+  materials** and choose **Repair materials**. This recovers the existing material closure and
+  reapplies the saved assignments without changing their authored values.
+- To refresh every generated texture from its saved PNG in one pass, open **Textures** and choose
+  **Reimport all**. The batch is backed up and rolled back together if one cook fails.
 - For a custom mesh, confirm its project-owned OBJ source still exists.
 - If both base templates are missing, return to the base picker and select the visual and gameplay
   donors again.

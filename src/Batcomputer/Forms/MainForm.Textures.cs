@@ -273,6 +273,18 @@ public sealed partial class MainForm
             }
         };
 
+        if (_currentProject?.GeneratedTextures.Count > 0)
+        {
+            tiles.Add(new VirtualTilePanel.Tile
+            {
+                Title = "↻ Reimport all",
+                Subtitle = "this suit's textures",
+                Accent = Theme.Textures,
+                OnClick = () => { _ = ReimportAllCurrentSuitTexturesAsync(); },
+                ToolTip = "Recooks every saved texture source for this suit with its existing profile. Batcomputer backs up the current package files and rolls the whole batch back if any texture fails."
+            });
+        }
+
         if (_currentProject is null || _currentProject.GeneratedTextures.Count == 0)
         {
             ShowVirtualTiles(tiles, header + "\n\nNo generated textures saved on this suit yet.");
@@ -334,7 +346,7 @@ public sealed partial class MainForm
     private void ReimportCurrentSuitTexture(GeneratedTextureEntry texture)
     {
         EnsureProject();
-        if (_currentProject is null || !ReimportGeneratedTextureSource(texture))
+        if (_currentProject is null || !ReimportGeneratedTextureSource(texture, confirm: true, createBackup: true))
         {
             return;
         }
@@ -344,44 +356,223 @@ public sealed partial class MainForm
         RefreshToyboxTiles();
     }
 
-    private bool ReimportGeneratedTextureSource(GeneratedTextureEntry texture)
+    private async Task ReimportAllCurrentSuitTexturesAsync()
+    {
+        EnsureProject();
+        if (_currentProject is null || _currentProject.GeneratedTextures.Count == 0)
+        {
+            Dialog.Info(this, "Reimport all textures", "This suit does not have any saved generated textures.");
+            return;
+        }
+
+        var textures = _currentProject.GeneratedTextures
+            .OrderBy(texture => texture.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(texture => texture.PackagePath, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var duplicatePackages = textures
+            .Where(texture => !string.IsNullOrWhiteSpace(texture.PackagePath))
+            .GroupBy(texture => UnrealPathUtil.NormalizePackagePath(texture.PackagePath), StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .OrderBy(package => package, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (duplicatePackages.Count > 0)
+        {
+            AppendLog("Reimport all textures stopped: duplicate saved package path(s): " + string.Join("; ", duplicatePackages));
+            Dialog.Error(
+                this,
+                "Duplicate texture recipes",
+                "Nothing was changed. More than one saved texture recipe owns the same package path:\n\n" +
+                string.Join("\n", duplicatePackages.Select(package => "• " + package)));
+            return;
+        }
+        var preflightFailures = textures
+            .Select(texture => (Texture: texture, Error: GeneratedTextureReimportPreflightError(texture)))
+            .Where(result => !string.IsNullOrWhiteSpace(result.Error))
+            .ToList();
+        if (preflightFailures.Count > 0)
+        {
+            var detail = string.Join("\n", preflightFailures.Select(result =>
+                $"• {result.Texture.DisplayName}: {result.Error}"));
+            AppendLog("Reimport all textures stopped during preflight: " +
+                      string.Join(" | ", preflightFailures.Select(result => $"{result.Texture.DisplayName}: {result.Error}")));
+            Dialog.Error(this, "Textures need attention", "Nothing was changed. Fix these saved texture recipes first:\n\n" + detail);
+            return;
+        }
+
+        if (!Dialog.Confirm(
+                this,
+                "Reimport all textures",
+                $"Recook all {textures.Count} saved texture(s) for '{_currentProject.DisplayName}' using their existing profiles?\n\n" +
+                "Batcomputer will back up every current package first and roll the batch back if any cook fails.",
+                confirmText: "Reimport all",
+                severity: Dialog.Level.Warn))
+        {
+            return;
+        }
+
+        var projectRoot = _projectRootText.Text.Trim();
+        var priorProject = JsonSerializer.Deserialize<NativeSuitProject>(
+            JsonSerializer.Serialize(_currentProject))
+            ?? throw new InvalidOperationException("Could not snapshot the suit before reimporting its textures.");
+        var backups = new List<(GeneratedTextureEntry Texture, string? BackupPath, bool HadOutput)>();
+        Exception? failure = null;
+        var completed = 0;
+
+        using (var progress = new ProgressDialog(this, "Reimporting suit textures", textures.Count))
+        {
+            try
+            {
+                progress.Report("Backing up current cooked packages…");
+                foreach (var texture in textures)
+                {
+                    var hadOutput = GeneratedTextureHasAnyCookedOutput(texture);
+                    var backupPath = CreateTextureBackup(texture, "Before reimporting every suit texture");
+                    if (hadOutput && string.IsNullOrWhiteSpace(backupPath))
+                    {
+                        throw new InvalidOperationException(
+                            $"Could not create a recoverable backup for '{texture.DisplayName}'. No texture was recooked.");
+                    }
+                    backups.Add((texture, backupPath, hadOutput));
+                }
+
+                foreach (var texture in textures)
+                {
+                    progress.SetStep($"Texture {completed + 1} of {textures.Count}");
+                    progress.Report(texture.DisplayName);
+                    await Task.Yield();
+                    if (!ReimportGeneratedTextureSource(texture, confirm: false, createBackup: false))
+                    {
+                        throw new InvalidOperationException($"'{texture.DisplayName}' could not be recooked from its saved recipe.");
+                    }
+                    completed++;
+                    progress.Advance(completed, texture.DisplayName);
+                }
+
+                await RunWithFileLockRetryAsync(
+                    () => (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(_currentProject),
+                    "save the reimported suit textures");
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+                progress.SetStep("Restoring previous textures");
+                foreach (var backup in backups.AsEnumerable().Reverse())
+                {
+                    try
+                    {
+                        RestoreTexturePackageFiles(backup.Texture, backup.BackupPath, backup.HadOutput);
+                    }
+                    catch (Exception restoreError)
+                    {
+                        failure = new AggregateException(
+                            "The texture batch failed and at least one prior cooked package could not be restored.",
+                            failure,
+                            restoreError);
+                    }
+                }
+
+                _currentProject = priorProject;
+                ApplyProjectToFields(priorProject);
+                try
+                {
+                    (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(priorProject);
+                }
+                catch (Exception saveRestoreError)
+                {
+                    failure = new AggregateException(
+                        "The texture batch failed and the prior suit recipe could not be re-saved.",
+                        failure,
+                        saveRestoreError);
+                }
+            }
+        }
+
+        _session.RaiseChanged();
+        RefreshToyboxTiles();
+        if (failure is not null)
+        {
+            AppendLog($"Reimport all textures failed after {completed}/{textures.Count}; restored the prior batch where possible: {failure.Message}");
+            Dialog.Error(
+                this,
+                "Texture reimport failed",
+                "Batcomputer stopped the batch and restored the previous cooked textures and suit recipe where possible.\n\n" + failure.Message);
+            return;
+        }
+
+        RecordChange("Textures", "All suit textures", $"{textures.Count} texture(s)", status: "reimported");
+        AppendLog($"Reimported all {textures.Count} texture(s) for '{_currentProject.DisplayName}' and saved the suit once.");
+        Dialog.Success(this, "Textures reimported", $"Recooked and verified all {textures.Count} saved texture(s) for this suit.");
+    }
+
+    internal static string? GeneratedTextureReimportPreflightError(GeneratedTextureEntry texture)
     {
         if (string.IsNullOrWhiteSpace(texture.SourcePng) || !File.Exists(texture.SourcePng))
         {
-            Dialog.Warn(this, "Reimport image", "The saved source PNG is missing. Import a new texture instead.");
-            return false;
+            return "saved source PNG is missing";
         }
-        if (string.IsNullOrWhiteSpace(texture.OutputRoot) || string.IsNullOrWhiteSpace(texture.PackagePath))
+        if (string.IsNullOrWhiteSpace(texture.OutputRoot))
         {
-            Dialog.Warn(this, "Reimport image", "This texture does not have a complete cooked output location.");
+            return "cooked output folder is missing from the recipe";
+        }
+        if (string.IsNullOrWhiteSpace(texture.PackagePath))
+        {
+            return "Unreal package path is missing from the recipe";
+        }
+        if (string.IsNullOrWhiteSpace(texture.TemplateJson) || !File.Exists(texture.TemplateJson))
+        {
+            return "saved donor template is missing";
+        }
+        return null;
+    }
+
+    private bool ReimportGeneratedTextureSource(
+        GeneratedTextureEntry texture,
+        bool confirm,
+        bool createBackup)
+    {
+        var preflightError = GeneratedTextureReimportPreflightError(texture);
+        if (!string.IsNullOrWhiteSpace(preflightError))
+        {
+            if (confirm)
+            {
+                Dialog.Warn(this, "Reimport image", $"This texture cannot be reimported because its {preflightError}. Import it again instead.");
+            }
             return false;
         }
-        if (!Dialog.Confirm(this, $"Reimport {texture.DisplayName}?", "The current PNG will be cooked again in place using its existing profile.", "Reimport"))
+        if (confirm && !Dialog.Confirm(this, $"Reimport {texture.DisplayName}?", "The current PNG will be cooked again in place using its existing profile.", "Reimport"))
         {
             return false;
         }
 
-        var backupPath = CreateTextureBackup(texture, "Before reimporting source image");
-        if (!string.IsNullOrWhiteSpace(backupPath))
+        if (createBackup)
         {
-            AppendLog($"Texture backup created: {backupPath}");
+            var hadOutput = GeneratedTextureHasAnyCookedOutput(texture);
+            var backupPath = CreateTextureBackup(texture, "Before reimporting source image");
+            if (!string.IsNullOrWhiteSpace(backupPath))
+            {
+                AppendLog($"Texture backup created: {backupPath}");
+            }
+            else if (hadOutput)
+            {
+                if (confirm)
+                {
+                    Dialog.Warn(
+                        this,
+                        "Reimport image",
+                        "Batcomputer could not create a recoverable backup of the current cooked texture, so it left the texture unchanged.");
+                }
+                return false;
+            }
         }
 
         var cookedContentRoot = Path.Combine(texture.OutputRoot, "Cooked", "LEGOBatmanLotDK", "Content");
-        var sourceBase = PackagePathToContentPath(cookedContentRoot, texture.PackagePath);
-        var reportPath = sourceBase + ".texture-cook-report.json";
-        try
+        if (!EnsureGeneratedTextureCooked(texture, cookedContentRoot, forceRecook: true))
         {
-            if (File.Exists(reportPath)) File.Delete(reportPath);
-        }
-        catch (Exception ex)
-        {
-            AppendLog($"Texture reimport could not clear its previous cook report: {ex.Message}");
-        }
-
-        if (!EnsureGeneratedTextureCooked(texture, cookedContentRoot))
-        {
-            Dialog.Warn(this, "Reimport image", "The texture could not be cooked again. The previous generated files were left in place.");
+            if (confirm)
+            {
+                Dialog.Warn(this, "Reimport image", "The texture could not be cooked again. The previous generated files were left in place.");
+            }
             return false;
         }
 
@@ -1081,7 +1272,7 @@ public sealed partial class MainForm
         try
         {
             var backupRoot = Path.Combine(texture.OutputRoot, "TextureBackups",
-                DateTime.UtcNow.ToString("yyyyMMdd-HHmmssfff"));
+                $"{DateTime.UtcNow:yyyyMMdd-HHmmssfff}-{Guid.NewGuid():N}");
             Directory.CreateDirectory(backupRoot);
             var snapshot = new TextureBackupSnapshot
             {
@@ -1102,6 +1293,56 @@ public sealed partial class MainForm
         {
             AppendLog($"Texture backup warning: {ex.Message}");
             return null;
+        }
+    }
+
+    private static bool GeneratedTextureHasAnyCookedOutput(GeneratedTextureEntry texture)
+    {
+        if (string.IsNullOrWhiteSpace(texture.OutputRoot) || string.IsNullOrWhiteSpace(texture.PackagePath))
+        {
+            return false;
+        }
+
+        var cookedContentRoot = Path.Combine(texture.OutputRoot, "Cooked", "LEGOBatmanLotDK", "Content");
+        var packageBase = PackagePathToContentPath(cookedContentRoot, texture.PackagePath);
+        return new[] { ".uasset", ".uexp", ".ubulk", ".texture-cook-report.json" }
+            .Any(extension => File.Exists(packageBase + extension));
+    }
+
+    private static void RestoreTexturePackageFiles(
+        GeneratedTextureEntry texture,
+        string? backupPath,
+        bool hadPriorOutput)
+    {
+        if (string.IsNullOrWhiteSpace(texture.OutputRoot) || string.IsNullOrWhiteSpace(texture.PackagePath))
+        {
+            throw new InvalidOperationException($"Texture '{texture.DisplayName}' has no recoverable output path.");
+        }
+        if (hadPriorOutput && string.IsNullOrWhiteSpace(backupPath))
+        {
+            throw new InvalidOperationException($"Texture '{texture.DisplayName}' had prior output but no backup was created.");
+        }
+
+        var cookedContentRoot = Path.Combine(texture.OutputRoot, "Cooked", "LEGOBatmanLotDK", "Content");
+        var destinationBase = PackagePathToContentPath(cookedContentRoot, texture.PackagePath);
+        foreach (var extension in new[] { ".uasset", ".uexp", ".ubulk", ".texture-cook-report.json" })
+        {
+            var destination = destinationBase + extension;
+            if (File.Exists(destination))
+            {
+                File.Delete(destination);
+            }
+
+            if (string.IsNullOrWhiteSpace(backupPath))
+            {
+                continue;
+            }
+            var source = Path.Combine(backupPath, Path.GetFileName(destination));
+            if (File.Exists(source))
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                File.Copy(source, destination, overwrite: true);
+            }
         }
     }
 
@@ -1156,23 +1397,7 @@ public sealed partial class MainForm
                 return;
             }
 
-            var cookedContentRoot = Path.Combine(texture.OutputRoot, "Cooked", "LEGOBatmanLotDK", "Content");
-            var destinationBase = PackagePathToContentPath(cookedContentRoot, texture.PackagePath);
-            foreach (var extension in new[] { ".uasset", ".uexp", ".ubulk", ".texture-cook-report.json" })
-            {
-                var destination = destinationBase + extension;
-                if (File.Exists(destination))
-                {
-                    File.Delete(destination);
-                }
-
-                var source = Path.Combine(backupPath, Path.GetFileName(destination));
-                if (File.Exists(source))
-                {
-                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                    File.Copy(source, destination, overwrite: true);
-                }
-            }
+            RestoreTexturePackageFiles(texture, backupPath, hadPriorOutput: true);
 
             RestoreTextureRecipe(texture, snapshot.Texture);
             (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject);
@@ -2090,11 +2315,9 @@ public sealed partial class MainForm
                 : $"'{label}' could not regenerate its saved recipe. Check its PNG source and donor template, then try again.";
             return false;
         }
-        var reportPath = sourceBase + ".texture-cook-report.json";
-        if (!GeneratedTextureRequiredCookedFilesExist(sourceBase, texture.TemplateJson) ||
-            !TextureCookReportOutputMatchesFiles(reportPath, sourceBase, texture.TemplateJson))
+        if (!ValidateGeneratedTextureCook(texture, sourceBase, out var validationError))
         {
-            error = $"'{label}' still has missing or unverified cooked output files after staging preparation.";
+            error = $"'{label}' still has missing or unverified cooked output files after staging preparation: {validationError}";
             return false;
         }
 
@@ -2102,7 +2325,10 @@ public sealed partial class MainForm
         return true;
     }
 
-    private bool EnsureGeneratedTextureCooked(GeneratedTextureEntry texture, string cookedContentRoot)
+    private bool EnsureGeneratedTextureCooked(
+        GeneratedTextureEntry texture,
+        string cookedContentRoot,
+        bool forceRecook = false)
     {
         if (string.IsNullOrWhiteSpace(texture.SourcePng) ||
             string.IsNullOrWhiteSpace(texture.TemplateJson) ||
@@ -2114,12 +2340,13 @@ public sealed partial class MainForm
         TextureCookTemplateService.NormalizeCoreTemplates(_projectRootText.Text.Trim());
         var sourceBase = PackagePathToContentPath(cookedContentRoot, texture.PackagePath);
         var reportPath = sourceBase + ".texture-cook-report.json";
-        var needsRecook =
+        var needsRecook = forceRecook ||
             !GeneratedTextureRequiredCookedFilesExist(sourceBase, texture.TemplateJson) ||
             ReadTextureEncoderVersion(reportPath) < TextureCookService.CurrentEncoderVersion ||
             !TextureCookReportPixelFormatMatchesTemplate(reportPath, texture.TemplateJson) ||
             !TextureCookReportTemplateMatchesTemplate(reportPath, texture.TemplateJson) ||
-            !TextureCookReportOutputMatchesFiles(reportPath, sourceBase, texture.TemplateJson);
+            !TextureCookReportOutputMatchesFiles(reportPath, sourceBase, texture.TemplateJson) ||
+            !TextureCookReportMatchesSavedEntry(reportPath, texture);
 
         if (!needsRecook)
         {
@@ -2226,6 +2453,131 @@ public sealed partial class MainForm
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Proves that a generated texture package is the complete output of the recipe currently
+    /// saved on its suit. Material dependency staging also uses this check, so an older archive
+    /// cannot hide a missing external mip payload or a mixed/tampered recook.
+    /// </summary>
+    internal static bool ValidateGeneratedTextureCook(
+        GeneratedTextureEntry texture,
+        string sourceBase,
+        out string reason)
+    {
+        if (texture is null)
+        {
+            reason = "the saved texture recipe is missing";
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(texture.PackagePath))
+        {
+            reason = "the saved texture recipe has no package path";
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(texture.TemplateJson) || !File.Exists(texture.TemplateJson))
+        {
+            reason = "the saved donor template is missing";
+            return false;
+        }
+        if (!GeneratedTextureRequiredCookedFilesExist(sourceBase, texture.TemplateJson))
+        {
+            var missing = GeneratedTextureRequiredExtensions(texture.TemplateJson)
+                .Where(extension =>
+                {
+                    var path = sourceBase + extension;
+                    return !File.Exists(path) || new FileInfo(path).Length <= 0;
+                })
+                .ToList();
+            reason = missing.Count == 0
+                ? "one or more required cooked package files are empty"
+                : "missing or empty required file(s): " + string.Join(", ", missing);
+            return false;
+        }
+
+        var reportPath = sourceBase + ".texture-cook-report.json";
+        if (!File.Exists(reportPath))
+        {
+            reason = "the texture cook report is missing";
+            return false;
+        }
+        if (!TextureCookReportMatchesSavedEntry(reportPath, texture))
+        {
+            reason = "the cook report does not match the saved package path or profile";
+            return false;
+        }
+        if (!TextureCookReportPixelFormatMatchesTemplate(reportPath, texture.TemplateJson) ||
+            !TextureCookReportTemplateMatchesTemplate(reportPath, texture.TemplateJson))
+        {
+            reason = "the cook report does not match the saved donor recipe";
+            return false;
+        }
+        if (!TextureCookReportOutputMatchesFiles(reportPath, sourceBase, texture.TemplateJson))
+        {
+            reason = "the cooked package files do not match the sizes and SHA-256 hashes in the cook report";
+            return false;
+        }
+
+        reason = "";
+        return true;
+    }
+
+    private static bool TextureCookReportMatchesSavedEntry(
+        string reportPath,
+        GeneratedTextureEntry texture)
+    {
+        try
+        {
+            using var reportDoc = JsonDocument.Parse(File.ReadAllText(reportPath));
+            var root = reportDoc.RootElement;
+            var status = root.TryGetProperty("Status", out var statusElement)
+                ? statusElement.GetString() ?? ""
+                : "";
+            var outputPackage = root.TryGetProperty("OutputPackagePath", out var packageElement)
+                ? UnrealPathUtil.NormalizePackagePath(packageElement.GetString())
+                : "";
+            var encoderVersion = root.TryGetProperty("EncoderVersion", out var encoderElement) &&
+                                 encoderElement.TryGetInt32(out var parsedEncoderVersion)
+                ? parsedEncoderVersion
+                : 0;
+            if (!status.Equals("created", StringComparison.OrdinalIgnoreCase) ||
+                encoderVersion < TextureCookService.CurrentEncoderVersion ||
+                !outputPackage.Equals(
+                    UnrealPathUtil.NormalizePackagePath(texture.PackagePath),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (texture.CookWidth > 0 &&
+                (!root.TryGetProperty("Width", out var widthElement) ||
+                 !widthElement.TryGetInt32(out var width) || width != texture.CookWidth))
+            {
+                return false;
+            }
+            if (texture.CookHeight > 0 &&
+                (!root.TryGetProperty("Height", out var heightElement) ||
+                 !heightElement.TryGetInt32(out var height) || height != texture.CookHeight))
+            {
+                return false;
+            }
+            if (!string.IsNullOrWhiteSpace(texture.CookPixelFormat))
+            {
+                var reportFormat = root.TryGetProperty("PixelFormat", out var formatElement)
+                    ? formatElement.GetString() ?? ""
+                    : "";
+                if (!reportFormat.Equals(texture.CookPixelFormat, StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static IReadOnlyList<string> GeneratedTextureRequiredExtensions(string? templateJson)

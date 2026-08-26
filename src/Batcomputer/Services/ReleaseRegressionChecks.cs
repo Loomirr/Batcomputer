@@ -335,9 +335,30 @@ internal static class ReleaseRegressionChecks
                         !MainForm.TextureCookReportOutputMatchesFiles(cookedReport, cookedBase, uiJson);
                 }
             }
+            var bulkRecipe = new GeneratedTextureEntry
+            {
+                DisplayName = "Bulk texture fixture",
+                SourcePng = sourcePng,
+                TemplateJson = uiJson,
+                OutputRoot = textureMipRecipeRoot,
+                PackagePath = "/Game/Mods/Fixture/Textures/T_Bulk",
+            };
+            var completeBulkRecipeAccepted =
+                MainForm.GeneratedTextureReimportPreflightError(bulkRecipe) is null;
+            bulkRecipe.SourcePng = Path.Combine(textureMipRecipeRoot, "missing-source.png");
+            var missingBulkSourceRejected =
+                MainForm.GeneratedTextureReimportPreflightError(bulkRecipe)?.Contains("source PNG", StringComparison.OrdinalIgnoreCase) == true;
+            bulkRecipe.SourcePng = sourcePng;
+            bulkRecipe.TemplateJson = Path.Combine(textureMipRecipeRoot, "missing-template.json");
+            var missingBulkTemplateRejected =
+                MainForm.GeneratedTextureReimportPreflightError(bulkRecipe)?.Contains("template", StringComparison.OrdinalIgnoreCase) == true;
             Check(
-                completeCookAccepted && tamperedCookRejected,
-                "texture cooks write every inline mip atomically and staging rejects payloads changed after the cook report",
+                completeCookAccepted &&
+                tamperedCookRejected &&
+                completeBulkRecipeAccepted &&
+                missingBulkSourceRejected &&
+                missingBulkTemplateRejected,
+                "texture cooks write every inline mip atomically, bulk reimport preflights every saved recipe, and staging rejects payloads changed after the cook report",
                 failures,
                 output);
         }
@@ -964,7 +985,7 @@ internal static class ReleaseRegressionChecks
             output);
         Check(
             StaticMeshObjProbeService.MultiMaterialPackageValidationRegressionPasses(),
-            "custom OBJ package validation rejects malformed raw LOD sections and StaticMaterials metadata",
+            "custom OBJ package validation rejects malformed LOD sections, bounds, weighted samplers, and StaticMaterials metadata",
             failures,
             output);
 
@@ -1348,6 +1369,17 @@ internal static class ReleaseRegressionChecks
             package => closureGraph.TryGetValue(package, out var dependencies)
                 ? dependencies
                 : Array.Empty<string>());
+        var reachableImportPackages = ToolMaterialLibraryService.ReachableImportPackagesForTest(
+            new (string ObjectName, int OuterImportIndex)[]
+            {
+                ("/Game/Mods/Electric/T_Body_BC", -1),
+                ("T_Body_BC", 0),
+                ("/Game/Mods/Electric/Textures/T_Body_BC", -1),
+                ("T_Body_BC", 2),
+                ("/Game/Mods/Electric/Materials/MI_Parent", -1),
+                ("MI_Parent", 4),
+            },
+            new[] { 3, 5 });
         var escapingDependencyRejected = false;
         try
         {
@@ -1392,13 +1424,102 @@ internal static class ReleaseRegressionChecks
             materialClosure.Contains(closureTexture, StringComparer.OrdinalIgnoreCase) &&
             materialClosure.Contains(closureParentTexture, StringComparer.OrdinalIgnoreCase) &&
             !materialClosure.Contains("/Game/Characters/Shared/T_Game", StringComparer.OrdinalIgnoreCase) &&
+            reachableImportPackages.SequenceEqual(
+                new[]
+                {
+                    "/Game/Mods/Electric/Materials/MI_Parent",
+                    "/Game/Mods/Electric/Textures/T_Body_BC",
+                },
+                StringComparer.OrdinalIgnoreCase) &&
+            !reachableImportPackages.Contains(
+                "/Game/Mods/Electric/T_Body_BC",
+                StringComparer.OrdinalIgnoreCase) &&
             escapingDependencyRejected &&
             completeClosureFilesAccepted &&
             missingClosureFilesRejected &&
             emptyOptionalBulkRejected,
-            "shared tool materials carry their complete cycle-safe mod-local dependency closure and reject escaping or incomplete packages",
+            "shared tool materials follow only reachable live imports, carry their cycle-safe mod-local closure, and reject escaping or incomplete packages",
             failures,
             output);
+
+        var libraryRepairRoot = Path.Combine(
+            Path.GetTempPath(),
+            "Batcomputer-material-library-repair-" + Guid.NewGuid().ToString("N"));
+        var libraryRepairRollbackPassed = false;
+        var libraryRepairCommitPassed = false;
+        var incompleteAtomicPromotionRejected = false;
+        try
+        {
+            const string repairPackage = "/Game/Mods/Fixture/MI_Repair";
+            var repairLibrary = new ToolMaterialLibraryService(libraryRepairRoot);
+            var archivedBase = Path.Combine(
+                repairLibrary.ContentRoot,
+                repairPackage["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(archivedBase)!);
+            File.WriteAllText(archivedBase + ".uasset", "old-uasset");
+            File.WriteAllText(archivedBase + ".uexp", "old-uexp");
+            File.WriteAllText(archivedBase + ".ubulk", "old-ubulk");
+            Directory.CreateDirectory(repairLibrary.CatalogRoot);
+            File.WriteAllText(repairLibrary.CatalogPath, "old-catalog");
+
+            var candidateBase = Path.Combine(libraryRepairRoot, "candidate", "MI_Repair");
+            Directory.CreateDirectory(Path.GetDirectoryName(candidateBase)!);
+            File.WriteAllText(candidateBase + ".uasset", "new-uasset");
+            File.WriteAllText(candidateBase + ".uexp", "new-uexp");
+            File.WriteAllText(candidateBase + ".ubulk", "new-ubulk");
+            var incompleteBase = Path.Combine(libraryRepairRoot, "incomplete", "MI_Repair");
+            Directory.CreateDirectory(Path.GetDirectoryName(incompleteBase)!);
+            File.WriteAllText(incompleteBase + ".uasset", "partial-uasset");
+
+            using (repairLibrary.BeginRepairSnapshotForTest([repairPackage]))
+            {
+                try
+                {
+                    ToolMaterialLibraryService.ReplacePackageFilesAtomicallyForTest(
+                        incompleteBase,
+                        archivedBase);
+                }
+                catch (InvalidOperationException)
+                {
+                    incompleteAtomicPromotionRejected =
+                        File.ReadAllText(archivedBase + ".uasset") == "old-uasset" &&
+                        File.ReadAllText(archivedBase + ".uexp") == "old-uexp" &&
+                        File.ReadAllText(archivedBase + ".ubulk") == "old-ubulk";
+                }
+
+                ToolMaterialLibraryService.ReplacePackageFilesAtomicallyForTest(candidateBase, archivedBase);
+                File.WriteAllText(repairLibrary.CatalogPath, "new-catalog");
+            }
+            libraryRepairRollbackPassed =
+                File.ReadAllText(archivedBase + ".uasset") == "old-uasset" &&
+                File.ReadAllText(archivedBase + ".uexp") == "old-uexp" &&
+                File.ReadAllText(archivedBase + ".ubulk") == "old-ubulk" &&
+                File.ReadAllText(repairLibrary.CatalogPath) == "old-catalog";
+
+            using (var committedRepair = repairLibrary.BeginRepairSnapshotForTest([repairPackage]))
+            {
+                ToolMaterialLibraryService.ReplacePackageFilesAtomicallyForTest(candidateBase, archivedBase);
+                File.WriteAllText(repairLibrary.CatalogPath, "committed-catalog");
+                committedRepair.Commit();
+            }
+            libraryRepairCommitPassed =
+                File.ReadAllText(archivedBase + ".uasset") == "new-uasset" &&
+                File.ReadAllText(archivedBase + ".uexp") == "new-uexp" &&
+                File.ReadAllText(archivedBase + ".ubulk") == "new-ubulk" &&
+                File.ReadAllText(repairLibrary.CatalogPath) == "committed-catalog";
+        }
+        finally
+        {
+            try { Directory.Delete(libraryRepairRoot, recursive: true); } catch { /* best effort */ }
+        }
+        Check(
+            incompleteAtomicPromotionRejected &&
+            libraryRepairRollbackPassed &&
+            libraryRepairCommitPassed,
+            "material repair atomically promotes complete package trios and rolls its shared catalog/archive back until the suit commits",
+            failures,
+            output);
+
         var activeViewerProject = new NativeSuitProject
         {
             SlotId = "viewer-transform-regression",
@@ -3510,9 +3631,12 @@ internal static class ReleaseRegressionChecks
         var generatedDependencyResolved = false;
         var movedDependencyResolved = false;
         var freshRecookPreferred = false;
+        var incompleteCurrentCookRejected = false;
         var staleArchiveBulkRemoved = false;
         var outsideWorkspaceOutputRejected = false;
         var conflictingDuplicateOwnerRejected = false;
+        var missingRequiredBulkRejected = false;
+        var tamperedCookReportRejected = false;
         try
         {
             var generatedRoot = Path.Combine(generatedDependencyRoot, "Generated");
@@ -3520,26 +3644,43 @@ internal static class ReleaseRegressionChecks
             const string liveTexturePackage = "/Game/Mods/Steve/Textures/T_Steve_Head";
             const string movedTexturePackage = "/Game/Mods/Steve/Textures/T_Steve_Moved";
             const string outsideTexturePackage = "/Game/Mods/Steve/Textures/T_Steve_Outside";
+            const string missingBulkPackage = "/Game/Mods/Steve/Textures/T_Steve_MissingBulk";
+            const string tamperedReportPackage = "/Game/Mods/Steve/Textures/T_Steve_Tampered";
+            var templateRoot = Path.Combine(generatedRoot, "RegressionTextureTemplates");
             var liveTextureOutput = Path.Combine(generatedRoot, "TextureImports", "steve", "T_Steve_Head_00001");
             var movedTextureOutput = Path.Combine(generatedRoot, "TextureImports", "steve", "T_Steve_Moved_00002");
-            foreach (var fixture in new[]
-                     {
-                         (Output: liveTextureOutput, Package: liveTexturePackage, Marker: "live"),
-                         (Output: movedTextureOutput, Package: movedTexturePackage, Marker: "moved"),
-                     })
-            {
-                var content = Path.Combine(fixture.Output, "Cooked", "LEGOBatmanLotDK", "Content");
-                var packageBase = Path.Combine(
-                    content,
-                    fixture.Package["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar));
-                Directory.CreateDirectory(Path.GetDirectoryName(packageBase)!);
-                File.WriteAllText(packageBase + ".uasset", fixture.Marker + "-uasset");
-                File.WriteAllText(packageBase + ".uexp", fixture.Marker + "-uexp");
-                if (fixture.Package == liveTexturePackage)
-                {
-                    File.WriteAllText(packageBase + ".ubulk", fixture.Marker + "-ubulk");
-                }
-            }
+            var missingBulkOutput = Path.Combine(generatedRoot, "TextureImports", "steve", "T_Steve_MissingBulk_00003");
+            var tamperedReportOutput = Path.Combine(generatedRoot, "TextureImports", "steve", "T_Steve_Tampered_00004");
+            var liveTexture = CreateGeneratedTextureCookFixture(
+                liveTextureOutput,
+                templateRoot,
+                liveTexturePackage,
+                "live",
+                externalMips: false,
+                includeUnexpectedBulk: true);
+            var movedTexture = CreateGeneratedTextureCookFixture(
+                movedTextureOutput,
+                templateRoot,
+                movedTexturePackage,
+                "moved",
+                externalMips: false);
+            var missingBulkTexture = CreateGeneratedTextureCookFixture(
+                missingBulkOutput,
+                templateRoot,
+                missingBulkPackage,
+                "missing-bulk",
+                externalMips: true,
+                includeRequiredBulk: false);
+            var tamperedReportTexture = CreateGeneratedTextureCookFixture(
+                tamperedReportOutput,
+                templateRoot,
+                tamperedReportPackage,
+                "tampered-report",
+                externalMips: false);
+            var tamperedReportBase = GeneratedTextureFixturePackageBase(
+                tamperedReportOutput,
+                tamperedReportPackage);
+            File.AppendAllText(tamperedReportBase + ".uasset", "-changed-after-report");
 
             var outsideTextureOutput = Path.Combine(
                 generatedDependencyRoot,
@@ -3555,6 +3696,12 @@ internal static class ReleaseRegressionChecks
             Directory.CreateDirectory(Path.GetDirectoryName(outsideTextureBase)!);
             File.WriteAllText(outsideTextureBase + ".uasset", "outside-uasset");
             File.WriteAllText(outsideTextureBase + ".uexp", "outside-uexp");
+            var outsideTexture = CreateGeneratedTextureCookFixture(
+                outsideTextureOutput,
+                templateRoot,
+                outsideTexturePackage,
+                "outside",
+                externalMips: false);
 
             var movedSavedOutput = Path.Combine(
                 Path.GetPathRoot(generatedDependencyRoot) ?? "C:\\",
@@ -3568,21 +3715,23 @@ internal static class ReleaseRegressionChecks
                 SlotId = "steve_dependency_fixture",
                 GeneratedTextures =
                 [
+                    liveTexture,
                     new GeneratedTextureEntry
                     {
-                        PackagePath = liveTexturePackage,
-                        OutputRoot = liveTextureOutput,
-                    },
-                    new GeneratedTextureEntry
-                    {
-                        PackagePath = movedTexturePackage,
+                        DisplayName = movedTexture.DisplayName,
+                        Kind = movedTexture.Kind,
+                        CookProfile = movedTexture.CookProfile,
+                        CookWidth = movedTexture.CookWidth,
+                        CookHeight = movedTexture.CookHeight,
+                        CookPixelFormat = movedTexture.CookPixelFormat,
+                        PackagePath = movedTexture.PackagePath,
+                        ObjectPath = movedTexture.ObjectPath,
+                        TemplateJson = movedTexture.TemplateJson,
                         OutputRoot = movedSavedOutput,
                     },
-                    new GeneratedTextureEntry
-                    {
-                        PackagePath = outsideTexturePackage,
-                        OutputRoot = outsideTextureOutput,
-                    },
+                    outsideTexture,
+                    missingBulkTexture,
+                    tamperedReportTexture,
                 ],
             };
             new SuitProjectService(generatedDependencyRoot).SaveProject(dependencyProject);
@@ -3609,11 +3758,49 @@ internal static class ReleaseRegressionChecks
             File.WriteAllText(liveTextureBase + ".uasset", "live-v2-uasset");
             File.WriteAllText(liveTextureBase + ".uexp", "live-v2-uexp");
             File.Delete(liveTextureBase + ".ubulk");
+            WriteGeneratedTextureCookReport(liveTexture, liveTextureBase, externalMips: false);
             var resolvedFreshUasset = dependencyLibrary.ResolvePackageUasset(liveTexturePackage);
             freshRecookPreferred =
                 !string.IsNullOrWhiteSpace(resolvedFreshUasset) &&
                 File.ReadAllText(resolvedFreshUasset) == "live-v2-uasset" &&
                 File.ReadAllText(Path.ChangeExtension(resolvedFreshUasset, ".uexp")) == "live-v2-uexp";
+
+            // A saved recipe is authoritative even while its current cook is damaged. The older
+            // complete workspace archive must not silently win, because that would package stale
+            // texture bytes after a failed recook.
+            File.Delete(liveTextureBase + ".uexp");
+            try
+            {
+                _ = dependencyLibrary.ResolvePackageUasset(liveTexturePackage);
+            }
+            catch (InvalidOperationException ex)
+            {
+                incompleteCurrentCookRejected =
+                    ex.Message.Contains("saved recipe", StringComparison.OrdinalIgnoreCase) &&
+                    ex.Message.Contains("incomplete", StringComparison.OrdinalIgnoreCase);
+            }
+            File.WriteAllText(liveTextureBase + ".uexp", "live-v2-uexp");
+
+            try
+            {
+                _ = dependencyLibrary.ResolvePackageUasset(missingBulkPackage);
+            }
+            catch (InvalidOperationException ex)
+            {
+                missingRequiredBulkRejected =
+                    ex.Message.Contains("saved recipe", StringComparison.OrdinalIgnoreCase) &&
+                    ex.Message.Contains(".ubulk", StringComparison.OrdinalIgnoreCase);
+            }
+            try
+            {
+                _ = dependencyLibrary.ResolvePackageUasset(tamperedReportPackage);
+            }
+            catch (InvalidOperationException ex)
+            {
+                tamperedCookReportRejected =
+                    ex.Message.Contains("saved recipe", StringComparison.OrdinalIgnoreCase) &&
+                    ex.Message.Contains("SHA-256", StringComparison.OrdinalIgnoreCase);
+            }
 
             // An in-place material-library refresh must not leave an old external mip payload
             // beside a newer cook that moved all payload inline.
@@ -3630,8 +3817,17 @@ internal static class ReleaseRegressionChecks
                 dependencyLibrary.ContentRoot,
                 liveTexturePackage["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar));
             staleArchiveBulkRemoved = !File.Exists(archivedLiveBase + ".ubulk");
-            outsideWorkspaceOutputRejected =
-                dependencyLibrary.ResolvePackageUasset(outsideTexturePackage) is null;
+            try
+            {
+                outsideWorkspaceOutputRejected =
+                    dependencyLibrary.ResolvePackageUasset(outsideTexturePackage) is null;
+            }
+            catch (InvalidOperationException ex)
+            {
+                outsideWorkspaceOutputRejected =
+                    ex.Message.Contains("saved recipe", StringComparison.OrdinalIgnoreCase) &&
+                    ex.Message.Contains("incomplete", StringComparison.OrdinalIgnoreCase);
+            }
 
             // Two saved recipes may only share a package identity when their cooked triplets are
             // byte-for-byte identical. Different owners must fail closed instead of depending on
@@ -3641,25 +3837,18 @@ internal static class ReleaseRegressionChecks
                 "TextureImports",
                 "steve-duplicate",
                 "T_Steve_Head_00004");
-            var duplicateTextureBase = Path.Combine(
+            var duplicateTexture = CreateGeneratedTextureCookFixture(
                 duplicateTextureOutput,
-                "Cooked",
-                "LEGOBatmanLotDK",
-                "Content",
-                liveTexturePackage["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar));
-            Directory.CreateDirectory(Path.GetDirectoryName(duplicateTextureBase)!);
-            File.WriteAllText(duplicateTextureBase + ".uasset", "conflicting-uasset");
-            File.WriteAllText(duplicateTextureBase + ".uexp", "conflicting-uexp");
+                templateRoot,
+                liveTexturePackage,
+                "conflicting",
+                externalMips: false);
             new SuitProjectService(generatedDependencyRoot).SaveProject(new NativeSuitProject
             {
                 SlotId = "steve_dependency_duplicate_fixture",
                 GeneratedTextures =
                 [
-                    new GeneratedTextureEntry
-                    {
-                        PackagePath = liveTexturePackage,
-                        OutputRoot = duplicateTextureOutput,
-                    },
+                    duplicateTexture,
                 ],
             });
             try
@@ -3681,10 +3870,13 @@ internal static class ReleaseRegressionChecks
             generatedDependencyResolved &&
             movedDependencyResolved &&
             freshRecookPreferred &&
+            incompleteCurrentCookRejected &&
             staleArchiveBulkRemoved &&
             outsideWorkspaceOutputRejected &&
-            conflictingDuplicateOwnerRejected,
-            "material dependencies prefer fresh workspace cooks, rebase moved paths, reject outside roots and conflicting owners, and remove stale bulk data",
+            conflictingDuplicateOwnerRejected &&
+            missingRequiredBulkRejected &&
+            tamperedCookReportRejected,
+            "material dependencies prefer verified fresh workspace cooks, reject stale fallback, missing external mips, tampered cook reports, outside roots and conflicting owners, and remove stale bulk data",
             failures,
             output);
 
@@ -4136,6 +4328,148 @@ internal static class ReleaseRegressionChecks
         ObjectPath = packagePath + "." + objectName,
         ClassName = "MaterialInstanceConstant"
     };
+
+    private static GeneratedTextureEntry CreateGeneratedTextureCookFixture(
+        string outputRoot,
+        string templateRoot,
+        string packagePath,
+        string marker,
+        bool externalMips,
+        bool includeRequiredBulk = true,
+        bool includeUnexpectedBulk = false)
+    {
+        packagePath = UnrealPathUtil.NormalizePackagePath(packagePath);
+        Directory.CreateDirectory(templateRoot);
+        var templateStem = UnrealPathUtil.AssetName(packagePath) +
+                           (externalMips ? "_External" : "_Inline");
+        var templateBase = Path.Combine(templateRoot, templateStem);
+        var templateJson = templateBase + ".json";
+        var templatePackage = "/Game/Regression/TextureTemplates/" + templateStem;
+        var flags = externalMips
+            ? "BULKDATA_PayloadInSeperateFile"
+            : "BULKDATA_ForceInlinePayload";
+        File.WriteAllText(
+            templateJson,
+            System.Text.Json.JsonSerializer.Serialize(new object[]
+            {
+                new
+                {
+                    Type = "Texture2D",
+                    Name = templateStem,
+                    Package = templatePackage,
+                    SizeX = 4,
+                    SizeY = 4,
+                    PixelFormat = "PF_DXT1",
+                    Mips = new object[]
+                    {
+                        new
+                        {
+                            SizeX = 4,
+                            SizeY = 4,
+                            BulkData = new
+                            {
+                                ElementCount = 8,
+                                SizeOnDisk = 8,
+                                OffsetInFile = 0,
+                                BulkDataFlags = flags,
+                            },
+                        },
+                    },
+                },
+            }));
+        File.WriteAllText(templateBase + ".uasset", "template-uasset-" + templateStem);
+        File.WriteAllText(templateBase + ".uexp", "template-uexp-" + templateStem);
+
+        var packageBase = GeneratedTextureFixturePackageBase(outputRoot, packagePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(packageBase)!);
+        File.WriteAllText(packageBase + ".uasset", marker + "-uasset");
+        File.WriteAllText(packageBase + ".uexp", marker + "-uexp");
+        if (externalMips || includeUnexpectedBulk)
+        {
+            File.WriteAllText(packageBase + ".ubulk", marker + "-ubulk");
+        }
+
+        var texture = new GeneratedTextureEntry
+        {
+            DisplayName = marker,
+            Kind = "Character texture",
+            CookProfile = "release-regression",
+            CookWidth = 4,
+            CookHeight = 4,
+            CookPixelFormat = "PF_DXT1",
+            PackagePath = packagePath,
+            ObjectPath = packagePath + "." + UnrealPathUtil.AssetName(packagePath),
+            TemplateJson = templateJson,
+            OutputRoot = outputRoot,
+        };
+        WriteGeneratedTextureCookReport(texture, packageBase, externalMips);
+        if (externalMips && !includeRequiredBulk)
+        {
+            File.Delete(packageBase + ".ubulk");
+        }
+        return texture;
+    }
+
+    private static string GeneratedTextureFixturePackageBase(string outputRoot, string packagePath) =>
+        Path.Combine(
+            outputRoot,
+            "Cooked",
+            "LEGOBatmanLotDK",
+            "Content",
+            UnrealPathUtil.NormalizePackagePath(packagePath)["/Game/".Length..]
+                .Replace('/', Path.DirectorySeparatorChar));
+
+    private static void WriteGeneratedTextureCookReport(
+        GeneratedTextureEntry texture,
+        string packageBase,
+        bool externalMips)
+    {
+        var templatePackage = ReadRegressionTextureTemplatePackage(texture.TemplateJson);
+        var (uassetBytes, uassetSha256) = GeneratedTextureFixtureIntegrity(packageBase + ".uasset");
+        var (uexpBytes, uexpSha256) = GeneratedTextureFixtureIntegrity(packageBase + ".uexp");
+        var (ubulkBytes, ubulkSha256) = externalMips
+            ? GeneratedTextureFixtureIntegrity(packageBase + ".ubulk")
+            : (0L, "");
+        File.WriteAllText(
+            packageBase + ".texture-cook-report.json",
+            System.Text.Json.JsonSerializer.Serialize(new
+            {
+                Status = "created",
+                TemplatePackagePath = templatePackage,
+                OutputPackagePath = UnrealPathUtil.NormalizePackagePath(texture.PackagePath),
+                Width = texture.CookWidth,
+                Height = texture.CookHeight,
+                PixelFormat = texture.CookPixelFormat,
+                MipCount = 1,
+                ExternalMipCount = externalMips ? 1 : 0,
+                InlineMipCount = externalMips ? 0 : 1,
+                RecipeFingerprint = TextureCookService.RecipeFingerprintFor(texture.TemplateJson),
+                OutputUassetBytes = uassetBytes,
+                OutputUassetSha256 = uassetSha256,
+                OutputUexpBytes = uexpBytes,
+                OutputUexpSha256 = uexpSha256,
+                OutputUbulkBytes = ubulkBytes,
+                OutputUbulkSha256 = ubulkSha256,
+                EncoderVersion = TextureCookService.CurrentEncoderVersion,
+            }));
+    }
+
+    private static string ReadRegressionTextureTemplatePackage(string templateJson)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(templateJson));
+        var root = doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array
+            ? doc.RootElement.EnumerateArray().First()
+            : doc.RootElement;
+        return UnrealPathUtil.NormalizePackagePath(root.GetProperty("Package").GetString());
+    }
+
+    private static (long Bytes, string Sha256) GeneratedTextureFixtureIntegrity(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return (
+            stream.Length,
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream)));
+    }
 
     private static void CreateSizedTextureFixture(string path, long length, bool packageFooter = false)
     {

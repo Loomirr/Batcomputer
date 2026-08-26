@@ -2,6 +2,16 @@
 
 ## 0.9.0-beta.8 — 2026-08-25
 
+- Adds **Reimport all** for safely recooking every saved texture recipe in one suit, with a complete
+  rollback if any source or cook fails.
+- Adds **Repair materials** for recovering a suit's saved material closure and reapplying its
+  assignments without treating abandoned import-table names as required dependencies.
+- Keeps material repair, the shared material library, the saved suit, and generated stages in one
+  transaction so a failed repair restores the complete prior state.
+- Writes multi-material OBJ sections, shared bounds, and area-weighted samplers in Unreal's native
+  UE 5.6 order, fixing the startup crash found during the two-material cowl test.
+- Extends package validation to reject missing or misaligned section samplers and buffer summaries
+  before a multi-material custom mesh can reach the game.
 - Adds the exact shipped Minifig and Smallfig root-body profiles while preserving the selected
   gameplay donor's runtime setup and shared native skeleton.
 - Keeps tool-created materials in a workspace library so another suit can find, import, and package

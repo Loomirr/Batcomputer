@@ -47,6 +47,10 @@ keeps an assignment with its exact material name when the OBJ is re-imported; re
 dropped and surviving slots are compacted. The referenced `.mtl` file is not used to create Unreal
 materials, so apply cooked game or tool-created materials to the resulting slots yourself.
 
+If a multi-material mesh was baked by an earlier beta, open it in the current build and choose
+**Bake to game** again before packaging. The current build rewrites the cooked section and sampler
+layout and verifies every slot before the mod can be installed.
+
 For a textured cowl, use the paired custom-cowl template when possible. A paired template creates
 separate gameplay and cutscene material instances; applying the pair to both contexts keeps each
 Blueprint on the correct native material controller. The material keeps the donor shader's shared

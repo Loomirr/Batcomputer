@@ -1,8 +1,13 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text.Json;
 using UAssetAPI;
+using UAssetAPI.ExportTypes;
+using UAssetAPI.PropertyTypes.Objects;
+using UAssetAPI.PropertyTypes.Structs;
 using UAssetAPI.UnrealTypes;
 using UAssetAPI.Unversioned;
+using PropertyData = UAssetAPI.PropertyTypes.Objects.PropertyData;
 
 namespace Batcomputer;
 
@@ -13,6 +18,11 @@ namespace Batcomputer;
 /// </summary>
 public sealed class ToolMaterialLibraryService
 {
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> RepairGates =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private static readonly string[] CookedPackageExtensions = [".uasset", ".uexp", ".ubulk"];
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -26,10 +36,126 @@ public sealed class ToolMaterialLibraryService
         public List<GeneratedMaterialEntry> Materials { get; set; } = new();
     }
 
+    internal sealed record RepairSnapshot(
+        string Root,
+        string CatalogCopy,
+        bool CatalogExisted,
+        IReadOnlyList<string> Packages);
+
+    /// <summary>
+    /// Owns one workspace-library repair until the consuming suit has also been rebuilt and
+    /// saved. Disposing an uncommitted transaction restores both the catalog and every affected
+    /// archived package, so a later suit-stage failure cannot leave a half-updated shared library.
+    /// </summary>
+    public sealed class MaterialLibraryRepairTransaction : IDisposable
+    {
+        private readonly ToolMaterialLibraryService _owner;
+        private readonly SemaphoreSlim _gate;
+        private readonly RepairSnapshot _snapshot;
+        private readonly Dictionary<string, GeneratedMaterialEntry> _materialEntries;
+        private bool _finished;
+
+        internal MaterialLibraryRepairTransaction(
+            ToolMaterialLibraryService owner,
+            SemaphoreSlim gate,
+            RepairSnapshot snapshot,
+            IEnumerable<string> rootMaterialPackages,
+            IEnumerable<string> closurePackages,
+            IEnumerable<GeneratedMaterialEntry> materialEntries)
+        {
+            _owner = owner;
+            _gate = gate;
+            _snapshot = snapshot;
+            RootMaterialPackages = rootMaterialPackages
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(package => package, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            ClosurePackages = closurePackages
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(package => RootMaterialPackages.Contains(package, StringComparer.OrdinalIgnoreCase) ? 0 : 1)
+                .ThenBy(package => package, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            _materialEntries = materialEntries
+                .GroupBy(entry => UnrealPathUtil.NormalizePackagePath(entry.PackagePath), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    group => group.Key,
+                    group => Clone(group.Last()),
+                    StringComparer.OrdinalIgnoreCase);
+        }
+
+        public IReadOnlyList<string> RootMaterialPackages { get; }
+        public IReadOnlyList<string> ClosurePackages { get; }
+
+        /// <summary>
+        /// Attaches the exact repaired catalog entry without running LoadAvailable. The latter is
+        /// intentionally avoided while this transaction owns the library gate because it can
+        /// discover and archive unrelated projects as a side effect.
+        /// </summary>
+        public bool ImportIntoProject(NativeSuitProject project, string packagePath)
+        {
+            ObjectDisposedException.ThrowIf(_finished, this);
+            ArgumentNullException.ThrowIfNull(project);
+
+            var package = UnrealPathUtil.NormalizePackagePath(packagePath);
+            if (!_materialEntries.TryGetValue(package, out var entry) ||
+                !RootMaterialPackages.Contains(package, StringComparer.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            project.GeneratedMaterials ??= new List<GeneratedMaterialEntry>();
+            project.GeneratedMaterials.RemoveAll(candidate =>
+                UnrealPathUtil.NormalizePackagePath(candidate.PackagePath)
+                    .Equals(package, StringComparison.OrdinalIgnoreCase));
+            project.GeneratedMaterials.Add(Clone(entry));
+            return true;
+        }
+
+        /// <summary>
+        /// Keeps the repaired archive and catalog. Call only after the consuming suit project and
+        /// all of its generated stages have committed successfully.
+        /// </summary>
+        public void Commit()
+        {
+            ObjectDisposedException.ThrowIf(_finished, this);
+            _finished = true;
+            try
+            {
+                DeleteDirectoryBestEffort(_snapshot.Root);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        public void Dispose()
+        {
+            if (_finished)
+            {
+                return;
+            }
+
+            _finished = true;
+            try
+            {
+                _owner.RestoreRepairSnapshotCore(_snapshot);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+    }
+
     public string ProjectRoot { get; }
     public string CatalogRoot => Path.Combine(AppSettings.GeneratedRootFor(ProjectRoot), "NativeSuitMaterials");
     public string CatalogPath => Path.Combine(CatalogRoot, "material-library.json");
     public string ContentRoot => Path.Combine(CatalogRoot, "Content");
+
+    private SemaphoreSlim RepairGate => RepairGates.GetOrAdd(
+        Path.GetFullPath(CatalogRoot),
+        _ => new SemaphoreSlim(1, 1));
 
     public ToolMaterialLibraryService(string projectRoot)
     {
@@ -38,6 +164,20 @@ public sealed class ToolMaterialLibraryService
 
     public IReadOnlyList<GeneratedMaterialEntry> LoadAvailable()
     {
+        var gate = RepairGate;
+        gate.Wait();
+        try
+        {
+            return LoadAvailableCore();
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private IReadOnlyList<GeneratedMaterialEntry> LoadAvailableCore()
+    {
         var entries = LoadCatalog().Materials;
         var changed = MergeSavedSuitMaterials(entries);
         foreach (var entry in entries)
@@ -45,10 +185,10 @@ public sealed class ToolMaterialLibraryService
             // Older projects kept their authored MIs only in the suit's persisted build stage.
             // Adopt those cooked files into the workspace library before the stage is rebuilt or
             // the source suit is removed, so "All tool materials" is genuinely project-wide.
-            ArchiveMaterialClosure(entry.PackagePath);
+            ArchiveMaterialClosureCore(entry.PackagePath);
         }
         var available = entries
-            .Where(entry => HasCookedPackage(entry.PackagePath))
+            .Where(entry => HasCookedPackageCore(entry.PackagePath))
             .GroupBy(entry => UnrealPathUtil.NormalizePackagePath(entry.PackagePath), StringComparer.OrdinalIgnoreCase)
             .Select(group => Clone(group.Last()))
             .OrderBy(entry => entry.Kind, StringComparer.OrdinalIgnoreCase)
@@ -56,25 +196,34 @@ public sealed class ToolMaterialLibraryService
             .ToList();
         if (changed)
         {
-            Save(entries);
+            SaveCore(entries);
         }
         return available;
     }
 
     public void Register(IEnumerable<GeneratedMaterialEntry> materials)
     {
-        var entries = LoadCatalog().Materials;
-        var changed = false;
-        foreach (var material in materials)
+        var gate = RepairGate;
+        gate.Wait();
+        try
         {
-            changed |= Upsert(entries, material);
-            // Register is also called after an in-place edit. Refresh the archived bytes from the
-            // newly cooked export instead of keeping an older complete library copy.
-            ArchiveMaterialClosure(material.PackagePath, refreshFromSource: true);
+            var entries = LoadCatalog().Materials;
+            var changed = false;
+            foreach (var material in materials)
+            {
+                changed |= Upsert(entries, material);
+                // Register is also called after an in-place edit. Refresh the archived bytes from the
+                // newly cooked export instead of keeping an older complete library copy.
+                ArchiveMaterialClosureCore(material.PackagePath, refreshFromSource: true);
+            }
+            if (changed)
+            {
+                SaveCore(entries);
+            }
         }
-        if (changed)
+        finally
         {
-            Save(entries);
+            gate.Release();
         }
     }
 
@@ -107,25 +256,43 @@ public sealed class ToolMaterialLibraryService
                 $"Material package path must be a safe /Game/ path. Current value: '{replacement.PackagePath}'.");
         }
 
-        var entries = LoadCatalog().Materials;
-        entries.RemoveAll(entry => UnrealPathUtil.NormalizePackagePath(entry.PackagePath)
-            .Equals(oldPackage, StringComparison.OrdinalIgnoreCase));
-        Upsert(entries, replacement);
-        ArchiveMaterialClosure(replacement.PackagePath, refreshFromSource: true);
-        DeleteArchivedPackageFiles(oldPackage);
-        Save(entries);
+        var gate = RepairGate;
+        gate.Wait();
+        try
+        {
+            var entries = LoadCatalog().Materials;
+            entries.RemoveAll(entry => UnrealPathUtil.NormalizePackagePath(entry.PackagePath)
+                .Equals(oldPackage, StringComparison.OrdinalIgnoreCase));
+            Upsert(entries, replacement);
+            ArchiveMaterialClosureCore(replacement.PackagePath, refreshFromSource: true);
+            DeleteArchivedPackageFilesCore(oldPackage);
+            SaveCore(entries);
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     public void Remove(string packagePath)
     {
         var package = UnrealPathUtil.NormalizePackagePath(packagePath);
-        var entries = LoadCatalog().Materials;
-        if (entries.RemoveAll(entry => UnrealPathUtil.NormalizePackagePath(entry.PackagePath)
-                .Equals(package, StringComparison.OrdinalIgnoreCase)) > 0)
+        var gate = RepairGate;
+        gate.Wait();
+        try
         {
-            Save(entries);
+            var entries = LoadCatalog().Materials;
+            if (entries.RemoveAll(entry => UnrealPathUtil.NormalizePackagePath(entry.PackagePath)
+                    .Equals(package, StringComparison.OrdinalIgnoreCase)) > 0)
+            {
+                SaveCore(entries);
+            }
+            DeleteArchivedPackageFilesCore(package);
         }
-        DeleteArchivedPackageFiles(package);
+        finally
+        {
+            gate.Release();
+        }
     }
 
     public IReadOnlyList<string> FindReferencingSuits(string packagePath, string? exceptSlotId = null)
@@ -176,18 +343,52 @@ public sealed class ToolMaterialLibraryService
 
     public bool HasCookedPackage(string packagePath)
     {
-        var packageBase = ResolvePackageBase(packagePath);
-        return HasCompletePackageBase(packageBase);
+        var gate = RepairGate;
+        gate.Wait();
+        try
+        {
+            return HasCookedPackageCore(packagePath);
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
+
+    private bool HasCookedPackageCore(string packagePath) =>
+        HasCompletePackageBase(ResolvePackageBase(packagePath));
 
     public string? ResolvePackageUasset(string packagePath)
     {
-        ArchivePackage(packagePath);
-        var packageBase = ResolvePackageBase(packagePath);
-        return HasCompletePackageBase(packageBase) ? packageBase + ".uasset" : null;
+        var gate = RepairGate;
+        gate.Wait();
+        try
+        {
+            ArchivePackageBestEffortCore(packagePath);
+            var packageBase = ResolvePackageBase(packagePath);
+            return HasCompletePackageBase(packageBase) ? packageBase + ".uasset" : null;
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     public IReadOnlyList<string> CopyPackageToContentRoot(string packagePath, string contentRoot)
+    {
+        var gate = RepairGate;
+        gate.Wait();
+        try
+        {
+            return CopyPackageToContentRootCore(packagePath, contentRoot);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private IReadOnlyList<string> CopyPackageToContentRootCore(string packagePath, string contentRoot)
     {
         var copied = new List<string>();
         var package = UnrealPathUtil.NormalizePackagePath(packagePath);
@@ -195,7 +396,7 @@ public sealed class ToolMaterialLibraryService
         {
             return copied;
         }
-        ArchivePackage(package);
+        ArchivePackageBestEffortCore(package);
         var sourceBase = ResolvePackageBase(package);
         var destinationBase = PackageBaseUnder(contentRoot, package);
         if (sourceBase is null || destinationBase is null)
@@ -236,18 +437,159 @@ public sealed class ToolMaterialLibraryService
         string materialPackagePath,
         string contentRoot)
     {
+        var gate = RepairGate;
+        gate.Wait();
+        try
+        {
+            return CopyMaterialClosureToContentRootCore(materialPackagePath, contentRoot);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private IReadOnlyList<string> CopyMaterialClosureToContentRootCore(
+        string materialPackagePath,
+        string contentRoot)
+    {
         var copied = new List<string>();
         var closure = ResolveMaterialDependencyClosure(materialPackagePath, preferLiveSource: false);
         foreach (var package in closure)
         {
             var sourceBase = ResolvePackageBase(package);
             ValidateClosurePackageBase(sourceBase, package, "workspace material library");
-            copied.AddRange(CopyPackageToContentRoot(package, contentRoot));
+            copied.AddRange(CopyPackageToContentRootCore(package, contentRoot));
 
             var destinationBase = PackageBaseUnder(contentRoot, package);
             ValidateClosurePackageBase(destinationBase, package, "fresh packaging stage");
         }
         return copied;
+    }
+
+    /// <summary>
+    /// Starts a workspace-library repair that remains reversible until the consuming suit's own
+    /// project and generated stages have committed. The transaction owns the shared-library gate;
+    /// attach repaired entries through its ImportIntoProject method rather than LoadAvailable.
+    /// </summary>
+    public MaterialLibraryRepairTransaction BeginRepairMaterialClosures(
+        IEnumerable<string> materialPackagePaths)
+    {
+        ArgumentNullException.ThrowIfNull(materialPackagePaths);
+        var roots = materialPackagePaths
+            .Select(UnrealPathUtil.NormalizePackagePath)
+            .Where(package => !string.IsNullOrWhiteSpace(package))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(package => package, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (roots.Count == 0)
+        {
+            throw new InvalidOperationException("Material repair requires at least one material package.");
+        }
+        foreach (var root in roots)
+        {
+            if (!IsSafeModPackagePath(root))
+            {
+                throw new InvalidOperationException(
+                    $"Tool-created material repair roots must be safe /Game/Mods packages. Current value: '{root}'.");
+            }
+        }
+
+        var gate = RepairGate;
+        gate.Wait();
+        RepairSnapshot? snapshot = null;
+        try
+        {
+            var closure = roots
+                .SelectMany(root => ResolveMaterialDependencyClosure(root, preferLiveSource: true))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(package => roots.Contains(package, StringComparer.OrdinalIgnoreCase) ? 0 : 1)
+                .ThenBy(package => package, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var catalog = LoadCatalog();
+            MergeSavedSuitMaterials(catalog.Materials);
+            var repairEntries = new List<GeneratedMaterialEntry>();
+            foreach (var root in roots)
+            {
+                var entry = catalog.Materials.FirstOrDefault(candidate =>
+                    UnrealPathUtil.NormalizePackagePath(candidate.PackagePath)
+                        .Equals(root, StringComparison.OrdinalIgnoreCase));
+                if (entry is null)
+                {
+                    entry = new GeneratedMaterialEntry
+                    {
+                        DisplayName = UnrealPathUtil.AssetName(root),
+                        Kind = "Material",
+                        PackagePath = root,
+                    };
+                    Upsert(catalog.Materials, entry);
+                }
+                repairEntries.Add(Clone(entry));
+            }
+
+            snapshot = CreateRepairSnapshotCore(closure);
+            foreach (var package in closure)
+            {
+                if (!ArchivePackageCore(package, refreshFromSource: true))
+                {
+                    throw new InvalidOperationException(
+                        $"Material repair could not recover '{package}' from the current suit or workspace library.");
+                }
+
+                var archiveBase = PackageBaseUnder(ContentRoot, package);
+                ValidateClosurePackageBase(archiveBase, package, "repaired workspace material library");
+            }
+
+            // Save catalog discovery and synthesized legacy entries inside the same snapshot.
+            // A later suit-stage failure restores the original catalog byte-for-byte.
+            SaveCore(catalog.Materials);
+            return new MaterialLibraryRepairTransaction(
+                this,
+                gate,
+                snapshot,
+                roots,
+                closure,
+                repairEntries);
+        }
+        catch (Exception repairFailure)
+        {
+            Exception? rollbackFailure = null;
+            if (snapshot is not null)
+            {
+                try
+                {
+                    RestoreRepairSnapshotCore(snapshot);
+                }
+                catch (Exception ex)
+                {
+                    rollbackFailure = ex;
+                }
+            }
+            gate.Release();
+
+            if (rollbackFailure is not null)
+            {
+                throw new AggregateException(
+                    "Material repair failed and its workspace-library snapshot could not be fully restored. " +
+                    $"The recovery snapshot was kept at '{snapshot!.Root}'.",
+                    repairFailure,
+                    rollbackFailure);
+            }
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Immediate compatibility wrapper. Workflows that rebuild a suit after repair should use
+    /// BeginRepairMaterialClosures and commit only after the suit transaction succeeds.
+    /// </summary>
+    public IReadOnlyList<string> RepairMaterialClosure(string materialPackagePath)
+    {
+        using var repair = BeginRepairMaterialClosures([materialPackagePath]);
+        var closure = repair.ClosurePackages.ToList();
+        repair.Commit();
+        return closure;
     }
 
     /// <summary>
@@ -314,6 +656,65 @@ public sealed class ToolMaterialLibraryService
             return false;
         }
     }
+
+    /// <summary>
+    /// Focused regression hook: snapshots an already prepared catalog/archive without requiring a
+    /// parseable UAsset dependency graph. The caller may replace the listed archive packages and
+    /// catalog, then Dispose to assert rollback or Commit to assert promotion persistence.
+    /// </summary>
+    internal MaterialLibraryRepairTransaction BeginRepairSnapshotForTest(
+        IEnumerable<string> materialPackagePaths)
+    {
+        var packages = materialPackagePaths
+            .Select(UnrealPathUtil.NormalizePackagePath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(package => package, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (packages.Count == 0 || packages.Any(package => !IsSafeModPackagePath(package)))
+        {
+            throw new InvalidOperationException(
+                "The material repair regression snapshot requires safe /Game/Mods packages.");
+        }
+
+        var gate = RepairGate;
+        gate.Wait();
+        RepairSnapshot? snapshot = null;
+        try
+        {
+            snapshot = CreateRepairSnapshotCore(packages);
+            var entries = packages.Select(package => new GeneratedMaterialEntry
+            {
+                DisplayName = UnrealPathUtil.AssetName(package),
+                Kind = "Material",
+                PackagePath = package,
+            }).ToList();
+            return new MaterialLibraryRepairTransaction(
+                this,
+                gate,
+                snapshot,
+                packages,
+                packages,
+                entries);
+        }
+        catch
+        {
+            if (snapshot is not null)
+            {
+                DeleteDirectoryBestEffort(snapshot.Root);
+            }
+            gate.Release();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Focused regression hook for the same per-package promotion used by real archive refreshes.
+    /// Call while a BeginRepairSnapshotForTest transaction owns the fixture library.
+    /// </summary>
+    internal static void ReplacePackageFilesAtomicallyForTest(
+        string sourceBase,
+        string destinationBase) =>
+        ReplacePackageFilesAtomically(sourceBase, destinationBase, requireCompleteSource: true);
 
     private CatalogFile LoadCatalog()
     {
@@ -462,7 +863,7 @@ public sealed class ToolMaterialLibraryService
         return true;
     }
 
-    private void Save(List<GeneratedMaterialEntry> entries)
+    private void SaveCore(List<GeneratedMaterialEntry> entries)
     {
         Directory.CreateDirectory(CatalogRoot);
         var catalog = new CatalogFile
@@ -474,6 +875,115 @@ public sealed class ToolMaterialLibraryService
                 .ToList(),
         };
         AtomicFileUtil.WriteAllText(CatalogPath, JsonSerializer.Serialize(catalog, JsonOptions));
+    }
+
+    private RepairSnapshot CreateRepairSnapshotCore(IReadOnlyList<string> packages)
+    {
+        var attemptsRoot = Path.Combine(
+            AppSettings.GeneratedRootFor(ProjectRoot),
+            "NativeSuitMaterialRepairAttempts");
+        var snapshotRoot = Path.Combine(attemptsRoot, Guid.NewGuid().ToString("N"));
+        var snapshotContentRoot = Path.Combine(snapshotRoot, "Content");
+        var catalogCopy = Path.Combine(snapshotRoot, "material-library.original.json");
+        try
+        {
+            Directory.CreateDirectory(snapshotRoot);
+            var catalogExisted = File.Exists(CatalogPath);
+            if (catalogExisted)
+            {
+                CopyFileDurably(CatalogPath, catalogCopy);
+            }
+
+            foreach (var package in packages)
+            {
+                var archiveBase = PackageBaseUnder(ContentRoot, package)
+                    ?? throw new InvalidOperationException(
+                        $"Could not resolve archived material package '{package}'.");
+                var snapshotBase = PackageBaseUnder(snapshotContentRoot, package)
+                    ?? throw new InvalidOperationException(
+                        $"Could not resolve repair snapshot path for '{package}'.");
+                foreach (var extension in CookedPackageExtensions)
+                {
+                    var source = archiveBase + extension;
+                    if (!File.Exists(source))
+                    {
+                        continue;
+                    }
+                    CopyFileDurably(source, snapshotBase + extension);
+                }
+            }
+
+            return new RepairSnapshot(
+                snapshotRoot,
+                catalogCopy,
+                catalogExisted,
+                packages.ToList());
+        }
+        catch
+        {
+            DeleteDirectoryBestEffort(snapshotRoot);
+            throw;
+        }
+    }
+
+    private void RestoreRepairSnapshotCore(RepairSnapshot snapshot)
+    {
+        var failures = new List<Exception>();
+        var snapshotContentRoot = Path.Combine(snapshot.Root, "Content");
+        foreach (var package in snapshot.Packages)
+        {
+            try
+            {
+                var snapshotBase = PackageBaseUnder(snapshotContentRoot, package)
+                    ?? throw new InvalidOperationException(
+                        $"Could not resolve repair snapshot path for '{package}'.");
+                var archiveBase = PackageBaseUnder(ContentRoot, package)
+                    ?? throw new InvalidOperationException(
+                        $"Could not resolve archived material package '{package}'.");
+                ReplacePackageFilesAtomically(
+                    snapshotBase,
+                    archiveBase,
+                    requireCompleteSource: false);
+            }
+            catch (Exception ex)
+            {
+                failures.Add(new IOException(
+                    $"Could not restore archived package '{package}' from the material-repair snapshot.",
+                    ex));
+            }
+        }
+
+        try
+        {
+            if (snapshot.CatalogExisted)
+            {
+                if (!File.Exists(snapshot.CatalogCopy))
+                {
+                    throw new FileNotFoundException(
+                        "The material catalog snapshot is missing.",
+                        snapshot.CatalogCopy);
+                }
+                AtomicReplaceFileFrom(snapshot.CatalogCopy, CatalogPath);
+            }
+            else if (File.Exists(CatalogPath))
+            {
+                File.Delete(CatalogPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            failures.Add(new IOException("Could not restore the workspace material catalog.", ex));
+        }
+
+        if (failures.Count > 0)
+        {
+            throw new AggregateException(
+                "The material-library repair could not be fully rolled back. " +
+                $"The recovery snapshot was kept at '{snapshot.Root}'.",
+                failures);
+        }
+
+        DeleteDirectoryBestEffort(snapshot.Root);
     }
 
     private static GeneratedMaterialEntry Clone(GeneratedMaterialEntry entry) => new()
@@ -490,12 +1000,12 @@ public sealed class ToolMaterialLibraryService
         CreatedUtc = entry.CreatedUtc,
     };
 
-    private bool ArchiveMaterialClosure(string materialPackagePath, bool refreshFromSource = false)
+    private bool ArchiveMaterialClosureCore(string materialPackagePath, bool refreshFromSource = false)
     {
         // Registration and legacy migration remain best-effort so a temporarily locked texture
         // does not make the Materials tab unusable. Release staging resolves the same graph in
         // strict mode and refuses to package until every dependency is complete.
-        var archivedRoot = ArchivePackage(materialPackagePath, refreshFromSource);
+        var archivedRoot = ArchivePackageBestEffortCore(materialPackagePath, refreshFromSource);
         if (!archivedRoot)
         {
             return false;
@@ -506,7 +1016,7 @@ public sealed class ToolMaterialLibraryService
             var complete = true;
             foreach (var dependency in closure)
             {
-                complete &= ArchivePackage(dependency, refreshFromSource);
+                complete &= ArchivePackageBestEffortCore(dependency, refreshFromSource);
             }
             return complete;
         }
@@ -542,11 +1052,7 @@ public sealed class ToolMaterialLibraryService
                 EngineVersion.VER_UE5_6,
                 mappings,
                 CustomSerializationFlags.SkipPreloadDependencyLoading);
-            return asset.Imports
-                .Select(import => UnrealPathUtil.NormalizePackagePath(import.ObjectName.ToString()))
-                .Where(dependency => dependency.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            return LiveModLocalPackageDependencies(asset);
         }
         catch (Exception ex)
         {
@@ -555,6 +1061,173 @@ public sealed class ToolMaterialLibraryService
                 "Re-cook or recreate this tool material before packaging.",
                 ex);
         }
+    }
+
+    /// <summary>
+    /// UAsset import maps are append-only in normal Material Forge edits. Retargeting a texture
+    /// parameter therefore leaves the old package/object imports behind even though no serialized
+    /// property references them anymore. Packaging must follow the live export properties rather
+    /// than treating every historical import-table row as a required dependency.
+    /// </summary>
+    private static IReadOnlyList<string> LiveModLocalPackageDependencies(UAsset asset)
+    {
+        var referencedImports = new HashSet<int>();
+        var directPackagePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var export in asset.Exports.OfType<NormalExport>())
+        {
+            CollectLivePropertyReferences(export.Data, referencedImports, directPackagePaths);
+            CollectImportReference(export.ClassIndex, referencedImports);
+            CollectImportReference(export.SuperIndex, referencedImports);
+            CollectImportReference(export.TemplateIndex, referencedImports);
+            CollectImportReference(export.OuterIndex, referencedImports);
+
+            // Preload/dependency arrays are intentionally excluded. Like the import table, they
+            // can retain historical package indices after an in-place material parameter edit.
+        }
+
+        foreach (var importIndex in referencedImports)
+        {
+            var package = ImportedPackagePath(asset, importIndex);
+            if (!string.IsNullOrWhiteSpace(package))
+            {
+                directPackagePaths.Add(package);
+            }
+        }
+
+        return directPackagePaths
+            .Select(UnrealPathUtil.NormalizePackagePath)
+            .Where(package => package.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(package => package, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static void CollectLivePropertyReferences(
+        IEnumerable<PropertyData> properties,
+        ISet<int> referencedImports,
+        ISet<string> directPackagePaths)
+    {
+        foreach (var property in properties)
+        {
+            switch (property)
+            {
+                case ObjectPropertyData objectReference:
+                    CollectImportReference(objectReference.Value, referencedImports);
+                    break;
+
+                case SoftObjectPropertyData softReference:
+                    var softPackage = softReference.Value.AssetPath.PackageName.ToString();
+                    if (!string.IsNullOrWhiteSpace(softPackage))
+                    {
+                        directPackagePaths.Add(softPackage);
+                    }
+                    break;
+
+                // SoftObjectPath, SoftClassPath, legacy SoftAssetPath and string asset/class
+                // references use the same serialized path shape but are not SoftObjectProperty.
+                case SoftObjectPathPropertyData softPathReference:
+                    var softPathPackage = softPathReference.Value.AssetPath.PackageName.ToString();
+                    if (!string.IsNullOrWhiteSpace(softPathPackage))
+                    {
+                        directPackagePaths.Add(softPathPackage);
+                    }
+                    break;
+
+                case DelegatePropertyData delegateReference:
+                    if (delegateReference.Value is not null)
+                    {
+                        CollectImportReference(delegateReference.Value.Object, referencedImports);
+                    }
+                    break;
+
+                case MulticastDelegatePropertyData multicastReference:
+                    foreach (var item in multicastReference.Value ?? [])
+                    {
+                        if (item is not null)
+                        {
+                            CollectImportReference(item.Object, referencedImports);
+                        }
+                    }
+                    break;
+
+                case AssetObjectPropertyData assetReference:
+                    var assetPackage = UnrealPathUtil.NormalizePackagePath(assetReference.Value?.ToString());
+                    if (!string.IsNullOrWhiteSpace(assetPackage))
+                    {
+                        directPackagePaths.Add(assetPackage);
+                    }
+                    break;
+
+                case StructPropertyData structure:
+                    CollectLivePropertyReferences(structure.Value, referencedImports, directPackagePaths);
+                    break;
+
+                case MapPropertyData map:
+                    CollectLivePropertyReferences(map.Value.Keys, referencedImports, directPackagePaths);
+                    CollectLivePropertyReferences(map.Value.Values, referencedImports, directPackagePaths);
+                    break;
+
+                case ArrayPropertyData array:
+                    CollectLivePropertyReferences(array.Value ?? Array.Empty<PropertyData>(), referencedImports, directPackagePaths);
+                    break;
+            }
+        }
+    }
+
+    private static void CollectImportReference(FPackageIndex? packageIndex, ISet<int> referencedImports)
+    {
+        if (packageIndex is not null && packageIndex.IsImport())
+        {
+            referencedImports.Add(-packageIndex.Index - 1);
+        }
+    }
+
+    private static string? ImportedPackagePath(UAsset asset, int importIndex)
+    {
+        var visited = new HashSet<int>();
+        while (importIndex >= 0 && importIndex < asset.Imports.Count && visited.Add(importIndex))
+        {
+            var import = asset.Imports[importIndex];
+            var objectName = import.ObjectName.ToString();
+            if (objectName.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+            {
+                return UnrealPathUtil.NormalizePackagePath(objectName);
+            }
+
+            if (!import.OuterIndex.IsImport())
+            {
+                return null;
+            }
+            importIndex = -import.OuterIndex.Index - 1;
+        }
+        return null;
+    }
+
+    internal static IReadOnlyList<string> ReachableImportPackagesForTest(
+        IReadOnlyList<(string ObjectName, int OuterImportIndex)> imports,
+        IEnumerable<int> referencedImportIndices)
+    {
+        var packages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var referencedIndex in referencedImportIndices)
+        {
+            var index = referencedIndex;
+            var visited = new HashSet<int>();
+            while (index >= 0 && index < imports.Count && visited.Add(index))
+            {
+                var import = imports[index];
+                if (import.ObjectName.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+                {
+                    var package = UnrealPathUtil.NormalizePackagePath(import.ObjectName);
+                    if (package.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase))
+                    {
+                        packages.Add(package);
+                    }
+                    break;
+                }
+                index = import.OuterImportIndex;
+            }
+        }
+        return packages.OrderBy(package => package, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     private string? PreferredClosurePackageBase(string packagePath, bool preferLiveSource)
@@ -603,59 +1276,226 @@ public sealed class ToolMaterialLibraryService
         }
     }
 
-    private bool ArchivePackage(string packagePath, bool refreshFromSource = false)
+    private bool ArchivePackageBestEffortCore(string packagePath, bool refreshFromSource = false)
     {
         try
         {
-            var package = UnrealPathUtil.NormalizePackagePath(packagePath);
-            if (!IsSafeGamePackagePath(package))
-            {
-                return false;
-            }
-
-            var archiveBase = PackageBaseUnder(ContentRoot, package);
-            if (archiveBase is null)
-            {
-                return false;
-            }
-            if (!refreshFromSource && HasCompletePackageBase(archiveBase))
-            {
-                return true;
-            }
-
-            var sourceBase = ResolvePackageBase(package, includeArchive: false);
-            if (!HasCompletePackageBase(sourceBase))
-            {
-                return HasCompletePackageBase(archiveBase);
-            }
-
-            Directory.CreateDirectory(Path.GetDirectoryName(archiveBase)!);
-            foreach (var extension in new[] { ".uasset", ".uexp", ".ubulk" })
-            {
-                var source = sourceBase + extension;
-                if (File.Exists(source))
-                {
-                    File.Copy(source, archiveBase + extension, overwrite: true);
-                }
-                else if (refreshFromSource && extension.Equals(".ubulk", StringComparison.OrdinalIgnoreCase))
-                {
-                    // A profile change can move all mip payload inline. Do not retain the old
-                    // external payload beside a freshly archived uasset/uexp pair.
-                    var staleArchiveBulk = archiveBase + extension;
-                    if (File.Exists(staleArchiveBulk))
-                    {
-                        File.Delete(staleArchiveBulk);
-                    }
-                }
-            }
-            return HasCompletePackageBase(archiveBase);
+            return ArchivePackageCore(packagePath, refreshFromSource);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // A locked or read-only archive must not make the Materials tab unusable. The entry
             // remains available from its original cooked source and can be adopted on a later load.
-            return HasCookedPackage(packagePath);
+            return HasCookedPackageCore(packagePath);
         }
+    }
+
+    private bool ArchivePackageCore(string packagePath, bool refreshFromSource = false)
+    {
+        var package = UnrealPathUtil.NormalizePackagePath(packagePath);
+        if (!IsSafeGamePackagePath(package))
+        {
+            return false;
+        }
+
+        var archiveBase = PackageBaseUnder(ContentRoot, package);
+        if (archiveBase is null)
+        {
+            return false;
+        }
+        if (!refreshFromSource && HasCompletePackageBase(archiveBase))
+        {
+            return true;
+        }
+
+        var sourceBase = ResolvePackageBase(package, includeArchive: false);
+        if (!HasCompletePackageBase(sourceBase))
+        {
+            return HasCompletePackageBase(archiveBase);
+        }
+
+        ValidateClosurePackageBase(sourceBase, package, "current workspace material source");
+        ReplacePackageFilesAtomically(
+            sourceBase!,
+            archiveBase,
+            requireCompleteSource: true);
+        return HasCompletePackageBase(archiveBase);
+    }
+
+    /// <summary>
+    /// Promotes all members of one cooked package as a unit. Every candidate is staged beside the
+    /// destination first, and the complete previous trio is retained until validation succeeds.
+    /// If any member cannot be promoted, the exact previous file set is restored before returning.
+    /// </summary>
+    private static void ReplacePackageFilesAtomically(
+        string sourceBase,
+        string destinationBase,
+        bool requireCompleteSource)
+    {
+        var destinationDirectory = Path.GetDirectoryName(Path.GetFullPath(destinationBase))
+            ?? throw new InvalidOperationException(
+                $"Could not resolve the archive directory for '{destinationBase}'.");
+        Directory.CreateDirectory(destinationDirectory);
+
+        var attemptRoot = Path.Combine(
+            destinationDirectory,
+            $".{Path.GetFileName(destinationBase)}.promote-{Guid.NewGuid():N}");
+        var stagedBase = Path.Combine(attemptRoot, "next", "package");
+        var previousBase = Path.Combine(attemptRoot, "previous", "package");
+        Directory.CreateDirectory(attemptRoot);
+        var keepAttemptForRecovery = false;
+        try
+        {
+            foreach (var extension in CookedPackageExtensions)
+            {
+                var source = sourceBase + extension;
+                if (File.Exists(source))
+                {
+                    CopyFileDurably(source, stagedBase + extension);
+                }
+
+                var previous = destinationBase + extension;
+                if (File.Exists(previous))
+                {
+                    CopyFileDurably(previous, previousBase + extension);
+                }
+            }
+
+            if (requireCompleteSource)
+            {
+                ValidateClosurePackageBase(
+                    stagedBase,
+                    "/Game/Mods/MaterialRepair/StagedPackage",
+                    "atomic archive candidate");
+            }
+
+            try
+            {
+                foreach (var extension in CookedPackageExtensions)
+                {
+                    var staged = stagedBase + extension;
+                    var destination = destinationBase + extension;
+                    if (File.Exists(staged))
+                    {
+                        // The staging folder is a sibling of the destination package, keeping the
+                        // final move on one volume so each individual member replacement is atomic.
+                        File.Move(staged, destination, overwrite: true);
+                    }
+                    else if (File.Exists(destination))
+                    {
+                        File.Delete(destination);
+                    }
+                }
+
+                if (requireCompleteSource)
+                {
+                    ValidateClosurePackageBase(
+                        destinationBase,
+                        "/Game/Mods/MaterialRepair/ArchivedPackage",
+                        "promoted workspace material library");
+                }
+            }
+            catch (Exception promotionFailure)
+            {
+                try
+                {
+                    RestorePackageMembers(previousBase, destinationBase);
+                }
+                catch (Exception rollbackFailure)
+                {
+                    keepAttemptForRecovery = true;
+                    throw new AggregateException(
+                        $"Could not promote cooked package '{destinationBase}' or restore its previous files. " +
+                        $"The package recovery files were kept at '{attemptRoot}'.",
+                        promotionFailure,
+                        rollbackFailure);
+                }
+                throw;
+            }
+        }
+        finally
+        {
+            if (!keepAttemptForRecovery)
+            {
+                DeleteDirectoryBestEffort(attemptRoot);
+            }
+        }
+    }
+
+    private static void RestorePackageMembers(string snapshotBase, string destinationBase)
+    {
+        foreach (var extension in CookedPackageExtensions)
+        {
+            var snapshot = snapshotBase + extension;
+            var destination = destinationBase + extension;
+            if (File.Exists(snapshot))
+            {
+                AtomicReplaceFileFrom(snapshot, destination);
+            }
+            else if (File.Exists(destination))
+            {
+                File.Delete(destination);
+            }
+        }
+    }
+
+    private static void AtomicReplaceFileFrom(string source, string destination)
+    {
+        var destinationPath = Path.GetFullPath(destination);
+        var directory = Path.GetDirectoryName(destinationPath)
+            ?? throw new InvalidOperationException(
+                $"Could not resolve the parent folder for '{destination}'.");
+        Directory.CreateDirectory(directory);
+        var temporary = Path.Combine(
+            directory,
+            $".{Path.GetFileName(destinationPath)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            CopyFileDurably(source, temporary);
+            File.Move(temporary, destinationPath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporary))
+            {
+                try { File.Delete(temporary); } catch { /* best-effort orphan cleanup */ }
+            }
+        }
+    }
+
+    private static void CopyFileDurably(string source, string destination)
+    {
+        var destinationPath = Path.GetFullPath(destination);
+        var directory = Path.GetDirectoryName(destinationPath)
+            ?? throw new InvalidOperationException(
+                $"Could not resolve the parent folder for '{destination}'.");
+        Directory.CreateDirectory(directory);
+        using var input = new FileStream(
+            source,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 1024 * 1024,
+            FileOptions.SequentialScan);
+        using var output = new FileStream(
+            destinationPath,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize: 1024 * 1024,
+            FileOptions.WriteThrough);
+        input.CopyTo(output);
+        output.Flush(flushToDisk: true);
+    }
+
+    private static void DeleteDirectoryBestEffort(string path)
+    {
+        if (!Directory.Exists(path))
+        {
+            return;
+        }
+        try { Directory.Delete(path, recursive: true); }
+        catch { /* keep an orphaned recovery/attempt directory instead of masking the result */ }
     }
 
     private string? ResolvePackageBase(string packagePath, bool includeArchive = true)
@@ -718,6 +1558,7 @@ public sealed class ToolMaterialLibraryService
         SuitProjectService projects)
     {
         var candidates = new List<(string PackageBase, string Owner)>();
+        var declaredOwners = new List<(string Owner, bool HasCompleteCook, string Reason)>();
         foreach (var summary in projects.ListProjectFiles()
                      .OrderBy(project => project.Path, StringComparer.OrdinalIgnoreCase))
         {
@@ -737,16 +1578,43 @@ public sealed class ToolMaterialLibraryService
                     continue;
                 }
 
+                var owner = $"{summary.DisplayName} ({summary.Path})";
+                var ownerHasCompleteCook = false;
+                var rejectedCandidates = new List<string>();
                 foreach (var contentRoot in GeneratedTextureContentRoots(texture))
                 {
                     var candidate = PackageBaseUnder(contentRoot, package);
-                    if (HasCompletePackageBase(candidate))
+                    var validationReason = "the cooked package path is invalid";
+                    if (!string.IsNullOrWhiteSpace(candidate) &&
+                        MainForm.ValidateGeneratedTextureCook(texture, candidate, out validationReason))
                     {
-                        candidates.Add((Path.GetFullPath(candidate!),
-                            $"{summary.DisplayName} ({summary.Path})"));
+                        ownerHasCompleteCook = true;
+                        candidates.Add((Path.GetFullPath(candidate!), owner));
+                    }
+                    else if (!string.IsNullOrWhiteSpace(validationReason))
+                    {
+                        rejectedCandidates.Add(validationReason);
                     }
                 }
+                declaredOwners.Add((
+                    owner,
+                    ownerHasCompleteCook,
+                    rejectedCandidates.Distinct(StringComparer.OrdinalIgnoreCase).FirstOrDefault() ??
+                    "no trusted current cooked output was found"));
             }
+        }
+
+        var incompleteOwners = declaredOwners
+            .Where(owner => !owner.HasCompleteCook)
+            .Select(owner => $"{owner.Owner}: {owner.Reason}")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(owner => owner, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (incompleteOwners.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Generated texture package '{package}' has a saved recipe, but its current cooked output is incomplete. " +
+                "Reimport that texture before packaging. Owners: " + string.Join("; ", incompleteOwners));
         }
 
         var distinct = candidates
@@ -758,9 +1626,14 @@ public sealed class ToolMaterialLibraryService
                     .ToList()))
             .OrderBy(candidate => candidate.PackageBase, StringComparer.OrdinalIgnoreCase)
             .ToList();
-        if (distinct.Count == 0)
+        if (declaredOwners.Count == 0)
         {
             return null;
+        }
+        if (distinct.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"Generated texture package '{package}' has a saved recipe, but no complete current cook was found.");
         }
 
         var expectedFingerprint = PackageFingerprint(distinct[0].PackageBase);
@@ -914,7 +1787,7 @@ public sealed class ToolMaterialLibraryService
         File.Exists(packageBase + ".uasset") && new FileInfo(packageBase + ".uasset").Length > 0 &&
         File.Exists(packageBase + ".uexp") && new FileInfo(packageBase + ".uexp").Length > 0;
 
-    private void DeleteArchivedPackageFiles(string packagePath)
+    private void DeleteArchivedPackageFilesCore(string packagePath)
     {
         var package = UnrealPathUtil.NormalizePackagePath(packagePath);
         if (!IsSafeGamePackagePath(package))
@@ -927,7 +1800,7 @@ public sealed class ToolMaterialLibraryService
         {
             return;
         }
-        foreach (var extension in new[] { ".uasset", ".uexp", ".ubulk" })
+        foreach (var extension in CookedPackageExtensions)
         {
             var path = packageBase + extension;
             if (File.Exists(path))
