@@ -526,8 +526,8 @@ internal static class ReleaseRegressionChecks
         }
 
         Check(
-            PartGraftService.AddsClassChildPropertyForTest(),
-            "an appended SCS component gets one reflected generated-class field bound to its component class",
+            PartGraftService.RejectsCookedClassFieldMutationForTest(),
+            "an appended SCS component cannot mutate an opaque cooked CDO's reflected class-field schema",
             failures,
             output);
         Check(
@@ -538,6 +538,16 @@ internal static class ReleaseRegressionChecks
         Check(
             PartGraftService.AddsScsNodeDependencyInNativeOrderForTest(),
             "an appended SCS node is added once to SimpleConstructionScript create-before-serialization dependencies",
+            failures,
+            output);
+        Check(
+            PartGraftService.RebindsCrossAssetDonorNamesForTest(),
+            "cross-package component grafts rebind nested collision names and cutscene owner names into the target name map",
+            failures,
+            output);
+        Check(
+            StageValidationService.RejectsMalformedCustomStaticMetadataForTest(),
+            "final stage validation rejects malformed custom-static BodyInstance and cutscene parent-owner metadata",
             failures,
             output);
 
@@ -807,6 +817,394 @@ internal static class ReleaseRegressionChecks
             !CustomStaticMeshImportService.HasCompleteCharacterGraft(partialCustomMeshGraft) &&
             !CustomStaticMeshImportService.HasCompleteCharacterGraft(completeCustomMeshGraft.Take(1)),
             "custom meshes require successful playable and cutscene grafts",
+            failures,
+            output);
+        Check(
+            StageValidationService.CustomStaticMeshDeclarationIdentityRegressionPasses(),
+            "custom mesh declarations reject normalized duplicate IDs, resolved components, and mesh packages",
+            failures,
+            output);
+        Check(
+            StageValidationService.CustomStaticComponentTemplateBindingRegressionPasses(),
+            "custom mesh validation binds each live SCS node to its exact declared component-template export",
+            failures,
+            output);
+        Check(
+            StageValidationService.ValidationProjectRootResolutionRegressionPasses(),
+            "stage-validation CLI derives canonical workspace roots and honors explicit archived-project roots",
+            failures,
+            output);
+        var combinedStageFailure = MainForm.CombinedStageValidationFailure(
+            new InvalidOperationException("combined-stage regression fixture"));
+        Check(
+            combinedStageFailure.Severity.Equals("ERROR", StringComparison.OrdinalIgnoreCase) &&
+            combinedStageFailure.Message.Contains("packaging is blocked", StringComparison.OrdinalIgnoreCase) &&
+            combinedStageFailure.Message.Contains("combined-stage regression fixture", StringComparison.Ordinal),
+            "combined-mod packaging treats an unexpected structural-validation failure as a blocking error",
+            failures,
+            output);
+        var customSourcePathProject = new NativeSuitProject { SlotId = "custom-source-fixture" };
+        Check(
+            StageValidationService.ProjectOwnedCustomMeshSourcePathIsSafeForTest(
+                Path.GetTempPath(),
+                customSourcePathProject,
+                Path.Combine("ImportedMeshes", "fixture.obj")) &&
+            !StageValidationService.ProjectOwnedCustomMeshSourcePathIsSafeForTest(
+                Path.GetTempPath(),
+                customSourcePathProject,
+                Path.Combine("..", "..", "outside.obj")),
+            "custom mesh OBJ declarations stay inside their SuitProjectService-owned output directory",
+            failures,
+            output);
+
+        var customPackageFixtureRoot = Path.Combine(
+            Path.GetTempPath(),
+            "Batcomputer-custom-package-regression-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            const string customPackage = "/Game/Mods/Fixture/Meshes/SM_Custom_Fixture";
+            var customPackageBase = Path.Combine(
+                customPackageFixtureRoot,
+                "Mods",
+                "Fixture",
+                "Meshes",
+                "SM_Custom_Fixture");
+            Directory.CreateDirectory(Path.GetDirectoryName(customPackageBase)!);
+            File.WriteAllBytes(customPackageBase + ".uasset", [1]);
+            File.WriteAllBytes(customPackageBase + ".uexp", [2]);
+            File.WriteAllBytes(customPackageBase + ".ubulk", [3]);
+            var completeCustomPackage = StageValidationService.RequiredPackageFilesAreNonEmptyForTest(
+                customPackageFixtureRoot,
+                customPackage,
+                ".uasset",
+                ".uexp",
+                ".ubulk");
+            File.WriteAllBytes(customPackageBase + ".ubulk", []);
+            var emptyPayloadRejected = !StageValidationService.RequiredPackageFilesAreNonEmptyForTest(
+                customPackageFixtureRoot,
+                customPackage,
+                ".uasset",
+                ".uexp",
+                ".ubulk");
+            Check(
+                completeCustomPackage && emptyPayloadRejected,
+                "custom mesh package validation requires a nonempty uasset, uexp, and ubulk trio",
+                failures,
+                output);
+        }
+        catch
+        {
+            failures.Add("custom mesh package validation requires a nonempty uasset, uexp, and ubulk trio");
+        }
+        finally
+        {
+            try { Directory.Delete(customPackageFixtureRoot, recursive: true); } catch { /* best effort */ }
+        }
+
+        var contextualCustomMaterialProject = new NativeSuitProject
+        {
+            MaterialAssignments =
+            [
+                new SavedMaterialAssignment
+                {
+                    Component = "CustomMesh_Fixture",
+                    Slot = 0,
+                    Context = "both",
+                    MiPackagePath = "/Game/Mods/Fixture/Materials/MI_Both",
+                },
+                new SavedMaterialAssignment
+                {
+                    Component = "CustomMesh_Fixture",
+                    Slot = 0,
+                    Context = "playable",
+                    MiPackagePath = "/Game/Mods/Fixture/Materials/MI_Playable",
+                },
+                new SavedMaterialAssignment
+                {
+                    Component = "CustomMesh_Fixture",
+                    Slot = 0,
+                    Context = "cutscene",
+                    MiPackagePath = "/Game/Mods/Fixture/Materials/MI_Cutscene",
+                },
+            ],
+        };
+        Check(
+            StageValidationService.EffectiveCustomStaticMeshMaterialForTest(
+                contextualCustomMaterialProject,
+                "playable",
+                "CustomMesh_Fixture",
+                "/Game/Base/MI_Fallback") == "/Game/Mods/Fixture/Materials/MI_Playable" &&
+            StageValidationService.EffectiveCustomStaticMeshMaterialForTest(
+                contextualCustomMaterialProject,
+                "cutscene",
+                "CustomMesh_Fixture",
+                "/Game/Base/MI_Fallback") == "/Game/Mods/Fixture/Materials/MI_Cutscene" &&
+            StageValidationService.EffectiveCustomStaticMeshMaterialForTest(
+                contextualCustomMaterialProject,
+                "playable",
+                "CustomMesh_Unassigned",
+                "/Game/Base/MI_Fallback") == "/Game/Base/MI_Fallback",
+            "custom mesh validation resolves the final role-specific slot-zero material with a declaration fallback",
+            failures,
+            output);
+        Check(
+            StaticMeshObjProbeService.PayloadMetadataRegressionPasses(),
+            "custom OBJ payloads update section vertex ranges and inline buffer-size summaries",
+            failures,
+            output);
+
+        var riskySurface = new MaterialSurfaceDiagnosticService.MmrStats(
+            1000, 255, 24, 8, 32, 55d, 12d, 70d);
+        var safeSurface = new MaterialSurfaceDiagnosticService.MmrStats(
+            1000, 0, 76, 64, 89, 0d, 0d, 0d);
+        var riskySurfaceMessages = MaterialSurfaceDiagnosticService.RiskMessages(
+            riskySurface,
+            expectUnusedGreen: true);
+        var specializedDonorMessages = MaterialSurfaceDiagnosticService.RiskMessages(riskySurface);
+        Check(
+            riskySurfaceMessages.Any(message => message.Contains("green channel", StringComparison.OrdinalIgnoreCase)) &&
+            riskySurfaceMessages.Any(message => message.Contains("fully metallic", StringComparison.OrdinalIgnoreCase)) &&
+            riskySurfaceMessages.Any(message => message.Contains("roughness", StringComparison.OrdinalIgnoreCase)) &&
+            specializedDonorMessages.All(message => !message.Contains("green channel", StringComparison.OrdinalIgnoreCase)) &&
+            specializedDonorMessages.Any(message => message.Contains("fully metallic", StringComparison.OrdinalIgnoreCase)) &&
+            MaterialSurfaceDiagnosticService.RiskMessages(safeSurface).Count == 0,
+            "MMR authoring diagnostics scope green-channel packing to verified donor families while retaining metal and gloss warnings",
+            failures,
+            output);
+
+        var nativePlasticCowlRecipe = new MaterialTemplateCatalogService().Recipes()
+            .SingleOrDefault(recipe => recipe.Id.Equals(
+                "accessory.textured-cowl.native-plastic",
+                StringComparison.OrdinalIgnoreCase));
+        Check(
+            nativePlasticCowlRecipe is not null &&
+            nativePlasticCowlRecipe.ExpectsUnusedMmrGreen &&
+            nativePlasticCowlRecipe.Outputs.Count == 2 &&
+            new[] { "RAO", "CT", "NRM", "ColourMask" }.All(parameter =>
+                nativePlasticCowlRecipe.DefaultTextureOverrides.ContainsKey(parameter)) &&
+            nativePlasticCowlRecipe.Outputs.Any(candidate =>
+                candidate.Role.Equals("gameplay", StringComparison.OrdinalIgnoreCase) &&
+                candidate.DonorPackagePath.Equals(
+                    "/Game/Characters/Attachments/Hat/BatmanCowl_MoldedEyes/Materials/MI_HAT_BatmanBraveAndTheBold_EOM",
+                    StringComparison.OrdinalIgnoreCase)) &&
+            nativePlasticCowlRecipe.Outputs.Any(candidate =>
+                candidate.Role.Equals("cutscene", StringComparison.OrdinalIgnoreCase) &&
+                candidate.DonorPackagePath.Equals(
+                    "/Game/Characters/Attachments/Hat/BatmanCowl_MoldedEyes/Materials/MI_HAT_BatmanBraveAndTheBold_CUT",
+                    StringComparison.OrdinalIgnoreCase)),
+            "the native-plastic custom-cowl template keeps matched role donors and neutralizes donor-mesh maps",
+            failures,
+            output);
+
+        var inheritedDuplicateNormals = new[]
+        {
+            new MaterialGenService.TextureParam
+            {
+                Name = "DNRM",
+                ObjectPath = "/Game/Mods/Fixture/T_CustomNormal.T_CustomNormal",
+            },
+            new MaterialGenService.TextureParam
+            {
+                Name = "NRM",
+                ObjectPath = "/Game/Mods/Fixture/T_CustomNormal.T_CustomNormal",
+            },
+        };
+        var inheritedNormalDuplicates = MaterialWizard.FindDuplicatedEffectiveNormalParameters(
+            inheritedDuplicateNormals,
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        var correctedNormalDuplicates = MaterialWizard.FindDuplicatedEffectiveNormalParameters(
+            inheritedDuplicateNormals,
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["NRM"] = "/Game/Characters/Textures/Shared/EoM/T_Dummy_Norm.T_Dummy_Norm",
+            },
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        var clearedNormalDuplicates = MaterialWizard.FindDuplicatedEffectiveNormalParameters(
+            inheritedDuplicateNormals,
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+            new HashSet<string>(new[] { "NRM" }, StringComparer.OrdinalIgnoreCase));
+        Check(
+            inheritedNormalDuplicates.Count == 1 &&
+            inheritedNormalDuplicates[0].Contains("DNRM", StringComparer.OrdinalIgnoreCase) &&
+            inheritedNormalDuplicates[0].Contains("NRM", StringComparer.OrdinalIgnoreCase) &&
+            correctedNormalDuplicates.Count == 0 &&
+            clearedNormalDuplicates.Count == 0,
+            "material surface checks compare effective inherited normals and respect overrides or explicit clears",
+            failures,
+            output);
+
+        const string materialPairGroup = "material-pair-regression";
+        var materialPair = new List<GeneratedMaterialEntry>
+        {
+            new() { PackagePath = "/Game/Mods/Pair/MI_Cowl_LOD0", TemplateGroupId = materialPairGroup, TemplateOutputRole = "gameplay LOD0" },
+            new() { PackagePath = "/Game/Mods/Pair/MI_Cowl_LOD0_CUT", TemplateGroupId = materialPairGroup, TemplateOutputRole = "cutscene LOD0" },
+            new() { PackagePath = "/Game/Mods/Pair/MI_Cowl_LOD1", TemplateGroupId = materialPairGroup, TemplateOutputRole = "gameplay LOD1" },
+            new() { PackagePath = "/Game/Mods/Pair/MI_Cowl_LOD1_CUT", TemplateGroupId = materialPairGroup, TemplateOutputRole = "cutscene LOD1" },
+        };
+        var resolvedLod0Pair = MainForm.ResolveTemplateMaterialAssignments(
+            materialPair,
+            "/Game/Mods/Pair/MI_Cowl_LOD0",
+            "both");
+        var resolvedLod1Pair = MainForm.ResolveTemplateMaterialAssignments(
+            materialPair,
+            "/Game/Mods/Pair/MI_Cowl_LOD1_CUT",
+            "both");
+        var incompletePair = MainForm.ResolveTemplateMaterialAssignments(
+            materialPair.Where(entry => !entry.TemplateOutputRole.Equals("cutscene LOD0", StringComparison.OrdinalIgnoreCase)),
+            "/Game/Mods/Pair/MI_Cowl_LOD0",
+            "both");
+        var duplicatePair = MainForm.ResolveTemplateMaterialAssignments(
+            materialPair.Append(new GeneratedMaterialEntry
+            {
+                PackagePath = "/Game/Mods/Pair/MI_Cowl_LOD0_Duplicate",
+                TemplateGroupId = materialPairGroup,
+                TemplateOutputRole = "gameplay LOD0",
+            }),
+            "/Game/Mods/Pair/MI_Cowl_LOD0",
+            "both");
+        Check(
+            resolvedLod0Pair.Assignments.Count == 2 &&
+            resolvedLod0Pair.Assignments.Any(assignment =>
+                assignment.Context.Equals("playable", StringComparison.OrdinalIgnoreCase) &&
+                assignment.PackagePath.EndsWith("MI_Cowl_LOD0", StringComparison.OrdinalIgnoreCase)) &&
+            resolvedLod0Pair.Assignments.Any(assignment =>
+                assignment.Context.Equals("cutscene", StringComparison.OrdinalIgnoreCase) &&
+                assignment.PackagePath.EndsWith("MI_Cowl_LOD0_CUT", StringComparison.OrdinalIgnoreCase)) &&
+            resolvedLod1Pair.Assignments.Count == 2 &&
+            resolvedLod1Pair.Assignments.All(assignment =>
+                assignment.PackagePath.Contains("LOD1", StringComparison.OrdinalIgnoreCase)) &&
+            incompletePair.Assignments.Count == 0 && !string.IsNullOrWhiteSpace(incompletePair.Warning) &&
+            duplicatePair.Assignments.Count == 0 && !string.IsNullOrWhiteSpace(duplicatePair.Warning),
+            "paired material outputs route exact gameplay/cutscene and LOD siblings while incomplete or ambiguous groups fail closed",
+            failures,
+            output);
+
+        const string customBaselineMaterial = "/Game/Mods/CustomFlow/Materials/MI_CustomCowl";
+        const string customMeshPackage = "/Game/Mods/CustomFlow/Meshes/SM_Custom_Cowl";
+        var customMaterialFlowProject = new NativeSuitProject
+        {
+            TargetPackages = new TargetPackages
+            {
+                Playable = "/Game/Mods/CustomFlow/Characters/BP_CustomFlow_Playable",
+            },
+            GeneratedMaterials =
+            [
+                new GeneratedMaterialEntry { PackagePath = customBaselineMaterial },
+            ],
+            CustomStaticMeshes =
+            [
+                new CustomStaticMeshImport
+                {
+                    Id = "custom-cowl",
+                    ResolvedComponent = "CustomMesh_CustomCowl",
+                    MeshPackagePath = customMeshPackage,
+                    MaterialPath = customBaselineMaterial,
+                },
+            ],
+        };
+        var referencedCustomBaseline = MainForm.ReferencedGeneratedMaterialPackagesForRelease(
+            customMaterialFlowProject);
+        var requiredCustomBaseline = MainForm.AssignedModMaterialPackagesForRelease(
+            customMaterialFlowProject);
+        var renamedCustomBaseline = MainForm.ReplaceCustomStaticMeshMaterialReferences(
+            customMaterialFlowProject,
+            customBaselineMaterial.ToLowerInvariant(),
+            "/Game/Mods/CustomFlow/Materials/MI_RenamedCowl");
+        var capturedCustomTransform = MainForm.CaptureViewerCustomMeshTransform(
+            new CustomStaticMeshImport
+            {
+                Scale = 215f,
+                OffsetX = 12f,
+                OffsetY = -8f,
+                OffsetZ = 4f,
+                RotationPitch = 15f,
+                RotationYaw = 25f,
+                RotationRoll = 35f,
+            });
+        customMaterialFlowProject.CustomStaticMeshes[0].MaterialPath = customMeshPackage;
+        var materialMeshCollision = MainForm.MaterialCustomMeshPackageCollisions(customMaterialFlowProject);
+        Check(
+            referencedCustomBaseline.SequenceEqual([customBaselineMaterial], StringComparer.OrdinalIgnoreCase) &&
+            requiredCustomBaseline.SequenceEqual([customBaselineMaterial], StringComparer.OrdinalIgnoreCase) &&
+            renamedCustomBaseline == 1 &&
+            capturedCustomTransform.Scale == 215f &&
+            capturedCustomTransform.OffsetX == 12f &&
+            capturedCustomTransform.OffsetY == -8f &&
+            capturedCustomTransform.OffsetZ == 4f &&
+            capturedCustomTransform.RotationPitch == 15f &&
+            capturedCustomTransform.RotationYaw == 25f &&
+            capturedCustomTransform.RotationRoll == 35f &&
+            materialMeshCollision.SequenceEqual([customMeshPackage], StringComparer.OrdinalIgnoreCase),
+            "custom mesh material baselines survive release ownership checks and rename, while package collisions and viewer transform drift are detectable",
+            failures,
+            output);
+
+        const string closureRoot = "/Game/Mods/Shared/Materials/MI_Shared";
+        const string closureParent = "/Game/Mods/Shared/Materials/MI_Parent";
+        const string closureTexture = "/Game/Mods/Shared/Textures/T_Body_BC";
+        const string closureParentTexture = "/Game/Mods/Shared/Textures/T_Parent_MMR";
+        var closureGraph = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            [closureRoot] = [closureParent, closureTexture, "/Game/Characters/Shared/T_Game"],
+            [closureParent] = [closureParentTexture, closureRoot],
+            [closureTexture] = [],
+            [closureParentTexture] = [],
+        };
+        var materialClosure = ToolMaterialLibraryService.WalkModLocalMaterialDependencyClosure(
+            closureRoot,
+            package => closureGraph.TryGetValue(package, out var dependencies)
+                ? dependencies
+                : Array.Empty<string>());
+        var escapingDependencyRejected = false;
+        try
+        {
+            ToolMaterialLibraryService.WalkModLocalMaterialDependencyClosure(
+                closureRoot,
+                package => package.Equals(closureRoot, StringComparison.OrdinalIgnoreCase)
+                    ? ["/Game/Mods/../Escaped/T_Bad"]
+                    : Array.Empty<string>());
+        }
+        catch (InvalidOperationException)
+        {
+            escapingDependencyRejected = true;
+        }
+
+        var closureFilesRoot = Path.Combine(
+            Path.GetTempPath(),
+            "Batcomputer-material-closure-regression-" + Guid.NewGuid().ToString("N"));
+        var completeClosureFilesAccepted = false;
+        var missingClosureFilesRejected = false;
+        var emptyOptionalBulkRejected = false;
+        try
+        {
+            Directory.CreateDirectory(closureFilesRoot);
+            var packageBase = Path.Combine(closureFilesRoot, "MI_Fixture");
+            File.WriteAllBytes(packageBase + ".uasset", [1]);
+            File.WriteAllBytes(packageBase + ".uexp", [2]);
+            completeClosureFilesAccepted = ToolMaterialLibraryService.ClosurePackageFilesAreCompleteForTest(packageBase);
+            File.Delete(packageBase + ".uexp");
+            missingClosureFilesRejected = !ToolMaterialLibraryService.ClosurePackageFilesAreCompleteForTest(packageBase);
+            File.WriteAllBytes(packageBase + ".uexp", [2]);
+            File.WriteAllBytes(packageBase + ".ubulk", []);
+            emptyOptionalBulkRejected = !ToolMaterialLibraryService.ClosurePackageFilesAreCompleteForTest(packageBase);
+        }
+        finally
+        {
+            try { Directory.Delete(closureFilesRoot, recursive: true); } catch { /* best effort */ }
+        }
+        Check(
+            materialClosure.Count == 4 &&
+            materialClosure.Contains(closureRoot, StringComparer.OrdinalIgnoreCase) &&
+            materialClosure.Contains(closureParent, StringComparer.OrdinalIgnoreCase) &&
+            materialClosure.Contains(closureTexture, StringComparer.OrdinalIgnoreCase) &&
+            materialClosure.Contains(closureParentTexture, StringComparer.OrdinalIgnoreCase) &&
+            !materialClosure.Contains("/Game/Characters/Shared/T_Game", StringComparer.OrdinalIgnoreCase) &&
+            escapingDependencyRejected &&
+            completeClosureFilesAccepted &&
+            missingClosureFilesRejected &&
+            emptyOptionalBulkRejected,
+            "shared tool materials carry their complete cycle-safe mod-local dependency closure and reject escaping or incomplete packages",
             failures,
             output);
         var activeViewerProject = new NativeSuitProject
@@ -2710,7 +3108,7 @@ internal static class ReleaseRegressionChecks
         var sharedReferencesDetected = false;
         var sharedLibraryRoundTrip = false;
         var legacyMaterialWasAdopted = false;
-        var legacyAssignmentWasReleaseStaged = false;
+        var malformedLegacyMaterialWasRejected = false;
         var incompleteReleaseMaterialWasRejected = false;
         var unsafeMaterialPathRejected = false;
         var previousSettings = AppSettings.Current;
@@ -2758,6 +3156,9 @@ internal static class ReleaseRegressionChecks
             var importedProject = new NativeSuitProject { SlotId = "material_import" };
             var packageStage = Path.Combine(materialReferenceRoot, "PackageStage");
             var copied = library.CopyPackageToContentRoot(newerMaterial.PackagePath, packageStage);
+            var stagedSharedUasset = Path.Combine(packageStage, "Mods", "Shared", "Materials", "MI_Shared.uasset");
+            File.WriteAllText(stagedSharedUasset, "fresh-certified-stage-uasset");
+            var refusedOverwrite = library.CopyPackageToContentRoot(newerMaterial.PackagePath, packageStage);
             sharedLibraryRoundTrip =
                 library.LoadAvailable().Any(material => material.PackagePath.Equals(
                     newerMaterial.PackagePath,
@@ -2765,7 +3166,8 @@ internal static class ReleaseRegressionChecks
                 library.ImportIntoProject(importedProject, newerMaterial.PackagePath) &&
                 importedProject.GeneratedMaterials.Count == 1 &&
                 copied.Count == 2 &&
-                File.Exists(Path.Combine(packageStage, "Mods", "Shared", "Materials", "MI_Shared.uasset")) &&
+                refusedOverwrite.Count == 0 &&
+                File.ReadAllText(stagedSharedUasset) == "fresh-certified-stage-uasset" &&
                 File.Exists(Path.Combine(packageStage, "Mods", "Shared", "Materials", "MI_Shared.uexp"));
 
             const string legacyPackage = "/Game/Mods/Legacy/MI_LegacyBody";
@@ -2801,21 +3203,27 @@ internal static class ReleaseRegressionChecks
                 StringComparison.OrdinalIgnoreCase));
             Directory.Delete(projects.ProjectOutputDirectory(legacyProject), recursive: true);
             var legacyPackageStage = Path.Combine(materialReferenceRoot, "LegacyPackageStage");
-            var legacyCopies = MainForm.StageReferencedToolMaterialsForRelease(
-                legacyProject,
-                library,
-                legacyPackageStage);
+            try
+            {
+                MainForm.StageReferencedToolMaterialsForRelease(
+                    legacyProject,
+                    library,
+                    legacyPackageStage);
+            }
+            catch (InvalidOperationException ex)
+            {
+                malformedLegacyMaterialWasRejected =
+                    ex.Message.Contains(legacyPackage, StringComparison.OrdinalIgnoreCase) &&
+                    ex.Message.Contains("Re-cook", StringComparison.OrdinalIgnoreCase);
+            }
             legacyMaterialWasAdopted =
                 adopted &&
                 library.LoadAvailable().Any(material => material.PackagePath.Equals(
                     legacyPackage,
-                    StringComparison.OrdinalIgnoreCase)) &&
-                legacyCopies == 2 &&
-                File.Exists(Path.Combine(legacyPackageStage, "Mods", "Legacy", "MI_LegacyBody.uasset")) &&
-                File.Exists(Path.Combine(legacyPackageStage, "Mods", "Legacy", "MI_LegacyBody.uexp"));
-            legacyAssignmentWasReleaseStaged =
+                    StringComparison.OrdinalIgnoreCase));
+            malformedLegacyMaterialWasRejected =
+                malformedLegacyMaterialWasRejected &&
                 legacyProject.GeneratedMaterials.Count == 0 &&
-                legacyCopies == 2 &&
                 MainForm.ReferencedGeneratedMaterialPackagesForRelease(
                         legacyProject,
                         library.LoadAvailable().Select(material => material.PackagePath))
@@ -2885,7 +3293,7 @@ internal static class ReleaseRegressionChecks
             output);
         Check(
             sharedLibraryRoundTrip,
-            "a tool-created material can be discovered, imported, and staged by another suit",
+            "a tool-created material can be discovered, imported, and staged by another suit without overwriting a fresh certified-stage package",
             failures,
             output);
         Check(
@@ -2894,8 +3302,8 @@ internal static class ReleaseRegressionChecks
             failures,
             output);
         Check(
-            legacyAssignmentWasReleaseStaged && incompleteReleaseMaterialWasRejected,
-            "legacy assignment-only materials are copied from the shared library and incomplete release packages fail closed",
+            malformedLegacyMaterialWasRejected && incompleteReleaseMaterialWasRejected,
+            "legacy assignment-only materials are adopted but malformed or incomplete cooked packages fail closed",
             failures,
             output);
         Check(

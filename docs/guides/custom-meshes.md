@@ -40,6 +40,11 @@ Custom meshes expose material slots in the inspector. Generate or select a compa
 then drag or apply it to the custom mesh slot as you would for a normal game part. Reopen the 3D
 viewer and confirm the material resolved on that mesh before baking.
 
+For a textured cowl, use the paired custom-cowl template when possible. A paired template creates
+separate gameplay and cutscene material instances; applying the pair to both contexts keeps each
+Blueprint on the correct native material controller. The material keeps the donor shader's shared
+LEGO micro-detail, so your imported OBJ only needs its own UVs and authored BC/MMR/normal maps.
+
 ## Edit or remove a custom mesh
 
 Project-owned OBJ attachments have **Edit custom mesh** and **Remove from suit** actions in Parts.

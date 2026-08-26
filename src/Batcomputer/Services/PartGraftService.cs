@@ -1,4 +1,6 @@
+using System.Collections;
 using System.Collections.Concurrent;
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using UAssetAPI;
@@ -14,6 +16,26 @@ namespace Batcomputer;
 
 public sealed class PartGraftService
 {
+    internal const string CanonicalStaticCollisionProfile = "NoCollision";
+    internal const string CanonicalCutsceneParentOwnerClass = "BP_CutsceneMinifigCharacter_C";
+    internal static readonly IReadOnlyList<string> CanonicalStaticCollisionChannels =
+    [
+        "WorldStatic",
+        "WorldDynamic",
+        "Pawn",
+        "Visibility",
+        "Camera",
+        "PhysicsBody",
+        "Vehicle",
+        "Destructible",
+        "EngineTraceChannel2",
+        "EngineTraceChannel3",
+        "EngineTraceChannel4",
+        "EngineTraceChannel5",
+        "EngineTraceChannel6",
+        "GameTraceChannel18",
+    ];
+
     private static readonly JsonSerializerOptions ReportJsonOptions = new()
     {
         WriteIndented = true,
@@ -904,6 +926,8 @@ public sealed class PartGraftService
             {
                 throw new InvalidOperationException("Could not find target ClassExport or SimpleConstructionScript_0 export.");
             }
+            var originalClassFieldSchema = CaptureClassFieldSchema(
+                (ClassExport)asset.Exports[classExportIndex - 1]);
 
             // The clone source must match the part's MESH KIND - a StaticMesh part
             // (hair/hat) needs a StaticMeshComponent, a SkeletalMesh part a skeletal
@@ -912,6 +936,7 @@ public sealed class PartGraftService
             // matching-kind component exists to clone, fail with a clear message.
             NormalExport newComponent;
             NormalExport newNode;
+            var usedCrossPackageDonorShell = false;
             var cloneNodeIndex = FindCloneNodeForPartLive(asset, cloneSlot, donorPart);
             if (preferDonorComponentShell)
             {
@@ -929,6 +954,7 @@ public sealed class PartGraftService
                         $"from '{donorPart.SourcePackagePath}'. The paired-cape adapter will not " +
                         "fall back to an unrelated local skeletal component.");
                 }
+                usedCrossPackageDonorShell = true;
             }
             else if (cloneNodeIndex != 0)
             {
@@ -952,6 +978,7 @@ public sealed class PartGraftService
                      TryBuildComponentShellFromDonorLive(asset, donorPart, mappings, out newComponent, out newNode))
             {
                 // The donor template supplies the StaticMeshComponent shape the base lacks.
+                usedCrossPackageDonorShell = true;
             }
             else
             {
@@ -1014,17 +1041,12 @@ public sealed class PartGraftService
             newNode.SerializationBeforeCreateDependencies = new List<FPackageIndex> { newNode.ClassIndex, newNode.TemplateIndex }.Where(x => !x.IsNull()).ToList();
             newNode.CreateBeforeCreateDependencies = new List<FPackageIndex> { FromExportNumber(scsExportIndex) };
 
-            // An authored Blueprint component has three linked pieces: the template export,
-            // its SCS node, and an FObjectProperty on the BlueprintGeneratedClass. The live
-            // graft path historically wrote only the first two. UAssetAPI could round-trip
-            // that package, and the viewer could render the declarative mesh, but Unreal had
-            // no reflected field through which to instantiate the new component in-game.
-            AddClassChildPropertyLive(
-                asset,
-                (ClassExport)asset.Exports[classExportIndex - 1],
-                cloneSlot,
-                targetSlot,
-                newComponent.ClassIndex);
+            // Do not append a reflected FObjectProperty to the generated class. Cooked gameplay
+            // Blueprints retain their CDO as an opaque RawExport; changing the class-field schema
+            // without re-authoring that raw unversioned property stream makes AsyncLoading2 read
+            // unrelated CDO bytes as an object reference (the Who Laughs crash was export 382/61).
+            // The authored SCS node and template are sufficient to construct the attachment, as
+            // proven by the original in-game custom-static-mesh acceptance packages.
 
             asset.Exports.Add(newComponent);
             asset.Exports.Add(newNode);
@@ -1052,13 +1074,12 @@ public sealed class PartGraftService
             {
                 var validated = new UAsset(result.OutputUasset, EngineVersion.VER_UE5_6, mappings, CustomSerializationFlags.SkipPreloadDependencyLoading);
                 var validatedClass = validated.Exports.OfType<ClassExport>().FirstOrDefault();
-                var validatedProperty = validatedClass?.LoadedProperties
-                    .OfType<FObjectProperty>()
-                    .FirstOrDefault(property => property.Name.ToString().Equals(targetSlot, StringComparison.OrdinalIgnoreCase));
-                if (validatedProperty is null)
+                if (validatedClass is null ||
+                    !ClassFieldSchemaMatches(validatedClass, originalClassFieldSchema))
                 {
                     throw new InvalidOperationException(
-                        $"Generated component '{targetSlot}' is missing its Blueprint class property.");
+                        $"Generated component '{targetSlot}' changed the cooked Blueprint class-field schema. " +
+                        "Its opaque class-default-object stream cannot be safely rewritten.");
                 }
 
                 var validatedComponent = validated.Exports.OfType<NormalExport>()
@@ -1107,6 +1128,23 @@ public sealed class PartGraftService
                 {
                     throw new InvalidOperationException(
                         $"Generated SimpleConstructionScript is not create-before-serialization dependent on node '{targetSlot}'.");
+                }
+
+                if (usedCrossPackageDonorShell &&
+                    donorPart.MeshKind.Equals("StaticMesh", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!TryValidateCanonicalStaticShellBodyInstance(validatedComponent, out var bodyInstanceError))
+                    {
+                        throw new InvalidOperationException(
+                            $"Generated static component '{targetSlot}' has invalid donor-shell collision metadata: {bodyInstanceError}");
+                    }
+
+                    if (role.Equals("cutscene", StringComparison.OrdinalIgnoreCase) &&
+                        !TryValidateCutsceneParentOwner(validatedNode, out var parentOwnerError))
+                    {
+                        throw new InvalidOperationException(
+                            $"Generated cutscene SCS node '{targetSlot}' has invalid parent-owner metadata: {parentOwnerError}");
+                    }
                 }
             }
             catch (Exception validateEx)
@@ -1360,7 +1398,7 @@ public sealed class PartGraftService
         }
 
         newComponent = (NormalExport)donorTemplate.Clone();
-        newComponent.Data = DeepCloneProperties(donorTemplate.Data);
+        newComponent.Data = DeepClonePropertiesRebased(donorTemplate.Data, target);
         newComponent.Asset = target;
         newComponent.ClassIndex = EnsureImportFromDonorLive(target, donor, donorTemplate.ClassIndex);
         // Preserve the donor's explicit component archetype when present. Some cooked templates
@@ -1397,7 +1435,7 @@ public sealed class PartGraftService
              !op.Name.ToString().Equals("AnimClass", StringComparison.OrdinalIgnoreCase)));
 
         newNode = (NormalExport)donorNode.Clone();
-        newNode.Data = DeepCloneProperties(donorNode.Data);
+        newNode.Data = DeepClonePropertiesRebased(donorNode.Data, target);
         newNode.Asset = target;
         newNode.ClassIndex = EnsureImportFromDonorLive(target, donor, donorNode.ClassIndex);
         // Preserve the SCS node's archetype link too (mirror the donor).
@@ -1571,6 +1609,269 @@ public sealed class PartGraftService
         return properties.Select(property => (PropertyData)property.Clone()).ToList();
     }
 
+    /// <summary>
+    /// UAssetAPI's PropertyData.Clone preserves the donor FName objects, including their numeric
+    /// indexes into the donor package's name map. Merely copying the donor strings into the target
+    /// name map is not sufficient: on write, an un-rebased nested name is interpreted at the same
+    /// numeric index in the target package. That previously turned NoCollision and the collision
+    /// response channels into unrelated component tags, sockets, and asset paths. Walk the complete
+    /// cloned property graph and recreate every FName against the target package before writing it.
+    /// </summary>
+    private static List<PropertyData> DeepClonePropertiesRebased(
+        IEnumerable<PropertyData> properties,
+        UAsset target)
+    {
+        var source = properties.ToList();
+        var cloned = DeepCloneProperties(source);
+        var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        for (var i = 0; i < source.Count; i++)
+        {
+            RebindPropertyGraphNames(target, source[i], cloned[i], visited);
+        }
+        return cloned;
+    }
+
+    private static void RebindPropertyGraphNames(
+        UAsset target,
+        object? source,
+        object? clone,
+        HashSet<object> visited)
+    {
+        if (source is null || clone is null)
+        {
+            return;
+        }
+
+        if (source is FName sourceName && clone is FName clonedName)
+        {
+            RebindNameInPlace(target, sourceName, clonedName);
+            return;
+        }
+
+        var type = source.GetType();
+        if (type != clone.GetType() ||
+            type == typeof(string) ||
+            type.IsPrimitive ||
+            type.IsEnum ||
+            type == typeof(decimal) ||
+            type == typeof(Guid) ||
+            type == typeof(DateTime) ||
+            type == typeof(TimeSpan))
+        {
+            return;
+        }
+
+        if (!type.IsValueType && !visited.Add(clone))
+        {
+            return;
+        }
+
+        if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(KeyValuePair<,>))
+        {
+            RebindPropertyGraphNames(
+                target,
+                type.GetProperty("Key")?.GetValue(source),
+                type.GetProperty("Key")?.GetValue(clone),
+                visited);
+            RebindPropertyGraphNames(
+                target,
+                type.GetProperty("Value")?.GetValue(source),
+                type.GetProperty("Value")?.GetValue(clone),
+                visited);
+            return;
+        }
+
+        if (source is DictionaryEntry sourceEntry && clone is DictionaryEntry clonedEntry)
+        {
+            RebindPropertyGraphNames(target, sourceEntry.Key, clonedEntry.Key, visited);
+            RebindPropertyGraphNames(target, sourceEntry.Value, clonedEntry.Value, visited);
+            return;
+        }
+
+        if (source is IEnumerable sourceItems && clone is IEnumerable clonedItems && source is not string)
+        {
+            var sourceEnumerator = sourceItems.GetEnumerator();
+            var cloneEnumerator = clonedItems.GetEnumerator();
+            try
+            {
+                while (sourceEnumerator.MoveNext() && cloneEnumerator.MoveNext())
+                {
+                    RebindPropertyGraphNames(
+                        target,
+                        sourceEnumerator.Current,
+                        cloneEnumerator.Current,
+                        visited);
+                }
+            }
+            finally
+            {
+                (sourceEnumerator as IDisposable)?.Dispose();
+                (cloneEnumerator as IDisposable)?.Dispose();
+            }
+            return;
+        }
+
+        // Stay inside UAssetAPI's serialized property graph. This avoids following arbitrary
+        // framework objects while still covering PropertyData, AncestryInfo, FPropertyTypeName,
+        // delegates, text arguments, gameplay-tag arrays, maps, sets, and nested structs.
+        if (type.Assembly != typeof(PropertyData).Assembly)
+        {
+            return;
+        }
+
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public;
+        foreach (var field in type.GetFields(flags))
+        {
+            var sourceValue = field.GetValue(source);
+            if (field.FieldType == typeof(FName))
+            {
+                if (sourceValue is FName fieldName)
+                {
+                    field.SetValue(clone, MakeName(target, fieldName));
+                }
+                continue;
+            }
+
+            if (!ShouldTraverseNameGraph(field.FieldType))
+            {
+                continue;
+            }
+
+            var clonedValue = field.GetValue(clone);
+            RebindPropertyGraphNames(target, sourceValue, clonedValue, visited);
+            if (field.FieldType.IsValueType && clonedValue is not null)
+            {
+                field.SetValue(clone, clonedValue);
+            }
+        }
+
+        foreach (var property in type.GetProperties(flags))
+        {
+            if (!property.CanRead || property.GetIndexParameters().Length != 0)
+            {
+                continue;
+            }
+
+            if (property.PropertyType == typeof(FName))
+            {
+                if (property.CanWrite && property.GetValue(source) is FName propertyName)
+                {
+                    property.SetValue(clone, MakeName(target, propertyName));
+                }
+                continue;
+            }
+
+            if (!ShouldTraverseNameGraph(property.PropertyType))
+            {
+                continue;
+            }
+
+            object? sourceValue;
+            object? clonedValue;
+            try
+            {
+                sourceValue = property.GetValue(source);
+                clonedValue = property.GetValue(clone);
+            }
+            catch
+            {
+                continue;
+            }
+
+            RebindPropertyGraphNames(target, sourceValue, clonedValue, visited);
+            if (property.CanWrite && property.PropertyType.IsValueType && clonedValue is not null)
+            {
+                property.SetValue(clone, clonedValue);
+            }
+        }
+    }
+
+    private static bool ShouldTraverseNameGraph(Type type) =>
+        type != typeof(string) &&
+        (typeof(IEnumerable).IsAssignableFrom(type) || type.Assembly == typeof(PropertyData).Assembly);
+
+    private static void RebindNameInPlace(UAsset target, FName source, FName clone)
+    {
+        var rebound = MakeName(target, source);
+        clone.Asset = rebound.Asset;
+        clone.Type = rebound.Type;
+        clone.Number = rebound.Number;
+        clone.Value = rebound.Value;
+    }
+
+    internal static bool TryValidateCanonicalStaticShellBodyInstance(
+        NormalExport component,
+        out string error)
+    {
+        var bodyInstance = FindPropertyLive<StructPropertyData>(component.Data, "BodyInstance");
+        if (bodyInstance is null)
+        {
+            error = "BodyInstance is missing.";
+            return false;
+        }
+
+        var objectType = FindPropertyLive<EnumPropertyData>(bodyInstance.Value, "ObjectType")?.Value.ToString() ?? "";
+        var collisionEnabled = FindPropertyLive<EnumPropertyData>(bodyInstance.Value, "CollisionEnabled")?.Value.ToString() ?? "";
+        var collisionProfile = FindPropertyLive<NamePropertyData>(bodyInstance.Value, "CollisionProfileName")?.Value.ToString() ?? "";
+        if (!objectType.Equals("ECC_WorldStatic", StringComparison.Ordinal) ||
+            !collisionEnabled.Equals(CanonicalStaticCollisionProfile, StringComparison.Ordinal) ||
+            !collisionProfile.Equals(CanonicalStaticCollisionProfile, StringComparison.Ordinal))
+        {
+            error =
+                $"expected ObjectType=ECC_WorldStatic, CollisionEnabled={CanonicalStaticCollisionProfile}, " +
+                $"CollisionProfileName={CanonicalStaticCollisionProfile}; got ObjectType='{objectType}', " +
+                $"CollisionEnabled='{collisionEnabled}', CollisionProfileName='{collisionProfile}'.";
+            return false;
+        }
+
+        var collisionResponses = FindPropertyLive<StructPropertyData>(bodyInstance.Value, "CollisionResponses");
+        var responseArray = collisionResponses is null
+            ? null
+            : FindPropertyLive<ArrayPropertyData>(collisionResponses.Value, "ResponseArray");
+        var entries = responseArray?.Value?.OfType<StructPropertyData>().ToList() ?? [];
+        if (responseArray is null || entries.Count != responseArray.Value.Length)
+        {
+            error = "CollisionResponses.ResponseArray is missing or contains malformed entries.";
+            return false;
+        }
+
+        var channels = entries
+            .Select(entry => FindPropertyLive<NamePropertyData>(entry.Value, "Channel")?.Value.ToString() ?? "")
+            .ToList();
+        if (!channels.SequenceEqual(CanonicalStaticCollisionChannels, StringComparer.Ordinal))
+        {
+            error =
+                "collision response channels are not the canonical static-shell set. " +
+                $"Expected [{string.Join(", ", CanonicalStaticCollisionChannels)}]; got [{string.Join(", ", channels)}].";
+            return false;
+        }
+
+        var responses = entries
+            .Select(entry => FindPropertyLive<EnumPropertyData>(entry.Value, "Response")?.Value.ToString() ?? "")
+            .ToList();
+        if (responses.Any(response => !response.Equals("ECR_Ignore", StringComparison.Ordinal)))
+        {
+            error = "one or more canonical static-shell collision responses are not ECR_Ignore.";
+            return false;
+        }
+
+        error = "";
+        return true;
+    }
+
+    internal static bool TryValidateCutsceneParentOwner(NormalExport node, out string error)
+    {
+        var owner = FindPropertyLive<NamePropertyData>(node.Data, "ParentComponentOwnerClassName")?.Value.ToString() ?? "";
+        if (!owner.Equals(CanonicalCutsceneParentOwnerClass, StringComparison.Ordinal))
+        {
+            error = $"expected '{CanonicalCutsceneParentOwnerClass}', got '{owner}'.";
+            return false;
+        }
+
+        error = "";
+        return true;
+    }
+
     private static FPackageIndex FromExportNumber(int exportNumber)
     {
         return exportNumber <= 0 ? FPackageIndex.FromRawIndex(0) : FPackageIndex.FromExport(exportNumber - 1);
@@ -1653,53 +1954,140 @@ public sealed class PartGraftService
             (componentTagsOverride ?? donorPart.ComponentTags).ToList());
     }
 
-    /// <summary>
-    /// Adds the reflected object property that lets Unreal bind an appended SCS component to the
-    /// generated class. Cooked component properties all share the same Blueprint-visible/instanced
-    /// metadata; only the field name and component class differ.
-    /// </summary>
-    private static void AddClassChildPropertyLive(
-        UAsset asset,
+    private static string[] CaptureClassFieldSchema(ClassExport classExport) =>
+        classExport.LoadedProperties
+            .Select(property =>
+                property.GetType().FullName + "|" +
+                property.Name + "|" +
+                (property is FObjectProperty objectProperty
+                    ? objectProperty.PropertyClass.Index.ToString()
+                    : ""))
+            .ToArray();
+
+    private static bool ClassFieldSchemaMatches(
         ClassExport classExport,
-        string cloneSlot,
-        string newSlot,
-        FPackageIndex componentClass)
+        IReadOnlyList<string> expected)
     {
-        if (classExport.LoadedProperties.Any(property =>
-                property.Name.ToString().Equals(newSlot, StringComparison.OrdinalIgnoreCase)))
-        {
-            return;
-        }
-
-        var objectProperties = classExport.LoadedProperties.OfType<FObjectProperty>().ToList();
-        var clone = objectProperties.FirstOrDefault(property =>
-                property.Name.ToString().Equals(cloneSlot, StringComparison.OrdinalIgnoreCase))
-            ?? objectProperties.FirstOrDefault(property => property.PropertyClass.Index == componentClass.Index)
-            ?? objectProperties.FirstOrDefault()
-            ?? throw new InvalidOperationException(
-                $"Could not find a Blueprint component property to clone for '{newSlot}'.");
-
-        var added = new FObjectProperty
-        {
-            Name = MakeName(asset, newSlot),
-            SerializedType = clone.SerializedType,
-            PropertyClass = componentClass,
-            ArrayDim = clone.ArrayDim,
-            ElementSize = clone.ElementSize,
-            PropertyFlags = clone.PropertyFlags,
-            RepIndex = clone.RepIndex,
-            RepNotifyFunc = clone.RepNotifyFunc,
-            BlueprintReplicationCondition = clone.BlueprintReplicationCondition,
-            RawValue = clone.RawValue,
-            UsmapPropertyTypeOverrides = clone.UsmapPropertyTypeOverrides,
-            Flags = clone.Flags,
-            MetaDataMap = clone.MetaDataMap,
-        };
-
-        classExport.LoadedProperties = classExport.LoadedProperties.Append(added).ToArray();
+        var actual = CaptureClassFieldSchema(classExport);
+        return actual.Length == expected.Count &&
+               actual.SequenceEqual(expected, StringComparer.Ordinal);
     }
 
-    internal static bool AddsClassChildPropertyForTest()
+    internal static bool RebindsCrossAssetDonorNamesForTest()
+    {
+        var donor = new UAsset(
+            EngineVersion.VER_UE5_6,
+            mappings: null,
+            CustomSerializationFlags.None);
+        donor.ClearNameIndexList();
+        var target = new UAsset(
+            EngineVersion.VER_UE5_6,
+            mappings: null,
+            CustomSerializationFlags.None);
+        target.ClearNameIndexList();
+
+        // Deliberately occupy the target's early name indexes with the exact kinds of unrelated
+        // names that appeared in the crashing Who Laughs package. A raw donor-index clone would
+        // resolve to these values after serialization.
+        AddNamesLive(
+            target,
+            "Glider",
+            "FLS",
+            "TtCharacterAsset.Torso",
+            "HeadStud_Attach_Socket",
+            "/Game/Characters/Attachments/Hat/TheBatman/ABP_HAT_Batman",
+            "BlueprintType",
+            "Chest_Socket");
+
+        var sourceBody = CreateCanonicalStaticBodyInstanceForTest(donor);
+        var sourceOwner = new NamePropertyData(MakeName(donor, "ParentComponentOwnerClassName"))
+        {
+            Value = MakeName(donor, CanonicalCutsceneParentOwnerClass)
+        };
+        var cloned = DeepClonePropertiesRebased([sourceBody, sourceOwner], target);
+        var component = new NormalExport { Data = [cloned[0]] };
+        var node = new NormalExport { Data = [cloned[1]] };
+
+        var body = FindPropertyLive<StructPropertyData>(component.Data, "BodyInstance");
+        var profile = body is null
+            ? null
+            : FindPropertyLive<NamePropertyData>(body.Value, "CollisionProfileName");
+        var collisionResponses = body is null
+            ? null
+            : FindPropertyLive<StructPropertyData>(body.Value, "CollisionResponses");
+        var responseArray = collisionResponses is null
+            ? null
+            : FindPropertyLive<ArrayPropertyData>(collisionResponses.Value, "ResponseArray");
+        var channels = responseArray?.Value?.OfType<StructPropertyData>()
+            .Select(entry => FindPropertyLive<NamePropertyData>(entry.Value, "Channel"))
+            .Where(channel => channel is not null)
+            .Cast<NamePropertyData>()
+            .ToList() ?? [];
+        var owner = FindPropertyLive<NamePropertyData>(node.Data, "ParentComponentOwnerClassName");
+
+        return TryValidateCanonicalStaticShellBodyInstance(component, out _) &&
+               TryValidateCutsceneParentOwner(node, out _) &&
+               body is not null && ReferenceEquals(body.Name.Asset, target) &&
+               profile is not null && ReferenceEquals(profile.Value.Asset, target) &&
+               owner is not null && ReferenceEquals(owner.Value.Asset, target) &&
+               channels.Count == CanonicalStaticCollisionChannels.Count &&
+               channels.All(channel => ReferenceEquals(channel.Value.Asset, target));
+    }
+
+    private static StructPropertyData CreateCanonicalStaticBodyInstanceForTest(UAsset asset)
+    {
+        EnumPropertyData Enum(string name, string enumType, string value) => new(MakeName(asset, name))
+        {
+            EnumType = MakeName(asset, enumType),
+            InnerType = MakeName(asset, "ByteProperty"),
+            Value = MakeName(asset, value)
+        };
+
+        var responseEntries = CanonicalStaticCollisionChannels
+            .Select((channel, index) => (PropertyData)new StructPropertyData(
+                MakeName(asset, index.ToString()),
+                MakeName(asset, "ResponseChannel"))
+            {
+                Value =
+                [
+                    new NamePropertyData(MakeName(asset, "Channel"))
+                    {
+                        Value = MakeName(asset, channel)
+                    },
+                    Enum("Response", "ECollisionResponse", "ECR_Ignore")
+                ]
+            })
+            .ToArray();
+        var responseArray = new ArrayPropertyData(MakeName(asset, "ResponseArray"))
+        {
+            ArrayType = MakeName(asset, "StructProperty"),
+            Value = responseEntries
+        };
+        var collisionResponses = new StructPropertyData(
+            MakeName(asset, "CollisionResponses"),
+            MakeName(asset, "CollisionResponseContainer"))
+        {
+            Value = [responseArray]
+        };
+
+        return new StructPropertyData(
+            MakeName(asset, "BodyInstance"),
+            MakeName(asset, "BodyInstance"))
+        {
+            Value =
+            [
+                Enum("ObjectType", "ECollisionChannel", "ECC_WorldStatic"),
+                Enum("CollisionEnabled", "ECollisionEnabled", CanonicalStaticCollisionProfile),
+                new NamePropertyData(MakeName(asset, "CollisionProfileName"))
+                {
+                    Value = MakeName(asset, CanonicalStaticCollisionProfile)
+                },
+                collisionResponses
+            ]
+        };
+    }
+
+    internal static bool RejectsCookedClassFieldMutationForTest()
     {
         var asset = new UAsset(
             EngineVersion.VER_UE5_6,
@@ -1707,7 +2095,6 @@ public sealed class PartGraftService
             CustomSerializationFlags.None);
         asset.ClearNameIndexList();
         var sourceClass = FromImportNumber(1);
-        var graftClass = FromImportNumber(2);
         var classExport = new ClassExport
         {
             LoadedProperties =
@@ -1721,16 +2108,16 @@ public sealed class PartGraftService
                 },
             ],
         };
+        var originalSchema = CaptureClassFieldSchema(classExport);
+        classExport.LoadedProperties = classExport.LoadedProperties.Append(new FObjectProperty
+        {
+            Name = MakeName(asset, "Hip"),
+            SerializedType = MakeName(asset, "ObjectProperty"),
+            PropertyClass = FromImportNumber(2),
+            ElementSize = 8,
+        }).ToArray();
 
-        AddClassChildPropertyLive(asset, classExport, "Face", "Hip", graftClass);
-        AddClassChildPropertyLive(asset, classExport, "Face", "Hip", graftClass);
-
-        var added = classExport.LoadedProperties.OfType<FObjectProperty>()
-            .Where(property => property.Name.ToString().Equals("Hip", StringComparison.OrdinalIgnoreCase))
-            .ToList();
-        return classExport.LoadedProperties.Length == 2 &&
-               added.Count == 1 &&
-               added[0].PropertyClass.Index == graftClass.Index;
+        return !ClassFieldSchemaMatches(classExport, originalSchema);
     }
 
     internal static bool ClearsStaleAnimClassForDonorWithoutAnimForTest()
@@ -2077,6 +2464,17 @@ public sealed class PartGraftService
         }
 
         return new FName(asset, value, 0);
+    }
+
+    private static FName MakeName(UAsset asset, FName source)
+    {
+        var value = source.Value.ToString();
+        if (!asset.ContainsNameReference(new FString(value)))
+        {
+            asset.AddNameReference(new FString(value), false, false);
+        }
+
+        return new FName(asset, new FString(value), source.Number);
     }
 
     private static void AddNamesLive(UAsset asset, params string?[] names)

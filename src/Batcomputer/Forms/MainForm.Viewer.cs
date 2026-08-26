@@ -19,6 +19,8 @@ public sealed partial class MainForm
     private int _viewerLoadGeneration;
     private NativeSuitProject? _viewerProject;
     private bool _viewerCustomMeshBakeInProgress;
+    private readonly SemaphoreSlim _viewerCustomMeshPlacementGate = new(1, 1);
+    private int _viewerCustomMeshPlacementRequest;
 
     /// <summary>Builds the viewer once and hosts it in the dedicated full-width workspace.</summary>
     private void ShowViewerPanel()
@@ -405,11 +407,13 @@ public sealed partial class MainForm
                 _viewerStatus!.Text = "That custom mesh is no longer part of this suit.";
                 return;
             }
+            var placementRequest = ++_viewerCustomMeshPlacementRequest;
             await SaveCustomStaticMeshPlacementAsync(
                 project!,
                 customMesh,
                 args,
-                _viewerLoadGeneration);
+                _viewerLoadGeneration,
+                placementRequest);
             return;
         }
 
@@ -438,7 +442,8 @@ public sealed partial class MainForm
         NativeSuitProject project,
         CustomStaticMeshImport mesh,
         PreviewPlacementSaveRequestedEventArgs args,
-        int expectedViewerGeneration)
+        int expectedViewerGeneration,
+        int placementRequest)
     {
         if (args.CustomMeshTransform is not { } transform)
         {
@@ -450,45 +455,92 @@ public sealed partial class MainForm
         {
             return;
         }
+
         var workspaceWasEnabled = _mainWorkspaceHost.Enabled;
         if (isBake)
         {
+            // Set this before the first await so debounced/pagehide drafts emitted by the WebView
+            // after the Bake click are ignored rather than queued behind the authoritative bake.
             _viewerCustomMeshBakeInProgress = true;
             _mainWorkspaceHost.Enabled = false;
         }
 
-        ApplyViewerCustomMeshTransform(mesh, transform);
-
+        await _viewerCustomMeshPlacementGate.WaitAsync();
         try
         {
-            var projectService = _projectService ??= new SuitProjectService(_projectRootText.Text.Trim());
-            projectService.SaveProject(project);
-            // Keep subsequent viewer messages and editor actions on the same declarative recipe.
-            // This assignment is especially important when the viewer initially loaded a disk
-            // clone before ResolveViewerProjectForEdit selected the active editor instance.
-            _viewerProject = project;
-            if (!isBake)
+            if (!isBake && placementRequest != _viewerCustomMeshPlacementRequest)
             {
-                _viewerStatus!.Text = $"{mesh.DisplayName}: preview transform saved. Use Bake to game before testing it in-game.";
                 return;
             }
 
-            _viewerStatus!.Text = $"{mesh.DisplayName}: baking its transform, then rebuilding the custom mesh…";
-            await RebuildGraftStageFromDeclarativeAsync(project, projectService.ProjectRoot);
-            projectService.SaveProject(project);
-            RecordChange(project, "Parts", mesh.DisplayName,
-                $"custom mesh scale {mesh.Scale:0.###}; position {mesh.OffsetX:0.###}, {mesh.OffsetY:0.###}, {mesh.OffsetZ:0.###}; rotation {mesh.RotationPitch:0.###}, {mesh.RotationYaw:0.###}, {mesh.RotationRoll:0.###}",
-                status: "staged");
-            if (expectedViewerGeneration == _viewerLoadGeneration &&
-                ReferenceEquals(_viewerProject, project))
+            var previousTransform = CaptureViewerCustomMeshTransform(mesh);
+            if (!isBake)
             {
-                _viewerStatus.Text = $"{mesh.DisplayName}: transform baked to the suit. Reloading preview…";
-                ShowCharacterInViewer(string.Empty, project.DisplayName, project);
+                ApplyViewerCustomMeshTransform(mesh, transform);
+                try
+                {
+                    var projectService = _projectService ??= new SuitProjectService(_projectRootText.Text.Trim());
+                    // A preview save changes the authoritative declarative recipe, while the current
+                    // cooked mesh still has the prior transform. Establish the fail-closed packaging
+                    // sentinel before persisting that newer recipe.
+                    await MarkDeclarativeStageIncompleteAsync(project, projectService.ProjectRoot);
+                    if (placementRequest != _viewerCustomMeshPlacementRequest)
+                    {
+                        // A newer draft or Bake request arrived while the marker was being written.
+                        // Leave the fail-closed marker in place and let that latest request own the
+                        // persisted recipe instead of briefly saving this stale transform.
+                        ApplyViewerCustomMeshTransform(mesh, previousTransform);
+                        return;
+                    }
+                    projectService.SaveProject(project);
+                    _viewerProject = project;
+                    _viewerStatus!.Text = $"{mesh.DisplayName}: preview transform saved. Use Bake to game before testing it in-game.";
+                }
+                catch (Exception ex)
+                {
+                    // The project JSON still represents the prior transform. Keep the live editor in
+                    // lockstep with it; an incomplete marker that was written before a failed save is
+                    // intentionally retained so packaging remains blocked.
+                    ApplyViewerCustomMeshTransform(mesh, previousTransform);
+                    _viewerStatus!.Text = $"Could not save {mesh.DisplayName}: {ex.Message.Split('\n')[0]}";
+                }
+                return;
             }
-        }
-        catch (Exception ex)
-        {
-            _viewerStatus!.Text = $"Could not save {mesh.DisplayName}: {ex.Message.Split('\n')[0]}";
+
+            ApplyViewerCustomMeshTransform(mesh, transform);
+            var projectSaved = false;
+            try
+            {
+                var projectService = _projectService ??= new SuitProjectService(_projectRootText.Text.Trim());
+                projectService.SaveProject(project);
+                projectSaved = true;
+                // Keep subsequent viewer messages and editor actions on the same declarative recipe.
+                // This assignment is especially important when the viewer initially loaded a disk
+                // clone before ResolveViewerProjectForEdit selected the active editor instance.
+                _viewerProject = project;
+                _viewerStatus!.Text = $"{mesh.DisplayName}: baking its transform, then rebuilding the custom mesh…";
+                await RebuildGraftStageFromDeclarativeAsync(project, projectService.ProjectRoot);
+                projectService.SaveProject(project);
+                RecordChange(project, "Parts", mesh.DisplayName,
+                    $"custom mesh scale {mesh.Scale:0.###}; position {mesh.OffsetX:0.###}, {mesh.OffsetY:0.###}, {mesh.OffsetZ:0.###}; rotation {mesh.RotationPitch:0.###}, {mesh.RotationYaw:0.###}, {mesh.RotationRoll:0.###}",
+                    status: "staged");
+                if (expectedViewerGeneration == _viewerLoadGeneration &&
+                    ReferenceEquals(_viewerProject, project))
+                {
+                    _viewerStatus.Text = $"{mesh.DisplayName}: transform baked to the suit. Reloading preview…";
+                    ShowCharacterInViewer(string.Empty, project.DisplayName, project);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!projectSaved)
+                {
+                    // No declarative intent reached disk and no rebuild marker was established, so
+                    // keep the live editor aligned with the still-certified prior stage.
+                    ApplyViewerCustomMeshTransform(mesh, previousTransform);
+                }
+                _viewerStatus!.Text = $"Could not save {mesh.DisplayName}: {ex.Message.Split('\n')[0]}";
+            }
         }
         finally
         {
@@ -497,6 +549,7 @@ public sealed partial class MainForm
                 _viewerCustomMeshBakeInProgress = false;
                 _mainWorkspaceHost.Enabled = workspaceWasEnabled;
             }
+            _viewerCustomMeshPlacementGate.Release();
         }
     }
 
@@ -535,6 +588,16 @@ public sealed partial class MainForm
         mesh.RotationYaw = transform.RotationYaw;
         mesh.RotationRoll = transform.RotationRoll;
     }
+
+    internal static PreviewCustomMeshTransform CaptureViewerCustomMeshTransform(CustomStaticMeshImport mesh) =>
+        new(
+            mesh.Scale,
+            mesh.OffsetX,
+            mesh.OffsetY,
+            mesh.OffsetZ,
+            mesh.RotationPitch,
+            mesh.RotationYaw,
+            mesh.RotationRoll);
 
     /// <summary>Jumps to the viewer tab and loads the current suit with its saved edits.</summary>
     private void ViewCurrentSuitIn3D()

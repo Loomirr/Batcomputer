@@ -44,6 +44,9 @@ internal sealed class MaterialTemplateCatalogService
         public bool IsFace { get; init; }
         public bool Advanced { get; init; }
         public bool Enabled { get; init; } = true;
+        // True only for donor families whose shipped MMR was verified to leave green unused.
+        // Other specialized attachment materials can carry authored mask data in that channel.
+        public bool ExpectsUnusedMmrGreen { get; init; }
         public string DisabledReason { get; init; } = "";
         public IReadOnlyList<string> AllowedTargetKinds { get; init; } = Array.Empty<string>();
         public IReadOnlyList<string> CompatibleMeshPackagePaths { get; init; } = Array.Empty<string>();
@@ -176,6 +179,7 @@ internal sealed class MaterialTemplateCatalogService
                 Category = "Character body",
                 Summary = "Textured minifigure body with the game's working Colour Mask and Red Brick support.",
                 Guidance = "Replace BC, MMR, DNRM, pristine maps, and ColourMask as needed. Both runtime contexts are generated from Batman Absolute donors.",
+                ExpectsUnusedMmrGreen = true,
                 AllowedTargetKinds = Kinds(TargetKinds.Body),
                 Outputs = new[]
                 {
@@ -238,6 +242,28 @@ internal sealed class MaterialTemplateCatalogService
                 Advanced = true,
                 AllowedTargetKinds = Kinds(TargetKinds.Accessory),
                 Outputs = new[] { One("/Game/Characters/Attachments/Hair/MI_Black", "gameplay only") },
+            },
+            new()
+            {
+                Id = "accessory.textured-cowl.native-plastic",
+                DisplayName = "Textured cowl / custom mesh (paired)",
+                Category = "Accessories",
+                Summary = "Native plastic cowl material with synchronized gameplay and cutscene outputs.",
+                Guidance = "Preferred for custom cowls. It retains the game's inherited micro-detail while avoiding the Mask of Tengu donor's metallic switch and extreme negative decal roughness. Donor mesh-specific RAO, CT, NRM, and ColourMask maps start neutral. For this template use R=metalness, G=unused, B=roughness in MMR.",
+                ExpectsUnusedMmrGreen = true,
+                AllowedTargetKinds = Kinds(TargetKinds.Accessory),
+                Outputs = new[]
+                {
+                    Gameplay("/Game/Characters/Attachments/Hat/BatmanCowl_MoldedEyes/Materials/MI_HAT_BatmanBraveAndTheBold_EOM"),
+                    Cutscene("/Game/Characters/Attachments/Hat/BatmanCowl_MoldedEyes/Materials/MI_HAT_BatmanBraveAndTheBold_CUT"),
+                },
+                DefaultTextureOverrides = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["RAO"] = DummyRao,
+                    ["CT"] = DummyCt,
+                    ["NRM"] = DummyNormal,
+                    ["ColourMask"] = DummyColourId,
+                },
             },
             new()
             {

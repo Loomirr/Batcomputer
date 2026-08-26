@@ -624,9 +624,14 @@ public sealed partial class MaterialWizard : AdaptiveForm
         row.Cells["Override"].Value = texture.PackagePath;
         var warning = DescribeTextureAssignment(parameter, texture);
         SetTextureRowWarning(row, warning);
-        _status.Text = warning is null
-            ? $"Set {parameter} -> {texture.PackagePath}"
-            : $"Check {parameter}: {warning.ExpectedKind} is usually expected, not {texture.Kind}. You can still generate it.";
+        var mmrStats = IsMmrPackedParameter(parameter)
+            ? MaterialSurfaceDiagnosticService.TryAnalyzeMmrSource(texture.SourcePng)
+            : null;
+        _status.Text = warning is not null
+            ? $"Check {parameter}: {warning.ExpectedKind} is usually expected, not {texture.Kind}. You can still generate it."
+            : mmrStats is not null
+                ? MaterialSurfaceDiagnosticService.Describe(mmrStats)
+                : $"Set {parameter} -> {texture.PackagePath}";
     }
 
     private void ClearSelectedTextureParam()
@@ -1040,7 +1045,10 @@ public sealed partial class MaterialWizard : AdaptiveForm
         }
         ApplyTemplateDefaults();
         UpdateFaceHelpersVisibility(info);
-        _status.Text = $"{info.TextureParams.Count} texture, {info.ColorParams.Count} colour, and {info.ScalarParams.Count} scalar parameters loaded.";
+        var inheritedSurface = info.ParentMaterialPath.Contains("EoM", StringComparison.OrdinalIgnoreCase)
+            ? " The native parent is retained, including its compiled micro-surface setup."
+            : " The donor parent and its compiled surface setup are retained.";
+        _status.Text = $"{info.TextureParams.Count} texture, {info.ColorParams.Count} colour, and {info.ScalarParams.Count} scalar parameters loaded.{inheritedSurface}";
     }
 
     private void ApplyTemplateDefaults()
@@ -1138,6 +1146,21 @@ public sealed partial class MaterialWizard : AdaptiveForm
             {
                 return;
             }
+        }
+
+        var surfaceWarnings = FindSurfaceWarnings(textureMap, clearedTextureParams, scalarMap);
+        if (surfaceWarnings.Count > 0 &&
+            !Dialog.Confirm(
+                this,
+                "Check material surface",
+                "Batcomputer found surface settings worth reviewing:\n\n" +
+                string.Join("\n\n", surfaceWarnings.Select(warning => "• " + warning)) +
+                "\n\nThis is a warning only. The native material parent and its inherited micro-detail will remain unchanged.",
+                confirmText: "Generate anyway",
+                cancelText: "Review material",
+                severity: Dialog.Level.Warn))
+        {
+            return;
         }
 
         var catalogCompatibility = _selectedRecipe is null
@@ -1240,6 +1263,102 @@ public sealed partial class MaterialWizard : AdaptiveForm
         ResultIsFaceMaterial = primary.IsFaceMaterial;
         DialogResult = DialogResult.OK;
         Close();
+    }
+
+    private List<string> FindSurfaceWarnings(
+        IReadOnlyDictionary<string, string> textureMap,
+        IReadOnlySet<string> clearedTextureParams,
+        IReadOnlyDictionary<string, float> scalarMap)
+    {
+        var warnings = new List<string>();
+        var describedSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in textureMap.Where(pair => IsMmrPackedParameter(pair.Key)))
+        {
+            var texture = FindGeneratedTexture(pair.Value);
+            var stats = MaterialSurfaceDiagnosticService.TryAnalyzeMmrSource(texture?.SourcePng);
+            if (stats is null || !describedSources.Add(texture!.SourcePng))
+            {
+                continue;
+            }
+            warnings.AddRange(MaterialSurfaceDiagnosticService.RiskMessages(
+                    stats,
+                    _selectedRecipe?.ExpectsUnusedMmrGreen == true)
+                .Select(message => $"{pair.Key} ({texture.DisplayName}): {message}"));
+        }
+
+        foreach (var group in FindDuplicatedEffectiveNormalParameters(
+                     _lastTemplateInfo?.TextureParams ?? Enumerable.Empty<MaterialGenService.TextureParam>(),
+                     textureMap,
+                     clearedTextureParams))
+        {
+            warnings.Add(
+                $"The same normal texture is assigned to {string.Join(" and ", group)}. " +
+                "DNRM and NRM often serve different layers; reusing one map can double highlights or surface detail.");
+        }
+
+        foreach (var parameter in clearedTextureParams.Where(parameter =>
+                     parameter.Equals("RAO", StringComparison.OrdinalIgnoreCase) ||
+                     parameter.Equals("CT", StringComparison.OrdinalIgnoreCase) ||
+                     parameter.Equals("NRM", StringComparison.OrdinalIgnoreCase)))
+        {
+            warnings.Add(
+                $"{parameter} is explicitly cleared. That removes the donor's mesh-specific surface map instead of inheriting it.");
+        }
+
+        foreach (var scalar in _lastTemplateInfo?.ScalarParams ?? Enumerable.Empty<MaterialGenService.ScalarParam>())
+        {
+            var value = scalarMap.TryGetValue(scalar.Name, out var authored) ? authored : scalar.Value;
+            if (scalar.Name.Contains("roughness", StringComparison.OrdinalIgnoreCase) && value <= -0.5f)
+            {
+                warnings.Add(
+                    $"{scalar.Name} is {value:0.###}. This strong negative roughness offset can make covered areas look mirror-glossy; try 0 unless the donor effect is intentional.");
+            }
+        }
+
+        return warnings.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    internal static IReadOnlyList<IReadOnlyList<string>> FindDuplicatedEffectiveNormalParameters(
+        IEnumerable<MaterialGenService.TextureParam> inheritedParameters,
+        IReadOnlyDictionary<string, string> textureOverrides,
+        IReadOnlySet<string> clearedParameters)
+    {
+        var effective = inheritedParameters
+            .Where(parameter => TextureRoleForParameter(parameter.Name) == TextureRole.Normal)
+            .Where(parameter => !string.IsNullOrWhiteSpace(parameter.ObjectPath))
+            .GroupBy(parameter => parameter.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => UnrealPathUtil.NormalizePackagePath(group.Last().ObjectPath),
+                StringComparer.OrdinalIgnoreCase);
+
+        foreach (var cleared in clearedParameters)
+        {
+            effective.Remove(cleared);
+        }
+        foreach (var pair in textureOverrides.Where(pair =>
+                     TextureRoleForParameter(pair.Key) == TextureRole.Normal))
+        {
+            effective[pair.Key] = UnrealPathUtil.NormalizePackagePath(pair.Value);
+        }
+
+        return effective
+            .Where(pair => !string.IsNullOrWhiteSpace(pair.Value))
+            .GroupBy(pair => pair.Value, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.Select(pair => pair.Key)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToList())
+            .Where(group => group.Count > 1)
+            .Cast<IReadOnlyList<string>>()
+            .ToList();
+    }
+
+    private static bool IsMmrPackedParameter(string? parameter)
+    {
+        var compact = new string((parameter ?? "").Where(char.IsLetterOrDigit).ToArray());
+        return compact.Contains("MMR", StringComparison.OrdinalIgnoreCase) ||
+               compact.Contains("ORM", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string MaterialOutputName(string baseName, string suffix)

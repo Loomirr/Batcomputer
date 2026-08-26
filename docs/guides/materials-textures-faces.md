@@ -88,10 +88,33 @@ native linear sampling metadata and all twelve mips from 2048 through 1 pixel. I
 This is Batcomputer's proven native MMR template. It is verified in game on Electric at every
 texture-quality setting.
 
+For ordinary LEGO plastic, keep red at `0`. A useful starting range for blue roughness is about
+`64–89` (`0.25–0.35`); darker values reflect the environment more sharply. Use red `255` only on
+regions that should behave like real metal. Batcomputer shows a source-map summary when you assign
+an MMR and warns about mostly-metal maps, an ORM-style green channel, or large mirror-glossy areas.
+The green warning appears only for templates whose shipped donor convention leaves that channel
+unused. Some specialized game materials deliberately store another mask in green.
+
 Do not cook an MMR as a Character texture. Older projects may have saved an MMR that way because
 names such as `CowlMMR` were not recognized. Right-click that texture, choose **Change cook
 profile**, and select **Native 2K DXT1 MMR**. Batcomputer backs up the prior cook and changes the
 saved texture role only after the native MMR recook succeeds.
+
+### Native LEGO surface detail
+
+Generated materials remain children of the copied game material's native parent. That preserves
+the parent's compiled micro-noise, micro-scratch, and plastic-response setup; Batcomputer does not
+flatten those features into the new material. Do not bake the game's tiled micro-noise into a new
+normal map unless you are deliberately replacing that shader behavior, or the detail can appear
+twice and shimmer at a distance.
+
+`DNRM` and `NRM` are not always interchangeable. Keep the donor value blank/inherited when you do
+not have a replacement for that layer. Assigning the same custom normal to both can double the
+surface response, and **Set None** removes the donor map instead of inheriting it.
+
+For a textured custom cowl, start with **Textured cowl / custom mesh (paired)**. It uses matched
+gameplay and cutscene donors with native micro-detail but without the Mask of Tengu material's
+metallic switch and unusually strong negative decal-roughness value.
 
 ### UI icons
 

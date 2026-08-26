@@ -23,6 +23,16 @@
   fresh mod build instead of being left behind.
 - Registry writer failures now explain an unavailable Win64 SDK directly, and Diagnostics records
   why the bundled prebuilt was rejected before trying a source build.
+- Custom OBJ components keep the cooked Blueprint's original class schema, preventing the known
+  load, hover, and startup crashes caused by adding a reflected field to an opaque class-default object.
+- Packaging now verifies every custom mesh's source OBJ, cooked files, live construction-script
+  binding, socket, and gameplay/cutscene material instead of trusting a partial stage.
+- A paired custom-cowl template keeps the game's LEGO surface detail without inheriting the donor
+  cowl's geometry-specific maps, metallic switch, or extreme roughness offset.
+- Material warnings flag suspicious metalness, roughness, packed-channel, and duplicate-normal
+  choices while leaving specialized game material families alone.
+- Shared materials bring their mod-local textures and parents into another suit. Renames, deletions,
+  viewer placement saves, and release staging restore the last working state if a rebuild fails.
 
 ## 0.9.0-beta.7
 

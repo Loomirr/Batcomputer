@@ -23,11 +23,15 @@ public sealed class StageValidationService
     public sealed record Finding(string Severity, string Message); // "ERROR" | "WARN"
 
     private readonly string _contentRoot;
+    private readonly string _projectRoot;
     private readonly Usmap? _mappings;
 
-    public StageValidationService(string contentRoot, string? mappingsPath)
+    public StageValidationService(string contentRoot, string? mappingsPath, string? projectRoot = null)
     {
         _contentRoot = contentRoot;
+        _projectRoot = string.IsNullOrWhiteSpace(projectRoot)
+            ? AppSettings.Current.EffectiveProjectRoot()
+            : projectRoot;
         _mappings = string.IsNullOrWhiteSpace(mappingsPath) || !File.Exists(mappingsPath)
             ? null
             : MappingsCache.Load(mappingsPath);
@@ -37,6 +41,8 @@ public sealed class StageValidationService
     {
         var findings = new List<Finding>();
         var characterAssets = new Dictionary<string, UAsset>(StringComparer.OrdinalIgnoreCase);
+
+        CheckCustomStaticMeshDeclarations(project, findings);
 
         foreach (var (role, pkg) in new[]
         {
@@ -56,6 +62,7 @@ public sealed class StageValidationService
             characterAssets[role] = asset;
             CheckMeshKindMismatch(asset, role, findings);
             CheckDonorShellStaticHair(asset, role, findings);
+            CheckCustomStaticMeshComponentIntegrity(asset, role, project, findings);
         }
 
         CheckNativeBodyProfile(project, characterAssets, findings);
@@ -468,6 +475,639 @@ public sealed class StageValidationService
                     $"Equipment '{resolvedEquipment.Name}' is {profile.SupportLabel.ToLowerInvariant()}: {profile.Summary}"));
             }
         }
+    }
+
+    /// <summary>
+    /// Proves that every saved custom-mesh declaration has one complete cooked mesh package.
+    /// Blueprint checks below then bind that package to both generated character roles. Keeping
+    /// the declaration as the source of truth prevents an orphaned or stale CustomMesh_* export
+    /// from being mistaken for a successfully rebuilt attachment.
+    /// </summary>
+    private void CheckCustomStaticMeshDeclarations(
+        NativeSuitProject project,
+        List<Finding> findings)
+    {
+        var declarations = (project.CustomStaticMeshes ?? []).Where(custom => custom is not null).ToList();
+        if (declarations.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var duplicate in DuplicateCustomStaticMeshDeclarationKeys(project, declarations))
+        {
+            findings.Add(new("ERROR",
+                $"Custom static mesh declarations reuse {duplicate}. Every imported OBJ needs a unique saved ID, component, and mesh package. Remove the duplicate and rebuild the custom meshes."));
+        }
+
+        foreach (var custom in declarations)
+        {
+            var display = CustomStaticMeshLabel(custom);
+            CheckProjectOwnedCustomStaticMeshSource(project, custom, display, findings);
+            if (string.IsNullOrWhiteSpace(NormalizeCustomStaticMeshId(custom.Id)))
+            {
+                findings.Add(new("ERROR",
+                    $"Custom static mesh '{display}' has no valid saved ID. Remove it and import the OBJ again before packaging."));
+            }
+
+            // A slot-zero assignment is normally validated by the role checks below. MaterialPath
+            // is also authoritative declarative state, though, and older/delete-corrupted projects
+            // can retain a mod-local path without any MaterialAssignment row at all. Check it even
+            // when a separate mesh-package declaration is malformed.
+            var declaredMaterial = UnrealPathUtil.NormalizePackagePath(
+                string.IsNullOrWhiteSpace(custom.MaterialPath)
+                    ? CustomStaticMeshImportService.DefaultMaterialPackagePath
+                    : custom.MaterialPath);
+            CheckCustomStaticMeshMaterialFiles(declaredMaterial, display, findings);
+
+            string meshPackage;
+            try
+            {
+                meshPackage = DeclaredCustomStaticMeshPackage(project, custom);
+            }
+            catch (Exception ex)
+            {
+                findings.Add(new("ERROR",
+                    $"Custom static mesh '{display}' has an invalid mesh package declaration: {ex.Message}"));
+                continue;
+            }
+
+            if (!ValidExpectedPackage(meshPackage))
+            {
+                findings.Add(new("ERROR",
+                    $"Custom static mesh '{display}' has invalid mesh package '{meshPackage}'. Rebuild it from Parts before packaging."));
+                continue;
+            }
+
+            var missingMeshFiles = MissingNonEmptyPackageFiles(
+                _contentRoot,
+                meshPackage,
+                ".uasset",
+                ".uexp",
+                ".ubulk");
+            if (missingMeshFiles.Count > 0)
+            {
+                findings.Add(new("ERROR",
+                    $"Custom static mesh '{display}' is missing its complete generated package ({string.Join(", ", missingMeshFiles)}): {meshPackage}. Rebuild the OBJ before packaging."));
+            }
+            else
+            {
+                CheckGeneratedCustomStaticMeshPackage(meshPackage, display, findings);
+            }
+        }
+    }
+
+    private void CheckProjectOwnedCustomStaticMeshSource(
+        NativeSuitProject project,
+        CustomStaticMeshImport custom,
+        string display,
+        List<Finding> findings)
+    {
+        if (string.IsNullOrWhiteSpace(custom.SourceObjRelativePath))
+        {
+            findings.Add(new("ERROR",
+                $"Custom static mesh '{display}' has no project-owned OBJ source. Import the OBJ again before packaging so later rebuilds remain possible."));
+            return;
+        }
+
+        try
+        {
+            if (!TryResolveProjectOwnedCustomMeshSource(
+                    _projectRoot,
+                    project,
+                    custom.SourceObjRelativePath,
+                    out var sourcePath))
+            {
+                findings.Add(new("ERROR",
+                    $"Custom static mesh '{display}' has an OBJ path outside its suit project. Import the OBJ again so the source is portable and safe to rebuild."));
+                return;
+            }
+            if (!File.Exists(sourcePath) || new FileInfo(sourcePath).Length <= 0)
+            {
+                findings.Add(new("ERROR",
+                    $"Custom static mesh '{display}' is missing its project-owned OBJ source '{custom.SourceObjRelativePath}'. Restore or re-import that OBJ before packaging."));
+            }
+        }
+        catch (Exception ex)
+        {
+            findings.Add(new("ERROR",
+                $"Custom static mesh '{display}' has an invalid project-owned OBJ path: {ex.Message}"));
+        }
+    }
+
+    private static bool TryResolveProjectOwnedCustomMeshSource(
+        string projectRoot,
+        NativeSuitProject project,
+        string relativePath,
+        out string sourcePath)
+    {
+        var projectDirectory = Path.GetFullPath(
+            new SuitProjectService(projectRoot).ProjectOutputDirectory(project));
+        sourcePath = Path.GetFullPath(Path.Combine(projectDirectory, relativePath));
+        return FileSystemPathUtil.IsWithinDirectory(sourcePath, projectDirectory);
+    }
+
+    private void CheckGeneratedCustomStaticMeshPackage(
+        string meshPackage,
+        string display,
+        List<Finding> findings)
+    {
+        var uasset = PackagePathToBasePath(meshPackage) + ".uasset";
+        try
+        {
+            var generated = new UAsset(
+                uasset,
+                EngineVersion.VER_UE5_6,
+                _mappings,
+                CustomSerializationFlags.SkipPreloadDependencyLoading);
+            var expectedName = UnrealPathUtil.AssetName(meshPackage);
+            var expectedExport = generated.Exports.OfType<NormalExport>().FirstOrDefault(export =>
+                export.ObjectName.ToString().Equals(expectedName, StringComparison.OrdinalIgnoreCase));
+            var exportClass = expectedExport?.GetExportClassType().Value?.ToString() ?? "";
+            if (expectedExport is null ||
+                !exportClass.Contains("StaticMesh", StringComparison.OrdinalIgnoreCase) ||
+                exportClass.Contains("Component", StringComparison.OrdinalIgnoreCase))
+            {
+                findings.Add(new("ERROR",
+                    $"Custom static mesh '{display}' package '{meshPackage}' does not contain the expected StaticMesh export '{expectedName}'. Rebuild the OBJ before packaging."));
+            }
+        }
+        catch (Exception ex)
+        {
+            findings.Add(new("ERROR",
+                $"Custom static mesh '{display}' package '{meshPackage}' failed to reopen and is unsafe to package: {ex.Message}"));
+        }
+    }
+
+    private void CheckCustomStaticMeshMaterialFiles(
+        string materialPackage,
+        string display,
+        List<Finding> findings)
+    {
+        if (!ValidExpectedPackage(materialPackage))
+        {
+            findings.Add(new("ERROR",
+                $"Custom static mesh '{display}' has invalid material package '{materialPackage}'. Choose a /Game material and rebuild it."));
+            return;
+        }
+        if (!materialPackage.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var missingMaterialFiles = MissingNonEmptyPackageFiles(
+            _contentRoot,
+            materialPackage,
+            ".uasset",
+            ".uexp");
+        if (missingMaterialFiles.Count > 0)
+        {
+            findings.Add(new("ERROR",
+                $"Custom static mesh '{display}' points at generated material '{materialPackage}', but its complete cooked pair is missing ({string.Join(", ", missingMaterialFiles)}). Recreate or reassign the material before packaging."));
+        }
+    }
+
+    /// <summary>
+    /// CustomMesh_* components are authored by Batcomputer through a cross-package static-shell
+    /// clone. Older stages could retain donor FName indexes in nested BodyInstance data and in the
+    /// cutscene SCS parent-owner field. Those indexes resolve to arbitrary names in the target
+    /// package and can crash as soon as the suit preview constructs the component. Only inspect
+    /// live SCS fields so a deliberately removed custom mesh's orphan exports do not block builds.
+    /// </summary>
+    private static void CheckCustomStaticMeshComponentIntegrity(
+        UAsset asset,
+        string role,
+        NativeSuitProject project,
+        List<Finding> findings)
+    {
+        var declarations = (project.CustomStaticMeshes ?? []).Where(custom => custom is not null).ToList();
+        var liveComponents = LiveScsComponentNames(asset);
+        var declaredComponents = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var custom in declarations)
+        {
+            var display = CustomStaticMeshLabel(custom);
+            var componentName = NormalizeCustomStaticMeshComponent(
+                CustomStaticMeshImportService.ComponentNameFor(custom));
+            if (string.IsNullOrWhiteSpace(componentName))
+            {
+                findings.Add(new("ERROR",
+                    $"{role}: custom static mesh '{display}' has no valid resolved component. Remove it and import the OBJ again."));
+                continue;
+            }
+            declaredComponents.Add(componentName);
+
+            void Error(string message) => findings.Add(new(
+                "ERROR",
+                $"{role}: custom static component '{componentName}' {message} " +
+                "Rebuild the custom mesh from Parts before packaging."));
+
+            if (!liveComponents.Contains(componentName))
+            {
+                Error("is declared by the suit but is not live in the SimpleConstructionScript.");
+                continue;
+            }
+
+            var matchingLiveNodes = LiveScsNodeExportIndices(asset)
+                .Select(index => asset.Exports[index - 1])
+                .OfType<NormalExport>()
+                .Where(export =>
+                    export.ObjectName.ToString().StartsWith("SCS_Node", StringComparison.OrdinalIgnoreCase) &&
+                    export.Data.OfType<NamePropertyData>().Any(property =>
+                        property.Name.ToString().Equals("InternalVariableName", StringComparison.OrdinalIgnoreCase) &&
+                        property.Value.ToString().Equals(componentName, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+            var node = matchingLiveNodes.Count == 1 ? matchingLiveNodes[0] : null;
+            var templateIndex = node is null
+                ? 0
+                : FindObjectProperty(node.Data, "ComponentTemplate")?.Value.Index ?? 0;
+            var templateExportName = templateIndex > 0 && templateIndex <= asset.Exports.Count
+                ? asset.Exports[templateIndex - 1].ObjectName.ToString()
+                : "";
+            if (node is null ||
+                !CustomStaticComponentTemplateBindingMatches(
+                    matchingLiveNodes.Count,
+                    templateIndex,
+                    asset.Exports.Count,
+                    templateExportName,
+                    componentName) ||
+                asset.Exports[templateIndex - 1] is not NormalExport component)
+            {
+                Error(matchingLiveNodes.Count switch
+                {
+                    0 => "is marked live but has no matching live SCS node.",
+                    > 1 => "has more than one matching live SCS node.",
+                    _ => "has a missing, invalid, or misdirected SCS ComponentTemplate binding.",
+                });
+                continue;
+            }
+
+            var hasSyntheticClassField = asset.Exports.OfType<ClassExport>()
+                .SelectMany(classExport => classExport.LoadedProperties)
+                .Any(property => property.Name.ToString().Equals(
+                    componentName,
+                    StringComparison.OrdinalIgnoreCase));
+            if (hasSyntheticClassField)
+            {
+                Error("also appears as a synthetic reflected Blueprint class field. " +
+                      "That changes the schema of an opaque cooked class-default object and can crash during startup preload.");
+            }
+
+            var componentClass = component.GetExportClassType().Value?.ToString() ?? "";
+            if (!componentClass.Contains("StaticMeshComponent", StringComparison.OrdinalIgnoreCase))
+            {
+                Error($"uses component class '{componentClass}' instead of StaticMeshComponent.");
+                continue;
+            }
+
+            if (!PartGraftService.TryValidateCanonicalStaticShellBodyInstance(component, out var bodyError))
+            {
+                Error("has malformed or foreign BodyInstance names: " + bodyError);
+            }
+
+            string meshPackage;
+            try
+            {
+                meshPackage = DeclaredCustomStaticMeshPackage(project, custom);
+            }
+            catch (Exception ex)
+            {
+                Error("has an invalid saved mesh package: " + ex.Message);
+                continue;
+            }
+            var expectedMeshObject = UnrealPathUtil.ObjectPath(meshPackage);
+            var actualMesh = FindObjectProperty(component.Data, "StaticMesh");
+            if (actualMesh is null || actualMesh.Value.IsNull() ||
+                !ObjectIdentityMatches(asset, actualMesh.Value, expectedMeshObject))
+            {
+                Error($"does not reference its declared mesh '{expectedMeshObject}' " +
+                      $"(found '{ObjectName(asset, actualMesh?.Value ?? FPackageIndex.FromRawIndex(0))}').");
+            }
+
+            var fallbackMaterial = string.IsNullOrWhiteSpace(custom.MaterialPath)
+                ? CustomStaticMeshImportService.DefaultMaterialPackagePath
+                : custom.MaterialPath;
+            var expectedMaterial = UnrealPathUtil.NormalizePackagePath(
+                FinalMaterialPackage(project, role, componentName, 0, fallbackMaterial));
+            var materials = MaterialObjectProperties(component);
+            if (!ValidExpectedPackage(expectedMaterial))
+            {
+                Error($"has invalid effective slot-zero material '{expectedMaterial}'.");
+            }
+            else if (materials.Count == 0 || materials[0].Value.IsNull() ||
+                     !ObjectIdentityMatches(
+                         asset,
+                         materials[0].Value,
+                         UnrealPathUtil.ObjectPath(expectedMaterial)))
+            {
+                var actualMaterial = materials.Count == 0
+                    ? "<missing>"
+                    : ObjectPackagePath(asset, materials[0].Value);
+                Error($"uses slot-zero material '{actualMaterial}' instead of the declared effective material '{expectedMaterial}'.");
+            }
+
+            var expectedSocket = CustomStaticMeshImportService.ResolveAttachmentSlot(
+                custom.Target,
+                custom.AttachSocket).AttachSocket;
+            var attachProperty = node.Data.OfType<NamePropertyData>().FirstOrDefault(property =>
+                property.Name.ToString().Equals("AttachToName", StringComparison.OrdinalIgnoreCase));
+            var actualSocket = attachProperty?.Value.ToString() ?? "";
+            // A root attachment can legitimately omit AttachToName entirely. Any authored
+            // non-root socket, or a present-but-different value, must still match exactly.
+            if ((attachProperty is not null ||
+                 !expectedSocket.Equals("Root", StringComparison.OrdinalIgnoreCase)) &&
+                !actualSocket.Equals(expectedSocket, StringComparison.OrdinalIgnoreCase))
+            {
+                Error($"attaches to '{actualSocket}' instead of declared socket '{expectedSocket}'.");
+            }
+
+            if (role.Equals("cutscene", StringComparison.OrdinalIgnoreCase) &&
+                !PartGraftService.TryValidateCutsceneParentOwner(node, out var ownerError))
+            {
+                Error("has an invalid SCS ParentComponentOwnerClassName: " + ownerError);
+            }
+        }
+
+        foreach (var staleComponent in liveComponents.Where(component =>
+                     component.StartsWith("CustomMesh_", StringComparison.OrdinalIgnoreCase) &&
+                     !declaredComponents.Contains(NormalizeCustomStaticMeshComponent(component))))
+        {
+            findings.Add(new("ERROR",
+                $"{role}: live custom static component '{staleComponent}' has no saved CustomStaticMeshes declaration. Rebuild the suit from its declarative Parts list before packaging."));
+        }
+    }
+
+    private static bool CustomStaticComponentTemplateBindingMatches(
+        int matchingLiveNodeCount,
+        int componentTemplateIndex,
+        int exportCount,
+        string? componentTemplateExportName,
+        string expectedComponentName) =>
+        matchingLiveNodeCount == 1 &&
+        componentTemplateIndex > 0 &&
+        componentTemplateIndex <= exportCount &&
+        NormalizeCustomStaticMeshComponent(componentTemplateExportName)
+            .Equals(
+                NormalizeCustomStaticMeshComponent(expectedComponentName),
+                StringComparison.OrdinalIgnoreCase);
+
+    private static string CustomStaticMeshLabel(CustomStaticMeshImport custom) =>
+        string.IsNullOrWhiteSpace(custom.DisplayName)
+            ? (string.IsNullOrWhiteSpace(custom.Id) ? "unnamed import" : custom.Id.Trim())
+            : custom.DisplayName.Trim();
+
+    private static string DeclaredCustomStaticMeshPackage(
+        NativeSuitProject project,
+        CustomStaticMeshImport custom) =>
+        UnrealPathUtil.NormalizePackagePath(
+            CustomStaticMeshImportService.MeshPackagePathFor(project, custom));
+
+    private static IReadOnlyList<string> DuplicateCustomStaticMeshDeclarationKeys(
+        NativeSuitProject project,
+        IEnumerable<CustomStaticMeshImport> declarations)
+    {
+        var identities = declarations.Select(custom => new
+        {
+            Id = NormalizeCustomStaticMeshId(custom.Id),
+            Component = NormalizeCustomStaticMeshComponent(
+                CustomStaticMeshImportService.ComponentNameFor(custom)),
+            MeshPackage = TryDeclaredCustomStaticMeshPackage(project, custom),
+        }).ToList();
+        var duplicates = new List<string>();
+
+        AddDuplicateKeys(identities.Select(identity => identity.Id), "saved ID", duplicates);
+        AddDuplicateKeys(identities.Select(identity => identity.Component), "resolved component", duplicates);
+        AddDuplicateKeys(identities.Select(identity => identity.MeshPackage), "mesh package", duplicates);
+        return duplicates;
+    }
+
+    private static void AddDuplicateKeys(
+        IEnumerable<string> values,
+        string label,
+        List<string> duplicates)
+    {
+        duplicates.AddRange(values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .GroupBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1)
+            .Select(group => $"{label} '{group.Key}'"));
+    }
+
+    private static string TryDeclaredCustomStaticMeshPackage(
+        NativeSuitProject project,
+        CustomStaticMeshImport custom)
+    {
+        try
+        {
+            return DeclaredCustomStaticMeshPackage(project, custom);
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
+    private static string NormalizeCustomStaticMeshId(string? id)
+    {
+        var token = new string((id ?? "").Where(char.IsLetterOrDigit).ToArray());
+        return token.Length > 24 ? token[..24] : token;
+    }
+
+    private static string NormalizeCustomStaticMeshComponent(string? component)
+    {
+        var normalized = (component ?? "").Trim();
+        var colon = normalized.IndexOf(':');
+        if (colon >= 0)
+        {
+            normalized = normalized[..colon].Trim();
+        }
+        const string generatedSuffix = "_GEN_VARIABLE";
+        if (normalized.EndsWith(generatedSuffix, StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized[..^generatedSuffix.Length];
+        }
+        return normalized;
+    }
+
+    private static IReadOnlyList<string> MissingNonEmptyPackageFiles(
+        string contentRoot,
+        string packagePath,
+        params string[] extensions)
+    {
+        string packageBase;
+        try
+        {
+            packageBase = PackagePathToBasePath(contentRoot, packagePath);
+        }
+        catch
+        {
+            return extensions.ToList();
+        }
+
+        return extensions
+            .Where(extension =>
+            {
+                var path = packageBase + extension;
+                return !File.Exists(path) || new FileInfo(path).Length <= 0;
+            })
+            .ToList();
+    }
+
+    internal static bool CustomStaticMeshDeclarationIdentityRegressionPasses()
+    {
+        var project = new NativeSuitProject
+        {
+            TargetPackages = new TargetPackages
+            {
+                Playable = "/Game/Mods/IdentityFixture/Characters/BP_Fixture_Playable",
+            },
+        };
+        var distinct = new[]
+        {
+            new CustomStaticMeshImport
+            {
+                Id = "cowl-one",
+                ResolvedComponent = "CustomMesh_CowlOne",
+                MeshPackagePath = "/Game/Mods/IdentityFixture/Meshes/SM_Custom_CowlOne",
+            },
+            new CustomStaticMeshImport
+            {
+                Id = "belt-two",
+                ResolvedComponent = "CustomMesh_BeltTwo",
+                MeshPackagePath = "/Game/Mods/IdentityFixture/Meshes/SM_Custom_BeltTwo",
+            },
+        };
+        var duplicate = new[]
+        {
+            distinct[0],
+            new CustomStaticMeshImport
+            {
+                Id = "COWL ONE",
+                ResolvedComponent = "custommesh_cowlone_GEN_VARIABLE",
+                MeshPackagePath = "/game/mods/IdentityFixture/Meshes/SM_Custom_CowlOne",
+            },
+        };
+        return DuplicateCustomStaticMeshDeclarationKeys(project, distinct).Count == 0 &&
+               DuplicateCustomStaticMeshDeclarationKeys(project, duplicate).Count == 3;
+    }
+
+    internal static bool RequiredPackageFilesAreNonEmptyForTest(
+        string contentRoot,
+        string packagePath,
+        params string[] extensions) =>
+        MissingNonEmptyPackageFiles(contentRoot, packagePath, extensions).Count == 0;
+
+    internal static bool ProjectOwnedCustomMeshSourcePathIsSafeForTest(
+        string projectRoot,
+        NativeSuitProject project,
+        string relativePath) =>
+        TryResolveProjectOwnedCustomMeshSource(
+            projectRoot,
+            project,
+            relativePath,
+            out _);
+
+    internal static string ResolveValidationProjectRoot(
+        string projectJsonPath,
+        string? explicitProjectRoot,
+        string fallbackProjectRoot)
+    {
+        if (!string.IsNullOrWhiteSpace(explicitProjectRoot))
+        {
+            return Path.GetFullPath(explicitProjectRoot);
+        }
+
+        try
+        {
+            var current = new DirectoryInfo(Path.GetDirectoryName(
+                Path.GetFullPath(projectJsonPath))!);
+            while (current is not null)
+            {
+                if (current.Name.Equals("NativeSuitGuiProjects", StringComparison.OrdinalIgnoreCase) &&
+                    current.Parent is { } generated &&
+                    (generated.Name.Equals(AppSettings.GeneratedFolderName, StringComparison.OrdinalIgnoreCase) ||
+                     generated.Name.Equals("_generated", StringComparison.OrdinalIgnoreCase)) &&
+                    generated.Parent is { } workspace)
+                {
+                    return workspace.FullName;
+                }
+                current = current.Parent;
+            }
+        }
+        catch
+        {
+            // The caller's configured workspace remains a deterministic fallback for malformed
+            // or noncanonical archived project paths.
+        }
+
+        return Path.GetFullPath(fallbackProjectRoot);
+    }
+
+    internal static bool ValidationProjectRootResolutionRegressionPasses()
+    {
+        var fixtureRoot = Path.Combine(Path.GetTempPath(), "Batcomputer-validation-root-fixture");
+        var canonicalWorkspace = Path.Combine(fixtureRoot, "CanonicalWorkspace");
+        var projectJson = Path.Combine(
+            canonicalWorkspace,
+            "_generated",
+            "NativeSuitGuiProjects",
+            "fixture.native-suit-project.json");
+        var explicitWorkspace = Path.Combine(fixtureRoot, "ExplicitWorkspace");
+        var fallbackWorkspace = Path.Combine(fixtureRoot, "FallbackWorkspace");
+        var noncanonicalProject = Path.Combine(fixtureRoot, "Archive", "fixture.json");
+        return ResolveValidationProjectRoot(projectJson, null, fallbackWorkspace)
+                   .Equals(Path.GetFullPath(canonicalWorkspace), StringComparison.OrdinalIgnoreCase) &&
+               ResolveValidationProjectRoot(projectJson, explicitWorkspace, fallbackWorkspace)
+                   .Equals(Path.GetFullPath(explicitWorkspace), StringComparison.OrdinalIgnoreCase) &&
+               ResolveValidationProjectRoot(noncanonicalProject, null, fallbackWorkspace)
+                   .Equals(Path.GetFullPath(fallbackWorkspace), StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool CustomStaticComponentTemplateBindingRegressionPasses() =>
+        CustomStaticComponentTemplateBindingMatches(
+            1,
+            60,
+            61,
+            "CustomMesh_Cowl_GEN_VARIABLE",
+            "CustomMesh_Cowl") &&
+        !CustomStaticComponentTemplateBindingMatches(
+            1,
+            0,
+            61,
+            "",
+            "CustomMesh_Cowl") &&
+        !CustomStaticComponentTemplateBindingMatches(
+            1,
+            62,
+            61,
+            "CustomMesh_Cowl_GEN_VARIABLE",
+            "CustomMesh_Cowl") &&
+        !CustomStaticComponentTemplateBindingMatches(
+            1,
+            60,
+            61,
+            "CustomMesh_Other_GEN_VARIABLE",
+            "CustomMesh_Cowl") &&
+        !CustomStaticComponentTemplateBindingMatches(
+            2,
+            60,
+            61,
+            "CustomMesh_Cowl_GEN_VARIABLE",
+            "CustomMesh_Cowl");
+
+    internal static string EffectiveCustomStaticMeshMaterialForTest(
+        NativeSuitProject project,
+        string role,
+        string component,
+        string fallback) =>
+        FinalMaterialPackage(project, role, component, 0, fallback);
+
+    internal static bool RejectsMalformedCustomStaticMetadataForTest()
+    {
+        var malformedComponent = new NormalExport { Data = [] };
+        var malformedNode = new NormalExport { Data = [] };
+
+        return !PartGraftService.TryValidateCanonicalStaticShellBodyInstance(malformedComponent, out _) &&
+               !PartGraftService.TryValidateCutsceneParentOwner(malformedNode, out _);
     }
 
     /// <summary>
@@ -1642,7 +2282,18 @@ public sealed class StageValidationService
     /// </summary>
     internal static HashSet<string> LiveScsComponentNames(UAsset asset)
     {
-        var liveNodeIndices = asset.Exports
+        return LiveScsNodeExportIndices(asset)
+            .Select(index => asset.Exports[index - 1])
+            .OfType<NormalExport>()
+            .Where(export => export.ObjectName.ToString().StartsWith("SCS_Node", StringComparison.OrdinalIgnoreCase))
+            .Select(export => export.Data.OfType<NamePropertyData>().FirstOrDefault(property =>
+                property.Name.ToString().Equals("InternalVariableName", StringComparison.OrdinalIgnoreCase))?.Value.ToString() ?? "")
+            .Where(component => !string.IsNullOrWhiteSpace(component))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static HashSet<int> LiveScsNodeExportIndices(UAsset asset) =>
+        asset.Exports
             .OfType<NormalExport>()
             .SelectMany(export => export.Data.OfType<ArrayPropertyData>())
             .Where(property =>
@@ -1654,16 +2305,6 @@ public sealed class StageValidationService
             .Select(property => property.Value.Index)
             .Where(index => index > 0 && index <= asset.Exports.Count)
             .ToHashSet();
-
-        return liveNodeIndices
-            .Select(index => asset.Exports[index - 1])
-            .OfType<NormalExport>()
-            .Where(export => export.ObjectName.ToString().StartsWith("SCS_Node", StringComparison.OrdinalIgnoreCase))
-            .Select(export => export.Data.OfType<NamePropertyData>().FirstOrDefault(property =>
-                property.Name.ToString().Equals("InternalVariableName", StringComparison.OrdinalIgnoreCase))?.Value.ToString() ?? "")
-            .Where(component => !string.IsNullOrWhiteSpace(component))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-    }
 
     internal static bool AuthoredShellLiveComponentsRemainForTest(
         IEnumerable<string> required,

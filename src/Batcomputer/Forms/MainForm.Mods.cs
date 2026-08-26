@@ -15,6 +15,11 @@ namespace Batcomputer;
 /// </summary>
 public sealed partial class MainForm
 {
+    internal static StageValidationService.Finding CombinedStageValidationFailure(Exception exception) =>
+        new(
+            "ERROR",
+            "Structural asset validation could not run, so packaging is blocked: " + exception.Message);
+
     private ModProjectService ModService => new(_projectRootText.Text.Trim());
 
     /// <summary>Where a built mod's aggregate outputs land.</summary>
@@ -1691,7 +1696,8 @@ public sealed partial class MainForm
             }
             catch (Exception ex)
             {
-                preflight.Result.AddWarning("staged release", $"Structural asset validation could not run: {ex.Message}");
+                var failure = CombinedStageValidationFailure(ex);
+                validationErrors.Add(failure.Message);
             }
             if (validationErrors.Count > 0)
             {

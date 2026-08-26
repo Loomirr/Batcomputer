@@ -682,14 +682,30 @@ internal static class Program
             return 0;
         }
 
+        if (args.Length >= 1 &&
+            args[0].Equals("--validate-stage", StringComparison.OrdinalIgnoreCase) &&
+            args.Length < 3)
+        {
+            Console.WriteLine(
+                "usage: --validate-stage <projectJson> <contentRoot> [usmapPath] [projectRoot]");
+            return 2;
+        }
+
         if (args.Length >= 3 && args[0].Equals("--validate-stage", StringComparison.OrdinalIgnoreCase))
         {
-            // --validate-stage <projectJson> <contentRoot> [usmapPath]
+            // --validate-stage <projectJson> <contentRoot> [usmapPath] [projectRoot]
+            // projectRoot is normally derived from a project stored under
+            // Generated/NativeSuitGuiProjects. Pass it explicitly when validating an archived
+            // project JSON whose project-owned OBJ sources still live in another workspace.
             var proj = System.Text.Json.JsonSerializer.Deserialize<NativeSuitProject>(File.ReadAllText(args[1]),
                 new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             if (proj is null) { Console.WriteLine("could not load project"); return 1; }
             var usmap = args.Length >= 4 ? args[3] : AppSettings.Current.EffectiveUsmapPath();
-            var findings = new StageValidationService(args[2], usmap).Validate(proj);
+            var projectRoot = StageValidationService.ResolveValidationProjectRoot(
+                args[1],
+                args.Length >= 5 ? args[4] : null,
+                AppSettings.Current.EffectiveProjectRoot());
+            var findings = new StageValidationService(args[2], usmap, projectRoot).Validate(proj);
             foreach (var f in findings) Console.WriteLine($"[{f.Severity}] {f.Message}");
             var errs = findings.Count(f => f.Severity.Equals("ERROR", StringComparison.OrdinalIgnoreCase));
             Console.WriteLine($"validation: {errs} error(s), {findings.Count - errs} warning(s)");

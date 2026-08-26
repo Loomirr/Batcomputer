@@ -159,7 +159,7 @@ public sealed partial class MainForm
     /// name defaults to the same MI so saving overwrites/edits it; otherwise
     /// (a base-game MI) it suggests a fresh mod-scoped name.
     /// </summary>
-    private void OpenMaterialFromBase(string miGamePath, bool editInPlace)
+    private async void OpenMaterialFromBase(string miGamePath, bool editInPlace)
     {
         var diskPath = ResolveMaterialDiskPath(miGamePath, preferExport: editInPlace);
         if (diskPath is null)
@@ -198,7 +198,21 @@ public sealed partial class MainForm
         }
         if (editInPlace)
         {
-            RenameGeneratedMaterial(miGamePath, wiz.ResultMiPackagePath);
+            try
+            {
+                await RenameGeneratedMaterialAsync(miGamePath, wiz.ResultMiPackagePath);
+            }
+            catch (Exception ex)
+            {
+                // The rename transaction restored the prior suit recipe and stage. Still register
+                // the newly cooked MI below as an unassigned material so the author's edit is not
+                // lost and can be applied after the reported rebuild problem is fixed.
+                AppendLog("Material edit was kept separately because its assignment rename could not be rebuilt: " + ex.Message);
+                Dialog.Error(
+                    this,
+                    "Material edit kept separately",
+                    "The prior suit and its working stage were restored. The edited material was kept as a separate unassigned material, but it was not substituted into this suit. Fix the reported rebuild issue, then apply the new material again.\n\n" + ex.Message);
+            }
         }
         RegisterGeneratedMaterial(wiz);
         AppendLog($"{(editInPlace ? "Edited" : "Created from base")} material {wiz.ResultMiPackagePath}");
@@ -864,7 +878,7 @@ public sealed partial class MainForm
         }
     }
 
-    private void RenameGeneratedMaterial(string oldPackagePath, string newPackagePath)
+    private async Task RenameGeneratedMaterialAsync(string oldPackagePath, string newPackagePath)
     {
         var oldPackage = UnrealPathUtil.NormalizePackagePath(oldPackagePath);
         var newPackage = UnrealPathUtil.NormalizePackagePath(newPackagePath);
@@ -885,47 +899,119 @@ public sealed partial class MainForm
 
         var reassigned = 0;
         var registryUpdated = 0;
+        var customMeshesUpdated = 0;
         if (_currentProject is not null)
         {
-            foreach (var generated in _currentProject.GeneratedMaterials ?? Enumerable.Empty<GeneratedMaterialEntry>())
+            var projectRoot = _projectRootText.Text.Trim();
+            var priorProject = JsonSerializer.Deserialize<NativeSuitProject>(
+                JsonSerializer.Serialize(_currentProject))
+                ?? throw new InvalidOperationException("Could not snapshot the suit before renaming its material.");
+            var stageSnapshot = await CaptureBaseStageFilesystemAsync(
+                projectRoot,
+                _currentProject.SlotId,
+                new[] { "UnpatchedStage", "PatchedNameMapStage", "GraftedPartStage" });
+            try
             {
-                if (!UnrealPathUtil.NormalizePackagePath(generated.PackagePath)
-                        .Equals(oldPackage, StringComparison.OrdinalIgnoreCase))
+                foreach (var generated in _currentProject.GeneratedMaterials ?? Enumerable.Empty<GeneratedMaterialEntry>())
                 {
-                    continue;
+                    if (!UnrealPathUtil.NormalizePackagePath(generated.PackagePath)
+                            .Equals(oldPackage, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    generated.PackagePath = newPackage;
+                    generated.DisplayName = UnrealPathUtil.AssetName(newPackage);
+                    registryUpdated++;
                 }
 
-                generated.PackagePath = newPackage;
-                generated.DisplayName = UnrealPathUtil.AssetName(newPackage);
-                registryUpdated++;
+                foreach (var assignment in _currentProject.MaterialAssignments)
+                {
+                    if (!UnrealPathUtil.NormalizePackagePath(assignment.MiPackagePath)
+                            .Equals(oldPackage, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    assignment.MiPackagePath = newPackage;
+                    reassigned++;
+                }
+
+                customMeshesUpdated = ReplaceCustomStaticMeshMaterialReferences(
+                    _currentProject,
+                    oldPackage,
+                    newPackage);
+
+                if (reassigned > 0 || customMeshesUpdated > 0)
+                {
+                    // Rebuild transactionally before the new JSON becomes authoritative. The
+                    // outer snapshot below can restore both project and stages if saving or final
+                    // certification fails after the generated payload succeeds.
+                    await RebuildGraftStageFromDeclarativeAsync(persistProject: false);
+                }
+                if (reassigned > 0 || registryUpdated > 0 || customMeshesUpdated > 0)
+                {
+                    await RunWithFileLockRetryAsync(
+                        () => (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(_currentProject),
+                        "save the renamed generated material");
+                }
+                if (reassigned > 0 || customMeshesUpdated > 0)
+                {
+                    await FinalizeDeclarativeGraftStageAsync(_currentProject, projectRoot);
+                }
+                await DiscardBaseStageFilesystemBackupAsync(stageSnapshot, logFailure: true);
             }
-
-            foreach (var assignment in _currentProject.MaterialAssignments)
+            catch (Exception renameFailure)
             {
-                if (!UnrealPathUtil.NormalizePackagePath(assignment.MiPackagePath)
-                        .Equals(oldPackage, StringComparison.OrdinalIgnoreCase))
+                _currentProject = priorProject;
+                try
                 {
-                    continue;
+                    await RestoreBaseStageFilesystemAsync(stageSnapshot);
+                    ApplyProjectToFields(priorProject);
+                    _session.RaiseChanged();
                 }
-
-                assignment.MiPackagePath = newPackage;
-                reassigned++;
-            }
-
-            if (reassigned > 0 || registryUpdated > 0)
-            {
-                (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject);
-                if (reassigned > 0)
+                catch (Exception restoreFailure)
                 {
-                    ApplySavedMaterials(_currentProject, logIfNone: false);
+                    throw new AggregateException(
+                        "The material rename failed and the previous suit stages could not be fully restored. Packaging remains blocked.",
+                        renameFailure,
+                        restoreFailure);
                 }
+                throw;
             }
         }
 
         var removed = DeleteGeneratedMaterialFiles(oldPackage);
         library.Remove(oldPackage);
-        AppendLog($"Renamed material {UnrealPathUtil.AssetName(oldPackage)} to {UnrealPathUtil.AssetName(newPackage)}; updated {reassigned} assignment(s) and {registryUpdated} saved material record(s), removed {removed} old file(s).");
+        AppendLog($"Renamed material {UnrealPathUtil.AssetName(oldPackage)} to {UnrealPathUtil.AssetName(newPackage)}; updated {reassigned} assignment(s), {customMeshesUpdated} custom-mesh recipe(s), and {registryUpdated} saved material record(s), removed {removed} old file(s).");
         RefreshInspector();
+    }
+
+    internal static int ReplaceCustomStaticMeshMaterialReferences(
+        NativeSuitProject project,
+        string oldPackagePath,
+        string replacementPackagePath)
+    {
+        var oldPackage = UnrealPathUtil.NormalizePackagePath(oldPackagePath);
+        var replacement = UnrealPathUtil.NormalizePackagePath(replacementPackagePath);
+        if (string.IsNullOrWhiteSpace(oldPackage) || string.IsNullOrWhiteSpace(replacement))
+        {
+            return 0;
+        }
+
+        var updated = 0;
+        foreach (var mesh in project.CustomStaticMeshes ?? new List<CustomStaticMeshImport>())
+        {
+            if (!UnrealPathUtil.NormalizePackagePath(mesh.MaterialPath)
+                    .Equals(oldPackage, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            mesh.MaterialPath = replacement;
+            updated++;
+        }
+        return updated;
     }
 
     private async Task DeleteGeneratedMaterialAsync(string miPackagePath)
@@ -954,9 +1040,12 @@ public sealed partial class MainForm
             .Where(assignment => UnrealPathUtil.NormalizePackagePath(assignment.MiPackagePath)
                 .Equals(package, StringComparison.OrdinalIgnoreCase))
             .ToList() ?? new List<SavedMaterialAssignment>();
-        var detail = assignments.Count == 0
+        var customMeshReferences = _currentProject?.CustomStaticMeshes
+            .Count(mesh => UnrealPathUtil.NormalizePackagePath(mesh.MaterialPath)
+                .Equals(package, StringComparison.OrdinalIgnoreCase)) ?? 0;
+        var detail = assignments.Count == 0 && customMeshReferences == 0
             ? "It is not assigned to this suit."
-            : $"It is assigned to {assignments.Count} slot(s). Those assignments will be removed and the stage rebuilt from the base.";
+            : $"It is assigned to {assignments.Count} slot(s) and {customMeshReferences} custom-mesh recipe(s). Those references will be removed and the stage rebuilt from the base.";
         if (!Dialog.Confirm(this, "Delete material",
                 $"Delete '{UnrealPathUtil.AssetName(package)}'?\n\n{detail}\n\n{package}",
                 confirmText: "Delete material", severity: Dialog.Level.Crit))
@@ -966,32 +1055,100 @@ public sealed partial class MainForm
 
         var removedAssignments = 0;
         var removedRegistryEntries = 0;
+        var resetCustomMeshMaterials = 0;
         if (_currentProject is not null)
         {
-            if (assignments.Count > 0)
+            var projectRoot = _projectRootText.Text.Trim();
+            NativeSuitProject? priorProject = null;
+            BaseStageFilesystemSnapshot? stageSnapshot = null;
+            try
             {
-                removedAssignments = _currentProject.MaterialAssignments.RemoveAll(assignment =>
-                    UnrealPathUtil.NormalizePackagePath(assignment.MiPackagePath)
+                priorProject = JsonSerializer.Deserialize<NativeSuitProject>(
+                    JsonSerializer.Serialize(_currentProject))
+                    ?? throw new InvalidOperationException("Could not snapshot the suit before deleting its material.");
+                stageSnapshot = await CaptureBaseStageFilesystemAsync(
+                    projectRoot,
+                    _currentProject.SlotId,
+                    new[] { "UnpatchedStage", "PatchedNameMapStage", "GraftedPartStage" });
+
+                if (assignments.Count > 0)
+                {
+                    removedAssignments = _currentProject.MaterialAssignments.RemoveAll(assignment =>
+                        UnrealPathUtil.NormalizePackagePath(assignment.MiPackagePath)
+                            .Equals(package, StringComparison.OrdinalIgnoreCase));
+                }
+                removedRegistryEntries = (_currentProject.GeneratedMaterials ?? new List<GeneratedMaterialEntry>())
+                    .RemoveAll(material => UnrealPathUtil.NormalizePackagePath(material.PackagePath)
                         .Equals(package, StringComparison.OrdinalIgnoreCase));
+                resetCustomMeshMaterials = ReplaceCustomStaticMeshMaterialReferences(
+                    _currentProject,
+                    package,
+                    CustomStaticMeshImportService.DefaultMaterialPackagePath);
+
+                if (removedAssignments > 0 || resetCustomMeshMaterials > 0)
+                {
+                    // Keep the working stage and project file recoverable until the replacement
+                    // recipe has rebuilt in both runtime roles. Generated material files are
+                    // deliberately deleted only after this transaction is certified.
+                    await RebuildGraftStageFromDeclarativeAsync(persistProject: false);
+                }
+                if (removedAssignments > 0 || removedRegistryEntries > 0 || resetCustomMeshMaterials > 0)
+                {
+                    await RunWithFileLockRetryAsync(
+                        () => (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(_currentProject),
+                        "save the generated material deletion");
+                }
+                if (removedAssignments > 0 || resetCustomMeshMaterials > 0)
+                {
+                    await FinalizeDeclarativeGraftStageAsync(_currentProject, projectRoot);
+                }
+                await DiscardBaseStageFilesystemBackupAsync(stageSnapshot, logFailure: true);
             }
-            removedRegistryEntries = (_currentProject.GeneratedMaterials ?? new List<GeneratedMaterialEntry>())
-                .RemoveAll(material => UnrealPathUtil.NormalizePackagePath(material.PackagePath)
-                    .Equals(package, StringComparison.OrdinalIgnoreCase));
-            if (removedAssignments > 0 || removedRegistryEntries > 0)
+            catch (Exception deleteFailure)
             {
-                (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject);
+                var reportedFailure = deleteFailure;
+                if (priorProject is not null && stageSnapshot is not null)
+                {
+                    _currentProject = priorProject;
+                    try
+                    {
+                        await RestoreBaseStageFilesystemAsync(stageSnapshot);
+                        ApplyProjectToFields(priorProject);
+                        _session.RaiseChanged();
+                    }
+                    catch (Exception restoreFailure)
+                    {
+                        reportedFailure = new AggregateException(
+                            "The material deletion failed and the previous suit stages could not be fully restored. Packaging remains blocked.",
+                            deleteFailure,
+                            restoreFailure);
+                    }
+                }
+
+                AppendLog("Material delete stopped; the prior material and suit were kept: " + reportedFailure.Message);
+                Dialog.Error(
+                    this,
+                    "Material delete failed",
+                    "Batcomputer could not rebuild the suit without this material, so it kept the prior project, generated stages, and material files.\n\n" +
+                    reportedFailure.Message);
+                return;
             }
         }
 
         var removedFiles = DeleteGeneratedMaterialFiles(package);
-        library.Remove(package);
-        if (removedAssignments > 0 && _currentProject is not null)
+        try
         {
-            await RebuildGraftStageFromDeclarativeAsync();
+            library.Remove(package);
+        }
+        catch (Exception ex)
+        {
+            // The suit no longer references the material and its local cooked copies were already
+            // removed. A locked disposable library entry must not undo that certified deletion.
+            AppendLog($"Material library cleanup warning for {package}: {ex.Message}");
         }
 
         RecordChange("Materials", UnrealPathUtil.AssetName(package), "deleted", status: "deleted");
-        AppendLog($"Deleted material {package}; removed {removedAssignments} assignment(s), {removedRegistryEntries} saved material record(s), and {removedFiles} file(s).");
+        AppendLog($"Deleted material {package}; removed {removedAssignments} assignment(s), reset {resetCustomMeshMaterials} custom-mesh recipe(s), removed {removedRegistryEntries} saved material record(s), and deleted {removedFiles} file(s).");
         RefreshInspector();
         RefreshToyboxTiles();
     }
@@ -1255,11 +1412,135 @@ public sealed partial class MainForm
         }
     }
 
+    internal sealed record ResolvedTemplateMaterialAssignment(string Context, string PackagePath);
+
+    internal sealed record TemplateMaterialAssignmentResolution(
+        IReadOnlyList<ResolvedTemplateMaterialAssignment> Assignments,
+        string GameplayBaselinePackage,
+        string Warning)
+    {
+        public bool IsRoleExpanded => Assignments.Count > 1;
+    }
+
+    /// <summary>
+    /// Resolves a Material Forge output into the cooked runtime context(s) its donor was authored
+    /// for. LOD-qualified sets are paired only with the sibling carrying the exact same qualifier;
+    /// this deliberately refuses to guess between LOD0 and LOD1.
+    /// </summary>
+    internal static TemplateMaterialAssignmentResolution ResolveTemplateMaterialAssignments(
+        IEnumerable<GeneratedMaterialEntry> knownMaterials,
+        string selectedPackagePath,
+        string requestedContext)
+    {
+        var selectedPackage = UnrealPathUtil.NormalizePackagePath(selectedPackagePath);
+        var context = (requestedContext ?? "both").Trim().ToLowerInvariant();
+        if (context is not ("both" or "playable" or "cutscene"))
+        {
+            context = "both";
+        }
+
+        var entries = (knownMaterials ?? Enumerable.Empty<GeneratedMaterialEntry>())
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.PackagePath))
+            .ToList();
+        var selected = entries
+            .Where(entry => UnrealPathUtil.NormalizePackagePath(entry.PackagePath)
+                .Equals(selectedPackage, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(entry => !string.IsNullOrWhiteSpace(entry.TemplateGroupId))
+            .FirstOrDefault();
+        if (selected is null || string.IsNullOrWhiteSpace(selected.TemplateGroupId))
+        {
+            return new TemplateMaterialAssignmentResolution(
+                [new ResolvedTemplateMaterialAssignment(context, selectedPackage)],
+                selectedPackage,
+                "");
+        }
+
+        static string RuntimeContext(string? role)
+        {
+            if (role?.Contains("gameplay", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return "playable";
+            }
+            if (role?.Contains("cutscene", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return "cutscene";
+            }
+            return "";
+        }
+
+        static string RoleQualifier(string? role)
+        {
+            var normalized = (role ?? "").Trim().ToLowerInvariant()
+                .Replace("gameplay", "", StringComparison.OrdinalIgnoreCase)
+                .Replace("cutscene", "", StringComparison.OrdinalIgnoreCase);
+            return string.Concat(normalized.Where(char.IsLetterOrDigit));
+        }
+
+        var selectedRuntimeContext = RuntimeContext(selected.TemplateOutputRole);
+        var qualifier = RoleQualifier(selected.TemplateOutputRole);
+        if (string.IsNullOrWhiteSpace(selectedRuntimeContext))
+        {
+            return new TemplateMaterialAssignmentResolution(
+                Array.Empty<ResolvedTemplateMaterialAssignment>(),
+                "",
+                $"Material '{UnrealPathUtil.AssetName(selectedPackage)}' belongs to a paired template, but its output role is missing or unrecognized. Recreate the template set before applying it.");
+        }
+
+        var matchingFamily = entries
+            .Where(entry => entry.TemplateGroupId.Equals(selected.TemplateGroupId, StringComparison.OrdinalIgnoreCase) &&
+                            RoleQualifier(entry.TemplateOutputRole).Equals(qualifier, StringComparison.OrdinalIgnoreCase))
+            .GroupBy(entry => UnrealPathUtil.NormalizePackagePath(entry.PackagePath), StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+        var gameplayMatches = matchingFamily.Where(entry =>
+            RuntimeContext(entry.TemplateOutputRole).Equals("playable", StringComparison.OrdinalIgnoreCase)).ToList();
+        var cutsceneMatches = matchingFamily.Where(entry =>
+            RuntimeContext(entry.TemplateOutputRole).Equals("cutscene", StringComparison.OrdinalIgnoreCase)).ToList();
+        if (gameplayMatches.Count > 1 || cutsceneMatches.Count > 1)
+        {
+            var qualifierText = string.IsNullOrWhiteSpace(qualifier) ? "the shared output" : qualifier.ToUpperInvariant();
+            return new TemplateMaterialAssignmentResolution(
+                Array.Empty<ResolvedTemplateMaterialAssignment>(),
+                "",
+                $"Material template group '{selected.TemplateGroupId}' has duplicate runtime outputs for {qualifierText}. Recreate the template set before applying it.");
+        }
+
+        var gameplayPackage = gameplayMatches.Count == 0
+            ? ""
+            : UnrealPathUtil.NormalizePackagePath(gameplayMatches[0].PackagePath);
+        var cutscenePackage = cutsceneMatches.Count == 0
+            ? ""
+            : UnrealPathUtil.NormalizePackagePath(cutsceneMatches[0].PackagePath);
+
+        var assignments = new List<ResolvedTemplateMaterialAssignment>();
+        if (context is "both" or "playable" && !string.IsNullOrWhiteSpace(gameplayPackage))
+        {
+            assignments.Add(new ResolvedTemplateMaterialAssignment("playable", gameplayPackage));
+        }
+        if (context is "both" or "cutscene" && !string.IsNullOrWhiteSpace(cutscenePackage))
+        {
+            assignments.Add(new ResolvedTemplateMaterialAssignment("cutscene", cutscenePackage));
+        }
+
+        var expectedCount = context.Equals("both", StringComparison.OrdinalIgnoreCase) ? 2 : 1;
+        if (assignments.Count != expectedCount)
+        {
+            var qualifierText = string.IsNullOrWhiteSpace(qualifier) ? "the shared output" : qualifier.ToUpperInvariant();
+            return new TemplateMaterialAssignmentResolution(
+                Array.Empty<ResolvedTemplateMaterialAssignment>(),
+                gameplayPackage,
+                $"Material template group '{selected.TemplateGroupId}' is incomplete for {qualifierText}: " +
+                $"it needs the requested gameplay/cutscene output(s). Recreate the full template set; Batcomputer will not substitute another LOD or runtime context.");
+        }
+
+        return new TemplateMaterialAssignmentResolution(assignments, gameplayPackage, "");
+    }
+
     private async Task ApplyMaterialAssignmentAsync()
     {
         var slotId = _slotIdText.Text.Trim();
         var component = _matAssignComponentText.Text.Trim();
-        var mi = _matAssignMiText.Text.Trim();
+        var mi = UnrealPathUtil.NormalizePackagePath(_matAssignMiText.Text.Trim());
 
         if (string.IsNullOrWhiteSpace(slotId)) { AppendLog("Slot ID is empty."); return; }
         if (string.IsNullOrWhiteSpace(component)) { AppendLog("Component is empty."); return; }
@@ -1271,6 +1552,22 @@ public sealed partial class MainForm
         if (_currentProject is null)
         {
             return;
+        }
+
+        var materialLibrary = new ToolMaterialLibraryService(_projectRootText.Text.Trim());
+        var knownMaterials = (_currentProject.GeneratedMaterials ?? new List<GeneratedMaterialEntry>())
+            .Concat(materialLibrary.LoadAvailable())
+            .ToList();
+        var roleResolution = ResolveTemplateMaterialAssignments(knownMaterials, mi, context);
+        if (roleResolution.Assignments.Count == 0)
+        {
+            AppendLog("Apply material stopped: " + roleResolution.Warning);
+            Dialog.Warn(this, "Material template set is incomplete", roleResolution.Warning);
+            return;
+        }
+        if (!string.IsNullOrWhiteSpace(roleResolution.Warning))
+        {
+            AppendLog("Apply material warning: " + roleResolution.Warning);
         }
 
         var projectRoot = _projectRootText.Text.Trim();
@@ -1318,25 +1615,32 @@ public sealed partial class MainForm
             return;
         }
 
-        _currentProject.MaterialAssignments.RemoveAll(m =>
-            m.Component.Equals(component, StringComparison.OrdinalIgnoreCase) &&
-            m.Slot == slot &&
-            m.Context.Equals(context, StringComparison.OrdinalIgnoreCase));
-        new ToolMaterialLibraryService(projectRoot).ImportIntoProject(_currentProject, mi);
-        _currentProject.MaterialAssignments.Add(new SavedMaterialAssignment
+        var replacesBothRuntimeContexts = context.Equals("both", StringComparison.OrdinalIgnoreCase);
+        _currentProject.MaterialAssignments.RemoveAll(assignment =>
+            assignment.Component.Equals(component, StringComparison.OrdinalIgnoreCase) &&
+            assignment.Slot == slot &&
+            (replacesBothRuntimeContexts ||
+             assignment.Context.Equals(context, StringComparison.OrdinalIgnoreCase)));
+        foreach (var resolved in roleResolution.Assignments)
         {
-            Component = component,
-            Slot = slot,
-            MiPackagePath = mi,
-            Context = context
-        });
+            materialLibrary.ImportIntoProject(_currentProject, resolved.PackagePath);
+            _currentProject.MaterialAssignments.Add(new SavedMaterialAssignment
+            {
+                Component = component,
+                Slot = slot,
+                MiPackagePath = resolved.PackagePath,
+                Context = resolved.Context,
+            });
+        }
         // A custom static mesh also stores its base component material declaratively. Keep that
         // source of truth aligned with a normal "both" slot-0 assignment so rebuilding the mesh
         // cannot silently restore the donor material after the user already changed it.
         if (slot == 0 && context.Equals("both", StringComparison.OrdinalIgnoreCase) &&
             FindCustomStaticMeshForComponent(_currentProject, component) is { } customMesh)
         {
-            customMesh.MaterialPath = UnrealPathUtil.NormalizePackagePath(mi);
+            customMesh.MaterialPath = string.IsNullOrWhiteSpace(roleResolution.GameplayBaselinePackage)
+                ? mi
+                : roleResolution.GameplayBaselinePackage;
         }
 
         var projectSaved = false;
@@ -1373,9 +1677,12 @@ public sealed partial class MainForm
             return;
         }
 
-        var miName = mi[(mi.LastIndexOf('/') + 1)..];
-        RecordChange("Materials", $"{component} slot {slot}", $"{miName} ({context})");
-        AppendLog($"Applied material [{component} slot {slot}] = {mi} to the completed declarative stage.");
+        var appliedDescription = string.Join(
+            "; ",
+            roleResolution.Assignments.Select(assignment =>
+                $"{assignment.Context}={assignment.PackagePath}"));
+        RecordChange("Materials", $"{component} slot {slot}", appliedDescription);
+        AppendLog($"Applied material [{component} slot {slot}] {appliedDescription} to the completed declarative stage.");
         RefreshInspector();
         PopulateToyboxSlots();
     }
@@ -1405,14 +1712,30 @@ public sealed partial class MainForm
     // patched/grafted BP assets in the stage are never clobbered by stale exports.
     private void StageGeneratedMaterialsIntoContentRoot(NativeSuitProject project, string contentRootToPackage)
     {
+        ThrowIfMaterialPackageCollidesWithCustomMesh(project);
+        var customMeshPackages = DeclaredCustomMeshPackagesForRelease(project)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var mod = ExtractModFolder(project.TargetPackages?.Playable);
         var copied = 0;
+        var preserved = 0;
         if (!string.IsNullOrWhiteSpace(mod))
         {
             var dst = Path.Combine(contentRootToPackage, "Mods", mod);
             var src = Path.Combine(AppSettings.Current.EffectiveExportContentRoot(), "Mods", mod);
             if (Directory.Exists(src))
             {
+                var cookedPackageExtensions = new HashSet<string>(
+                    [".uasset", ".uexp", ".ubulk"],
+                    StringComparer.OrdinalIgnoreCase);
+                // Capture pre-existing package ownership before copying starts. Newly copied
+                // ExportContent packages must still receive all of their sidecars, while any
+                // package already present in the certified stage is preserved atomically.
+                var certifiedPackageBases = Directory.Exists(dst)
+                    ? Directory.EnumerateFiles(dst, "*", SearchOption.AllDirectories)
+                        .Where(existing => cookedPackageExtensions.Contains(Path.GetExtension(existing)))
+                        .Select(existing => Path.ChangeExtension(Path.GetFullPath(existing), null) ?? existing)
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase)
+                    : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var file in Directory.EnumerateFiles(src, "*", SearchOption.AllDirectories))
                 {
                     var relative = file.Substring(src.Length).TrimStart('\\', '/');
@@ -1422,9 +1745,39 @@ public sealed partial class MainForm
                         continue;
                     }
 
+                    // Custom mesh assets are generated fresh into the certified stage. Never let
+                    // an older ExportContent copy of the same package replace (or stand in for)
+                    // that authoritative mesh during packaging.
+                    var relativePackage = Path.ChangeExtension(relative, null)
+                        .Replace(Path.DirectorySeparatorChar, '/');
+                    var exportedPackage = UnrealPathUtil.NormalizePackagePath(
+                        $"/Game/Mods/{mod}/{relativePackage}");
+                    if (customMeshPackages.Contains(exportedPackage))
+                    {
+                        preserved++;
+                        continue;
+                    }
+
                     var destination = Path.Combine(dst, relative);
+                    var destinationPackageBase = Path.ChangeExtension(Path.GetFullPath(destination), null)
+                        ?? Path.GetFullPath(destination);
+                    if (cookedPackageExtensions.Contains(Path.GetExtension(destination)) &&
+                        certifiedPackageBases.Contains(destinationPackageBase))
+                    {
+                        // Do not create a hybrid package from a certified .uasset and stale export
+                        // sidecars (or the reverse). Validation will fail closed if the certified
+                        // package itself is incomplete.
+                        preserved++;
+                        continue;
+                    }
+                    if (File.Exists(destination))
+                    {
+                        // The fresh declarative stage wins over the disposable export cache.
+                        preserved++;
+                        continue;
+                    }
                     Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                    File.Copy(file, destination, overwrite: true);
+                    File.Copy(file, destination, overwrite: false);
                     copied++;
                 }
             }
@@ -1432,6 +1785,10 @@ public sealed partial class MainForm
             AppendLog(copied > 0
                 ? $"Staged {copied} generated Mods\\{mod} asset file(s) into the pack content root."
                 : $"No generated Mods\\{mod} assets to stage.");
+            if (preserved > 0)
+            {
+                AppendLog($"  kept {preserved} fresh certified-stage file(s) instead of replacing them from ExportContent.");
+            }
         }
 
         var library = new ToolMaterialLibraryService(_projectRootText.Text.Trim());
@@ -1462,8 +1819,7 @@ public sealed partial class MainForm
             }
         }
 
-        return (project.MaterialAssignments ?? new List<SavedMaterialAssignment>())
-            .Select(assignment => UnrealPathUtil.NormalizePackagePath(assignment.MiPackagePath))
+        return DeclaredReleaseMaterialPackages(project)
             .Where(package => releasablePackages.Contains(package))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(package => package, StringComparer.OrdinalIgnoreCase)
@@ -1475,6 +1831,7 @@ public sealed partial class MainForm
         ToolMaterialLibraryService library,
         string contentRoot)
     {
+        ThrowIfMaterialPackageCollidesWithCustomMesh(project);
         // Older Material Forge projects saved only the assignment. LoadAvailable migrates those
         // packages into the durable library, so the assignment remains sufficient declarative
         // ownership even when GeneratedMaterials is empty.
@@ -1488,7 +1845,7 @@ public sealed partial class MainForm
         var copied = 0;
         foreach (var package in referencedPackages)
         {
-            copied += library.CopyPackageToContentRoot(package, contentRoot).Count;
+            copied += library.CopyMaterialClosureToContentRoot(package, contentRoot).Count;
         }
 
         // Every assigned /Game/Mods material must exist in the fresh stage,
@@ -1507,12 +1864,55 @@ public sealed partial class MainForm
     }
 
     internal static IReadOnlyList<string> AssignedModMaterialPackagesForRelease(NativeSuitProject project) =>
-        (project.MaterialAssignments ?? new List<SavedMaterialAssignment>())
-            .Select(assignment => UnrealPathUtil.NormalizePackagePath(assignment.MiPackagePath))
+        DeclaredReleaseMaterialPackages(project)
             .Where(package => package.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(package => package, StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+    internal static IReadOnlyList<string> DeclaredCustomMeshPackagesForRelease(NativeSuitProject project) =>
+        (project.CustomStaticMeshes ?? new List<CustomStaticMeshImport>())
+            .Select(mesh => CustomStaticMeshImportService.MeshPackagePathFor(project, mesh))
+            .Select(UnrealPathUtil.NormalizePackagePath)
+            .Where(package => !string.IsNullOrWhiteSpace(package))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(package => package, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    internal static IReadOnlyList<string> MaterialCustomMeshPackageCollisions(NativeSuitProject project)
+    {
+        var meshPackages = DeclaredCustomMeshPackagesForRelease(project)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return DeclaredReleaseMaterialPackages(project)
+            .Concat((project.GeneratedMaterials ?? new List<GeneratedMaterialEntry>())
+                .Select(material => UnrealPathUtil.NormalizePackagePath(material.PackagePath)))
+            .Where(meshPackages.Contains)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(package => package, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static IEnumerable<string> DeclaredReleaseMaterialPackages(NativeSuitProject project) =>
+        (project.MaterialAssignments ?? new List<SavedMaterialAssignment>())
+            .Select(assignment => assignment.MiPackagePath)
+            .Concat((project.CustomStaticMeshes ?? new List<CustomStaticMeshImport>())
+                .Select(mesh => mesh.MaterialPath))
+            .Select(UnrealPathUtil.NormalizePackagePath)
+            .Where(package => !string.IsNullOrWhiteSpace(package));
+
+    private static void ThrowIfMaterialPackageCollidesWithCustomMesh(NativeSuitProject project)
+    {
+        var collisions = MaterialCustomMeshPackageCollisions(project);
+        if (collisions.Count == 0)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(
+            "A material and a declared custom mesh use the same Unreal package path. " +
+            "Rename the material or re-import the mesh before packaging: " +
+            string.Join("; ", collisions));
+    }
 
     private static List<string> MissingReferencedGeneratedMaterialFiles(
         IEnumerable<string> referencedPackages,

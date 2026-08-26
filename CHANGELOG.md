@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.9.0-beta.8 — 2026-08-24
+## 0.9.0-beta.8 — 2026-08-25
 
 - Adds the exact shipped Minifig and Smallfig root-body profiles while preserving the selected
   gameplay donor's runtime setup and shared native skeleton.
@@ -24,6 +24,16 @@
   Windows SDK repair steps instead of leaving users with a generic writer exit code.
 - Treats the bundled Registry writer prebuilt as part of the required portable layout and records
   why it was rejected before attempting a source build.
+- Preserves the exact cooked Blueprint schema when adding an OBJ component, preventing the known
+  load, hover, and startup crashes caused by that schema corruption.
+- Validates each custom mesh's saved OBJ, cooked package trio, live construction-script node,
+  component template, socket, and role-specific material before a suit can be packaged.
+- Adds a paired custom-cowl material template with native LEGO surface detail and neutral
+  mesh-specific maps, plus practical MMR and normal-map warnings for overly glossy materials.
+- Keeps gameplay and cutscene material pairs matched, carries shared materials' mod-local textures
+  and parents into another suit, and blocks stale files or package-path collisions.
+- Makes custom-material rename and deletion, shared-library staging, and 3D-viewer placement saves
+  transactional so a failed rebuild restores the last working project and stage.
 
 ## 0.9.0-beta.7 — 2026-08-24
 

@@ -5,7 +5,12 @@ public sealed class CustomStaticMeshImportService
 {
     private const string ComponentDonorPlayable = "/Game/Characters/Minifig/Alfred/BP_Alfred_Casual_Playable";
     private const string ComponentDonorCutscene = "/Game/Characters/Minifig/Alfred/BP_Alfred_Casual_Cutscene";
-    private const string DefaultHeadMaterial = "/Game/Characters/Attachments/Hat/Batman08/MI_Hat_Batman08";
+    /// <summary>
+    /// Canonical safe fallback used when a project-owned mesh does not declare a material.
+    /// Material rename/delete flows use the same value so a removed generated MI cannot remain
+    /// as a hidden dangling reference in the custom-mesh recipe.
+    /// </summary>
+    public const string DefaultMaterialPackagePath = "/Game/Characters/Attachments/Hat/Batman08/MI_Hat_Batman08";
 
     // These are the attachment definitions declared by CAE_Default_AttachmentDef in the game.
     // A static component shell can be mounted on any of them; whether it is visually useful is
@@ -253,7 +258,7 @@ public sealed class CustomStaticMeshImportService
                 import.MaterialPath = savedMaterial.MiPackagePath;
             }
             var materialPackage = UnrealPathUtil.NormalizePackagePath(string.IsNullOrWhiteSpace(import.MaterialPath)
-                ? DefaultHeadMaterial
+                ? DefaultMaterialPackagePath
                 : import.MaterialPath);
             if (!materialPackage.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
             {
@@ -439,7 +444,7 @@ public sealed class CustomStaticMeshImportService
         var attachment = ResolveAttachmentSlot(import.Target, import.AttachSocket);
         import.Target = attachment.Id;
         import.AttachSocket = attachment.AttachSocket;
-        import.MaterialPath = string.IsNullOrWhiteSpace(import.MaterialPath) ? DefaultHeadMaterial : UnrealPathUtil.NormalizePackagePath(import.MaterialPath);
+        import.MaterialPath = string.IsNullOrWhiteSpace(import.MaterialPath) ? DefaultMaterialPackagePath : UnrealPathUtil.NormalizePackagePath(import.MaterialPath);
     }
 
     private static string MakeSafeToken(string value)

@@ -16,24 +16,71 @@ public sealed class StaticMeshObjProbeService
 {
     private const string DonorPackagePath = "/Game/Characters/Attachments/HAIR/Nightwing08/SM_Hair_Nightwing08";
     private const string DonorAssetName = "SM_Hair_Nightwing08";
+    // Verified UE 5.6 cooked FStaticMeshLODResources layout for the exact donor above. These
+    // offsets are deliberately guarded in ValidateDonorPayload before any byte-range rewrite.
+    private const int DonorStaticMeshSerialSize = 18132;
     private const int DonorVertexCount = 486;
+    private const int DonorTriangleCount = 420;
+    private const int DonorSerializedBuffersSize = 16704;
+    private const int SectionsCountOffset = 0x97;
+    private const int SectionTriangleCountOffset = 0xA3;
+    private const int SectionMinVertexIndexOffset = 0xA7;
+    private const int SectionMaxVertexIndexOffset = 0xAB;
+    private const int LodCookedOutOffset = 0xFF;
+    private const int LodBuffersInlinedOffset = 0x103;
+    private const int LodHasRayTracingGeometryOffset = 0x107;
+    private const int LodBufferGlobalStripFlagsOffset = 0x10B;
+    private const int LodBufferClassStripFlagsOffset = 0x10C;
+    private const byte DonorGlobalStripFlags = 0x05;
+    private const byte DonorClassStripFlags = 0x08;
+    private const int PositionStrideOffset = 0x10D;
     private const int PositionDataOffset = 0x11D;
     private const int PositionStride = 12;
     private const int PositionCountOffset0 = 0x111;
+    private const int PositionElementSizeOffset = 0x115;
     private const int PositionCountOffset1 = 0x119;
+    private const int StaticMeshVertexGlobalStripFlagsOffset = 0x17E5;
+    private const int StaticMeshVertexClassStripFlagsOffset = 0x17E6;
+    private const int NumTexCoordsOffset = 0x17E7;
     private const int TangentDataOffset = 0x17FF;
     private const int TangentStride = 8;
     private const int TangentCountOffset0 = 0x17EB;
+    private const int TangentElementSizeOffset = 0x17F7;
     private const int TangentCountOffset1 = 0x17FB;
     private const int UvDataOffset = 0x2737;
     private const int UvStride = 4;
+    private const int UvElementSizeOffset = 0x272F;
     private const int UvCountOffset = 0x2733;
+    private const int ColorVertexGlobalStripFlagsOffset = 0x2ECF;
+    private const int ColorVertexClassStripFlagsOffset = 0x2ED0;
+    private const int ColorVertexStrideOffset = 0x2ED1;
+    private const int ColorVertexCountOffset = 0x2ED5;
+    private const int Index0Is32BitOffset = 0x2ED9;
+    private const int Index0ElementSizeOffset = 0x2EDD;
     private const int Index0DataOffset = 0x2EE5;
     private const int Index0SizeOffset = 0x2EE1;
+    private const int Index0ExpandTo32BitOffset = 0x38BD;
+    private const int ReversedIndexIs32BitOffset = 0x38C1;
+    private const int ReversedIndexElementSizeOffset = 0x38C5;
+    private const int ReversedIndexSizeOffset = 0x38C9;
+    private const int ReversedIndexExpandTo32BitOffset = 0x38CD;
+    private const int Index1Is32BitOffset = 0x38D1;
+    private const int Index1ElementSizeOffset = 0x38D5;
     private const int Index1DataOffset = 0x38DD;
     private const int Index1SizeOffset = 0x38D9;
+    private const int Index1ExpandTo32BitOffset = 0x42B5;
+    private const int ReversedDepthIndexIs32BitOffset = 0x42B9;
+    private const int ReversedDepthIndexElementSizeOffset = 0x42BD;
+    private const int ReversedDepthIndexSizeOffset = 0x42C1;
+    private const int ReversedDepthIndexExpandTo32BitOffset = 0x42C5;
+    private const int SectionSamplerProbabilityCountOffset = 0x42C9;
+    private const int SectionSamplerAliasCountOffset = 0x42CD;
+    private const int MeshSamplerProbabilityCountOffset = 0x42D5;
+    private const int MeshSamplerAliasCountOffset = 0x42D9;
+    private const int SerializedBuffersSizeOffset = 0x42E1;
+    private const int DepthOnlyBufferSizeOffset = 0x42E5;
+    private const int ReversedBuffersSizeOffset = 0x42E9;
     private const int DonorIndexBytes = 2520;
-    private const int SectionTriangleCountOffset = 0xA3;
     private static readonly int[] RenderBoundsOffsets = [0x33, 0xC3, 0x4629];
     private const CustomSerializationFlags NameMapOnlyPatchFlags =
         CustomSerializationFlags.SkipPreloadDependencyLoading;
@@ -434,8 +481,22 @@ public sealed class StaticMeshObjProbeService
         var uvDelta = checked((vertexCount - DonorVertexCount) * UvStride);
         var vertexDelta = checked(positionDelta + tangentDelta + uvDelta);
         var indexDelta = indexBytes - DonorIndexBytes;
+        var metadataShift = checked(vertexDelta + 2 * indexDelta);
+        // FStaticMeshBuffersSize counts raw position/tangent/UV bytes plus every active index
+        // buffer. This donor carries main and depth-only indices; both are replaced below.
+        var serializedBuffersSize = checked(
+            vertexCount * (PositionStride + TangentStride + UvStride) +
+            2 * indexBytes);
 
-        using var output = new MemoryStream(source.Length + vertexDelta + 2 * indexDelta);
+        var minVertexIndex = mesh.Indices.Min(index => (int)index);
+        var maxVertexIndex = mesh.Indices.Max(index => (int)index);
+        if (minVertexIndex < 0 || maxVertexIndex >= vertexCount)
+        {
+            throw new InvalidOperationException(
+                $"The OBJ index range {minVertexIndex}..{maxVertexIndex} is outside its {vertexCount} flattened vertices.");
+        }
+
+        using var output = new MemoryStream(checked(source.Length + metadataShift));
         output.Write(source, 0, PositionDataOffset);
         WritePositions(output, mesh.Vertices);
         output.Write(source, oldPositionEnd, TangentDataOffset - oldPositionEnd);
@@ -457,11 +518,28 @@ public sealed class StaticMeshObjProbeService
         WriteInt32(payload, Index0SizeOffset + vertexDelta, indexBytes);
         WriteInt32(payload, Index1SizeOffset + vertexDelta + indexDelta, indexBytes);
         WriteInt32(payload, SectionTriangleCountOffset, mesh.Indices.Count / 3);
+        WriteInt32(payload, SectionMinVertexIndexOffset, minVertexIndex);
+        WriteInt32(payload, SectionMaxVertexIndexOffset, maxVertexIndex);
+        WriteInt32(payload, SerializedBuffersSizeOffset + metadataShift, serializedBuffersSize);
+        WriteInt32(payload, DepthOnlyBufferSizeOffset + metadataShift, indexBytes);
+        WriteInt32(payload, ReversedBuffersSizeOffset + metadataShift, 0);
 
-        var boundsShift = vertexDelta + 2 * indexDelta;
         WriteRenderBounds(payload, RenderBoundsOffsets[0], mesh.Bounds);
         WriteRenderBounds(payload, RenderBoundsOffsets[1], mesh.Bounds);
-        WriteRenderBounds(payload, RenderBoundsOffsets[2] + boundsShift, mesh.Bounds);
+        WriteRenderBounds(payload, RenderBoundsOffsets[2] + metadataShift, mesh.Bounds);
+        ValidateGeneratedPayload(
+            payload,
+            mesh,
+            positionDelta,
+            tangentDelta,
+            vertexDelta,
+            indexDelta,
+            metadataShift,
+            indexBytes,
+            serializedBuffersSize);
+        result.Log.Add(
+            $"Validated LOD0 section vertices {minVertexIndex}..{maxVertexIndex}; " +
+            $"serialized buffers {serializedBuffersSize:N0} bytes (depth-only {indexBytes:N0}).");
         return payload;
     }
 
@@ -720,17 +798,287 @@ public sealed class StaticMeshObjProbeService
 
     private static void ValidateDonorPayload(byte[] uexp, int serialOffset, int serialSize)
     {
-        if (serialOffset < 0 || serialSize <= Index1DataOffset + DonorIndexBytes || serialOffset + serialSize > uexp.Length ||
-            ReadInt32(uexp, serialOffset + PositionCountOffset0) != DonorVertexCount ||
-            ReadInt32(uexp, serialOffset + PositionCountOffset1) != DonorVertexCount ||
-            ReadInt32(uexp, serialOffset + TangentCountOffset0) != DonorVertexCount ||
-            ReadInt32(uexp, serialOffset + TangentCountOffset1) != DonorVertexCount ||
-            ReadInt32(uexp, serialOffset + UvCountOffset) != DonorVertexCount ||
-            ReadInt32(uexp, serialOffset + Index0SizeOffset) != DonorIndexBytes ||
-            ReadInt32(uexp, serialOffset + Index1SizeOffset) != DonorIndexBytes ||
-            ReadInt32(uexp, serialOffset + SectionTriangleCountOffset) != 420)
+        if (serialOffset < 0 || serialSize != DonorStaticMeshSerialSize ||
+            (long)serialOffset + serialSize > uexp.Length)
         {
             throw new InvalidOperationException("The Nightwing donor's verified LOD0 layout changed.");
+        }
+
+        void RequireInt(int relativeOffset, int expected, string field) =>
+            RequireInt32Value(uexp, serialOffset + relativeOffset, expected, $"Nightwing donor {field}");
+        void RequireByte(int relativeOffset, byte expected, string field) =>
+            RequireByteValue(uexp, serialOffset + relativeOffset, expected, $"Nightwing donor {field}");
+
+        RequireInt(SectionsCountOffset, 1, "section count");
+        RequireInt(SectionTriangleCountOffset, DonorTriangleCount, "section triangle count");
+        RequireInt(SectionMinVertexIndexOffset, 0, "section minimum vertex");
+        RequireInt(SectionMaxVertexIndexOffset, DonorVertexCount - 1, "section maximum vertex");
+        RequireInt(LodCookedOutOffset, 0, "cooked-out flag");
+        RequireInt(LodBuffersInlinedOffset, 1, "inline-buffer flag");
+        RequireInt(LodHasRayTracingGeometryOffset, 0, "ray-tracing geometry flag");
+        RequireByte(LodBufferGlobalStripFlagsOffset, DonorGlobalStripFlags, "LOD buffer global strip flags");
+        RequireByte(LodBufferClassStripFlagsOffset, DonorClassStripFlags, "LOD buffer class strip flags");
+
+        RequireInt(PositionStrideOffset, PositionStride, "position stride");
+        RequireInt(PositionCountOffset0, DonorVertexCount, "position vertex count");
+        RequireInt(PositionElementSizeOffset, PositionStride, "position element size");
+        RequireInt(PositionCountOffset1, DonorVertexCount, "position bulk count");
+        RequireByte(StaticMeshVertexGlobalStripFlagsOffset, DonorGlobalStripFlags, "static vertex global strip flags");
+        RequireByte(StaticMeshVertexClassStripFlagsOffset, 0, "static vertex class strip flags");
+        RequireInt(NumTexCoordsOffset, 1, "texture-coordinate channel count");
+        RequireInt(TangentCountOffset0, DonorVertexCount, "tangent vertex count");
+        RequireInt(TangentElementSizeOffset, TangentStride, "tangent element size");
+        RequireInt(TangentCountOffset1, DonorVertexCount, "tangent bulk count");
+        RequireInt(UvElementSizeOffset, UvStride, "UV element size");
+        RequireInt(UvCountOffset, DonorVertexCount, "UV bulk count");
+        RequireByte(ColorVertexGlobalStripFlagsOffset, DonorGlobalStripFlags, "colour vertex global strip flags");
+        RequireByte(ColorVertexClassStripFlagsOffset, 0, "colour vertex class strip flags");
+        RequireInt(ColorVertexStrideOffset, 0, "colour vertex stride");
+        RequireInt(ColorVertexCountOffset, 0, "colour vertex count");
+
+        RequireInt(Index0Is32BitOffset, 0, "main index width flag");
+        RequireInt(Index0ElementSizeOffset, 1, "main index byte-array element size");
+        RequireInt(Index0SizeOffset, DonorIndexBytes, "main index byte count");
+        RequireInt(Index0ExpandTo32BitOffset, 0, "main index expansion flag");
+        RequireInt(ReversedIndexIs32BitOffset, 0, "reversed index width flag");
+        RequireInt(ReversedIndexElementSizeOffset, 1, "reversed index byte-array element size");
+        RequireInt(ReversedIndexSizeOffset, 0, "reversed index byte count");
+        RequireInt(ReversedIndexExpandTo32BitOffset, 0, "reversed index expansion flag");
+        RequireInt(Index1Is32BitOffset, 0, "depth-only index width flag");
+        RequireInt(Index1ElementSizeOffset, 1, "depth-only index byte-array element size");
+        RequireInt(Index1SizeOffset, DonorIndexBytes, "depth-only index byte count");
+        RequireInt(Index1ExpandTo32BitOffset, 0, "depth-only index expansion flag");
+        RequireInt(ReversedDepthIndexIs32BitOffset, 0, "reversed-depth index width flag");
+        RequireInt(ReversedDepthIndexElementSizeOffset, 1, "reversed-depth index byte-array element size");
+        RequireInt(ReversedDepthIndexSizeOffset, 0, "reversed-depth index byte count");
+        RequireInt(ReversedDepthIndexExpandTo32BitOffset, 0, "reversed-depth index expansion flag");
+
+        RequireInt(SectionSamplerProbabilityCountOffset, 0, "section sampler probability count");
+        RequireInt(SectionSamplerAliasCountOffset, 0, "section sampler alias count");
+        RequireInt(MeshSamplerProbabilityCountOffset, 0, "mesh sampler probability count");
+        RequireInt(MeshSamplerAliasCountOffset, 0, "mesh sampler alias count");
+        RequireInt(SerializedBuffersSizeOffset, DonorSerializedBuffersSize, "serialized buffer-size summary");
+        RequireInt(DepthOnlyBufferSizeOffset, DonorIndexBytes, "depth-only buffer-size summary");
+        RequireInt(ReversedBuffersSizeOffset, 0, "reversed buffer-size summary");
+    }
+
+    private static void ValidateGeneratedPayload(
+        byte[] payload,
+        ImportedMesh mesh,
+        int positionDelta,
+        int tangentDelta,
+        int vertexDelta,
+        int indexDelta,
+        int metadataShift,
+        int indexBytes,
+        int serializedBuffersSize)
+    {
+        var vertexCount = mesh.Vertices.Count;
+        var triangleCount = mesh.Indices.Count / 3;
+        var minVertexIndex = mesh.Indices.Min(index => (int)index);
+        var maxVertexIndex = mesh.Indices.Max(index => (int)index);
+        var uvHeaderShift = checked(positionDelta + tangentDelta);
+        var firstIndexTailShift = checked(vertexDelta + indexDelta);
+
+        if (payload.Length != checked(DonorStaticMeshSerialSize + metadataShift))
+        {
+            throw new InvalidOperationException(
+                $"Generated StaticMesh payload length {payload.Length:N0} did not match the expected " +
+                $"{DonorStaticMeshSerialSize + metadataShift:N0} bytes.");
+        }
+
+        void RequireInt(int offset, int expected, string field) =>
+            RequireInt32Value(payload, offset, expected, $"generated {field}");
+        void RequireByte(int offset, byte expected, string field) =>
+            RequireByteValue(payload, offset, expected, $"generated {field}");
+
+        RequireInt(SectionsCountOffset, 1, "section count");
+        RequireInt(SectionTriangleCountOffset, triangleCount, "section triangle count");
+        RequireInt(SectionMinVertexIndexOffset, minVertexIndex, "section minimum vertex");
+        RequireInt(SectionMaxVertexIndexOffset, maxVertexIndex, "section maximum vertex");
+        RequireInt(LodCookedOutOffset, 0, "cooked-out flag");
+        RequireInt(LodBuffersInlinedOffset, 1, "inline-buffer flag");
+        RequireInt(LodHasRayTracingGeometryOffset, 0, "ray-tracing geometry flag");
+        RequireByte(LodBufferGlobalStripFlagsOffset, DonorGlobalStripFlags, "LOD buffer global strip flags");
+        RequireByte(LodBufferClassStripFlagsOffset, DonorClassStripFlags, "LOD buffer class strip flags");
+
+        RequireInt(PositionStrideOffset, PositionStride, "position stride");
+        RequireInt(PositionCountOffset0, vertexCount, "position vertex count");
+        RequireInt(PositionElementSizeOffset, PositionStride, "position element size");
+        RequireInt(PositionCountOffset1, vertexCount, "position bulk count");
+        RequireByte(StaticMeshVertexGlobalStripFlagsOffset + positionDelta, DonorGlobalStripFlags, "static vertex global strip flags");
+        RequireByte(StaticMeshVertexClassStripFlagsOffset + positionDelta, 0, "static vertex class strip flags");
+        RequireInt(NumTexCoordsOffset + positionDelta, 1, "texture-coordinate channel count");
+        RequireInt(TangentCountOffset0 + positionDelta, vertexCount, "tangent vertex count");
+        RequireInt(TangentElementSizeOffset + positionDelta, TangentStride, "tangent element size");
+        RequireInt(TangentCountOffset1 + positionDelta, vertexCount, "tangent bulk count");
+        RequireInt(UvElementSizeOffset + uvHeaderShift, UvStride, "UV element size");
+        RequireInt(UvCountOffset + uvHeaderShift, vertexCount, "UV bulk count");
+        RequireByte(ColorVertexGlobalStripFlagsOffset + vertexDelta, DonorGlobalStripFlags, "colour vertex global strip flags");
+        RequireByte(ColorVertexClassStripFlagsOffset + vertexDelta, 0, "colour vertex class strip flags");
+        RequireInt(ColorVertexStrideOffset + vertexDelta, 0, "colour vertex stride");
+        RequireInt(ColorVertexCountOffset + vertexDelta, 0, "colour vertex count");
+
+        RequireInt(Index0Is32BitOffset + vertexDelta, 0, "main index width flag");
+        RequireInt(Index0ElementSizeOffset + vertexDelta, 1, "main index byte-array element size");
+        RequireInt(Index0SizeOffset + vertexDelta, indexBytes, "main index byte count");
+        RequireInt(Index0ExpandTo32BitOffset + firstIndexTailShift, 0, "main index expansion flag");
+        RequireInt(ReversedIndexIs32BitOffset + firstIndexTailShift, 0, "reversed index width flag");
+        RequireInt(ReversedIndexElementSizeOffset + firstIndexTailShift, 1, "reversed index byte-array element size");
+        RequireInt(ReversedIndexSizeOffset + firstIndexTailShift, 0, "reversed index byte count");
+        RequireInt(ReversedIndexExpandTo32BitOffset + firstIndexTailShift, 0, "reversed index expansion flag");
+        RequireInt(Index1Is32BitOffset + firstIndexTailShift, 0, "depth-only index width flag");
+        RequireInt(Index1ElementSizeOffset + firstIndexTailShift, 1, "depth-only index byte-array element size");
+        RequireInt(Index1SizeOffset + firstIndexTailShift, indexBytes, "depth-only index byte count");
+        RequireInt(Index1ExpandTo32BitOffset + metadataShift, 0, "depth-only index expansion flag");
+        RequireInt(ReversedDepthIndexIs32BitOffset + metadataShift, 0, "reversed-depth index width flag");
+        RequireInt(ReversedDepthIndexElementSizeOffset + metadataShift, 1, "reversed-depth index byte-array element size");
+        RequireInt(ReversedDepthIndexSizeOffset + metadataShift, 0, "reversed-depth index byte count");
+        RequireInt(ReversedDepthIndexExpandTo32BitOffset + metadataShift, 0, "reversed-depth index expansion flag");
+
+        RequireInt(SectionSamplerProbabilityCountOffset + metadataShift, 0, "section sampler probability count");
+        RequireInt(SectionSamplerAliasCountOffset + metadataShift, 0, "section sampler alias count");
+        RequireInt(MeshSamplerProbabilityCountOffset + metadataShift, 0, "mesh sampler probability count");
+        RequireInt(MeshSamplerAliasCountOffset + metadataShift, 0, "mesh sampler alias count");
+        RequireInt(SerializedBuffersSizeOffset + metadataShift, serializedBuffersSize, "serialized buffer-size summary");
+        RequireInt(DepthOnlyBufferSizeOffset + metadataShift, indexBytes, "depth-only buffer-size summary");
+        RequireInt(ReversedBuffersSizeOffset + metadataShift, 0, "reversed buffer-size summary");
+
+        var mainIndexDataOffset = checked(Index0DataOffset + vertexDelta);
+        var depthIndexDataOffset = checked(Index1DataOffset + firstIndexTailShift);
+        for (var i = 0; i < mesh.Indices.Count; i++)
+        {
+            var byteOffset = checked(i * sizeof(ushort));
+            var expected = mesh.Indices[i];
+            var mainIndex = BinaryPrimitives.ReadUInt16LittleEndian(
+                payload.AsSpan(mainIndexDataOffset + byteOffset, sizeof(ushort)));
+            var depthIndex = BinaryPrimitives.ReadUInt16LittleEndian(
+                payload.AsSpan(depthIndexDataOffset + byteOffset, sizeof(ushort)));
+            if (mainIndex != expected || depthIndex != expected)
+            {
+                throw new InvalidOperationException(
+                    $"Generated StaticMesh index {i:N0} did not match in both main and depth-only buffers.");
+            }
+        }
+    }
+
+    internal static bool PayloadMetadataRegressionPasses()
+    {
+        try
+        {
+            var source = CreateVerifiedDonorPayloadFixture();
+            ValidateDonorPayload(source, 0, source.Length);
+
+            const int vertexCount = 600;
+            const int indexCount = 2100;
+            var mesh = new ImportedMesh
+            {
+                Bounds = new Bounds(new Vector3(0f, 0f, 0f), new Vector3(300f, 1f, 1f), 300.01f),
+            };
+            for (var i = 0; i < vertexCount; i++)
+            {
+                mesh.Vertices.Add(new ImportedVertex
+                {
+                    Position = new Vector3(i - vertexCount / 2f, i % 2, 0f),
+                    Normal = new Vector3(0f, 0f, 1f),
+                    Tangent = new Vector3(1f, 0f, 0f),
+                    Uv = new Vector2((i % 32) / 31f, (i % 16) / 15f),
+                });
+            }
+            for (var i = 0; i < indexCount; i++)
+            {
+                mesh.Indices.Add((ushort)(i % vertexCount));
+            }
+
+            _ = BuildPayload(source, mesh, new Result());
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static byte[] CreateVerifiedDonorPayloadFixture()
+    {
+        var source = new byte[DonorStaticMeshSerialSize];
+        WriteInt32(source, SectionsCountOffset, 1);
+        WriteInt32(source, SectionTriangleCountOffset, DonorTriangleCount);
+        WriteInt32(source, SectionMinVertexIndexOffset, 0);
+        WriteInt32(source, SectionMaxVertexIndexOffset, DonorVertexCount - 1);
+        WriteInt32(source, LodCookedOutOffset, 0);
+        WriteInt32(source, LodBuffersInlinedOffset, 1);
+        WriteInt32(source, LodHasRayTracingGeometryOffset, 0);
+        source[LodBufferGlobalStripFlagsOffset] = DonorGlobalStripFlags;
+        source[LodBufferClassStripFlagsOffset] = DonorClassStripFlags;
+
+        WriteInt32(source, PositionStrideOffset, PositionStride);
+        WriteInt32(source, PositionCountOffset0, DonorVertexCount);
+        WriteInt32(source, PositionElementSizeOffset, PositionStride);
+        WriteInt32(source, PositionCountOffset1, DonorVertexCount);
+        source[StaticMeshVertexGlobalStripFlagsOffset] = DonorGlobalStripFlags;
+        source[StaticMeshVertexClassStripFlagsOffset] = 0;
+        WriteInt32(source, NumTexCoordsOffset, 1);
+        WriteInt32(source, TangentCountOffset0, DonorVertexCount);
+        WriteInt32(source, TangentElementSizeOffset, TangentStride);
+        WriteInt32(source, TangentCountOffset1, DonorVertexCount);
+        WriteInt32(source, UvElementSizeOffset, UvStride);
+        WriteInt32(source, UvCountOffset, DonorVertexCount);
+        source[ColorVertexGlobalStripFlagsOffset] = DonorGlobalStripFlags;
+        source[ColorVertexClassStripFlagsOffset] = 0;
+        WriteInt32(source, ColorVertexStrideOffset, 0);
+        WriteInt32(source, ColorVertexCountOffset, 0);
+
+        WriteInt32(source, Index0Is32BitOffset, 0);
+        WriteInt32(source, Index0ElementSizeOffset, 1);
+        WriteInt32(source, Index0SizeOffset, DonorIndexBytes);
+        WriteInt32(source, Index0ExpandTo32BitOffset, 0);
+        WriteInt32(source, ReversedIndexIs32BitOffset, 0);
+        WriteInt32(source, ReversedIndexElementSizeOffset, 1);
+        WriteInt32(source, ReversedIndexSizeOffset, 0);
+        WriteInt32(source, ReversedIndexExpandTo32BitOffset, 0);
+        WriteInt32(source, Index1Is32BitOffset, 0);
+        WriteInt32(source, Index1ElementSizeOffset, 1);
+        WriteInt32(source, Index1SizeOffset, DonorIndexBytes);
+        WriteInt32(source, Index1ExpandTo32BitOffset, 0);
+        WriteInt32(source, ReversedDepthIndexIs32BitOffset, 0);
+        WriteInt32(source, ReversedDepthIndexElementSizeOffset, 1);
+        WriteInt32(source, ReversedDepthIndexSizeOffset, 0);
+        WriteInt32(source, ReversedDepthIndexExpandTo32BitOffset, 0);
+
+        WriteInt32(source, SectionSamplerProbabilityCountOffset, 0);
+        WriteInt32(source, SectionSamplerAliasCountOffset, 0);
+        WriteInt32(source, MeshSamplerProbabilityCountOffset, 0);
+        WriteInt32(source, MeshSamplerAliasCountOffset, 0);
+        WriteInt32(source, SerializedBuffersSizeOffset, DonorSerializedBuffersSize);
+        WriteInt32(source, DepthOnlyBufferSizeOffset, DonorIndexBytes);
+        WriteInt32(source, ReversedBuffersSizeOffset, 0);
+        return source;
+    }
+
+    private static void RequireInt32Value(byte[] data, int offset, int expected, string field)
+    {
+        if (offset < 0 || offset > data.Length - sizeof(int))
+        {
+            throw new InvalidOperationException($"The {field} lies outside the StaticMesh payload.");
+        }
+        var actual = ReadInt32(data, offset);
+        if (actual != expected)
+        {
+            throw new InvalidOperationException($"The {field} was {actual}, expected {expected}.");
+        }
+    }
+
+    private static void RequireByteValue(byte[] data, int offset, byte expected, string field)
+    {
+        if (offset < 0 || offset >= data.Length)
+        {
+            throw new InvalidOperationException($"The {field} lies outside the StaticMesh payload.");
+        }
+        var actual = data[offset];
+        if (actual != expected)
+        {
+            throw new InvalidOperationException($"The {field} was 0x{actual:X2}, expected 0x{expected:X2}.");
         }
     }
 
