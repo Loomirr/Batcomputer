@@ -744,6 +744,15 @@ internal static class Program
         Theme.ApplyDarkTitleBarsAppWide();
         Animator.Enabled = AppSettings.Current.AnimationsEnabled;
 
+        if (args.Length >= 4 && args[0].Equals("--rebuild-and-build-mod", StringComparison.OrdinalIgnoreCase))
+        {
+            // Internal acceptance command: rebuild one suit from its saved declaration and create
+            // the complete current mod release, but never install it into the game.
+            using var context = new HeadlessModBuildContext(args[1], args[2], args[3]);
+            Application.Run(context);
+            return context.ExitCode;
+        }
+
         if (args.Length >= 1 && args[0].Equals("--capture-ui-gallery", StringComparison.OrdinalIgnoreCase))
         {
             var output = args.Length >= 2
@@ -802,6 +811,76 @@ internal static class Program
     }
 
     private static int _handlingGuiCrash;
+
+    private sealed class HeadlessModBuildContext : ApplicationContext
+    {
+        private readonly MainForm _form;
+        private readonly string _projectRoot;
+        private readonly string _suitProjectPath;
+        private readonly string _modProjectPath;
+        private bool _started;
+
+        public int ExitCode { get; private set; } = 1;
+
+        public HeadlessModBuildContext(string projectRoot, string suitProjectPath, string modProjectPath)
+        {
+            _projectRoot = projectRoot;
+            _suitProjectPath = suitProjectPath;
+            _modProjectPath = modProjectPath;
+            _form = new MainForm
+            {
+                ShowInTaskbar = false,
+                Opacity = 0,
+                StartPosition = FormStartPosition.Manual,
+                Bounds = new Rectangle(-32000, -32000, 1, 1),
+            };
+            MainForm = _form;
+            Application.Idle += BeginBuild;
+            // Creating a real WinForms handle installs the UI synchronization context used by the
+            // asynchronous build pipeline. Hide immediately so this remains a console-style probe.
+            _form.Show();
+            _form.Hide();
+        }
+
+        private async void BeginBuild(object? sender, EventArgs e)
+        {
+            if (_started)
+            {
+                return;
+            }
+            _started = true;
+            Application.Idle -= BeginBuild;
+            try
+            {
+                var result = await _form.RebuildAndBuildModForCliAsync(
+                    _projectRoot,
+                    _suitProjectPath,
+                    _modProjectPath);
+                if (!string.IsNullOrWhiteSpace(result.Diagnostics))
+                {
+                    Console.WriteLine(result.Diagnostics.TrimEnd());
+                }
+                foreach (var path in result.TrioPaths)
+                {
+                    Console.WriteLine("trio=" + path);
+                }
+                ExitCode = result.Success && result.TrioPaths.All(path =>
+                    File.Exists(path) && new FileInfo(path).Length > 0)
+                    ? 0
+                    : 1;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("ERROR: " + ex);
+                ExitCode = 1;
+            }
+            finally
+            {
+                _form.Close();
+                ExitThread();
+            }
+        }
+    }
 
     private static void ConfigureGuiCrashReporting()
     {

@@ -23,6 +23,22 @@ public sealed class StaticMeshObjProbeService
     private const int DonorTriangleCount = 420;
     private const int DonorSerializedBuffersSize = 16704;
     private const int SectionsCountOffset = 0x97;
+    private const int SectionDataOffset = SectionsCountOffset + sizeof(int);
+    private const int SectionRecordSize = LodCookedOutOffset - SectionDataOffset;
+    private const int SectionMaterialIndexRelativeOffset = 0x00;
+    private const int SectionFirstIndexRelativeOffset = 0x04;
+    private const int SectionTriangleCountRelativeOffset = 0x08;
+    private const int SectionMinVertexIndexRelativeOffset = 0x0C;
+    private const int SectionMaxVertexIndexRelativeOffset = 0x10;
+    private const int SectionRenderBoundsRelativeOffset = 0x28;
+    private const int MaxMaterialSlots = 64;
+    // UAssetAPI separates reflected properties from NormalExport.Extras. For the verified donor,
+    // the raw cooked LOD tail begins 0x6F bytes into the export and the section table therefore
+    // starts at these stable Extras-relative offsets. StaticMaterials growth changes the reflected
+    // prefix length, but it does not change offsets inside Extras.
+    private const int CookedSectionsCountExtrasOffset = 0x28;
+    private const int CookedSectionDataExtrasOffset = CookedSectionsCountExtrasOffset + sizeof(int);
+    private const int DonorReflectedPropertyBytes = SectionsCountOffset - CookedSectionsCountExtrasOffset;
     private const int SectionTriangleCountOffset = 0xA3;
     private const int SectionMinVertexIndexOffset = 0xA7;
     private const int SectionMaxVertexIndexOffset = 0xAB;
@@ -81,7 +97,8 @@ public sealed class StaticMeshObjProbeService
     private const int DepthOnlyBufferSizeOffset = 0x42E5;
     private const int ReversedBuffersSizeOffset = 0x42E9;
     private const int DonorIndexBytes = 2520;
-    private static readonly int[] RenderBoundsOffsets = [0x33, 0xC3, 0x4629];
+    private const int GlobalRenderBoundsOffset = 0x33;
+    private const int FinalRenderBoundsOffset = 0x4629;
     private const CustomSerializationFlags NameMapOnlyPatchFlags =
         CustomSerializationFlags.SkipPreloadDependencyLoading;
 
@@ -105,6 +122,10 @@ public sealed class StaticMeshObjProbeService
         public float RotationPitch { get; set; }
         public float RotationYaw { get; set; }
         public float RotationRoll { get; set; }
+        // Optional previously persisted slot map. Matching `usemtl` names keep their material
+        // bindings even if the OBJ's first-use order changes on re-import.
+        public List<CustomStaticMeshMaterialSlot> MaterialSlots { get; set; } = new();
+        public string LegacyMaterialPath { get; set; } = "";
     }
 
     public sealed class Result
@@ -134,7 +155,20 @@ public sealed class StaticMeshObjProbeService
         public string ObjSha256 { get; set; } = "";
         public string UexpSha256Before { get; set; } = "";
         public string UexpSha256After { get; set; } = "";
+        public List<ObjMaterialSlot> MaterialSlots { get; set; } = new();
         public List<string> Log { get; set; } = [];
+    }
+
+    public sealed class ObjMaterialSlot
+    {
+        public int Slot { get; set; }
+        public string SourceMaterialName { get; set; } = "";
+        public string StableSlotName { get; set; } = "";
+        public int FirstIndex { get; set; }
+        public int IndexCount { get; set; }
+        public int TriangleCount => IndexCount / 3;
+        public int MinVertexIndex { get; set; }
+        public int MaxVertexIndex { get; set; }
     }
 
     private readonly record struct Vector3(float X, float Y, float Z)
@@ -161,6 +195,18 @@ public sealed class StaticMeshObjProbeService
     private sealed class ImportedMesh
     {
         public List<ImportedVertex> Vertices { get; } = [];
+        public List<ushort> Indices { get; } = [];
+        public List<ImportedSection> Sections { get; } = [];
+        public List<CustomStaticMeshMaterialSlot> DeclaredMaterialSlots { get; } = [];
+        public Bounds Bounds { get; set; }
+    }
+
+    private sealed class ImportedSection
+    {
+        public int Slot { get; set; }
+        public string SourceMaterialName { get; set; } = "";
+        public string StableSlotName { get; set; } = "";
+        public int FirstIndex { get; set; }
         public List<ushort> Indices { get; } = [];
         public Bounds Bounds { get; set; }
     }
@@ -211,7 +257,9 @@ public sealed class StaticMeshObjProbeService
                 new Vector3(request.OffsetX, request.OffsetY, request.OffsetZ),
                 request.RotationPitch,
                 request.RotationYaw,
-                request.RotationRoll);
+                request.RotationRoll,
+                request.MaterialSlots,
+                request.LegacyMaterialPath);
             if (mesh.Vertices.Count > ushort.MaxValue)
             {
                 throw new InvalidOperationException("This first OBJ writer supports up to 65,535 flattened vertices.");
@@ -224,6 +272,7 @@ public sealed class StaticMeshObjProbeService
             result.VertexCount = mesh.Vertices.Count;
             result.IndexCount = mesh.Indices.Count;
             result.TriangleCount = mesh.Indices.Count / 3;
+            result.MaterialSlots = DescribeMaterialSlots(mesh);
             result.ObjSha256 = Hash(File.ReadAllBytes(request.ObjPath));
 
             var contentRoot = AppSettings.NormalizeContentRoot(request.ExtractedContentRoot);
@@ -265,23 +314,36 @@ public sealed class StaticMeshObjProbeService
             ValidateDonorPayload(initialUexp, serialOffset, originalSerialSize);
 
             PatchExtendedBounds(staticMesh, mesh.Bounds);
+            PatchStaticMaterialSlots(asset, staticMesh, mesh.DeclaredMaterialSlots);
             asset.Write(result.OutputUasset);
 
-            var afterBounds = new UAsset(result.OutputUasset, EngineVersion.VER_UE5_6, mappings, NameMapOnlyPatchFlags);
-            var afterBoundsMesh = FindStaticMeshExport(afterBounds)
-                ?? throw new InvalidOperationException("The donor no longer contains a StaticMesh export after its bounds update.");
-            serialOffset = checked((int)(afterBoundsMesh.SerialOffset - new FileInfo(result.OutputUasset).Length));
+            var afterMetadata = new UAsset(result.OutputUasset, EngineVersion.VER_UE5_6, mappings, NameMapOnlyPatchFlags);
+            var afterMetadataMesh = FindStaticMeshExport(afterMetadata)
+                ?? throw new InvalidOperationException("The donor no longer contains a StaticMesh export after its metadata update.");
+            serialOffset = checked((int)(afterMetadataMesh.SerialOffset - new FileInfo(result.OutputUasset).Length));
+            var metadataSerialSize = checked((int)afterMetadataMesh.SerialSize);
+            var sourceLayoutShift = checked(metadataSerialSize - originalSerialSize);
+            if (sourceLayoutShift < 0)
+            {
+                throw new InvalidOperationException("The generated StaticMaterials metadata unexpectedly shrank the donor export.");
+            }
             var uexp = File.ReadAllBytes(result.OutputUexp);
             result.UexpSha256Before = Hash(uexp);
-            var payload = BuildPayload(uexp.AsSpan(serialOffset, originalSerialSize).ToArray(), mesh, result);
-            result.StaticMeshBytesBefore = originalSerialSize;
+            var metadataPayload = uexp.AsSpan(serialOffset, metadataSerialSize).ToArray();
+            ValidateShiftedDonorPayload(metadataPayload, sourceLayoutShift);
+            var payload = BuildPayload(metadataPayload, mesh, result, sourceLayoutShift);
+            result.StaticMeshBytesBefore = metadataSerialSize;
             result.StaticMeshBytesAfter = payload.Length;
 
-            PatchExportSerialSize(result.OutputUasset, originalSerialSize, afterBoundsMesh.SerialOffset, payload.Length);
+            PatchExportSerialSizeAndBulkDataStart(
+                result.OutputUasset,
+                metadataSerialSize,
+                afterMetadataMesh.SerialOffset,
+                payload.Length);
 
             var finalUexp = File.ReadAllBytes(result.OutputUexp);
             var prefix = finalUexp.AsSpan(0, serialOffset).ToArray();
-            var tail = finalUexp.AsSpan(serialOffset + originalSerialSize).ToArray();
+            var tail = finalUexp.AsSpan(serialOffset + metadataSerialSize).ToArray();
             using var output = new MemoryStream(prefix.Length + payload.Length + tail.Length);
             output.Write(prefix);
             output.Write(payload);
@@ -299,12 +361,15 @@ public sealed class StaticMeshObjProbeService
             {
                 throw new InvalidOperationException("The generated OBJ static-mesh metadata did not persist.");
             }
+            ValidateStaticMaterialSlots(validationMesh, mesh.DeclaredMaterialSlots);
+            ValidateCookedMaterialSections(validationMesh, mesh.DeclaredMaterialSlots);
 
             result.Status = "created";
             result.Log.Add($"Parsed {result.VertexCount} flattened vertices and {result.TriangleCount} double-sided triangles from the OBJ.");
+            result.Log.Add($"Mapped {mesh.Sections.Count} active OBJ material section(s) onto {mesh.DeclaredMaterialSlots.Count} stable slot declaration(s).");
             result.Log.Add($"Applied mesh transform: scale={request.Scale:0.###}, offset=({request.OffsetX:0.###}, {request.OffsetY:0.###}, {request.OffsetZ:0.###}), rotation=({request.RotationPitch:0.###}, {request.RotationYaw:0.###}, {request.RotationRoll:0.###}).");
             result.Log.Add("Expanded the final StaticMesh export's inline position, tangent, UV, and active index buffers.");
-            result.Log.Add("Kept the donor's one material section, collision shell, and package identity structure.");
+            result.Log.Add("Preserved the donor collision shell and package identity while rebuilding its material sections.");
         }
         catch (Exception ex)
         {
@@ -334,7 +399,8 @@ public sealed class StaticMeshObjProbeService
         float offsetZ,
         float rotationPitch = 0f,
         float rotationYaw = 0f,
-        float rotationRoll = 0f)
+        float rotationRoll = 0f,
+        IReadOnlyList<CustomStaticMeshMaterialSlot>? materialSlots = null)
     {
         if (!File.Exists(objPath))
         {
@@ -354,7 +420,8 @@ public sealed class StaticMeshObjProbeService
             new Vector3(offsetX, offsetY, offsetZ) * unrealUnitsToMeters,
             rotationPitch,
             rotationYaw,
-            rotationRoll);
+            rotationRoll,
+            materialSlots);
         // The cooked payload is UE space (X forward, Y right, Z up). CUE4Parse's
         // character GLBs use (X, Z, -Y), so use that same basis here rather than
         // handing the browser raw UE vertices.
@@ -394,28 +461,68 @@ public sealed class StaticMeshObjProbeService
         var uvLength = checked((int)binary.Length - uvOffset);
         Align4(binary);
 
-        var indexOffset = checked((int)binary.Length);
-        WriteIndices(binary, mesh.Indices);
-        var indexLength = checked((int)binary.Length - indexOffset);
-        Align4(binary);
+        var bufferViews = new List<object>
+        {
+            new { buffer = 0, byteOffset = positionOffset, byteLength = positionLength, target = 34962 },
+            new { buffer = 0, byteOffset = normalOffset, byteLength = normalLength, target = 34962 },
+            new { buffer = 0, byteOffset = uvOffset, byteLength = uvLength, target = 34962 },
+        };
+        var accessors = new List<object>
+        {
+            new
+            {
+                bufferView = 0,
+                componentType = 5126,
+                count = mesh.Vertices.Count,
+                type = "VEC3",
+                min = new[] { min.X, min.Y, min.Z },
+                max = new[] { max.X, max.Y, max.Z },
+            },
+            new { bufferView = 1, componentType = 5126, count = mesh.Vertices.Count, type = "VEC3" },
+            new { bufferView = 2, componentType = 5126, count = mesh.Vertices.Count, type = "VEC2" },
+        };
+        var primitives = new List<object>();
+        var materials = new List<object>();
+        for (var sectionIndex = 0; sectionIndex < mesh.Sections.Count; sectionIndex++)
+        {
+            var section = mesh.Sections[sectionIndex];
+            var indexOffset = checked((int)binary.Length);
+            WriteIndices(binary, section.Indices);
+            var indexLength = checked((int)binary.Length - indexOffset);
+            Align4(binary);
 
-        var f = (float value) => value.ToString("0.######", CultureInfo.InvariantCulture);
-        var json = "{" +
-                   "\"asset\":{\"version\":\"2.0\",\"generator\":\"Batcomputer OBJ preview\"}," +
-                   "\"scene\":0,\"scenes\":[{\"nodes\":[0]}],\"nodes\":[{\"mesh\":0}]," +
-                   "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":2},\"indices\":3,\"mode\":4}]}]," +
-                   $"\"buffers\":[{{\"byteLength\":{binary.Length}}}]," +
-                   "\"bufferViews\":[" +
-                   $"{{\"buffer\":0,\"byteOffset\":{positionOffset},\"byteLength\":{positionLength},\"target\":34962}}," +
-                   $"{{\"buffer\":0,\"byteOffset\":{normalOffset},\"byteLength\":{normalLength},\"target\":34962}}," +
-                   $"{{\"buffer\":0,\"byteOffset\":{uvOffset},\"byteLength\":{uvLength},\"target\":34962}}," +
-                   $"{{\"buffer\":0,\"byteOffset\":{indexOffset},\"byteLength\":{indexLength},\"target\":34963}}]," +
-                   "\"accessors\":[" +
-                   $"{{\"bufferView\":0,\"componentType\":5126,\"count\":{mesh.Vertices.Count},\"type\":\"VEC3\",\"min\":[{f(min.X)},{f(min.Y)},{f(min.Z)}],\"max\":[{f(max.X)},{f(max.Y)},{f(max.Z)}]}}," +
-                   $"{{\"bufferView\":1,\"componentType\":5126,\"count\":{mesh.Vertices.Count},\"type\":\"VEC3\"}}," +
-                   $"{{\"bufferView\":2,\"componentType\":5126,\"count\":{mesh.Vertices.Count},\"type\":\"VEC2\"}}," +
-                   $"{{\"bufferView\":3,\"componentType\":5123,\"count\":{mesh.Indices.Count},\"type\":\"SCALAR\"}}]" +
-                   "}";
+            var bufferView = bufferViews.Count;
+            bufferViews.Add(new { buffer = 0, byteOffset = indexOffset, byteLength = indexLength, target = 34963 });
+            var accessor = accessors.Count;
+            accessors.Add(new { bufferView, componentType = 5123, count = section.Indices.Count, type = "SCALAR" });
+            var material = materials.Count;
+            materials.Add(new { name = section.StableSlotName });
+            primitives.Add(new
+            {
+                attributes = new Dictionary<string, int>
+                {
+                    ["POSITION"] = 0,
+                    ["NORMAL"] = 1,
+                    ["TEXCOORD_0"] = 2,
+                },
+                indices = accessor,
+                material,
+                mode = 4,
+            });
+        }
+
+        var json = JsonSerializer.Serialize(new
+        {
+            asset = new { version = "2.0", generator = "Batcomputer OBJ preview" },
+            scene = 0,
+            scenes = new[] { new { nodes = new[] { 0 } } },
+            nodes = new[] { new { mesh = 0 } },
+            meshes = new[] { new { primitives } },
+            materials,
+            buffers = new[] { new { byteLength = binary.Length } },
+            bufferViews,
+            accessors,
+        }, JsonOptions);
         var jsonBytes = Encoding.UTF8.GetBytes(json);
         var jsonLength = jsonBytes.Length;
         Array.Resize(ref jsonBytes, Align4(jsonLength));
@@ -462,13 +569,22 @@ public sealed class StaticMeshObjProbeService
         return new Vector3(transformed.X, transformed.Y, transformed.Z);
     }
 
-    private static byte[] BuildPayload(byte[] source, ImportedMesh mesh, Result result)
+    private static byte[] BuildPayload(byte[] source, ImportedMesh mesh, Result result, int sourceLayoutShift = 0)
     {
-        var oldPositionEnd = PositionDataOffset + DonorVertexCount * PositionStride;
-        var oldTangentEnd = TangentDataOffset + DonorVertexCount * TangentStride;
-        var oldUvEnd = UvDataOffset + DonorVertexCount * UvStride;
-        var oldIndex0End = Index0DataOffset + DonorIndexBytes;
-        var oldIndex1End = Index1DataOffset + DonorIndexBytes;
+        EnsureMaterialSections(mesh);
+        var sectionDelta = checked((mesh.Sections.Count - 1) * SectionRecordSize);
+        var shiftedSectionDataOffset = checked(SectionDataOffset + sourceLayoutShift);
+        var shiftedLodCookedOutOffset = checked(LodCookedOutOffset + sourceLayoutShift);
+        var shiftedPositionDataOffset = checked(PositionDataOffset + sourceLayoutShift);
+        var shiftedTangentDataOffset = checked(TangentDataOffset + sourceLayoutShift);
+        var shiftedUvDataOffset = checked(UvDataOffset + sourceLayoutShift);
+        var shiftedIndex0DataOffset = checked(Index0DataOffset + sourceLayoutShift);
+        var shiftedIndex1DataOffset = checked(Index1DataOffset + sourceLayoutShift);
+        var oldPositionEnd = shiftedPositionDataOffset + DonorVertexCount * PositionStride;
+        var oldTangentEnd = shiftedTangentDataOffset + DonorVertexCount * TangentStride;
+        var oldUvEnd = shiftedUvDataOffset + DonorVertexCount * UvStride;
+        var oldIndex0End = shiftedIndex0DataOffset + DonorIndexBytes;
+        var oldIndex1End = shiftedIndex1DataOffset + DonorIndexBytes;
         if (oldIndex1End > source.Length)
         {
             throw new InvalidOperationException("The donor's LOD0 buffers do not match the verified Nightwing layout.");
@@ -481,7 +597,8 @@ public sealed class StaticMeshObjProbeService
         var uvDelta = checked((vertexCount - DonorVertexCount) * UvStride);
         var vertexDelta = checked(positionDelta + tangentDelta + uvDelta);
         var indexDelta = indexBytes - DonorIndexBytes;
-        var metadataShift = checked(vertexDelta + 2 * indexDelta);
+        var generatedShift = checked(sectionDelta + vertexDelta + 2 * indexDelta);
+        var totalLayoutShift = checked(sourceLayoutShift + generatedShift);
         // FStaticMeshBuffersSize counts raw position/tangent/UV bytes plus every active index
         // buffer. This donor carries main and depth-only indices; both are replaced below.
         var serializedBuffersSize = checked(
@@ -496,49 +613,69 @@ public sealed class StaticMeshObjProbeService
                 $"The OBJ index range {minVertexIndex}..{maxVertexIndex} is outside its {vertexCount} flattened vertices.");
         }
 
-        using var output = new MemoryStream(checked(source.Length + metadataShift));
-        output.Write(source, 0, PositionDataOffset);
+        using var output = new MemoryStream(checked(source.Length + generatedShift));
+        output.Write(source, 0, shiftedSectionDataOffset);
+        for (var i = 0; i < mesh.Sections.Count; i++)
+        {
+            output.Write(source, shiftedSectionDataOffset, SectionRecordSize);
+        }
+        output.Write(
+            source,
+            shiftedLodCookedOutOffset,
+            shiftedPositionDataOffset - shiftedLodCookedOutOffset);
         WritePositions(output, mesh.Vertices);
-        output.Write(source, oldPositionEnd, TangentDataOffset - oldPositionEnd);
+        output.Write(source, oldPositionEnd, shiftedTangentDataOffset - oldPositionEnd);
         WriteTangents(output, mesh.Vertices);
-        output.Write(source, oldTangentEnd, UvDataOffset - oldTangentEnd);
+        output.Write(source, oldTangentEnd, shiftedUvDataOffset - oldTangentEnd);
         WriteUvs(output, mesh.Vertices);
-        output.Write(source, oldUvEnd, Index0DataOffset - oldUvEnd);
+        output.Write(source, oldUvEnd, shiftedIndex0DataOffset - oldUvEnd);
         WriteIndices(output, mesh.Indices);
-        output.Write(source, oldIndex0End, Index1DataOffset - oldIndex0End);
+        output.Write(source, oldIndex0End, shiftedIndex1DataOffset - oldIndex0End);
         WriteIndices(output, mesh.Indices);
         output.Write(source, oldIndex1End, source.Length - oldIndex1End);
 
         var payload = output.ToArray();
-        WriteInt32(payload, PositionCountOffset0, vertexCount);
-        WriteInt32(payload, PositionCountOffset1, vertexCount);
-        WriteInt32(payload, TangentCountOffset0 + positionDelta, vertexCount);
-        WriteInt32(payload, TangentCountOffset1 + positionDelta, vertexCount);
-        WriteInt32(payload, UvCountOffset + positionDelta + tangentDelta, vertexCount);
-        WriteInt32(payload, Index0SizeOffset + vertexDelta, indexBytes);
-        WriteInt32(payload, Index1SizeOffset + vertexDelta + indexDelta, indexBytes);
-        WriteInt32(payload, SectionTriangleCountOffset, mesh.Indices.Count / 3);
-        WriteInt32(payload, SectionMinVertexIndexOffset, minVertexIndex);
-        WriteInt32(payload, SectionMaxVertexIndexOffset, maxVertexIndex);
-        WriteInt32(payload, SerializedBuffersSizeOffset + metadataShift, serializedBuffersSize);
-        WriteInt32(payload, DepthOnlyBufferSizeOffset + metadataShift, indexBytes);
-        WriteInt32(payload, ReversedBuffersSizeOffset + metadataShift, 0);
+        WriteInt32(payload, SectionsCountOffset + sourceLayoutShift, mesh.Sections.Count);
+        for (var sectionIndex = 0; sectionIndex < mesh.Sections.Count; sectionIndex++)
+        {
+            var section = mesh.Sections[sectionIndex];
+            var recordOffset = checked(SectionDataOffset + sourceLayoutShift + sectionIndex * SectionRecordSize);
+            WriteInt32(payload, recordOffset + SectionMaterialIndexRelativeOffset, section.Slot);
+            WriteInt32(payload, recordOffset + SectionFirstIndexRelativeOffset, section.FirstIndex);
+            WriteInt32(payload, recordOffset + SectionTriangleCountRelativeOffset, section.Indices.Count / 3);
+            WriteInt32(payload, recordOffset + SectionMinVertexIndexRelativeOffset, section.Indices.Min(index => (int)index));
+            WriteInt32(payload, recordOffset + SectionMaxVertexIndexRelativeOffset, section.Indices.Max(index => (int)index));
+            WriteRenderBounds(payload, recordOffset + SectionRenderBoundsRelativeOffset, section.Bounds);
+        }
 
-        WriteRenderBounds(payload, RenderBoundsOffsets[0], mesh.Bounds);
-        WriteRenderBounds(payload, RenderBoundsOffsets[1], mesh.Bounds);
-        WriteRenderBounds(payload, RenderBoundsOffsets[2] + metadataShift, mesh.Bounds);
+        var postSectionShift = checked(sourceLayoutShift + sectionDelta);
+        WriteInt32(payload, PositionCountOffset0 + postSectionShift, vertexCount);
+        WriteInt32(payload, PositionCountOffset1 + postSectionShift, vertexCount);
+        WriteInt32(payload, TangentCountOffset0 + postSectionShift + positionDelta, vertexCount);
+        WriteInt32(payload, TangentCountOffset1 + postSectionShift + positionDelta, vertexCount);
+        WriteInt32(payload, UvCountOffset + postSectionShift + positionDelta + tangentDelta, vertexCount);
+        WriteInt32(payload, Index0SizeOffset + postSectionShift + vertexDelta, indexBytes);
+        WriteInt32(payload, Index1SizeOffset + postSectionShift + vertexDelta + indexDelta, indexBytes);
+        WriteInt32(payload, SerializedBuffersSizeOffset + totalLayoutShift, serializedBuffersSize);
+        WriteInt32(payload, DepthOnlyBufferSizeOffset + totalLayoutShift, indexBytes);
+        WriteInt32(payload, ReversedBuffersSizeOffset + totalLayoutShift, 0);
+
+        WriteRenderBounds(payload, GlobalRenderBoundsOffset + sourceLayoutShift, mesh.Bounds);
+        WriteRenderBounds(payload, FinalRenderBoundsOffset + totalLayoutShift, mesh.Bounds);
         ValidateGeneratedPayload(
             payload,
             mesh,
+            sourceLayoutShift,
+            sectionDelta,
             positionDelta,
             tangentDelta,
             vertexDelta,
             indexDelta,
-            metadataShift,
+            totalLayoutShift,
             indexBytes,
             serializedBuffersSize);
         result.Log.Add(
-            $"Validated LOD0 section vertices {minVertexIndex}..{maxVertexIndex}; " +
+            $"Validated {mesh.Sections.Count} LOD0 material section(s), vertices {minVertexIndex}..{maxVertexIndex}; " +
             $"serialized buffers {serializedBuffersSize:N0} bytes (depth-only {indexBytes:N0}).");
         return payload;
     }
@@ -549,13 +686,34 @@ public sealed class StaticMeshObjProbeService
         Vector3 offset,
         float rotationPitch = 0f,
         float rotationYaw = 0f,
-        float rotationRoll = 0f)
+        float rotationRoll = 0f,
+        IReadOnlyList<CustomStaticMeshMaterialSlot>? preferredMaterialSlots = null,
+        string legacyMaterialPath = "")
     {
         var positions = new List<Vector3> { default };
         var uvs = new List<Vector2> { default };
         var normals = new List<Vector3> { default };
         var mesh = new ImportedMesh();
         var vertexMap = new Dictionary<ObjKey, ushort>();
+        var sectionsByMaterial = new Dictionary<string, ImportedSection>(StringComparer.Ordinal);
+        var sourceSections = new List<ImportedSection>();
+        var currentMaterial = "Default";
+
+        ImportedSection CurrentSection()
+        {
+            if (sectionsByMaterial.TryGetValue(currentMaterial, out var existing))
+            {
+                return existing;
+            }
+            if (sourceSections.Count >= MaxMaterialSlots)
+            {
+                throw new InvalidOperationException($"Custom OBJ meshes support up to {MaxMaterialSlots} material slots.");
+            }
+            var created = new ImportedSection { SourceMaterialName = currentMaterial };
+            sectionsByMaterial.Add(currentMaterial, created);
+            sourceSections.Add(created);
+            return created;
+        }
 
         foreach (var rawLine in File.ReadLines(objPath))
         {
@@ -580,20 +738,28 @@ public sealed class StaticMeshObjProbeService
                 case "vn" when tokens.Length >= 4:
                     normals.Add(Normalize(new Vector3(ParseFloat(tokens[1]), ParseFloat(tokens[2]), ParseFloat(tokens[3]))));
                     break;
+                case "usemtl":
+                    currentMaterial = line[tokens[0].Length..].Trim();
+                    if (string.IsNullOrWhiteSpace(currentMaterial))
+                    {
+                        currentMaterial = "Default";
+                    }
+                    break;
                 case "f" when tokens.Length >= 4:
                 {
+                    var section = CurrentSection();
                     var face = tokens.Skip(1).Select(token => ParseObjKey(token, positions.Count - 1, uvs.Count - 1, normals.Count - 1)).ToArray();
                     for (var i = 1; i < face.Length - 1; i++)
                     {
                         var first = AddVertex(face[0], positions, uvs, normals, vertexMap, mesh, scale);
                         var second = AddVertex(face[i], positions, uvs, normals, vertexMap, mesh, scale);
                         var third = AddVertex(face[i + 1], positions, uvs, normals, vertexMap, mesh, scale);
-                        mesh.Indices.Add(first);
-                        mesh.Indices.Add(second);
-                        mesh.Indices.Add(third);
-                        mesh.Indices.Add(first);
-                        mesh.Indices.Add(third);
-                        mesh.Indices.Add(second);
+                        section.Indices.Add(first);
+                        section.Indices.Add(second);
+                        section.Indices.Add(third);
+                        section.Indices.Add(first);
+                        section.Indices.Add(third);
+                        section.Indices.Add(second);
                     }
                     break;
                 }
@@ -604,8 +770,220 @@ public sealed class StaticMeshObjProbeService
         {
             throw new InvalidOperationException("The OBJ contains no usable faces.");
         }
+        var declarations = ReconcileMaterialSlots(
+            preferredMaterialSlots,
+            sourceSections.Select(section => section.SourceMaterialName),
+            legacyMaterialPath);
+        mesh.DeclaredMaterialSlots.AddRange(declarations);
+        var activeSlots = declarations.ToDictionary(slot => slot.SourceMaterialName, StringComparer.Ordinal);
+        foreach (var section in sourceSections)
+        {
+            if (!activeSlots.TryGetValue(section.SourceMaterialName, out var declaration))
+            {
+                throw new InvalidOperationException($"OBJ material '{section.SourceMaterialName}' did not receive a stable slot.");
+            }
+            section.Slot = declaration.Slot;
+            section.StableSlotName = declaration.StableSlotName;
+            mesh.Sections.Add(section);
+        }
+        mesh.Sections.Sort((left, right) => left.Slot.CompareTo(right.Slot));
+        foreach (var section in mesh.Sections)
+        {
+            section.FirstIndex = mesh.Indices.Count;
+            mesh.Indices.AddRange(section.Indices);
+        }
         CenterAndBuildFrames(mesh, offset, rotationPitch, rotationYaw, rotationRoll);
+        foreach (var section in mesh.Sections)
+        {
+            section.Bounds = ComputeBounds(mesh, section.Indices);
+        }
         return mesh;
+    }
+
+    /// <summary>
+    /// Reads the OBJ's active <c>usemtl</c> sections. Repeated declarations are consolidated in
+    /// first-use order; faces before the first declaration use the stable <c>Default</c> slot.
+    /// </summary>
+    public static List<ObjMaterialSlot> InspectObjMaterialSlots(string objPath)
+    {
+        if (!File.Exists(objPath))
+        {
+            throw new FileNotFoundException("The custom mesh OBJ was not found.", objPath);
+        }
+        var mesh = ParseObj(objPath, 1f, default);
+        return DescribeMaterialSlots(mesh);
+    }
+
+    /// <summary>
+    /// Reconciles a freshly observed set of OBJ material names with saved declarations. Existing
+    /// source names retain their relative order and material paths, new names append, and removed
+    /// names disappear. Runtime slots are then compacted so every output stays contiguous.
+    /// </summary>
+    public static List<CustomStaticMeshMaterialSlot> ReconcileMaterialSlots(
+        IReadOnlyList<CustomStaticMeshMaterialSlot>? existingSlots,
+        IEnumerable<string> sourceMaterialNames,
+        string legacyMaterialPath = "")
+    {
+        var priorBySource = (existingSlots ?? Array.Empty<CustomStaticMeshMaterialSlot>())
+            .Where(slot => slot is not null && slot.Slot is >= 0 and < MaxMaterialSlots)
+            .OrderBy(slot => slot.Slot)
+            .GroupBy(slot => NormalizeSourceMaterialName(slot.SourceMaterialName), StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToDictionary(
+                slot => NormalizeSourceMaterialName(slot.SourceMaterialName),
+                slot => slot,
+                StringComparer.Ordinal);
+        var sourceOrder = sourceMaterialNames
+            .Select(NormalizeSourceMaterialName)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (sourceOrder.Count > MaxMaterialSlots)
+        {
+            throw new InvalidOperationException($"Custom OBJ meshes support up to {MaxMaterialSlots} material slots.");
+        }
+
+        // Keep the relative order of surviving saved names so merely reordering usemtl blocks does
+        // not swap slots. New names append in first-use order. Removed names are intentionally gone.
+        var orderedNames = priorBySource.Values
+            .OrderBy(slot => slot.Slot)
+            .Select(slot => NormalizeSourceMaterialName(slot.SourceMaterialName))
+            .Where(sourceOrder.Contains)
+            .Distinct(StringComparer.Ordinal)
+            .Concat(sourceOrder.Where(name => !priorBySource.ContainsKey(name)))
+            .ToList();
+        var reconciled = new List<CustomStaticMeshMaterialSlot>(orderedNames.Count);
+        for (var slot = 0; slot < orderedNames.Count; slot++)
+        {
+            var sourceName = orderedNames[slot];
+            priorBySource.TryGetValue(sourceName, out var prior);
+            reconciled.Add(new CustomStaticMeshMaterialSlot
+            {
+                Slot = slot,
+                SourceMaterialName = sourceName,
+                StableSlotName = StableMaterialSlotName(slot, sourceName),
+                MaterialPath = prior?.MaterialPath ?? (slot == 0 ? legacyMaterialPath ?? "" : ""),
+            });
+        }
+        return reconciled;
+    }
+
+    /// <summary>Returns declared slots, or a synthetic slot zero for a legacy one-material import.</summary>
+    public static IReadOnlyList<CustomStaticMeshMaterialSlot> EffectiveMaterialSlots(CustomStaticMeshImport import)
+    {
+        if (import.MaterialSlots is { Count: > 0 })
+        {
+            return import.MaterialSlots
+                .Where(slot => slot.Slot is >= 0 and < MaxMaterialSlots)
+                .OrderBy(slot => slot.Slot)
+                .GroupBy(slot => NormalizeSourceMaterialName(slot.SourceMaterialName), StringComparer.Ordinal)
+                .Select(group => group.First())
+                .Select((slot, index) => new CustomStaticMeshMaterialSlot
+                {
+                    Slot = index,
+                    SourceMaterialName = NormalizeSourceMaterialName(slot.SourceMaterialName),
+                    StableSlotName = StableMaterialSlotName(index, slot.SourceMaterialName),
+                    MaterialPath = slot.MaterialPath ?? "",
+                })
+                .ToList();
+        }
+        return
+        [
+            new CustomStaticMeshMaterialSlot
+            {
+                Slot = 0,
+                SourceMaterialName = "Default",
+                StableSlotName = StableMaterialSlotName(0, "Default"),
+                MaterialPath = import.MaterialPath ?? "",
+            },
+        ];
+    }
+
+    private static List<ObjMaterialSlot> DescribeMaterialSlots(ImportedMesh mesh) => mesh.Sections
+        .Select(section => new ObjMaterialSlot
+        {
+            Slot = section.Slot,
+            SourceMaterialName = section.SourceMaterialName,
+            StableSlotName = section.StableSlotName,
+            FirstIndex = section.FirstIndex,
+            IndexCount = section.Indices.Count,
+            MinVertexIndex = section.Indices.Min(index => (int)index),
+            MaxVertexIndex = section.Indices.Max(index => (int)index),
+        })
+        .ToList();
+
+    private static string NormalizeSourceMaterialName(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "Default" : value.Trim();
+
+    private static string StableMaterialSlotName(int slot, string? sourceMaterialName)
+    {
+        var source = NormalizeSourceMaterialName(sourceMaterialName);
+        var sanitized = new StringBuilder(source.Length);
+        var lastWasSeparator = false;
+        foreach (var character in source)
+        {
+            if (char.IsLetterOrDigit(character) || character == '_')
+            {
+                sanitized.Append(character);
+                lastWasSeparator = false;
+            }
+            else if (!lastWasSeparator)
+            {
+                sanitized.Append('_');
+                lastWasSeparator = true;
+            }
+            if (sanitized.Length >= 48)
+            {
+                break;
+            }
+        }
+        var suffix = sanitized.ToString().Trim('_');
+        return $"BC_SLOT_{slot:D3}_{(suffix.Length == 0 ? "Default" : suffix)}";
+    }
+
+    private static void EnsureMaterialSections(ImportedMesh mesh)
+    {
+        if (mesh.Sections.Count > 0)
+        {
+            var flattened = mesh.Sections.SelectMany(section => section.Indices).ToArray();
+            if (!flattened.SequenceEqual(mesh.Indices))
+            {
+                throw new InvalidOperationException("The OBJ material sections no longer match its combined index buffer.");
+            }
+            return;
+        }
+        var section = new ImportedSection
+        {
+            Slot = 0,
+            SourceMaterialName = "Default",
+            StableSlotName = StableMaterialSlotName(0, "Default"),
+            FirstIndex = 0,
+            Bounds = mesh.Bounds,
+        };
+        section.Indices.AddRange(mesh.Indices);
+        mesh.Sections.Add(section);
+        if (mesh.DeclaredMaterialSlots.Count == 0)
+        {
+            mesh.DeclaredMaterialSlots.Add(new CustomStaticMeshMaterialSlot
+            {
+                Slot = 0,
+                SourceMaterialName = "Default",
+                StableSlotName = section.StableSlotName,
+            });
+        }
+    }
+
+    private static Bounds ComputeBounds(ImportedMesh mesh, IReadOnlyList<ushort> indices)
+    {
+        if (indices.Count == 0)
+        {
+            return mesh.Bounds;
+        }
+        var vertices = indices.Select(index => mesh.Vertices[index].Position).ToArray();
+        var min = new Vector3(vertices.Min(value => value.X), vertices.Min(value => value.Y), vertices.Min(value => value.Z));
+        var max = new Vector3(vertices.Max(value => value.X), vertices.Max(value => value.Y), vertices.Max(value => value.Z));
+        var center = (min + max) * 0.5f;
+        var extent = (max - min) * 0.5f;
+        return new Bounds(center, extent, MathF.Sqrt(Dot(extent, extent)));
     }
 
     private static ushort AddVertex(
@@ -865,26 +1243,26 @@ public sealed class StaticMeshObjProbeService
     private static void ValidateGeneratedPayload(
         byte[] payload,
         ImportedMesh mesh,
+        int sourceLayoutShift,
+        int sectionDelta,
         int positionDelta,
         int tangentDelta,
         int vertexDelta,
         int indexDelta,
-        int metadataShift,
+        int totalLayoutShift,
         int indexBytes,
         int serializedBuffersSize)
     {
         var vertexCount = mesh.Vertices.Count;
-        var triangleCount = mesh.Indices.Count / 3;
-        var minVertexIndex = mesh.Indices.Min(index => (int)index);
-        var maxVertexIndex = mesh.Indices.Max(index => (int)index);
-        var uvHeaderShift = checked(positionDelta + tangentDelta);
-        var firstIndexTailShift = checked(vertexDelta + indexDelta);
+        var postSectionShift = checked(sourceLayoutShift + sectionDelta);
+        var uvHeaderShift = checked(postSectionShift + positionDelta + tangentDelta);
+        var firstIndexTailShift = checked(postSectionShift + vertexDelta + indexDelta);
 
-        if (payload.Length != checked(DonorStaticMeshSerialSize + metadataShift))
+        if (payload.Length != checked(DonorStaticMeshSerialSize + totalLayoutShift))
         {
             throw new InvalidOperationException(
                 $"Generated StaticMesh payload length {payload.Length:N0} did not match the expected " +
-                $"{DonorStaticMeshSerialSize + metadataShift:N0} bytes.");
+                $"{DonorStaticMeshSerialSize + totalLayoutShift:N0} bytes.");
         }
 
         void RequireInt(int offset, int expected, string field) =>
@@ -892,36 +1270,43 @@ public sealed class StaticMeshObjProbeService
         void RequireByte(int offset, byte expected, string field) =>
             RequireByteValue(payload, offset, expected, $"generated {field}");
 
-        RequireInt(SectionsCountOffset, 1, "section count");
-        RequireInt(SectionTriangleCountOffset, triangleCount, "section triangle count");
-        RequireInt(SectionMinVertexIndexOffset, minVertexIndex, "section minimum vertex");
-        RequireInt(SectionMaxVertexIndexOffset, maxVertexIndex, "section maximum vertex");
-        RequireInt(LodCookedOutOffset, 0, "cooked-out flag");
-        RequireInt(LodBuffersInlinedOffset, 1, "inline-buffer flag");
-        RequireInt(LodHasRayTracingGeometryOffset, 0, "ray-tracing geometry flag");
-        RequireByte(LodBufferGlobalStripFlagsOffset, DonorGlobalStripFlags, "LOD buffer global strip flags");
-        RequireByte(LodBufferClassStripFlagsOffset, DonorClassStripFlags, "LOD buffer class strip flags");
+        RequireInt(SectionsCountOffset + sourceLayoutShift, mesh.Sections.Count, "section count");
+        for (var sectionIndex = 0; sectionIndex < mesh.Sections.Count; sectionIndex++)
+        {
+            var section = mesh.Sections[sectionIndex];
+            var recordOffset = checked(SectionDataOffset + sourceLayoutShift + sectionIndex * SectionRecordSize);
+            RequireInt(recordOffset + SectionMaterialIndexRelativeOffset, section.Slot, $"section {sectionIndex} material slot");
+            RequireInt(recordOffset + SectionFirstIndexRelativeOffset, section.FirstIndex, $"section {sectionIndex} first index");
+            RequireInt(recordOffset + SectionTriangleCountRelativeOffset, section.Indices.Count / 3, $"section {sectionIndex} triangle count");
+            RequireInt(recordOffset + SectionMinVertexIndexRelativeOffset, section.Indices.Min(index => (int)index), $"section {sectionIndex} minimum vertex");
+            RequireInt(recordOffset + SectionMaxVertexIndexRelativeOffset, section.Indices.Max(index => (int)index), $"section {sectionIndex} maximum vertex");
+        }
+        RequireInt(LodCookedOutOffset + postSectionShift, 0, "cooked-out flag");
+        RequireInt(LodBuffersInlinedOffset + postSectionShift, 1, "inline-buffer flag");
+        RequireInt(LodHasRayTracingGeometryOffset + postSectionShift, 0, "ray-tracing geometry flag");
+        RequireByte(LodBufferGlobalStripFlagsOffset + postSectionShift, DonorGlobalStripFlags, "LOD buffer global strip flags");
+        RequireByte(LodBufferClassStripFlagsOffset + postSectionShift, DonorClassStripFlags, "LOD buffer class strip flags");
 
-        RequireInt(PositionStrideOffset, PositionStride, "position stride");
-        RequireInt(PositionCountOffset0, vertexCount, "position vertex count");
-        RequireInt(PositionElementSizeOffset, PositionStride, "position element size");
-        RequireInt(PositionCountOffset1, vertexCount, "position bulk count");
-        RequireByte(StaticMeshVertexGlobalStripFlagsOffset + positionDelta, DonorGlobalStripFlags, "static vertex global strip flags");
-        RequireByte(StaticMeshVertexClassStripFlagsOffset + positionDelta, 0, "static vertex class strip flags");
-        RequireInt(NumTexCoordsOffset + positionDelta, 1, "texture-coordinate channel count");
-        RequireInt(TangentCountOffset0 + positionDelta, vertexCount, "tangent vertex count");
-        RequireInt(TangentElementSizeOffset + positionDelta, TangentStride, "tangent element size");
-        RequireInt(TangentCountOffset1 + positionDelta, vertexCount, "tangent bulk count");
+        RequireInt(PositionStrideOffset + postSectionShift, PositionStride, "position stride");
+        RequireInt(PositionCountOffset0 + postSectionShift, vertexCount, "position vertex count");
+        RequireInt(PositionElementSizeOffset + postSectionShift, PositionStride, "position element size");
+        RequireInt(PositionCountOffset1 + postSectionShift, vertexCount, "position bulk count");
+        RequireByte(StaticMeshVertexGlobalStripFlagsOffset + postSectionShift + positionDelta, DonorGlobalStripFlags, "static vertex global strip flags");
+        RequireByte(StaticMeshVertexClassStripFlagsOffset + postSectionShift + positionDelta, 0, "static vertex class strip flags");
+        RequireInt(NumTexCoordsOffset + postSectionShift + positionDelta, 1, "texture-coordinate channel count");
+        RequireInt(TangentCountOffset0 + postSectionShift + positionDelta, vertexCount, "tangent vertex count");
+        RequireInt(TangentElementSizeOffset + postSectionShift + positionDelta, TangentStride, "tangent element size");
+        RequireInt(TangentCountOffset1 + postSectionShift + positionDelta, vertexCount, "tangent bulk count");
         RequireInt(UvElementSizeOffset + uvHeaderShift, UvStride, "UV element size");
         RequireInt(UvCountOffset + uvHeaderShift, vertexCount, "UV bulk count");
-        RequireByte(ColorVertexGlobalStripFlagsOffset + vertexDelta, DonorGlobalStripFlags, "colour vertex global strip flags");
-        RequireByte(ColorVertexClassStripFlagsOffset + vertexDelta, 0, "colour vertex class strip flags");
-        RequireInt(ColorVertexStrideOffset + vertexDelta, 0, "colour vertex stride");
-        RequireInt(ColorVertexCountOffset + vertexDelta, 0, "colour vertex count");
+        RequireByte(ColorVertexGlobalStripFlagsOffset + postSectionShift + vertexDelta, DonorGlobalStripFlags, "colour vertex global strip flags");
+        RequireByte(ColorVertexClassStripFlagsOffset + postSectionShift + vertexDelta, 0, "colour vertex class strip flags");
+        RequireInt(ColorVertexStrideOffset + postSectionShift + vertexDelta, 0, "colour vertex stride");
+        RequireInt(ColorVertexCountOffset + postSectionShift + vertexDelta, 0, "colour vertex count");
 
-        RequireInt(Index0Is32BitOffset + vertexDelta, 0, "main index width flag");
-        RequireInt(Index0ElementSizeOffset + vertexDelta, 1, "main index byte-array element size");
-        RequireInt(Index0SizeOffset + vertexDelta, indexBytes, "main index byte count");
+        RequireInt(Index0Is32BitOffset + postSectionShift + vertexDelta, 0, "main index width flag");
+        RequireInt(Index0ElementSizeOffset + postSectionShift + vertexDelta, 1, "main index byte-array element size");
+        RequireInt(Index0SizeOffset + postSectionShift + vertexDelta, indexBytes, "main index byte count");
         RequireInt(Index0ExpandTo32BitOffset + firstIndexTailShift, 0, "main index expansion flag");
         RequireInt(ReversedIndexIs32BitOffset + firstIndexTailShift, 0, "reversed index width flag");
         RequireInt(ReversedIndexElementSizeOffset + firstIndexTailShift, 1, "reversed index byte-array element size");
@@ -930,21 +1315,21 @@ public sealed class StaticMeshObjProbeService
         RequireInt(Index1Is32BitOffset + firstIndexTailShift, 0, "depth-only index width flag");
         RequireInt(Index1ElementSizeOffset + firstIndexTailShift, 1, "depth-only index byte-array element size");
         RequireInt(Index1SizeOffset + firstIndexTailShift, indexBytes, "depth-only index byte count");
-        RequireInt(Index1ExpandTo32BitOffset + metadataShift, 0, "depth-only index expansion flag");
-        RequireInt(ReversedDepthIndexIs32BitOffset + metadataShift, 0, "reversed-depth index width flag");
-        RequireInt(ReversedDepthIndexElementSizeOffset + metadataShift, 1, "reversed-depth index byte-array element size");
-        RequireInt(ReversedDepthIndexSizeOffset + metadataShift, 0, "reversed-depth index byte count");
-        RequireInt(ReversedDepthIndexExpandTo32BitOffset + metadataShift, 0, "reversed-depth index expansion flag");
+        RequireInt(Index1ExpandTo32BitOffset + totalLayoutShift, 0, "depth-only index expansion flag");
+        RequireInt(ReversedDepthIndexIs32BitOffset + totalLayoutShift, 0, "reversed-depth index width flag");
+        RequireInt(ReversedDepthIndexElementSizeOffset + totalLayoutShift, 1, "reversed-depth index byte-array element size");
+        RequireInt(ReversedDepthIndexSizeOffset + totalLayoutShift, 0, "reversed-depth index byte count");
+        RequireInt(ReversedDepthIndexExpandTo32BitOffset + totalLayoutShift, 0, "reversed-depth index expansion flag");
 
-        RequireInt(SectionSamplerProbabilityCountOffset + metadataShift, 0, "section sampler probability count");
-        RequireInt(SectionSamplerAliasCountOffset + metadataShift, 0, "section sampler alias count");
-        RequireInt(MeshSamplerProbabilityCountOffset + metadataShift, 0, "mesh sampler probability count");
-        RequireInt(MeshSamplerAliasCountOffset + metadataShift, 0, "mesh sampler alias count");
-        RequireInt(SerializedBuffersSizeOffset + metadataShift, serializedBuffersSize, "serialized buffer-size summary");
-        RequireInt(DepthOnlyBufferSizeOffset + metadataShift, indexBytes, "depth-only buffer-size summary");
-        RequireInt(ReversedBuffersSizeOffset + metadataShift, 0, "reversed buffer-size summary");
+        RequireInt(SectionSamplerProbabilityCountOffset + totalLayoutShift, 0, "section sampler probability count");
+        RequireInt(SectionSamplerAliasCountOffset + totalLayoutShift, 0, "section sampler alias count");
+        RequireInt(MeshSamplerProbabilityCountOffset + totalLayoutShift, 0, "mesh sampler probability count");
+        RequireInt(MeshSamplerAliasCountOffset + totalLayoutShift, 0, "mesh sampler alias count");
+        RequireInt(SerializedBuffersSizeOffset + totalLayoutShift, serializedBuffersSize, "serialized buffer-size summary");
+        RequireInt(DepthOnlyBufferSizeOffset + totalLayoutShift, indexBytes, "depth-only buffer-size summary");
+        RequireInt(ReversedBuffersSizeOffset + totalLayoutShift, 0, "reversed buffer-size summary");
 
-        var mainIndexDataOffset = checked(Index0DataOffset + vertexDelta);
+        var mainIndexDataOffset = checked(Index0DataOffset + postSectionShift + vertexDelta);
         var depthIndexDataOffset = checked(Index1DataOffset + firstIndexTailShift);
         for (var i = 0; i < mesh.Indices.Count; i++)
         {
@@ -992,6 +1377,277 @@ public sealed class StaticMeshObjProbeService
 
             _ = BuildPayload(source, mesh, new Result());
             return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    internal static bool MultiMaterialObjRegressionPasses()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "batcomputer-obj-material-regression-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(tempRoot);
+            var objPath = Path.Combine(tempRoot, "sections.obj");
+            var glbPath = Path.Combine(tempRoot, "sections.glb");
+            File.WriteAllLines(objPath,
+            [
+                "v 0 0 0",
+                "v 1 0 0",
+                "v 0 1 0",
+                "v 1 1 0",
+                "vt 0 0",
+                "vt 1 0",
+                "vt 0 1",
+                "vt 1 1",
+                "vn 0 0 1",
+                "usemtl Black Plastic",
+                "f 1/1/1 2/2/1 3/3/1",
+                "usemtl Metal",
+                "f 2/2/1 4/4/1 3/3/1",
+                "usemtl Black Plastic",
+                "f 1/1/1 3/3/1 4/4/1",
+            ]);
+
+            var prior = new List<CustomStaticMeshMaterialSlot>
+            {
+                new() { Slot = 0, SourceMaterialName = "Metal", MaterialPath = "/Game/Test/MI_Metal" },
+                new() { Slot = 1, SourceMaterialName = "Black Plastic", MaterialPath = "/Game/Test/MI_Black" },
+            };
+            var reconciled = ReconcileMaterialSlots(prior, ["Black Plastic", "Accent", "Metal"]);
+            var removed = ReconcileMaterialSlots(prior, ["Black Plastic"]);
+            if (reconciled.Count != 3 ||
+                reconciled[0].SourceMaterialName != "Metal" || reconciled[0].MaterialPath != "/Game/Test/MI_Metal" ||
+                reconciled[1].SourceMaterialName != "Black Plastic" || reconciled[1].MaterialPath != "/Game/Test/MI_Black" ||
+                reconciled[2].SourceMaterialName != "Accent" ||
+                !reconciled.Select((slot, index) => slot.Slot == index).All(matches => matches) ||
+                removed.Count != 1 || removed[0].Slot != 0 || removed[0].MaterialPath != "/Game/Test/MI_Black")
+            {
+                return false;
+            }
+
+            var mesh = ParseObj(objPath, 1f, default, preferredMaterialSlots: prior);
+            if (mesh.Sections.Count != 2 ||
+                mesh.Sections[0].SourceMaterialName != "Metal" || mesh.Sections[0].FirstIndex != 0 || mesh.Sections[0].Indices.Count != 6 ||
+                mesh.Sections[1].SourceMaterialName != "Black Plastic" || mesh.Sections[1].FirstIndex != 6 || mesh.Sections[1].Indices.Count != 12 ||
+                mesh.Indices.Count != 18)
+            {
+                return false;
+            }
+
+            const int simulatedStaticMaterialsGrowth = 31;
+            const int staticMaterialInsertionOffset = 0x0A;
+            var donor = CreateVerifiedDonorPayloadFixture();
+            var expandedDonor = new byte[donor.Length + simulatedStaticMaterialsGrowth];
+            donor.AsSpan(0, staticMaterialInsertionOffset).CopyTo(expandedDonor);
+            donor.AsSpan(staticMaterialInsertionOffset)
+                .CopyTo(expandedDonor.AsSpan(staticMaterialInsertionOffset + simulatedStaticMaterialsGrowth));
+            ValidateShiftedDonorPayload(expandedDonor, simulatedStaticMaterialsGrowth);
+            var payload = BuildPayload(expandedDonor, mesh, new Result(), simulatedStaticMaterialsGrowth);
+            var sectionBase = SectionDataOffset + simulatedStaticMaterialsGrowth;
+            if (ReadInt32(payload, SectionsCountOffset + simulatedStaticMaterialsGrowth) != 2 ||
+                ReadInt32(payload, sectionBase + SectionMaterialIndexRelativeOffset) != 0 ||
+                ReadInt32(payload, sectionBase + SectionFirstIndexRelativeOffset) != 0 ||
+                ReadInt32(payload, sectionBase + SectionRecordSize + SectionMaterialIndexRelativeOffset) != 1 ||
+                ReadInt32(payload, sectionBase + SectionRecordSize + SectionFirstIndexRelativeOffset) != 6)
+            {
+                return false;
+            }
+
+            WritePreviewGlb(objPath, glbPath, 1f, 0f, 0f, 0f, materialSlots: prior);
+            var glb = File.ReadAllBytes(glbPath);
+            if (glb.Length < 20 || BinaryPrimitives.ReadInt32LittleEndian(glb) != 0x46546C67)
+            {
+                return false;
+            }
+            var jsonLength = BinaryPrimitives.ReadInt32LittleEndian(glb.AsSpan(12, sizeof(int)));
+            using var document = JsonDocument.Parse(glb.AsMemory(20, jsonLength));
+            var root = document.RootElement;
+            var materials = root.GetProperty("materials");
+            var primitives = root.GetProperty("meshes")[0].GetProperty("primitives");
+            return materials.GetArrayLength() == 2 && primitives.GetArrayLength() == 2 &&
+                   materials[0].GetProperty("name").GetString() == "BC_SLOT_000_Metal" &&
+                   materials[1].GetProperty("name").GetString() == "BC_SLOT_001_Black_Plastic";
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(tempRoot))
+                {
+                    Directory.Delete(tempRoot, recursive: true);
+                }
+            }
+            catch
+            {
+                // Regression cleanup is best effort; the unique directory cannot affect later runs.
+            }
+        }
+    }
+
+    internal static bool MultiMaterialPackageValidationRegressionPasses()
+    {
+        try
+        {
+            var declarations = new List<CustomStaticMeshMaterialSlot>
+            {
+                new()
+                {
+                    Slot = 0,
+                    SourceMaterialName = "Black Plastic",
+                    StableSlotName = "BC_SLOT_000_Black_Plastic",
+                },
+                new()
+                {
+                    Slot = 1,
+                    SourceMaterialName = "Metal",
+                    StableSlotName = "BC_SLOT_001_Metal",
+                },
+            };
+            var mesh = new ImportedMesh
+            {
+                Bounds = new Bounds(new Vector3(0.5f, 0.5f, 0f), new Vector3(0.5f, 0.5f, 0f), 0.71f),
+            };
+            foreach (var position in new[]
+                     {
+                         new Vector3(0f, 0f, 0f),
+                         new Vector3(1f, 0f, 0f),
+                         new Vector3(0f, 1f, 0f),
+                         new Vector3(1f, 1f, 0f),
+                     })
+            {
+                mesh.Vertices.Add(new ImportedVertex
+                {
+                    Position = position,
+                    Normal = new Vector3(0f, 0f, 1f),
+                    Tangent = new Vector3(1f, 0f, 0f),
+                    Uv = new Vector2(position.X, position.Y),
+                });
+            }
+            var first = new ImportedSection
+            {
+                Slot = 0,
+                SourceMaterialName = declarations[0].SourceMaterialName,
+                StableSlotName = declarations[0].StableSlotName,
+                FirstIndex = 0,
+                Bounds = mesh.Bounds,
+            };
+            first.Indices.AddRange([0, 1, 2, 0, 2, 1]);
+            var second = new ImportedSection
+            {
+                Slot = 1,
+                SourceMaterialName = declarations[1].SourceMaterialName,
+                StableSlotName = declarations[1].StableSlotName,
+                FirstIndex = first.Indices.Count,
+                Bounds = mesh.Bounds,
+            };
+            second.Indices.AddRange([1, 3, 2, 1, 2, 3]);
+            mesh.Sections.AddRange([first, second]);
+            mesh.Indices.AddRange(first.Indices);
+            mesh.Indices.AddRange(second.Indices);
+            mesh.DeclaredMaterialSlots.AddRange(declarations);
+
+            const int staticMaterialsGrowth = 31;
+            const int staticMaterialInsertionOffset = 0x0A;
+            var donor = CreateVerifiedDonorPayloadFixture();
+            var expandedDonor = new byte[donor.Length + staticMaterialsGrowth];
+            donor.AsSpan(0, staticMaterialInsertionOffset).CopyTo(expandedDonor);
+            donor.AsSpan(staticMaterialInsertionOffset)
+                .CopyTo(expandedDonor.AsSpan(staticMaterialInsertionOffset + staticMaterialsGrowth));
+            var payload = BuildPayload(expandedDonor, mesh, new Result(), staticMaterialsGrowth);
+            var extras = payload.AsSpan(DonorReflectedPropertyBytes + staticMaterialsGrowth).ToArray();
+            ValidateCookedMaterialSectionBytes(extras, declarations);
+
+            var legacyExtras = donor.AsSpan(DonorReflectedPropertyBytes).ToArray();
+            var legacyIndexDataOffset = Index0DataOffset - DonorReflectedPropertyBytes;
+            for (var index = 0; index < DonorIndexBytes / sizeof(ushort); index++)
+            {
+                BinaryPrimitives.WriteUInt16LittleEndian(
+                    legacyExtras.AsSpan(
+                        legacyIndexDataOffset + index * sizeof(ushort),
+                        sizeof(ushort)),
+                    (ushort)(index % DonorVertexCount));
+            }
+            ValidateCookedMaterialSectionBytes(
+                legacyExtras,
+                [new CustomStaticMeshMaterialSlot { Slot = 0, SourceMaterialName = "Default" }]);
+
+            static bool Rejects(Action validation)
+            {
+                try
+                {
+                    validation();
+                    return false;
+                }
+                catch (InvalidOperationException)
+                {
+                    return true;
+                }
+            }
+
+            var badMaterialIndex = extras.ToArray();
+            WriteInt32(
+                badMaterialIndex,
+                CookedSectionDataExtrasOffset + SectionRecordSize + SectionMaterialIndexRelativeOffset,
+                0);
+            var badFirstIndex = extras.ToArray();
+            WriteInt32(
+                badFirstIndex,
+                CookedSectionDataExtrasOffset + SectionRecordSize + SectionFirstIndexRelativeOffset,
+                9);
+            var badTriangleCount = extras.ToArray();
+            WriteInt32(
+                badTriangleCount,
+                CookedSectionDataExtrasOffset + SectionTriangleCountRelativeOffset,
+                999);
+            var badStoredRange = extras.ToArray();
+            WriteInt32(
+                badStoredRange,
+                CookedSectionDataExtrasOffset + SectionMaxVertexIndexRelativeOffset,
+                3);
+
+            var sectionDelta = SectionRecordSize;
+            var vertexDelta = (mesh.Vertices.Count - DonorVertexCount) *
+                              (PositionStride + TangentStride + UvStride);
+            var indexDataOffset = Index0DataOffset - DonorReflectedPropertyBytes + sectionDelta + vertexDelta;
+            var badVertexIndex = extras.ToArray();
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                badVertexIndex.AsSpan(indexDataOffset, sizeof(ushort)),
+                (ushort)mesh.Vertices.Count);
+
+            var validMetadata = new List<StaticMaterialSlotMetadata>
+            {
+                new(true, declarations[0].StableSlotName, declarations[0].StableSlotName),
+                new(true, declarations[1].StableSlotName, declarations[1].StableSlotName),
+            };
+            ValidateStaticMaterialSlotMetadata(validMetadata, declarations);
+            var nonStruct = validMetadata.ToArray();
+            nonStruct[1] = new StaticMaterialSlotMetadata(false, null, null);
+            var missingField = validMetadata.ToArray();
+            missingField[0] = new StaticMaterialSlotMetadata(true, null, declarations[0].StableSlotName);
+            var noneField = validMetadata.ToArray();
+            noneField[0] = new StaticMaterialSlotMetadata(true, declarations[0].StableSlotName, "None");
+            var wrongField = validMetadata.ToArray();
+            wrongField[1] = new StaticMaterialSlotMetadata(
+                true,
+                declarations[0].StableSlotName,
+                declarations[1].StableSlotName);
+
+            return Rejects(() => ValidateCookedMaterialSectionBytes(badMaterialIndex, declarations)) &&
+                   Rejects(() => ValidateCookedMaterialSectionBytes(badFirstIndex, declarations)) &&
+                   Rejects(() => ValidateCookedMaterialSectionBytes(badTriangleCount, declarations)) &&
+                   Rejects(() => ValidateCookedMaterialSectionBytes(badStoredRange, declarations)) &&
+                   Rejects(() => ValidateCookedMaterialSectionBytes(badVertexIndex, declarations)) &&
+                   Rejects(() => ValidateStaticMaterialSlotMetadata(nonStruct, declarations)) &&
+                   Rejects(() => ValidateStaticMaterialSlotMetadata(missingField, declarations)) &&
+                   Rejects(() => ValidateStaticMaterialSlotMetadata(noneField, declarations)) &&
+                   Rejects(() => ValidateStaticMaterialSlotMetadata(wrongField, declarations));
         }
         catch
         {
@@ -1097,6 +1753,341 @@ public sealed class StaticMeshObjProbeService
         radius.Value = bounds.Radius;
     }
 
+    private static void PatchStaticMaterialSlots(
+        UAsset asset,
+        NormalExport mesh,
+        IReadOnlyList<CustomStaticMeshMaterialSlot> declarations)
+    {
+        if (declarations.Count <= 1)
+        {
+            // Keep legacy single-material imports byte-for-byte compatible with the proven donor.
+            return;
+        }
+        if (declarations.Count > MaxMaterialSlots ||
+            declarations.Select((slot, index) => slot.Slot == index).Any(matches => !matches))
+        {
+            throw new InvalidOperationException("Custom OBJ material slots must be contiguous and start at slot zero.");
+        }
+
+        var staticMaterials = mesh.Data.OfType<ArrayPropertyData>().FirstOrDefault(property =>
+            property.Name.ToString().Equals("StaticMaterials", StringComparison.OrdinalIgnoreCase));
+        var template = staticMaterials?.Value?.OfType<StructPropertyData>().FirstOrDefault();
+        if (staticMaterials is null || template is null)
+        {
+            throw new InvalidOperationException("The verified StaticMesh donor no longer exposes a StaticMaterials template.");
+        }
+
+        var entries = new List<PropertyData>(declarations.Count);
+        foreach (var declaration in declarations)
+        {
+            var entry = (StructPropertyData)template.Clone();
+            entry.Name = MakeName(asset, declaration.Slot.ToString(CultureInfo.InvariantCulture));
+            var materialSlotName = entry.Value.OfType<NamePropertyData>().FirstOrDefault(property =>
+                property.Name.ToString().Equals("MaterialSlotName", StringComparison.OrdinalIgnoreCase));
+            var importedSlotName = entry.Value.OfType<NamePropertyData>().FirstOrDefault(property =>
+                property.Name.ToString().Equals("ImportedMaterialSlotName", StringComparison.OrdinalIgnoreCase));
+            if (materialSlotName is null || importedSlotName is null)
+            {
+                throw new InvalidOperationException("The verified StaticMaterial structure no longer exposes its slot-name fields.");
+            }
+            materialSlotName.Value = MakeName(asset, declaration.StableSlotName);
+            importedSlotName.Value = MakeName(asset, declaration.StableSlotName);
+            entries.Add(entry);
+        }
+        staticMaterials.Value = entries.ToArray();
+    }
+
+    private readonly record struct StaticMaterialSlotMetadata(
+        bool IsStruct,
+        string? MaterialSlotName,
+        string? ImportedMaterialSlotName);
+
+    /// <summary>
+    /// Verifies the reflected FStaticMaterial table written alongside the raw LOD sections. A
+    /// legacy one-slot import intentionally retains the donor's authored name. Multi-slot imports
+    /// must carry both exact stable-name fields on every real struct entry.
+    /// </summary>
+    internal static void ValidateStaticMaterialSlots(
+        NormalExport mesh,
+        IReadOnlyList<CustomStaticMeshMaterialSlot> declarations)
+    {
+        var staticMaterials = mesh.Data.OfType<ArrayPropertyData>().FirstOrDefault(property =>
+            property.Name.ToString().Equals("StaticMaterials", StringComparison.OrdinalIgnoreCase));
+        var entries = staticMaterials?.Value;
+        if (entries is null || entries.Length != declarations.Count)
+        {
+            throw new InvalidOperationException("The generated StaticMesh did not retain the expected material-slot count.");
+        }
+        if (declarations.Count <= 1)
+        {
+            return;
+        }
+
+        var metadata = entries
+            .Select(entry =>
+            {
+                if (entry is not StructPropertyData structure)
+                {
+                    return new StaticMaterialSlotMetadata(false, null, null);
+                }
+                var materialNames = structure.Value.OfType<NamePropertyData>()
+                    .Where(property => property.Name.ToString().Equals(
+                        "MaterialSlotName",
+                        StringComparison.OrdinalIgnoreCase))
+                    .Select(property => property.Value.ToString())
+                    .ToList();
+                var importedNames = structure.Value.OfType<NamePropertyData>()
+                    .Where(property => property.Name.ToString().Equals(
+                        "ImportedMaterialSlotName",
+                        StringComparison.OrdinalIgnoreCase))
+                    .Select(property => property.Value.ToString())
+                    .ToList();
+                return new StaticMaterialSlotMetadata(
+                    true,
+                    materialNames.Count == 1 ? materialNames[0] : null,
+                    importedNames.Count == 1 ? importedNames[0] : null);
+            })
+            .ToList();
+        ValidateStaticMaterialSlotMetadata(metadata, declarations);
+    }
+
+    private static void ValidateStaticMaterialSlotMetadata(
+        IReadOnlyList<StaticMaterialSlotMetadata> metadata,
+        IReadOnlyList<CustomStaticMeshMaterialSlot> declarations)
+    {
+        if (metadata.Count != declarations.Count)
+        {
+            throw new InvalidOperationException("The generated StaticMesh did not retain the expected material-slot count.");
+        }
+
+        var expected = declarations.OrderBy(declaration => declaration.Slot).ToList();
+        for (var index = 0; index < expected.Count; index++)
+        {
+            var entry = metadata[index];
+            if (!entry.IsStruct)
+            {
+                throw new InvalidOperationException(
+                    $"StaticMaterials slot {index} is not an FStaticMaterial struct entry.");
+            }
+
+            var expectedName = expected[index].StableSlotName ?? "";
+            if (string.IsNullOrWhiteSpace(expectedName) ||
+                expectedName.Equals("None", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    $"The saved stable material name for slot {index} is empty or None.");
+            }
+
+            foreach (var (field, actual) in new[]
+                     {
+                         ("MaterialSlotName", entry.MaterialSlotName),
+                         ("ImportedMaterialSlotName", entry.ImportedMaterialSlotName),
+                     })
+            {
+                if (string.IsNullOrWhiteSpace(actual) ||
+                    actual.Equals("None", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"StaticMaterials slot {index} is missing a non-None {field} field.");
+                }
+                if (!actual.Equals(expectedName, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"StaticMaterials slot {index} {field} is '{actual}', expected '{expectedName}'.");
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Validates the actual cooked LOD0 section table and main index buffer retained in
+    /// <see cref="NormalExport.Extras"/>. Reflected StaticMaterials alone are not proof that the
+    /// renderer will address the same slots and ranges.
+    /// </summary>
+    internal static void ValidateCookedMaterialSections(
+        NormalExport mesh,
+        IReadOnlyList<CustomStaticMeshMaterialSlot> declarations) =>
+        ValidateCookedMaterialSectionBytes(mesh.Extras ?? [], declarations);
+
+    private static void ValidateCookedMaterialSectionBytes(
+        byte[] extras,
+        IReadOnlyList<CustomStaticMeshMaterialSlot> declarations)
+    {
+        if (declarations.Count is < 1 or > MaxMaterialSlots)
+        {
+            throw new InvalidOperationException(
+                $"The generated StaticMesh requires between 1 and {MaxMaterialSlots} material declarations.");
+        }
+        var orderedDeclarations = declarations.OrderBy(declaration => declaration.Slot).ToList();
+        if (orderedDeclarations.Select((declaration, index) => declaration.Slot == index).Any(matches => !matches))
+        {
+            throw new InvalidOperationException(
+                "The generated StaticMesh material declarations are not dense from slot zero.");
+        }
+
+        int ReadInt(int offset, string field)
+        {
+            if (offset < 0 || offset > extras.Length - sizeof(int))
+            {
+                throw new InvalidOperationException(
+                    $"The generated StaticMesh {field} lies outside its cooked LOD0 payload.");
+            }
+            return BinaryPrimitives.ReadInt32LittleEndian(extras.AsSpan(offset, sizeof(int)));
+        }
+
+        var sectionCount = ReadInt(CookedSectionsCountExtrasOffset, "section count");
+        if (sectionCount != orderedDeclarations.Count)
+        {
+            throw new InvalidOperationException(
+                $"The cooked LOD0 contains {sectionCount} material section(s), expected {orderedDeclarations.Count}.");
+        }
+
+        var sectionDelta = checked((sectionCount - 1) * SectionRecordSize);
+        var postSectionLodOffset = checked(LodCookedOutOffset - DonorReflectedPropertyBytes + sectionDelta);
+        if (ReadInt(postSectionLodOffset, "cooked-out flag") != 0 ||
+            ReadInt(LodBuffersInlinedOffset - DonorReflectedPropertyBytes + sectionDelta, "inline-buffer flag") != 1)
+        {
+            throw new InvalidOperationException(
+                "The generated StaticMesh no longer has the verified inline LOD0 buffer layout.");
+        }
+
+        var positionCountOffset = checked(PositionCountOffset0 - DonorReflectedPropertyBytes + sectionDelta);
+        var vertexCount = ReadInt(positionCountOffset, "position vertex count");
+        if (vertexCount is < 1 or > ushort.MaxValue ||
+            ReadInt(PositionStrideOffset - DonorReflectedPropertyBytes + sectionDelta, "position stride") != PositionStride ||
+            ReadInt(PositionElementSizeOffset - DonorReflectedPropertyBytes + sectionDelta, "position element size") != PositionStride ||
+            ReadInt(PositionCountOffset1 - DonorReflectedPropertyBytes + sectionDelta, "position bulk count") != vertexCount)
+        {
+            throw new InvalidOperationException(
+                "The generated StaticMesh has inconsistent LOD0 position-buffer metadata.");
+        }
+
+        var positionDelta = checked((vertexCount - DonorVertexCount) * PositionStride);
+        var tangentDelta = checked((vertexCount - DonorVertexCount) * TangentStride);
+        var uvDelta = checked((vertexCount - DonorVertexCount) * UvStride);
+        var vertexDelta = checked(positionDelta + tangentDelta + uvDelta);
+        var indexHeaderShift = checked(sectionDelta + vertexDelta);
+        if (ReadInt(Index0Is32BitOffset - DonorReflectedPropertyBytes + indexHeaderShift, "main index width flag") != 0 ||
+            ReadInt(Index0ElementSizeOffset - DonorReflectedPropertyBytes + indexHeaderShift, "main index element size") != 1)
+        {
+            throw new InvalidOperationException(
+                "The generated StaticMesh no longer has the verified 16-bit main index-buffer layout.");
+        }
+
+        var indexBytes = ReadInt(
+            Index0SizeOffset - DonorReflectedPropertyBytes + indexHeaderShift,
+            "main index byte count");
+        if (indexBytes <= 0 || indexBytes % (3 * sizeof(ushort)) != 0)
+        {
+            throw new InvalidOperationException(
+                $"The generated StaticMesh main index byte count {indexBytes} is not a positive triangle list.");
+        }
+        var totalIndexCount = indexBytes / sizeof(ushort);
+        var indexDataOffset = checked(Index0DataOffset - DonorReflectedPropertyBytes + indexHeaderShift);
+        if (indexDataOffset < 0 || (long)indexDataOffset + indexBytes > extras.Length)
+        {
+            throw new InvalidOperationException(
+                "The generated StaticMesh main index buffer lies outside its cooked LOD0 payload.");
+        }
+
+        var nextFirstIndex = 0;
+        for (var sectionIndex = 0; sectionIndex < sectionCount; sectionIndex++)
+        {
+            var recordOffset = checked(CookedSectionDataExtrasOffset + sectionIndex * SectionRecordSize);
+            var materialIndex = ReadInt(
+                recordOffset + SectionMaterialIndexRelativeOffset,
+                $"section {sectionIndex} material index");
+            var firstIndex = ReadInt(
+                recordOffset + SectionFirstIndexRelativeOffset,
+                $"section {sectionIndex} first index");
+            var triangleCount = ReadInt(
+                recordOffset + SectionTriangleCountRelativeOffset,
+                $"section {sectionIndex} triangle count");
+            var minVertex = ReadInt(
+                recordOffset + SectionMinVertexIndexRelativeOffset,
+                $"section {sectionIndex} minimum vertex");
+            var maxVertex = ReadInt(
+                recordOffset + SectionMaxVertexIndexRelativeOffset,
+                $"section {sectionIndex} maximum vertex");
+
+            if (materialIndex != orderedDeclarations[sectionIndex].Slot)
+            {
+                throw new InvalidOperationException(
+                    $"Cooked LOD0 section {sectionIndex} uses material index {materialIndex}, expected slot {orderedDeclarations[sectionIndex].Slot}.");
+            }
+            if (firstIndex != nextFirstIndex || triangleCount <= 0)
+            {
+                throw new InvalidOperationException(
+                    $"Cooked LOD0 section {sectionIndex} has an invalid FirstIndex/triangle range ({firstIndex}, {triangleCount}).");
+            }
+
+            var sectionIndexCount = checked(triangleCount * 3);
+            var sectionEnd = checked(firstIndex + sectionIndexCount);
+            if (sectionEnd > totalIndexCount || minVertex < 0 || minVertex > maxVertex || maxVertex >= vertexCount)
+            {
+                throw new InvalidOperationException(
+                    $"Cooked LOD0 section {sectionIndex} range is outside {totalIndexCount} indices or {vertexCount} vertices.");
+            }
+
+            var observedMin = int.MaxValue;
+            var observedMax = int.MinValue;
+            for (var index = firstIndex; index < sectionEnd; index++)
+            {
+                var byteOffset = checked(indexDataOffset + index * sizeof(ushort));
+                var vertex = BinaryPrimitives.ReadUInt16LittleEndian(extras.AsSpan(byteOffset, sizeof(ushort)));
+                if (vertex >= vertexCount)
+                {
+                    throw new InvalidOperationException(
+                        $"Cooked LOD0 section {sectionIndex} references vertex {vertex}, outside {vertexCount} vertices.");
+                }
+                observedMin = Math.Min(observedMin, vertex);
+                observedMax = Math.Max(observedMax, vertex);
+            }
+            if (minVertex != observedMin || maxVertex != observedMax)
+            {
+                throw new InvalidOperationException(
+                    $"Cooked LOD0 section {sectionIndex} stores vertex range {minVertex}..{maxVertex}, " +
+                    $"but its indices address {observedMin}..{observedMax}.");
+            }
+            nextFirstIndex = sectionEnd;
+        }
+
+        if (nextFirstIndex != totalIndexCount)
+        {
+            throw new InvalidOperationException(
+                $"Cooked LOD0 sections cover {nextFirstIndex} of {totalIndexCount} main indices.");
+        }
+    }
+
+    private static void ValidateShiftedDonorPayload(byte[] source, int sourceLayoutShift)
+    {
+        if (sourceLayoutShift == 0)
+        {
+            ValidateDonorPayload(source, 0, source.Length);
+            return;
+        }
+        const int staticMaterialInsertionOffset = 0x0A;
+        if (sourceLayoutShift < 0 || source.Length != DonorStaticMeshSerialSize + sourceLayoutShift ||
+            staticMaterialInsertionOffset + sourceLayoutShift > source.Length)
+        {
+            throw new InvalidOperationException("The expanded StaticMaterials layout did not match the verified donor export.");
+        }
+        var reconstructed = new byte[DonorStaticMeshSerialSize];
+        source.AsSpan(0, staticMaterialInsertionOffset).CopyTo(reconstructed);
+        source.AsSpan(staticMaterialInsertionOffset + sourceLayoutShift)
+            .CopyTo(reconstructed.AsSpan(staticMaterialInsertionOffset));
+        ValidateDonorPayload(reconstructed, 0, reconstructed.Length);
+    }
+
+    private static FName MakeName(UAsset asset, string value)
+    {
+        if (!asset.ContainsNameReference(new FString(value)))
+        {
+            asset.AddNameReference(new FString(value), false, false);
+        }
+        return new FName(asset, value, 0);
+    }
+
     private static void WriteRenderBounds(byte[] payload, int offset, Bounds bounds)
     {
         if (offset < 0 || offset + 7 * sizeof(double) > payload.Length)
@@ -1135,23 +2126,48 @@ public sealed class StaticMeshObjProbeService
         result.Log.Add($"Patched package identity and {changed} matching name-map entries.");
     }
 
-    private static void PatchExportSerialSize(string uassetPath, int originalSize, long serialOffset, int newSize)
+    private static void PatchExportSerialSizeAndBulkDataStart(
+        string uassetPath,
+        int originalSize,
+        long serialOffset,
+        int newSize)
     {
         var data = File.ReadAllBytes(uassetPath);
-        var matches = new List<int>();
+        var serialSizeMatches = new List<int>();
         for (var offset = 0; offset <= data.Length - 2 * sizeof(long); offset++)
         {
             if (BinaryPrimitives.ReadInt64LittleEndian(data.AsSpan(offset, sizeof(long))) == originalSize &&
                 BinaryPrimitives.ReadInt64LittleEndian(data.AsSpan(offset + sizeof(long), sizeof(long))) == serialOffset)
             {
-                matches.Add(offset);
+                serialSizeMatches.Add(offset);
             }
         }
-        if (matches.Count != 1)
+        if (serialSizeMatches.Count != 1)
         {
             throw new InvalidOperationException("The cloned package does not have one verified StaticMesh serial-size entry.");
         }
-        BinaryPrimitives.WriteInt64LittleEndian(data.AsSpan(matches[0], sizeof(long)), newSize);
+        BinaryPrimitives.WriteInt64LittleEndian(data.AsSpan(serialSizeMatches[0], sizeof(long)), newSize);
+
+        // This verified donor's StaticMesh export is package-terminal. Its end is therefore the
+        // virtual start of the external .ubulk data. UAssetAPI updated this header when it wrote
+        // StaticMaterials, but the raw payload resize happens afterward and must move it again.
+        // Leaving the old value makes shrunken meshes unreadable and points larger meshes' bulk
+        // references into the middle of their rewritten .uexp data.
+        var oldBulkDataStart = checked(serialOffset + originalSize);
+        var newBulkDataStart = checked(serialOffset + newSize);
+        var bulkStartMatches = new List<int>();
+        for (var offset = 0; offset <= data.Length - sizeof(long); offset++)
+        {
+            if (BinaryPrimitives.ReadInt64LittleEndian(data.AsSpan(offset, sizeof(long))) == oldBulkDataStart)
+            {
+                bulkStartMatches.Add(offset);
+            }
+        }
+        if (bulkStartMatches.Count != 1)
+        {
+            throw new InvalidOperationException("The cloned package does not have one verified bulk-data-start entry.");
+        }
+        BinaryPrimitives.WriteInt64LittleEndian(data.AsSpan(bulkStartMatches[0], sizeof(long)), newBulkDataStart);
         File.WriteAllBytes(uassetPath, data);
     }
 

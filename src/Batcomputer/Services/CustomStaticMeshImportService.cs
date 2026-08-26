@@ -245,28 +245,17 @@ public sealed class CustomStaticMeshImportService
             var meshName = "SM_Custom_" + MakeSafeToken(import.Id);
             var meshPackage = $"/Game/Mods/{modId}/Meshes/{meshName}";
             var componentSlot = ComponentNameFor(import);
-            var savedMaterial = project.MaterialAssignments.LastOrDefault(assignment =>
-                assignment.Slot == 0 &&
-                "both".Equals(assignment.Context, StringComparison.OrdinalIgnoreCase) &&
-                ComponentWithoutSlot(assignment.Component).Equals(
-                    ComponentWithoutSlot(componentSlot),
-                    StringComparison.OrdinalIgnoreCase));
-            if (!string.IsNullOrWhiteSpace(savedMaterial?.MiPackagePath))
-            {
-                // Older projects could have a valid inspector assignment while the import still
-                // remembered its donor material. Reconcile that state before regenerating the mesh.
-                import.MaterialPath = savedMaterial.MiPackagePath;
-            }
-            var materialPackage = UnrealPathUtil.NormalizePackagePath(string.IsNullOrWhiteSpace(import.MaterialPath)
-                ? DefaultMaterialPackagePath
-                : import.MaterialPath);
-            if (!materialPackage.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException("Custom mesh material must be a /Game/ material path.");
-            }
+            var priorMaterialSlots = SnapshotPriorMaterialSlots(import);
+            var observedMaterialSlots = StaticMeshObjProbeService.InspectObjMaterialSlots(sourceObjPath);
+            var materialSlots = BuildActiveMaterialSlots(
+                project,
+                import,
+                componentSlot,
+                priorMaterialSlots,
+                observedMaterialSlots);
 
-            var playablePart = CreateStaticAttachmentPart(partIndex, "playable", ComponentDonorPlayable, attachment, meshPackage, meshName, materialPackage);
-            var cutscenePart = CreateStaticAttachmentPart(partIndex, "cutscene", ComponentDonorCutscene, attachment, meshPackage, meshName, materialPackage);
+            var playablePart = CreateStaticAttachmentPart(partIndex, "playable", ComponentDonorPlayable, attachment, meshPackage, meshName, materialSlots);
+            var cutscenePart = CreateStaticAttachmentPart(partIndex, "cutscene", ComponentDonorCutscene, attachment, meshPackage, meshName, materialSlots);
             var graft = new PartGraftService(projectRoot).CreateSelectedPartGraftedStage(
                 project,
                 playablePart,
@@ -315,6 +304,8 @@ public sealed class CustomStaticMeshImportService
                 RotationPitch = import.RotationPitch,
                 RotationYaw = import.RotationYaw,
                 RotationRoll = import.RotationRoll,
+                MaterialSlots = CloneMaterialSlots(materialSlots),
+                LegacyMaterialPath = import.MaterialPath,
             });
             if (!mesh.Status.Equals("created", StringComparison.OrdinalIgnoreCase))
             {
@@ -326,15 +317,29 @@ public sealed class CustomStaticMeshImportService
                 throw new InvalidOperationException("The OBJ mesh could not be generated. " + mesh.Error);
             }
 
-            import.ResolvedComponent = graft.PackageResults
+            var resolvedComponent = graft.PackageResults
                 .Where(package => package.Success && !string.IsNullOrWhiteSpace(package.TargetSlot))
                 .Select(package => package.TargetSlot)
                 .FirstOrDefault() ?? componentSlot;
+            var persistedMaterialSlots = PersistWriterMaterialSlots(mesh.MaterialSlots, materialSlots);
+            RewriteCustomMaterialAssignments(
+                project,
+                import,
+                componentSlot,
+                resolvedComponent,
+                priorMaterialSlots,
+                persistedMaterialSlots);
+            import.MaterialSlots = persistedMaterialSlots;
+            import.MaterialPath = persistedMaterialSlots[0].MaterialPath;
+            import.ResolvedComponent = resolvedComponent;
             import.MeshPackagePath = meshPackage;
             result.MeshPackagePath = meshPackage;
             result.ResolvedComponent = import.ResolvedComponent;
             result.Status = "created";
             result.Log.Add($"Imported {mesh.VertexCount} vertices and {mesh.TriangleCount} double-sided triangles from {Path.GetFileName(sourceObjPath)}.");
+            result.Log.Add(
+                $"Mapped {persistedMaterialSlots.Count} OBJ material section(s): " +
+                string.Join(", ", persistedMaterialSlots.Select(slot => $"{slot.Slot} '{slot.SourceMaterialName}'")) + ".");
             result.Log.Add($"Mounted as {attachment.Label} on {attachment.AttachSocket}.");
             result.Log.Add($"Applied scale {import.Scale:0.###}, offset ({import.OffsetX:0.###}, {import.OffsetY:0.###}, {import.OffsetZ:0.###}), and rotation ({import.RotationPitch:0.##}, {import.RotationYaw:0.##}, {import.RotationRoll:0.##}).");
         }
@@ -357,14 +362,14 @@ public sealed class CustomStaticMeshImportService
                results.All(package => package.Success);
     }
 
-    private static NativeSuitPartRecord CreateStaticAttachmentPart(
+    internal static NativeSuitPartRecord CreateStaticAttachmentPart(
         NativeSuitPartIndex partIndex,
         string context,
         string sourcePackage,
         AttachmentSlotDefinition attachment,
         string meshPackage,
         string meshName,
-        string materialPackage)
+        IReadOnlyList<CustomStaticMeshMaterialSlot> materialSlots)
     {
         var donor = partIndex.Parts.FirstOrDefault(part =>
             part.Context.Equals(context, StringComparison.OrdinalIgnoreCase) &&
@@ -387,21 +392,233 @@ public sealed class CustomStaticMeshImportService
         custom.MeshObjectName = meshName;
         custom.MeshObjectPath = meshPackage + "." + meshName;
         custom.AttachSocket = attachment.AttachSocket;
-        var materialName = UnrealPathUtil.AssetName(materialPackage);
-        custom.Materials =
-        [
-            new NativeSuitObjectRef
+        custom.Materials = materialSlots
+            .OrderBy(slot => slot.Slot)
+            .Select(slot =>
             {
-                ObjectName = materialName,
-                PackagePath = materialPackage,
-                ObjectPath = materialPackage + "." + materialName,
-                ClassName = "MaterialInstanceConstant"
-            }
-        ];
+                var materialName = UnrealPathUtil.AssetName(slot.MaterialPath);
+                return new NativeSuitObjectRef
+                {
+                    ObjectName = materialName,
+                    PackagePath = slot.MaterialPath,
+                    ObjectPath = slot.MaterialPath + "." + materialName,
+                    ClassName = "MaterialInstanceConstant"
+                };
+            })
+            .ToList();
         custom.SemanticKind = "CustomStaticMesh";
         custom.IsSynthesized = true;
         custom.RecipeKey = PartRecipeService.BuildRecipeKey(custom);
         return custom;
+    }
+
+    private static List<CustomStaticMeshMaterialSlot> SnapshotPriorMaterialSlots(CustomStaticMeshImport import) =>
+        CloneMaterialSlots(import.MaterialSlots ?? []);
+
+    private static List<CustomStaticMeshMaterialSlot> BuildActiveMaterialSlots(
+        NativeSuitProject project,
+        CustomStaticMeshImport import,
+        string componentSlot,
+        IReadOnlyList<CustomStaticMeshMaterialSlot> priorMaterialSlots,
+        IReadOnlyList<StaticMeshObjProbeService.ObjMaterialSlot> observedMaterialSlots)
+    {
+        if (observedMaterialSlots.Count == 0)
+        {
+            throw new InvalidOperationException("The OBJ contains no material section with usable faces.");
+        }
+
+        var matchingAssignments = MatchingCustomMaterialAssignments(project, import, componentSlot).ToList();
+        var enrichedPrior = CloneMaterialSlots(priorMaterialSlots);
+        foreach (var prior in enrichedPrior)
+        {
+            var savedBoth = matchingAssignments.LastOrDefault(assignment =>
+                assignment.Slot == prior.Slot &&
+                "both".Equals(assignment.Context, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(savedBoth?.MiPackagePath))
+            {
+                // Inspector changes are authoritative. Mirror them into the name-keyed recipe
+                // before any numeric slots are compacted by an OBJ re-import.
+                prior.MaterialPath = savedBoth.MiPackagePath;
+            }
+        }
+
+        var legacySavedMaterial = matchingAssignments.LastOrDefault(assignment =>
+            assignment.Slot == 0 &&
+            "both".Equals(assignment.Context, StringComparison.OrdinalIgnoreCase));
+        var legacyMaterialPath = !string.IsNullOrWhiteSpace(legacySavedMaterial?.MiPackagePath)
+            ? legacySavedMaterial.MiPackagePath
+            : import.MaterialPath;
+        var reconciled = StaticMeshObjProbeService.ReconcileMaterialSlots(
+            enrichedPrior,
+            observedMaterialSlots.Select(slot => slot.SourceMaterialName),
+            legacyMaterialPath);
+        if (reconciled.Count != observedMaterialSlots
+                .Select(slot => slot.SourceMaterialName)
+                .Distinct(StringComparer.Ordinal)
+                .Count())
+        {
+            throw new InvalidOperationException("The OBJ material-slot declaration could not be reconciled deterministically.");
+        }
+
+        for (var slotIndex = 0; slotIndex < reconciled.Count; slotIndex++)
+        {
+            var slot = reconciled[slotIndex];
+            if (slot.Slot != slotIndex)
+            {
+                throw new InvalidOperationException("Custom mesh material slots must be contiguous and start at slot zero.");
+            }
+            slot.MaterialPath = ValidateMaterialPackagePath(
+                string.IsNullOrWhiteSpace(slot.MaterialPath) ? DefaultMaterialPackagePath : slot.MaterialPath,
+                slot.SourceMaterialName);
+        }
+        return reconciled;
+    }
+
+    private static List<CustomStaticMeshMaterialSlot> PersistWriterMaterialSlots(
+        IReadOnlyList<StaticMeshObjProbeService.ObjMaterialSlot> writerSlots,
+        IReadOnlyList<CustomStaticMeshMaterialSlot> plannedSlots)
+    {
+        var materialPathBySource = plannedSlots.ToDictionary(
+            slot => slot.SourceMaterialName,
+            slot => slot.MaterialPath,
+            StringComparer.Ordinal);
+        var persisted = writerSlots
+            .OrderBy(slot => slot.Slot)
+            .Select((slot, slotIndex) =>
+            {
+                if (slot.Slot != slotIndex)
+                {
+                    throw new InvalidOperationException("The generated StaticMesh returned a non-contiguous material-slot layout.");
+                }
+                if (!materialPathBySource.TryGetValue(slot.SourceMaterialName, out var materialPath))
+                {
+                    throw new InvalidOperationException(
+                        $"The generated StaticMesh returned unexpected OBJ material '{slot.SourceMaterialName}'.");
+                }
+                return new CustomStaticMeshMaterialSlot
+                {
+                    Slot = slot.Slot,
+                    SourceMaterialName = slot.SourceMaterialName,
+                    StableSlotName = slot.StableSlotName,
+                    MaterialPath = ValidateMaterialPackagePath(materialPath, slot.SourceMaterialName),
+                };
+            })
+            .ToList();
+        if (persisted.Count == 0 || persisted.Count != plannedSlots.Count)
+        {
+            throw new InvalidOperationException(
+                $"The generated StaticMesh returned {persisted.Count} material slot(s), expected {plannedSlots.Count}.");
+        }
+        if (persisted.Select(slot => slot.SourceMaterialName).Distinct(StringComparer.Ordinal).Count() != persisted.Count)
+        {
+            throw new InvalidOperationException("The generated StaticMesh returned duplicate material-slot identities.");
+        }
+        return persisted;
+    }
+
+    internal static void RewriteCustomMaterialAssignments(
+        NativeSuitProject project,
+        CustomStaticMeshImport import,
+        string oldComponent,
+        string newComponent,
+        IReadOnlyList<CustomStaticMeshMaterialSlot> priorMaterialSlots,
+        IReadOnlyList<CustomStaticMeshMaterialSlot> currentMaterialSlots)
+    {
+        project.MaterialAssignments ??= [];
+        var oldNameBySlot = priorMaterialSlots
+            .OrderBy(slot => slot.Slot)
+            .GroupBy(slot => slot.Slot)
+            .ToDictionary(group => group.Key, group => group.First().SourceMaterialName);
+        if (oldNameBySlot.Count == 0 && currentMaterialSlots.Count > 0)
+        {
+            // A legacy one-material project had numeric slot zero but no source-material name.
+            oldNameBySlot[0] = currentMaterialSlots[0].SourceMaterialName;
+        }
+        var currentSlotByName = currentMaterialSlots.ToDictionary(
+            slot => slot.SourceMaterialName,
+            slot => slot.Slot,
+            StringComparer.Ordinal);
+
+        var componentIdentities = CustomComponentIdentities(import, oldComponent);
+        componentIdentities.Add(ComponentWithoutSlot(newComponent));
+        var retained = new List<SavedMaterialAssignment>();
+        var rewrittenBySlotAndContext = new Dictionary<(int Slot, string Context), SavedMaterialAssignment>();
+        foreach (var assignment in project.MaterialAssignments)
+        {
+            if (!componentIdentities.Contains(ComponentWithoutSlot(assignment.Component)))
+            {
+                retained.Add(assignment);
+                continue;
+            }
+            if (!oldNameBySlot.TryGetValue(assignment.Slot, out var sourceMaterialName) ||
+                !currentSlotByName.TryGetValue(sourceMaterialName, out var currentSlot))
+            {
+                // The OBJ no longer declares this material identity, so its numeric component
+                // override must not survive and accidentally land on another section.
+                continue;
+            }
+
+            var context = string.IsNullOrWhiteSpace(assignment.Context)
+                ? "both"
+                : assignment.Context.Trim();
+            var materialPath = ValidateMaterialPackagePath(assignment.MiPackagePath, sourceMaterialName);
+            rewrittenBySlotAndContext[(currentSlot, context.ToUpperInvariant())] = new SavedMaterialAssignment
+            {
+                Component = newComponent,
+                Slot = currentSlot,
+                MiPackagePath = materialPath,
+                Context = context,
+            };
+        }
+
+        retained.AddRange(rewrittenBySlotAndContext.Values
+            .OrderBy(assignment => assignment.Slot)
+            .ThenBy(assignment => assignment.Context, StringComparer.OrdinalIgnoreCase));
+        project.MaterialAssignments = retained;
+    }
+
+    private static IEnumerable<SavedMaterialAssignment> MatchingCustomMaterialAssignments(
+        NativeSuitProject project,
+        CustomStaticMeshImport import,
+        string componentSlot)
+    {
+        var componentIdentities = CustomComponentIdentities(import, componentSlot);
+        return (project.MaterialAssignments ?? [])
+            .Where(assignment => componentIdentities.Contains(ComponentWithoutSlot(assignment.Component)));
+    }
+
+    private static HashSet<string> CustomComponentIdentities(CustomStaticMeshImport import, string componentSlot) =>
+        new(
+            new[]
+            {
+                ComponentWithoutSlot(componentSlot),
+                ComponentWithoutSlot(import.ResolvedComponent),
+                ComponentWithoutSlot("CustomMesh_" + MakeSafeToken(import.Id)),
+            }.Where(value => !string.IsNullOrWhiteSpace(value)),
+            StringComparer.OrdinalIgnoreCase);
+
+    private static List<CustomStaticMeshMaterialSlot> CloneMaterialSlots(
+        IEnumerable<CustomStaticMeshMaterialSlot> slots) =>
+        slots
+            .Where(slot => slot is not null)
+            .Select(slot => new CustomStaticMeshMaterialSlot
+            {
+                Slot = slot.Slot,
+                SourceMaterialName = slot.SourceMaterialName ?? "",
+                StableSlotName = slot.StableSlotName ?? "",
+                MaterialPath = slot.MaterialPath ?? "",
+            })
+            .ToList();
+
+    private static string ValidateMaterialPackagePath(string? path, string sourceMaterialName)
+    {
+        var materialPackage = UnrealPathUtil.NormalizePackagePath(path ?? "");
+        if (!materialPackage.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"Custom mesh material '{sourceMaterialName}' must use a /Game/ material path.");
+        }
+        return materialPackage;
     }
 
     private static string ResolveProjectObjPath(string projectRoot, NativeSuitProject project, CustomStaticMeshImport import)

@@ -576,9 +576,25 @@ public sealed class CustomStaticMeshImport
     public float RotationYaw { get; set; }
     public float RotationRoll { get; set; }
     public bool HideBaseHead { get; set; } = true;
+    // OBJ `usemtl` declarations become stable StaticMesh material slots. Keep the legacy
+    // singular path below so existing one-material projects continue to load unchanged.
+    public List<CustomStaticMeshMaterialSlot> MaterialSlots { get; set; } = new();
     public string MaterialPath { get; set; } = "";
     public string MeshPackagePath { get; set; } = "";
     public string ResolvedComponent { get; set; } = "";
+}
+
+/// <summary>
+/// A stable material slot declared by one custom OBJ. <see cref="Slot"/> is the authored
+/// component/StaticMesh slot. Re-import reconciliation matches by source material name before
+/// assigning the current contiguous runtime slots.
+/// </summary>
+public sealed class CustomStaticMeshMaterialSlot
+{
+    public int Slot { get; set; }
+    public string SourceMaterialName { get; set; } = "";
+    public string StableSlotName { get; set; } = "";
+    public string MaterialPath { get; set; } = "";
 }
 
 /// <summary>

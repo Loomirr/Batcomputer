@@ -1312,6 +1312,115 @@ public sealed partial class MainForm
     private void BuildMod(string modProjectPath) => _ = BuildAndInstallModAsync(modProjectPath);
 
     /// <summary>
+    /// Build-only bridge for deterministic acceptance probes. It deliberately replays the saved
+    /// suit first and never calls the install path, so an automated check cannot replace game files
+    /// merely because packaging succeeded.
+    /// </summary>
+    internal async Task<HeadlessModBuildResult> RebuildAndBuildModForCliAsync(
+        string projectRoot,
+        string suitProjectPath,
+        string modProjectPath)
+    {
+        projectRoot = Path.GetFullPath(projectRoot);
+        suitProjectPath = Path.GetFullPath(suitProjectPath);
+        modProjectPath = Path.GetFullPath(modProjectPath);
+        _batchMode = true;
+        _projectRootText.Text = projectRoot;
+        _projectService = new SuitProjectService(projectRoot);
+
+        var suit = _projectService.LoadProject(suitProjectPath)
+            ?? throw new InvalidOperationException("The requested suit project could not be loaded.");
+
+        var requestedModService = new ModProjectService(projectRoot);
+        var requestedMod = requestedModService.LoadMod(modProjectPath)
+            ?? throw new InvalidOperationException("The requested mod project could not be loaded.");
+        ModProjectService.ApplyDerivedFields(requestedMod);
+        if (!HeadlessModContainsEnabledSuit(
+                requestedModService,
+                requestedMod,
+                suitProjectPath))
+        {
+            throw new InvalidOperationException(
+                "The requested mod does not contain the requested suit project as an enabled entry. " +
+                "Add or enable that exact suit before running the acceptance build.");
+        }
+
+        _currentProject = suit;
+        AppendLog($"CLI acceptance build: replaying '{suit.DisplayName}' from its saved declaration.");
+        await RebuildGraftStageFromDeclarativeAsync(suit, projectRoot, persistProject: true);
+
+        AppendLog("CLI acceptance build: creating the mod release without installing it.");
+        var built = await BuildModAsync(modProjectPath);
+        var mod = new ModProjectService(projectRoot).LoadMod(modProjectPath)
+            ?? throw new InvalidOperationException("The requested mod project could not be reloaded after the build.");
+        ModProjectService.ApplyDerivedFields(mod);
+        var outputRoot = ModBuildRoot(mod.ModId);
+        var trio = new[] { ".pak", ".ucas", ".utoc" }
+            .Select(extension => Path.Combine(outputRoot, mod.PackageBaseName + extension))
+            .ToList();
+        return new HeadlessModBuildResult(built, _diagnostics.LogText, trio);
+    }
+
+    /// <summary>
+    /// Prevents the build-only acceptance command from reporting success for an unrelated mod.
+    /// The resolved project path is authoritative. ModSuitEntry.SuitId is only a cached display and
+    /// deduplication hint, so a blank or stale legacy value must not reject the exact enabled suit.
+    /// </summary>
+    internal static bool HeadlessModContainsEnabledSuit(
+        ModProjectService modService,
+        NativeSuitModProject mod,
+        string suitProjectPath)
+    {
+        if (modService is null || mod is null ||
+            string.IsNullOrWhiteSpace(suitProjectPath))
+        {
+            return false;
+        }
+
+        string expectedProjectPath;
+        try
+        {
+            expectedProjectPath = Path.GetFullPath(suitProjectPath);
+        }
+        catch
+        {
+            return false;
+        }
+
+        foreach (var entry in mod.Suits ?? [])
+        {
+            if (!entry.Enabled)
+            {
+                continue;
+            }
+
+            try
+            {
+                var resolved = modService.ResolveSuitProjectPath(entry);
+                if (!string.IsNullOrWhiteSpace(resolved) &&
+                    string.Equals(
+                        Path.GetFullPath(resolved),
+                        expectedProjectPath,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+                // A malformed or unresolvable entry cannot satisfy the acceptance guard.
+            }
+        }
+
+        return false;
+    }
+
+    internal sealed record HeadlessModBuildResult(
+        bool Success,
+        string Diagnostics,
+        IReadOnlyList<string> TrioPaths);
+
+    /// <summary>
     /// The user-facing build command creates the release and immediately deploys that
     /// exact successful build. A failed package never falls through to an older trio.
     /// </summary>

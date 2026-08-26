@@ -20,6 +20,7 @@ or Loomirr's LOTDK UE4SS.
 - Adapts verified native cape/glider pairs across compatible gameplay donors without replacing the
   donor's general play style or visual identity.
 - Copies working game materials and applies new textures to individual mesh slots.
+- Imports static OBJ attachments with a separate stable slot for each named `usemtl` section.
 - Keeps tool-created materials available to other suits in the same workspace and previews indexed
   native parts with their resolved default materials before applying them.
 - Creates the PawnTag, DCMD, UIMD, StringTable, and Asset Registry data the game needs.

@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using UAssetAPI;
 using UAssetAPI.UnrealTypes;
@@ -156,8 +157,10 @@ public sealed class ToolMaterialLibraryService
                 UnrealPathUtil.NormalizePackagePath(assignment.MiPackagePath)
                     .Equals(package, StringComparison.OrdinalIgnoreCase));
             var hasCustomMeshMaterial = (project.CustomStaticMeshes ?? new List<CustomStaticMeshImport>()).Any(mesh =>
-                UnrealPathUtil.NormalizePackagePath(mesh.MaterialPath)
-                    .Equals(package, StringComparison.OrdinalIgnoreCase));
+                StaticMeshObjProbeService.EffectiveMaterialSlots(mesh)
+                .Select(slot => slot.MaterialPath)
+                .Any(materialPath => UnrealPathUtil.NormalizePackagePath(materialPath)
+                    .Equals(package, StringComparison.OrdinalIgnoreCase)));
             if (ownsRecord || hasAssignment || hasCustomMeshMaterial)
             {
                 references.Add(string.IsNullOrWhiteSpace(project.DisplayName)
@@ -373,6 +376,31 @@ public sealed class ToolMaterialLibraryService
                            UnrealPathUtil.AssetName(package).StartsWith("MI_FACE_", StringComparison.OrdinalIgnoreCase)
                         ? "Face"
                         : "Material",
+                    PackagePath = package,
+                });
+            }
+
+            // Older custom-mesh projects could keep their material only on the import recipe.
+            // Recover every authored OBJ section as well, including sections added after the
+            // original single-material format, so All tool materials remains a workspace-wide
+            // view even when the generated-material catalog needs rebuilding.
+            foreach (var package in (project?.CustomStaticMeshes ?? Enumerable.Empty<CustomStaticMeshImport>())
+                         .SelectMany(mesh => StaticMeshObjProbeService.EffectiveMaterialSlots(mesh)
+                             .Select(slot => slot.MaterialPath))
+                         .Select(UnrealPathUtil.NormalizePackagePath)
+                         .Where(package => package.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase))
+                         .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (entries.Any(entry => UnrealPathUtil.NormalizePackagePath(entry.PackagePath)
+                    .Equals(package, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                changed |= Upsert(entries, new GeneratedMaterialEntry
+                {
+                    DisplayName = UnrealPathUtil.AssetName(package),
+                    Kind = "Material",
                     PackagePath = package,
                 });
             }
@@ -609,6 +637,16 @@ public sealed class ToolMaterialLibraryService
                 {
                     File.Copy(source, archiveBase + extension, overwrite: true);
                 }
+                else if (refreshFromSource && extension.Equals(".ubulk", StringComparison.OrdinalIgnoreCase))
+                {
+                    // A profile change can move all mip payload inline. Do not retain the old
+                    // external payload beside a freshly archived uasset/uexp pair.
+                    var staleArchiveBulk = archiveBase + extension;
+                    if (File.Exists(staleArchiveBulk))
+                    {
+                        File.Delete(staleArchiveBulk);
+                    }
+                }
             }
             return HasCompletePackageBase(archiveBase);
         }
@@ -628,6 +666,16 @@ public sealed class ToolMaterialLibraryService
             return null;
         }
 
+        var projects = new SuitProjectService(ProjectRoot);
+        // Generated recipes are the authoritative current source for their texture packages.
+        // Prefer them to the durable archive and ExportContent so a recook takes effect on the
+        // very next material refresh/build instead of leaving stale bytes in the closure.
+        var generatedTextureBase = ResolveGeneratedTexturePackageBase(package, projects);
+        if (generatedTextureBase is not null)
+        {
+            return generatedTextureBase;
+        }
+
         if (includeArchive)
         {
             var archiveBase = PackageBaseUnder(ContentRoot, package);
@@ -643,7 +691,6 @@ public sealed class ToolMaterialLibraryService
             return exportBase;
         }
 
-        var projects = new SuitProjectService(ProjectRoot);
         foreach (var summary in projects.ListProjectFiles())
         {
             NativeSuitProject? project;
@@ -664,6 +711,165 @@ public sealed class ToolMaterialLibraryService
             }
         }
         return null;
+    }
+
+    private string? ResolveGeneratedTexturePackageBase(
+        string package,
+        SuitProjectService projects)
+    {
+        var candidates = new List<(string PackageBase, string Owner)>();
+        foreach (var summary in projects.ListProjectFiles()
+                     .OrderBy(project => project.Path, StringComparer.OrdinalIgnoreCase))
+        {
+            NativeSuitProject? project;
+            try { project = projects.LoadProject(summary.Path); }
+            catch { continue; }
+            if (project is null)
+            {
+                continue;
+            }
+
+            foreach (var texture in project.GeneratedTextures ?? Enumerable.Empty<GeneratedTextureEntry>())
+            {
+                if (!UnrealPathUtil.NormalizePackagePath(texture.PackagePath)
+                        .Equals(package, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                foreach (var contentRoot in GeneratedTextureContentRoots(texture))
+                {
+                    var candidate = PackageBaseUnder(contentRoot, package);
+                    if (HasCompletePackageBase(candidate))
+                    {
+                        candidates.Add((Path.GetFullPath(candidate!),
+                            $"{summary.DisplayName} ({summary.Path})"));
+                    }
+                }
+            }
+        }
+
+        var distinct = candidates
+            .GroupBy(candidate => candidate.PackageBase, StringComparer.OrdinalIgnoreCase)
+            .Select(group => (PackageBase: group.Key,
+                Owners: group.Select(candidate => candidate.Owner)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(owner => owner, StringComparer.OrdinalIgnoreCase)
+                    .ToList()))
+            .OrderBy(candidate => candidate.PackageBase, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (distinct.Count == 0)
+        {
+            return null;
+        }
+
+        var expectedFingerprint = PackageFingerprint(distinct[0].PackageBase);
+        if (distinct.Skip(1).Any(candidate => !PackageFingerprint(candidate.PackageBase)
+                .Equals(expectedFingerprint, StringComparison.Ordinal)))
+        {
+            var owners = distinct.SelectMany(candidate => candidate.Owners.Select(owner =>
+                $"{owner}: {candidate.PackageBase}"));
+            throw new InvalidOperationException(
+                $"Generated texture package '{package}' is owned by multiple saved recipes with different cooked bytes. " +
+                "Rename or remove the duplicate texture before packaging. Owners: " +
+                string.Join("; ", owners));
+        }
+
+        return distinct[0].PackageBase;
+    }
+
+    private IEnumerable<string> GeneratedTextureContentRoots(GeneratedTextureEntry texture)
+    {
+        if (string.IsNullOrWhiteSpace(texture.OutputRoot))
+        {
+            yield break;
+        }
+
+        var importsRoot = Path.GetFullPath(Path.Combine(
+            AppSettings.GeneratedRootFor(ProjectRoot),
+            "TextureImports"));
+        string? savedOutputRoot = null;
+        try
+        {
+            var resolvedSavedRoot = Path.GetFullPath(Path.IsPathRooted(texture.OutputRoot)
+                ? texture.OutputRoot
+                : Path.Combine(ProjectRoot, texture.OutputRoot));
+            // Saved project JSON is data, not authority to load cooked packages from arbitrary
+            // directories. Only the current workspace's TextureImports tree is accepted directly.
+            if (FileSystemPathUtil.IsWithinDirectory(resolvedSavedRoot, importsRoot))
+            {
+                savedOutputRoot = resolvedSavedRoot;
+            }
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            // Keep looking for a portable rebased copy below. A malformed legacy path must not
+            // prevent another saved suit from supplying the same generated package.
+        }
+
+        if (!string.IsNullOrWhiteSpace(savedOutputRoot))
+        {
+            yield return Path.Combine(savedOutputRoot, "Cooked", "LEGOBatmanLotDK", "Content");
+        }
+
+        // OutputRoot was historically stored as an absolute cache path. When a workspace moves,
+        // retain the portion below TextureImports and try it under this workspace's Generated
+        // root. The package path is still checked exactly, and PackageBaseUnder keeps the final
+        // candidate inside the computed content root.
+        var portableOutputRoot = RebaseGeneratedTextureOutputRoot(texture.OutputRoot);
+        if (!string.IsNullOrWhiteSpace(portableOutputRoot) &&
+            !portableOutputRoot.Equals(savedOutputRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            yield return Path.Combine(portableOutputRoot, "Cooked", "LEGOBatmanLotDK", "Content");
+        }
+    }
+
+    private string? RebaseGeneratedTextureOutputRoot(string savedOutputRoot)
+    {
+        var normalized = savedOutputRoot.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+        var marker = Path.DirectorySeparatorChar + "TextureImports" + Path.DirectorySeparatorChar;
+        var markerIndex = normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+        {
+            return null;
+        }
+
+        var relative = normalized[(markerIndex + marker.Length)..];
+        if (string.IsNullOrWhiteSpace(relative))
+        {
+            return null;
+        }
+
+        try
+        {
+            var importsRoot = Path.GetFullPath(Path.Combine(
+                AppSettings.GeneratedRootFor(ProjectRoot),
+                "TextureImports"));
+            var rebased = Path.GetFullPath(Path.Combine(importsRoot, relative));
+            return FileSystemPathUtil.IsWithinDirectory(rebased, importsRoot) ? rebased : null;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
+    }
+
+    private static string PackageFingerprint(string packageBase)
+    {
+        var members = new List<string>();
+        foreach (var extension in new[] { ".uasset", ".uexp", ".ubulk" })
+        {
+            var path = packageBase + extension;
+            if (!File.Exists(path))
+            {
+                members.Add(extension + ":missing");
+                continue;
+            }
+
+            using var stream = File.OpenRead(path);
+            members.Add($"{extension}:{stream.Length}:{Convert.ToHexString(SHA256.HashData(stream))}");
+        }
+        return string.Join("|", members);
     }
 
     private static IEnumerable<string> PersistedContentRoots(

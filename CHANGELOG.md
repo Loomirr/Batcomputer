@@ -26,12 +26,17 @@
   why it was rejected before attempting a source build.
 - Preserves the exact cooked Blueprint schema when adding an OBJ component, preventing the known
   load, hover, and startup crashes caused by that schema corruption.
+- Turns each distinct OBJ `usemtl` section into its own stable material slot, keeps assignments
+  attached to the material name after a re-import, and previews and packages every slot.
 - Validates each custom mesh's saved OBJ, cooked package trio, live construction-script node,
-  component template, socket, and role-specific material before a suit can be packaged.
+  component template, socket, cooked section ranges, and role-specific materials before a suit can
+  be packaged.
 - Adds a paired custom-cowl material template with native LEGO surface detail and neutral
   mesh-specific maps, plus practical MMR and normal-map warnings for overly glossy materials.
 - Keeps gameplay and cutscene material pairs matched, carries shared materials' mod-local textures
   and parents into another suit, and blocks stale files or package-path collisions.
+- Finds a tool material's texture dependencies in the owning suit's current cooked texture output,
+  so a successful texture recook no longer remains invisible to the shared material packager.
 - Makes custom-material rename and deletion, shared-library staging, and 3D-viewer placement saves
   transactional so a failed rebuild restores the last working project and stage.
 

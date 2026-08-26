@@ -825,6 +825,11 @@ internal static class ReleaseRegressionChecks
             failures,
             output);
         Check(
+            StageValidationService.CustomStaticMeshSourceMaterialNameRegressionPasses(),
+            "custom mesh declarations require nonempty unique source OBJ material names",
+            failures,
+            output);
+        Check(
             StageValidationService.CustomStaticComponentTemplateBindingRegressionPasses(),
             "custom mesh validation binds each live SCS node to its exact declared component-template export",
             failures,
@@ -950,6 +955,193 @@ internal static class ReleaseRegressionChecks
         Check(
             StaticMeshObjProbeService.PayloadMetadataRegressionPasses(),
             "custom OBJ payloads update section vertex ranges and inline buffer-size summaries",
+            failures,
+            output);
+        Check(
+            StaticMeshObjProbeService.MultiMaterialObjRegressionPasses(),
+            "custom OBJ usemtl sections keep source-name bindings and emit matching cooked/preview slots",
+            failures,
+            output);
+        Check(
+            StaticMeshObjProbeService.MultiMaterialPackageValidationRegressionPasses(),
+            "custom OBJ package validation rejects malformed raw LOD sections and StaticMaterials metadata",
+            failures,
+            output);
+
+        const string assignmentBlack = "/Game/Mods/SlotFlow/Materials/MI_Black";
+        const string assignmentMetal = "/Game/Mods/SlotFlow/Materials/MI_Metal";
+        const string assignmentTrim = "/Game/Mods/SlotFlow/Materials/MI_Trim";
+        var priorAssignmentSlots = new List<CustomStaticMeshMaterialSlot>
+        {
+            new() { Slot = 0, SourceMaterialName = "Black", StableSlotName = "BC_SLOT_000_Black", MaterialPath = assignmentBlack },
+            new() { Slot = 1, SourceMaterialName = "Metal", StableSlotName = "BC_SLOT_001_Metal", MaterialPath = assignmentMetal },
+            new() { Slot = 2, SourceMaterialName = "Trim", StableSlotName = "BC_SLOT_002_Trim", MaterialPath = assignmentTrim },
+        };
+        var compactedAssignmentSlots = StaticMeshObjProbeService.ReconcileMaterialSlots(
+            priorAssignmentSlots,
+            ["Trim", "Metal"]);
+        var assignmentRemapImport = new CustomStaticMeshImport
+        {
+            Id = "assignment-remap",
+            ResolvedComponent = "CustomMesh_AssignmentRemap",
+            MaterialSlots = priorAssignmentSlots,
+            MaterialPath = assignmentBlack,
+        };
+        var assignmentRemapProject = new NativeSuitProject
+        {
+            MaterialAssignments =
+            [
+                new SavedMaterialAssignment { Component = "CustomMesh_AssignmentRemap", Slot = 0, Context = "both", MiPackagePath = assignmentBlack },
+                new SavedMaterialAssignment { Component = "CustomMesh_AssignmentRemap", Slot = 1, Context = "playable", MiPackagePath = assignmentMetal },
+                new SavedMaterialAssignment { Component = "CustomMesh_AssignmentRemap", Slot = 2, Context = "cutscene", MiPackagePath = assignmentTrim },
+                new SavedMaterialAssignment { Component = "CharacterMesh0", Slot = 0, Context = "both", MiPackagePath = "/Game/Mods/SlotFlow/Materials/MI_Body" },
+            ],
+        };
+        CustomStaticMeshImportService.RewriteCustomMaterialAssignments(
+            assignmentRemapProject,
+            assignmentRemapImport,
+            "CustomMesh_AssignmentRemap",
+            "CustomMesh_AssignmentRemap_Rebuilt",
+            priorAssignmentSlots,
+            compactedAssignmentSlots);
+        var remappedCustomAssignments = assignmentRemapProject.MaterialAssignments
+            .Where(assignment => assignment.Component.Equals(
+                "CustomMesh_AssignmentRemap_Rebuilt",
+                StringComparison.OrdinalIgnoreCase))
+            .OrderBy(assignment => assignment.Slot)
+            .ToList();
+        Check(
+            compactedAssignmentSlots.Select(slot => slot.SourceMaterialName).SequenceEqual(["Metal", "Trim"], StringComparer.Ordinal) &&
+            remappedCustomAssignments.Count == 2 &&
+            remappedCustomAssignments[0].Slot == 0 &&
+            remappedCustomAssignments[0].Context.Equals("playable", StringComparison.OrdinalIgnoreCase) &&
+            remappedCustomAssignments[0].MiPackagePath == assignmentMetal &&
+            remappedCustomAssignments[1].Slot == 1 &&
+            remappedCustomAssignments[1].Context.Equals("cutscene", StringComparison.OrdinalIgnoreCase) &&
+            remappedCustomAssignments[1].MiPackagePath == assignmentTrim &&
+            assignmentRemapProject.MaterialAssignments.Count(assignment =>
+                assignment.Component.Equals("CharacterMesh0", StringComparison.OrdinalIgnoreCase)) == 1 &&
+            assignmentRemapProject.MaterialAssignments.All(assignment =>
+                assignment.MiPackagePath != assignmentBlack),
+            "custom mesh material assignments follow source names through usemtl reordering, removal, and slot compaction",
+            failures,
+            output);
+
+        const string graftPlayable = "/Game/Characters/Minifig/Alfred/BP_Alfred_Casual_Playable";
+        const string graftCutscene = "/Game/Characters/Minifig/Alfred/BP_Alfred_Casual_Cutscene";
+        var multiMaterialDonorIndex = new NativeSuitPartIndex
+        {
+            Parts =
+            [
+                new NativeSuitPartRecord
+                {
+                    SourcePackagePath = graftPlayable,
+                    Context = "playable",
+                    Slot = "Head",
+                    MeshKind = "StaticMesh",
+                    ComponentClass = "StaticMeshComponent",
+                    AttachSocket = "HeadStud_Attach_Socket",
+                },
+                new NativeSuitPartRecord
+                {
+                    SourcePackagePath = graftCutscene,
+                    Context = "cutscene",
+                    Slot = "Head",
+                    MeshKind = "StaticMesh",
+                    ComponentClass = "StaticMeshComponent",
+                    AttachSocket = "HeadStud_Attach_Socket",
+                },
+            ],
+        };
+        var multiMaterialAttachment = CustomStaticMeshImportService.ResolveAttachmentSlot("Head");
+        var playableMultiMaterialPart = CustomStaticMeshImportService.CreateStaticAttachmentPart(
+            multiMaterialDonorIndex,
+            "playable",
+            graftPlayable,
+            multiMaterialAttachment,
+            "/Game/Mods/SlotFlow/Meshes/SM_Custom_Multi",
+            "SM_Custom_Multi",
+            compactedAssignmentSlots);
+        var cutsceneMultiMaterialPart = CustomStaticMeshImportService.CreateStaticAttachmentPart(
+            multiMaterialDonorIndex,
+            "cutscene",
+            graftCutscene,
+            multiMaterialAttachment,
+            "/Game/Mods/SlotFlow/Meshes/SM_Custom_Multi",
+            "SM_Custom_Multi",
+            compactedAssignmentSlots);
+        var expectedGraftMaterials = new[] { assignmentMetal, assignmentTrim };
+        Check(
+            playableMultiMaterialPart.Materials.Select(material => material.PackagePath)
+                .SequenceEqual(expectedGraftMaterials, StringComparer.OrdinalIgnoreCase) &&
+            cutsceneMultiMaterialPart.Materials.Select(material => material.PackagePath)
+                .SequenceEqual(expectedGraftMaterials, StringComparer.OrdinalIgnoreCase),
+            "custom mesh playable and cutscene graft recipes carry every active OBJ material slot in order",
+            failures,
+            output);
+
+        const string legacyCustomMaterialJson =
+            "{\"customStaticMeshes\":[{\"id\":\"legacy-cowl\",\"materialPath\":\"/Game/Mods/Legacy/Materials/MI_Cowl\"}]}";
+        var legacyCustomMaterialProject = System.Text.Json.JsonSerializer.Deserialize<NativeSuitProject>(
+            legacyCustomMaterialJson,
+            new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        var legacyCustomMesh = legacyCustomMaterialProject?.CustomStaticMeshes.SingleOrDefault();
+        var legacyEffectiveSlots = legacyCustomMesh is null
+            ? Array.Empty<CustomStaticMeshMaterialSlot>()
+            : StaticMeshObjProbeService.EffectiveMaterialSlots(legacyCustomMesh).ToArray();
+        Check(
+            legacyCustomMesh is not null &&
+            legacyCustomMesh.MaterialSlots.Count == 0 &&
+            legacyEffectiveSlots.Length == 1 &&
+            legacyEffectiveSlots[0].Slot == 0 &&
+            legacyEffectiveSlots[0].SourceMaterialName == "Default" &&
+            legacyEffectiveSlots[0].MaterialPath == "/Game/Mods/Legacy/Materials/MI_Cowl",
+            "legacy custom-mesh JSON without MaterialSlots synthesizes its saved MaterialPath as slot zero",
+            failures,
+            output);
+
+        const string releaseSlot0 = "/Game/Mods/SlotFlow/Materials/MI_ReleaseBlack";
+        const string releaseSlot1 = "/Game/Mods/SlotFlow/Materials/MI_ReleaseMetal";
+        const string renamedReleaseSlot1 = "/Game/Mods/SlotFlow/Materials/MI_ReleaseMetalRenamed";
+        var multiMaterialReleaseMesh = new CustomStaticMeshImport
+        {
+            Id = "release-multi",
+            MaterialPath = releaseSlot0,
+            MaterialSlots =
+            [
+                new CustomStaticMeshMaterialSlot { Slot = 0, SourceMaterialName = "Black", MaterialPath = releaseSlot0 },
+                new CustomStaticMeshMaterialSlot { Slot = 1, SourceMaterialName = "Metal", MaterialPath = releaseSlot1 },
+            ],
+        };
+        var multiMaterialReleaseProject = new NativeSuitProject
+        {
+            CustomStaticMeshes = [multiMaterialReleaseMesh],
+        };
+        var enumeratedReleaseMaterials = MainForm.AssignedModMaterialPackagesForRelease(multiMaterialReleaseProject);
+        var slotOneReferencesBeforeRename = MainForm.CountCustomStaticMeshMaterialReferences(
+            multiMaterialReleaseProject,
+            releaseSlot1.ToLowerInvariant());
+        var renamedSlotOneReferences = MainForm.ReplaceCustomStaticMeshMaterialReferences(
+            multiMaterialReleaseProject,
+            releaseSlot1.ToLowerInvariant(),
+            renamedReleaseSlot1);
+        var slotOneReferencesAfterRename = MainForm.CountCustomStaticMeshMaterialReferences(
+            multiMaterialReleaseProject,
+            renamedReleaseSlot1);
+        var resetDeletedSlotOneReferences = MainForm.ReplaceCustomStaticMeshMaterialReferences(
+            multiMaterialReleaseProject,
+            renamedReleaseSlot1,
+            CustomStaticMeshImportService.DefaultMaterialPackagePath);
+        Check(
+            enumeratedReleaseMaterials.SequenceEqual([releaseSlot0, releaseSlot1], StringComparer.OrdinalIgnoreCase) &&
+            slotOneReferencesBeforeRename == 1 &&
+            renamedSlotOneReferences == 1 &&
+            slotOneReferencesAfterRename == 1 &&
+            resetDeletedSlotOneReferences == 1 &&
+            multiMaterialReleaseMesh.MaterialPath == releaseSlot0 &&
+            multiMaterialReleaseMesh.MaterialSlots.Single(slot => slot.Slot == 1).MaterialPath ==
+                CustomStaticMeshImportService.DefaultMaterialPackagePath,
+            "release enumeration plus rename/delete reference helpers include custom-mesh material slot one",
             failures,
             output);
 
@@ -3309,6 +3501,244 @@ internal static class ReleaseRegressionChecks
         Check(
             unsafeMaterialPathRejected,
             "workspace material paths cannot escape their content roots",
+            failures,
+            output);
+
+        var generatedDependencyRoot = Path.Combine(
+            Path.GetTempPath(),
+            "Batcomputer-generated-material-dependency-" + Guid.NewGuid().ToString("N"));
+        var generatedDependencyResolved = false;
+        var movedDependencyResolved = false;
+        var freshRecookPreferred = false;
+        var staleArchiveBulkRemoved = false;
+        var outsideWorkspaceOutputRejected = false;
+        var conflictingDuplicateOwnerRejected = false;
+        try
+        {
+            var generatedRoot = Path.Combine(generatedDependencyRoot, "Generated");
+            Directory.CreateDirectory(generatedRoot);
+            const string liveTexturePackage = "/Game/Mods/Steve/Textures/T_Steve_Head";
+            const string movedTexturePackage = "/Game/Mods/Steve/Textures/T_Steve_Moved";
+            const string outsideTexturePackage = "/Game/Mods/Steve/Textures/T_Steve_Outside";
+            var liveTextureOutput = Path.Combine(generatedRoot, "TextureImports", "steve", "T_Steve_Head_00001");
+            var movedTextureOutput = Path.Combine(generatedRoot, "TextureImports", "steve", "T_Steve_Moved_00002");
+            foreach (var fixture in new[]
+                     {
+                         (Output: liveTextureOutput, Package: liveTexturePackage, Marker: "live"),
+                         (Output: movedTextureOutput, Package: movedTexturePackage, Marker: "moved"),
+                     })
+            {
+                var content = Path.Combine(fixture.Output, "Cooked", "LEGOBatmanLotDK", "Content");
+                var packageBase = Path.Combine(
+                    content,
+                    fixture.Package["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar));
+                Directory.CreateDirectory(Path.GetDirectoryName(packageBase)!);
+                File.WriteAllText(packageBase + ".uasset", fixture.Marker + "-uasset");
+                File.WriteAllText(packageBase + ".uexp", fixture.Marker + "-uexp");
+                if (fixture.Package == liveTexturePackage)
+                {
+                    File.WriteAllText(packageBase + ".ubulk", fixture.Marker + "-ubulk");
+                }
+            }
+
+            var outsideTextureOutput = Path.Combine(
+                generatedDependencyRoot,
+                "UntrustedCookOutput",
+                "steve",
+                "T_Steve_Outside_00003");
+            var outsideTextureBase = Path.Combine(
+                outsideTextureOutput,
+                "Cooked",
+                "LEGOBatmanLotDK",
+                "Content",
+                outsideTexturePackage["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(outsideTextureBase)!);
+            File.WriteAllText(outsideTextureBase + ".uasset", "outside-uasset");
+            File.WriteAllText(outsideTextureBase + ".uexp", "outside-uexp");
+
+            var movedSavedOutput = Path.Combine(
+                Path.GetPathRoot(generatedDependencyRoot) ?? "C:\\",
+                "RetiredWorkspace",
+                "Generated",
+                "TextureImports",
+                "steve",
+                "T_Steve_Moved_00002");
+            var dependencyProject = new NativeSuitProject
+            {
+                SlotId = "steve_dependency_fixture",
+                GeneratedTextures =
+                [
+                    new GeneratedTextureEntry
+                    {
+                        PackagePath = liveTexturePackage,
+                        OutputRoot = liveTextureOutput,
+                    },
+                    new GeneratedTextureEntry
+                    {
+                        PackagePath = movedTexturePackage,
+                        OutputRoot = movedSavedOutput,
+                    },
+                    new GeneratedTextureEntry
+                    {
+                        PackagePath = outsideTexturePackage,
+                        OutputRoot = outsideTextureOutput,
+                    },
+                ],
+            };
+            new SuitProjectService(generatedDependencyRoot).SaveProject(dependencyProject);
+            var dependencyLibrary = new ToolMaterialLibraryService(generatedDependencyRoot);
+            var resolvedLiveUasset = dependencyLibrary.ResolvePackageUasset(liveTexturePackage);
+            var resolvedMovedUasset = dependencyLibrary.ResolvePackageUasset(movedTexturePackage);
+            generatedDependencyResolved =
+                !string.IsNullOrWhiteSpace(resolvedLiveUasset) &&
+                File.ReadAllText(resolvedLiveUasset) == "live-uasset" &&
+                File.ReadAllText(Path.ChangeExtension(resolvedLiveUasset, ".uexp")) == "live-uexp";
+            movedDependencyResolved =
+                !string.IsNullOrWhiteSpace(resolvedMovedUasset) &&
+                File.ReadAllText(resolvedMovedUasset) == "moved-uasset" &&
+                File.ReadAllText(Path.ChangeExtension(resolvedMovedUasset, ".uexp")) == "moved-uexp";
+
+            // ResolvePackageUasset archived the first cook. Mutate the current recipe output and
+            // prove the next lookup uses the recook instead of that older complete archive.
+            var liveTextureBase = Path.Combine(
+                liveTextureOutput,
+                "Cooked",
+                "LEGOBatmanLotDK",
+                "Content",
+                liveTexturePackage["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar));
+            File.WriteAllText(liveTextureBase + ".uasset", "live-v2-uasset");
+            File.WriteAllText(liveTextureBase + ".uexp", "live-v2-uexp");
+            File.Delete(liveTextureBase + ".ubulk");
+            var resolvedFreshUasset = dependencyLibrary.ResolvePackageUasset(liveTexturePackage);
+            freshRecookPreferred =
+                !string.IsNullOrWhiteSpace(resolvedFreshUasset) &&
+                File.ReadAllText(resolvedFreshUasset) == "live-v2-uasset" &&
+                File.ReadAllText(Path.ChangeExtension(resolvedFreshUasset, ".uexp")) == "live-v2-uexp";
+
+            // An in-place material-library refresh must not leave an old external mip payload
+            // beside a newer cook that moved all payload inline.
+            dependencyLibrary.Register(
+            [
+                new GeneratedMaterialEntry
+                {
+                    DisplayName = "Texture refresh fixture",
+                    Kind = "Material",
+                    PackagePath = liveTexturePackage,
+                },
+            ]);
+            var archivedLiveBase = Path.Combine(
+                dependencyLibrary.ContentRoot,
+                liveTexturePackage["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar));
+            staleArchiveBulkRemoved = !File.Exists(archivedLiveBase + ".ubulk");
+            outsideWorkspaceOutputRejected =
+                dependencyLibrary.ResolvePackageUasset(outsideTexturePackage) is null;
+
+            // Two saved recipes may only share a package identity when their cooked triplets are
+            // byte-for-byte identical. Different owners must fail closed instead of depending on
+            // project enumeration order.
+            var duplicateTextureOutput = Path.Combine(
+                generatedRoot,
+                "TextureImports",
+                "steve-duplicate",
+                "T_Steve_Head_00004");
+            var duplicateTextureBase = Path.Combine(
+                duplicateTextureOutput,
+                "Cooked",
+                "LEGOBatmanLotDK",
+                "Content",
+                liveTexturePackage["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(duplicateTextureBase)!);
+            File.WriteAllText(duplicateTextureBase + ".uasset", "conflicting-uasset");
+            File.WriteAllText(duplicateTextureBase + ".uexp", "conflicting-uexp");
+            new SuitProjectService(generatedDependencyRoot).SaveProject(new NativeSuitProject
+            {
+                SlotId = "steve_dependency_duplicate_fixture",
+                GeneratedTextures =
+                [
+                    new GeneratedTextureEntry
+                    {
+                        PackagePath = liveTexturePackage,
+                        OutputRoot = duplicateTextureOutput,
+                    },
+                ],
+            });
+            try
+            {
+                _ = dependencyLibrary.ResolvePackageUasset(liveTexturePackage);
+            }
+            catch (InvalidOperationException ex)
+            {
+                conflictingDuplicateOwnerRejected =
+                    ex.Message.Contains("multiple saved recipes", StringComparison.OrdinalIgnoreCase) &&
+                    ex.Message.Contains(liveTexturePackage, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        finally
+        {
+            try { Directory.Delete(generatedDependencyRoot, recursive: true); } catch { /* best effort */ }
+        }
+        Check(
+            generatedDependencyResolved &&
+            movedDependencyResolved &&
+            freshRecookPreferred &&
+            staleArchiveBulkRemoved &&
+            outsideWorkspaceOutputRejected &&
+            conflictingDuplicateOwnerRejected,
+            "material dependencies prefer fresh workspace cooks, rebase moved paths, reject outside roots and conflicting owners, and remove stale bulk data",
+            failures,
+            output);
+
+        var headlessProjectRoot = Path.Combine(
+            Path.GetTempPath(),
+            "Batcomputer-headless-membership-" + Guid.NewGuid().ToString("N"));
+        var headlessSuitPath = Path.Combine(
+            headlessProjectRoot,
+            "Generated",
+            "NativeSuitGuiProjects",
+            "fixture.native-suit-project.json");
+        var headlessModService = new ModProjectService(headlessProjectRoot);
+        var headlessMod = new NativeSuitModProject
+        {
+            Suits =
+            [
+                new ModSuitEntry
+                {
+                    SuitProjectPath = Path.GetRelativePath(headlessProjectRoot, headlessSuitPath),
+                    SuitId = "fixture_suit",
+                    Enabled = true,
+                },
+            ],
+        };
+        var headlessExactMatch = MainForm.HeadlessModContainsEnabledSuit(
+            headlessModService,
+            headlessMod,
+            headlessSuitPath);
+        headlessMod.Suits[0].SuitId = "";
+        var headlessBlankCachedIdAccepted = MainForm.HeadlessModContainsEnabledSuit(
+            headlessModService,
+            headlessMod,
+            headlessSuitPath);
+        headlessMod.Suits[0].SuitId = "stale_legacy_identity";
+        var headlessStaleCachedIdAccepted = MainForm.HeadlessModContainsEnabledSuit(
+            headlessModService,
+            headlessMod,
+            headlessSuitPath);
+        var headlessWrongPathRejected = !MainForm.HeadlessModContainsEnabledSuit(
+            headlessModService,
+            headlessMod,
+            Path.Combine(headlessProjectRoot, "Generated", "NativeSuitGuiProjects", "other.native-suit-project.json"));
+        headlessMod.Suits[0].Enabled = false;
+        var headlessDisabledRejected = !MainForm.HeadlessModContainsEnabledSuit(
+            headlessModService,
+            headlessMod,
+            headlessSuitPath);
+        Check(
+            headlessExactMatch &&
+            headlessBlankCachedIdAccepted &&
+            headlessStaleCachedIdAccepted &&
+            headlessWrongPathRejected &&
+            headlessDisabledRejected,
+            "headless acceptance builds require the exact enabled suit path while accepting blank or stale legacy cached IDs",
             failures,
             output);
 

@@ -195,7 +195,8 @@ public static class ModelPreviewService
         Vector3? SourceObjOffset = null,
         Vector3? SourceObjRotation = null,
         string? CustomMeshId = null,
-        string? DisplayName = null);
+        string? DisplayName = null,
+        IReadOnlyList<CustomStaticMeshMaterialSlot>? SourceObjMaterialSlots = null);
 
     /// <summary>An explicit material assignment stored on a suit project.</summary>
     public sealed record PreviewMaterialFallback(
@@ -228,7 +229,8 @@ public static class ModelPreviewService
         Vector3? SourceObjOffset = null,
         Vector3? SourceObjRotation = null,
         string? CustomMeshId = null,
-        string? DisplayName = null);
+        string? DisplayName = null,
+        IReadOnlyList<CustomStaticMeshMaterialSlot>? SourceObjMaterialSlots = null);
 
     /// <summary>
     /// The SCS is the Blueprint's real component hierarchy. Component templates themselves often
@@ -907,16 +909,18 @@ public static class ModelPreviewService
 
             var component = CustomStaticMeshImportService.ComponentNameFor(custom);
             var attachment = CustomStaticMeshImportService.ResolveAttachmentSlot(custom.Target, custom.AttachSocket);
-            var material = string.IsNullOrWhiteSpace(custom.MaterialPath)
-                ? "/Game/Characters/Attachments/Hat/Batman08/MI_Hat_Batman08"
-                : custom.MaterialPath;
+            var materialPaths = StaticMeshObjProbeService.EffectiveMaterialSlots(custom)
+                .Select(slot => string.IsNullOrWhiteSpace(slot.MaterialPath)
+                    ? "/Game/Characters/Attachments/Hat/Batman08/MI_Hat_Batman08"
+                    : slot.MaterialPath)
+                .ToList();
             additions.Add(new PreviewAdditionalPart(
                 component,
                 UnrealPathUtil.ObjectPath(CustomStaticMeshImportService.MeshPackagePathFor(project, custom)),
                 IsStaticAttachment: true,
                 ParentComponent: "CharacterMesh0",
                 AttachSocket: attachment.AttachSocket,
-                MaterialPaths: [material],
+                MaterialPaths: materialPaths,
                 // The staged Blueprint supplies the original component transform. This OBJ entry
                 // replaces its mesh export only, so the viewer uses the same attachment chain.
                 ReplaceExisting: true,
@@ -925,7 +929,8 @@ public static class ModelPreviewService
                 SourceObjOffset: new Vector3(custom.OffsetX, custom.OffsetY, custom.OffsetZ),
                 SourceObjRotation: new Vector3(custom.RotationPitch, custom.RotationYaw, custom.RotationRoll),
                 CustomMeshId: custom.Id,
-                DisplayName: custom.DisplayName));
+                DisplayName: custom.DisplayName,
+                SourceObjMaterialSlots: StaticMeshObjProbeService.EffectiveMaterialSlots(custom)));
         }
 
         // Early OBJ proofs were staged before custom imports were saved in the project file.
@@ -1515,7 +1520,8 @@ public static class ModelPreviewService
                 SourceObjOffset: extra.SourceObjOffset,
                 SourceObjRotation: extra.SourceObjRotation,
                 CustomMeshId: extra.CustomMeshId,
-                DisplayName: extra.DisplayName));
+                DisplayName: extra.DisplayName,
+                SourceObjMaterialSlots: extra.SourceObjMaterialSlots));
             if (stagedComponent?.Transform is { } transform)
             {
                 Console.WriteLine($"  {extra.ComponentName}: staged component transform -> "
@@ -1768,7 +1774,8 @@ public static class ModelPreviewService
                         offset.Z,
                         rotation.X,
                         rotation.Y,
-                        rotation.Z);
+                        rotation.Z,
+                        part.SourceObjMaterialSlots);
                     models.Add((name, part, slotShading));
                     Console.WriteLine($"  {Path.GetFileName(part.SourceObjPath)} -> preview GLB from source OBJ");
                     continue;
@@ -4784,7 +4791,11 @@ function dress(g,info){
     }
     const list=Array.isArray(o.material)?o.material:[o.material];
     list.forEach((m,li)=>{if(!m)return;
-      const s=slots[matIndex]||slots[0]||{};
+      // OBJ preview materials carry the writer's stable slot id. Use it instead of glTF
+      // primitive traversal order, which loaders are free to reorder or merge.
+      const stable=/^BC_SLOT_(\d+)_/.exec(m.name||'');
+      const stableIndex=stable?Number.parseInt(stable[1],10):-1;
+      const s=(stableIndex>=0&&stableIndex<slots.length?slots[stableIndex]:slots[matIndex])||slots[0]||{};
       matIndex++;
       // Sections the cooked mesh marks bDisabled (cape cloth-sim proxy sheets) are never drawn
       // by the game - hide the whole primitive.

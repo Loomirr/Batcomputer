@@ -2,6 +2,7 @@ using UAssetAPI;
 using UAssetAPI.ExportTypes;
 using UAssetAPI.FieldTypes;
 using UAssetAPI.PropertyTypes.Objects;
+using UAssetAPI.PropertyTypes.Structs;
 using UAssetAPI.UnrealTypes;
 using UAssetAPI.Unversioned;
 using PropertyData = UAssetAPI.PropertyTypes.Objects.PropertyData;
@@ -509,15 +510,16 @@ public sealed class StageValidationService
                     $"Custom static mesh '{display}' has no valid saved ID. Remove it and import the OBJ again before packaging."));
             }
 
-            // A slot-zero assignment is normally validated by the role checks below. MaterialPath
-            // is also authoritative declarative state, though, and older/delete-corrupted projects
-            // can retain a mod-local path without any MaterialAssignment row at all. Check it even
-            // when a separate mesh-package declaration is malformed.
-            var declaredMaterial = UnrealPathUtil.NormalizePackagePath(
-                string.IsNullOrWhiteSpace(custom.MaterialPath)
-                    ? CustomStaticMeshImportService.DefaultMaterialPackagePath
-                    : custom.MaterialPath);
-            CheckCustomStaticMeshMaterialFiles(declaredMaterial, display, findings);
+            // Validate the saved slot table before looking at generated assets. The writer and
+            // component overrides both rely on a dense 0..N-1 mapping; accepting duplicate or
+            // sparse slot IDs here can make a valid-looking package bind the wrong material at
+            // runtime. Projects saved before multi-material OBJ support synthesize slot zero from
+            // MaterialPath and remain fully supported.
+            var materialSlots = CheckCustomStaticMeshMaterialDeclarations(
+                project,
+                custom,
+                display,
+                findings);
 
             string meshPackage;
             try
@@ -551,9 +553,223 @@ public sealed class StageValidationService
             }
             else
             {
-                CheckGeneratedCustomStaticMeshPackage(meshPackage, display, findings);
+                CheckGeneratedCustomStaticMeshPackage(
+                    meshPackage,
+                    display,
+                    materialSlots,
+                    findings);
             }
         }
+    }
+
+    /// <summary>
+    /// Validates the declarative material table and every saved inspector override for one custom
+    /// component. Keeping this check ahead of package inspection catches malformed JSON without
+    /// relying on whatever subset the writer happened to accept.
+    /// </summary>
+    private IReadOnlyList<CustomStaticMeshMaterialSlot> CheckCustomStaticMeshMaterialDeclarations(
+        NativeSuitProject project,
+        CustomStaticMeshImport custom,
+        string display,
+        List<Finding> findings)
+    {
+        var hasExplicitSlots = custom.MaterialSlots is { Count: > 0 };
+        var slots = EffectiveCustomStaticMeshMaterialSlots(custom);
+
+        if (hasExplicitSlots)
+        {
+            var rawSlots = custom.MaterialSlots ?? [];
+            var nullSlotCount = rawSlots.Count(slot => slot is null);
+            if (nullSlotCount > 0)
+            {
+                findings.Add(new("ERROR",
+                    $"Custom static mesh '{display}' has {nullSlotCount} empty material-slot declaration(s). Re-import the OBJ before packaging."));
+            }
+
+            var duplicateSlots = slots
+                .GroupBy(slot => slot.Slot)
+                .Where(group => group.Count() > 1)
+                .Select(group => group.Key)
+                .OrderBy(slot => slot)
+                .ToList();
+            if (duplicateSlots.Count > 0)
+            {
+                findings.Add(new("ERROR",
+                    $"Custom static mesh '{display}' reuses material slot(s) {string.Join(", ", duplicateSlots)}. Re-import the OBJ so every section has one unique slot."));
+            }
+
+            var orderedSlotIds = slots.Select(slot => slot.Slot).OrderBy(slot => slot).ToList();
+            var expectedSlotIds = Enumerable.Range(0, slots.Count).ToList();
+            if (!orderedSlotIds.SequenceEqual(expectedSlotIds))
+            {
+                var actual = orderedSlotIds.Count == 0 ? "<none>" : string.Join(", ", orderedSlotIds);
+                var expected = expectedSlotIds.Count == 0 ? "<none>" : string.Join(", ", expectedSlotIds);
+                findings.Add(new("ERROR",
+                    $"Custom static mesh '{display}' has non-contiguous material slots [{actual}]; expected [{expected}]. Re-import the OBJ before packaging."));
+            }
+
+            var missingNames = slots
+                .Where(slot => string.IsNullOrWhiteSpace(slot.StableSlotName))
+                .Select(slot => slot.Slot)
+                .OrderBy(slot => slot)
+                .ToList();
+            if (missingNames.Count > 0)
+            {
+                findings.Add(new("ERROR",
+                    $"Custom static mesh '{display}' has no stable material-slot name for slot(s) {string.Join(", ", missingNames)}. Re-import the OBJ before packaging."));
+            }
+
+            var duplicateNames = slots
+                .Where(slot => !string.IsNullOrWhiteSpace(slot.StableSlotName))
+                .GroupBy(slot => slot.StableSlotName.Trim(), StringComparer.OrdinalIgnoreCase)
+                .Where(group => group.Count() > 1)
+                .Select(group => group.Key)
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (duplicateNames.Count > 0)
+            {
+                findings.Add(new("ERROR",
+                    $"Custom static mesh '{display}' reuses stable material-slot name(s) {string.Join(", ", duplicateNames.Select(name => $"'{name}'"))}. Re-import the OBJ before packaging."));
+            }
+
+            var sourceNameIssues = CustomStaticMeshSourceMaterialNameIssues(slots);
+            if (sourceNameIssues.MissingSlots.Count > 0)
+            {
+                findings.Add(new("ERROR",
+                    $"Custom static mesh '{display}' has no source OBJ material name for slot(s) {string.Join(", ", sourceNameIssues.MissingSlots)}. Re-import the OBJ before packaging."));
+            }
+            if (sourceNameIssues.DuplicateNames.Count > 0)
+            {
+                findings.Add(new("ERROR",
+                    $"Custom static mesh '{display}' reuses source OBJ material name(s) {string.Join(", ", sourceNameIssues.DuplicateNames.Select(name => $"'{name}'"))}. Re-import the OBJ before packaging."));
+            }
+        }
+
+        if (slots.Count == 0)
+        {
+            findings.Add(new("ERROR",
+                $"Custom static mesh '{display}' declares no material slots. Re-import the OBJ before packaging."));
+        }
+
+        foreach (var slot in slots)
+        {
+            var declaredMaterial = EffectiveCustomStaticMeshDeclaredMaterial(custom, slot);
+            CheckCustomStaticMeshMaterialFiles(
+                declaredMaterial,
+                $"{display} — slot {slot.Slot} ({CustomStaticMeshSlotLabel(slot)})",
+                findings);
+        }
+
+        var componentName = NormalizeCustomStaticMeshComponent(
+            CustomStaticMeshImportService.ComponentNameFor(custom));
+        var validSlotIds = slots.Select(slot => slot.Slot).ToHashSet();
+        foreach (var assignment in (project.MaterialAssignments ?? [])
+                     .Where(assignment => assignment is not null &&
+                         CustomStaticMeshMaterialAssignmentMatches(assignment.Component, componentName)))
+        {
+            if (!validSlotIds.Contains(assignment.Slot))
+            {
+                var validRange = slots.Count == 0
+                    ? "no valid slots are declared"
+                    : $"valid slots are 0 through {slots.Count - 1}";
+                findings.Add(new("ERROR",
+                    $"Custom static mesh '{display}' has a saved material assignment for out-of-range slot {assignment.Slot}; {validRange}. Remove that assignment or re-import the OBJ before packaging."));
+                continue;
+            }
+
+            var assignmentPackage = UnrealPathUtil.NormalizePackagePath(assignment.MiPackagePath);
+            CheckCustomStaticMeshMaterialFiles(
+                assignmentPackage,
+                $"{display} — slot {assignment.Slot} {assignment.Context} override",
+                findings);
+        }
+
+        return slots;
+    }
+
+    private static (List<int> MissingSlots, List<string> DuplicateNames)
+        CustomStaticMeshSourceMaterialNameIssues(
+            IReadOnlyList<CustomStaticMeshMaterialSlot> slots)
+    {
+        var missing = slots
+            .Where(slot => string.IsNullOrWhiteSpace(slot.SourceMaterialName))
+            .Select(slot => slot.Slot)
+            .OrderBy(slot => slot)
+            .ToList();
+        var duplicates = slots
+            .Where(slot => !string.IsNullOrWhiteSpace(slot.SourceMaterialName))
+            .GroupBy(slot => slot.SourceMaterialName.Trim(), StringComparer.Ordinal)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToList();
+        return (missing, duplicates);
+    }
+
+    private static IReadOnlyList<CustomStaticMeshMaterialSlot> EffectiveCustomStaticMeshMaterialSlots(
+        CustomStaticMeshImport custom)
+    {
+        if (custom.MaterialSlots is { Count: > 0 })
+        {
+            // Do not repair, deduplicate, or renumber declarations during validation. Returning
+            // their raw numeric identities is what lets the checks above report corrupt JSON.
+            return custom.MaterialSlots
+                .Where(slot => slot is not null)
+                .OrderBy(slot => slot.Slot)
+                .ToList();
+        }
+
+        return
+        [
+            new CustomStaticMeshMaterialSlot
+            {
+                Slot = 0,
+                SourceMaterialName = "Default",
+                StableSlotName = "",
+                MaterialPath = custom.MaterialPath ?? "",
+            },
+        ];
+    }
+
+    private static string EffectiveCustomStaticMeshDeclaredMaterial(
+        CustomStaticMeshImport custom,
+        CustomStaticMeshMaterialSlot slot)
+    {
+        var path = slot.MaterialPath;
+        if (string.IsNullOrWhiteSpace(path) && slot.Slot == 0)
+        {
+            path = custom.MaterialPath;
+        }
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            path = CustomStaticMeshImportService.DefaultMaterialPackagePath;
+        }
+        return UnrealPathUtil.NormalizePackagePath(path);
+    }
+
+    private static string CustomStaticMeshSlotLabel(CustomStaticMeshMaterialSlot slot)
+    {
+        if (!string.IsNullOrWhiteSpace(slot.SourceMaterialName))
+        {
+            return slot.SourceMaterialName.Trim();
+        }
+        if (!string.IsNullOrWhiteSpace(slot.StableSlotName))
+        {
+            return slot.StableSlotName.Trim();
+        }
+        return "unnamed";
+    }
+
+    private static bool CustomStaticMeshMaterialAssignmentMatches(
+        string? assignmentComponent,
+        string componentName)
+    {
+        if (string.IsNullOrWhiteSpace(componentName))
+        {
+            return false;
+        }
+        return NormalizeCustomStaticMeshComponent(assignmentComponent)
+            .Equals(componentName, StringComparison.OrdinalIgnoreCase);
     }
 
     private void CheckProjectOwnedCustomStaticMeshSource(
@@ -609,6 +825,7 @@ public sealed class StageValidationService
     private void CheckGeneratedCustomStaticMeshPackage(
         string meshPackage,
         string display,
+        IReadOnlyList<CustomStaticMeshMaterialSlot> expectedMaterialSlots,
         List<Finding> findings)
     {
         var uasset = PackagePathToBasePath(meshPackage) + ".uasset";
@@ -629,6 +846,31 @@ public sealed class StageValidationService
             {
                 findings.Add(new("ERROR",
                     $"Custom static mesh '{display}' package '{meshPackage}' does not contain the expected StaticMesh export '{expectedName}'. Rebuild the OBJ before packaging."));
+                return;
+            }
+
+            try
+            {
+                StaticMeshObjProbeService.ValidateStaticMaterialSlots(
+                    expectedExport,
+                    expectedMaterialSlots);
+            }
+            catch (Exception ex)
+            {
+                findings.Add(new("ERROR",
+                    $"Custom static mesh '{display}' package '{meshPackage}' has unsafe StaticMaterials metadata: {ex.Message} Rebuild the OBJ before packaging."));
+            }
+
+            try
+            {
+                StaticMeshObjProbeService.ValidateCookedMaterialSections(
+                    expectedExport,
+                    expectedMaterialSlots);
+            }
+            catch (Exception ex)
+            {
+                findings.Add(new("ERROR",
+                    $"Custom static mesh '{display}' package '{meshPackage}' has an unsafe cooked LOD0 section table: {ex.Message} Rebuild the OBJ before packaging."));
             }
         }
         catch (Exception ex)
@@ -783,26 +1025,43 @@ public sealed class StageValidationService
                       $"(found '{ObjectName(asset, actualMesh?.Value ?? FPackageIndex.FromRawIndex(0))}').");
             }
 
-            var fallbackMaterial = string.IsNullOrWhiteSpace(custom.MaterialPath)
-                ? CustomStaticMeshImportService.DefaultMaterialPackagePath
-                : custom.MaterialPath;
-            var expectedMaterial = UnrealPathUtil.NormalizePackagePath(
-                FinalMaterialPackage(project, role, componentName, 0, fallbackMaterial));
+            var expectedMaterialSlots = EffectiveCustomStaticMeshMaterialSlots(custom);
             var materials = MaterialObjectProperties(component);
-            if (!ValidExpectedPackage(expectedMaterial))
+            if (materials.Count != expectedMaterialSlots.Count)
             {
-                Error($"has invalid effective slot-zero material '{expectedMaterial}'.");
+                Error($"has {materials.Count} OverrideMaterials entry/entries, but its declaration requires exactly {expectedMaterialSlots.Count}.");
             }
-            else if (materials.Count == 0 || materials[0].Value.IsNull() ||
-                     !ObjectIdentityMatches(
-                         asset,
-                         materials[0].Value,
-                         UnrealPathUtil.ObjectPath(expectedMaterial)))
+
+            foreach (var materialSlot in expectedMaterialSlots.OrderBy(slot => slot.Slot))
             {
-                var actualMaterial = materials.Count == 0
-                    ? "<missing>"
-                    : ObjectPackagePath(asset, materials[0].Value);
-                Error($"uses slot-zero material '{actualMaterial}' instead of the declared effective material '{expectedMaterial}'.");
+                var fallbackMaterial = EffectiveCustomStaticMeshDeclaredMaterial(custom, materialSlot);
+                var expectedMaterial = UnrealPathUtil.NormalizePackagePath(
+                    FinalMaterialPackage(
+                        project,
+                        role,
+                        componentName,
+                        materialSlot.Slot,
+                        fallbackMaterial));
+                if (!ValidExpectedPackage(expectedMaterial))
+                {
+                    Error($"has invalid effective material '{expectedMaterial}' for slot {materialSlot.Slot} ({CustomStaticMeshSlotLabel(materialSlot)}).");
+                    continue;
+                }
+
+                var material = materialSlot.Slot >= 0 && materialSlot.Slot < materials.Count
+                    ? materials[materialSlot.Slot]
+                    : null;
+                if (material is null || material.Value.IsNull() ||
+                    !ObjectIdentityMatches(
+                        asset,
+                        material.Value,
+                        UnrealPathUtil.ObjectPath(expectedMaterial)))
+                {
+                    var actualMaterial = material is null || material.Value.IsNull()
+                        ? "<missing>"
+                        : ObjectPackagePath(asset, material.Value);
+                    Error($"uses slot {materialSlot.Slot} ({CustomStaticMeshSlotLabel(materialSlot)}) material '{actualMaterial}' instead of the declared effective material '{expectedMaterial}'.");
+                }
             }
 
             var expectedSocket = CustomStaticMeshImportService.ResolveAttachmentSlot(
@@ -988,6 +1247,28 @@ public sealed class StageValidationService
         };
         return DuplicateCustomStaticMeshDeclarationKeys(project, distinct).Count == 0 &&
                DuplicateCustomStaticMeshDeclarationKeys(project, duplicate).Count == 3;
+    }
+
+    internal static bool CustomStaticMeshSourceMaterialNameRegressionPasses()
+    {
+        var valid = CustomStaticMeshSourceMaterialNameIssues(
+        [
+            new CustomStaticMeshMaterialSlot { Slot = 0, SourceMaterialName = "Black Plastic" },
+            new CustomStaticMeshMaterialSlot { Slot = 1, SourceMaterialName = "Metal" },
+        ]);
+        var missing = CustomStaticMeshSourceMaterialNameIssues(
+        [
+            new CustomStaticMeshMaterialSlot { Slot = 0, SourceMaterialName = " " },
+            new CustomStaticMeshMaterialSlot { Slot = 1, SourceMaterialName = "Metal" },
+        ]);
+        var duplicate = CustomStaticMeshSourceMaterialNameIssues(
+        [
+            new CustomStaticMeshMaterialSlot { Slot = 0, SourceMaterialName = "Metal" },
+            new CustomStaticMeshMaterialSlot { Slot = 1, SourceMaterialName = "Metal" },
+        ]);
+        return valid.MissingSlots.Count == 0 && valid.DuplicateNames.Count == 0 &&
+               missing.MissingSlots.SequenceEqual([0]) && missing.DuplicateNames.Count == 0 &&
+               duplicate.MissingSlots.Count == 0 && duplicate.DuplicateNames.SequenceEqual(["Metal"]);
     }
 
     internal static bool RequiredPackageFilesAreNonEmptyForTest(

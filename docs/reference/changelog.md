@@ -25,14 +25,19 @@
   why the bundled prebuilt was rejected before trying a source build.
 - Custom OBJ components keep the cooked Blueprint's original class schema, preventing the known
   load, hover, and startup crashes caused by adding a reflected field to an opaque class-default object.
+- Distinct OBJ `usemtl` sections become stable material slots. Re-importing matches assignments by
+  material name, and the viewer, gameplay/cutscene grafts, and release build keep every slot.
 - Packaging now verifies every custom mesh's source OBJ, cooked files, live construction-script
-  binding, socket, and gameplay/cutscene material instead of trusting a partial stage.
+  binding, socket, raw cooked section ranges, and gameplay/cutscene materials instead of trusting a
+  partial stage.
 - A paired custom-cowl template keeps the game's LEGO surface detail without inheriting the donor
   cowl's geometry-specific maps, metallic switch, or extreme roughness offset.
 - Material warnings flag suspicious metalness, roughness, packed-channel, and duplicate-normal
   choices while leaving specialized game material families alone.
 - Shared materials bring their mod-local textures and parents into another suit. Renames, deletions,
   viewer placement saves, and release staging restore the last working state if a rebuild fails.
+- Shared-material packaging finds generated texture dependencies directly in the owning suit's
+  current cooked output, so **Recook** actually repairs a previously missing dependency.
 
 ## 0.9.0-beta.7
 

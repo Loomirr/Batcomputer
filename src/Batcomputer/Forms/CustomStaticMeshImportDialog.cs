@@ -168,7 +168,7 @@ public sealed class CustomStaticMeshImportDialog : AdaptiveForm
 
         var note = new Label
         {
-            Text = "Static OBJ only for now. Export triangles, UVs, and one material section. The 3D viewer saves custom-mesh scale, XYZ placement, and rotation into this suit.",
+            Text = "Static OBJ only for now. Export triangles and UVs; each distinct material named by usemtl becomes a numbered slot. After import, assign each slot from Components or the 3D inspector. Scale, XYZ placement, and rotation stay saved with the mesh.",
             Dock = DockStyle.Fill,
             Font = Theme.Caption,
             ForeColor = Theme.OnDarkMuted,

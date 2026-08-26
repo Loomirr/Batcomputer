@@ -7,6 +7,7 @@ obj/
 
 # Local release staging and archives
 artifacts/
+.verification/
 
 # UI artwork. Compiled into the exe as an embedded resource, so it is required to
 # BUILD but is not kept in the repo. See the note in README.md.

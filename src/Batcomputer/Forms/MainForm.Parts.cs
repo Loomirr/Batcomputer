@@ -1952,7 +1952,7 @@ public sealed partial class MainForm
                 Accent = Theme.Parts,
                 Dashed = true,
                 OnClick = () => _ = OpenCustomStaticMeshDialogAsync(null),
-                ToolTip = "Imports a project-owned OBJ as a static attachment. Pick a real game socket, then set scale and local XYZ offset."
+                ToolTip = "Imports a project-owned OBJ as a static attachment. Each distinct usemtl name becomes a material slot. Pick a real game socket, then set scale, local XYZ offset, and rotation."
             }
         };
 
@@ -1981,7 +1981,20 @@ public sealed partial class MainForm
         {
             var current = mesh;
             var attachment = CustomStaticMeshImportService.ResolveAttachmentSlot(current.Target, current.AttachSocket);
-            if (!MatchesToyboxSearch(search, current.DisplayName, current.SourceObjRelativePath, attachment.Label, attachment.AttachSocket))
+            var sectionNames = StaticMeshObjProbeService.EffectiveMaterialSlots(current)
+                .OrderBy(slot => slot.Slot)
+                .Select(slot => string.IsNullOrWhiteSpace(slot.SourceMaterialName)
+                    ? $"slot {slot.Slot}"
+                    : slot.SourceMaterialName)
+                .ToList();
+            var sectionLabel = $"{sectionNames.Count} material slot{(sectionNames.Count == 1 ? "" : "s")}";
+            if (!MatchesToyboxSearch(
+                    search,
+                    current.DisplayName,
+                    current.SourceObjRelativePath,
+                    attachment.Label,
+                    attachment.AttachSocket,
+                    string.Join(" ", sectionNames)))
             {
                 continue;
             }
@@ -1989,10 +2002,10 @@ public sealed partial class MainForm
             {
                 Section = "CUSTOM MESHES",
                 Title = TrimMiddle(current.DisplayName, 28),
-                Subtitle = $"{attachment.Label} · scale {current.Scale:0.###}\noffset {current.OffsetX:0.##}, {current.OffsetY:0.##}, {current.OffsetZ:0.##}",
+                Subtitle = $"{attachment.Label} · scale {current.Scale:0.###} · {sectionLabel}\noffset {current.OffsetX:0.##}, {current.OffsetY:0.##}, {current.OffsetZ:0.##}",
                 Accent = Theme.Parts,
                 OnClick = () => _ = OpenCustomStaticMeshDialogAsync(current),
-                ToolTip = $"Project OBJ: {current.SourceObjRelativePath}\nSocket: {attachment.AttachSocket}\n\nClick to edit. Right-click to edit or remove this mesh from the suit.",
+                ToolTip = $"Project OBJ: {current.SourceObjRelativePath}\nSocket: {attachment.AttachSocket}\nMaterial slots: {string.Join(", ", sectionNames)}\n\nClick to edit. Right-click to edit or remove this mesh from the suit.",
                 MenuFactory = () => BuildCustomStaticMeshTileMenu(current),
             });
         }

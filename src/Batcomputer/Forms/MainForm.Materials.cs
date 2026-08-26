@@ -761,6 +761,14 @@ public sealed partial class MainForm
                     paths.Add(package);
                 }
             }
+
+            foreach (var package in (_currentProject.CustomStaticMeshes ?? new List<CustomStaticMeshImport>())
+                         .SelectMany(mesh => StaticMeshObjProbeService.EffectiveMaterialSlots(mesh))
+                         .Select(slot => UnrealPathUtil.NormalizePackagePath(slot.MaterialPath))
+                         .Where(package => package.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase)))
+            {
+                paths.Add(package);
+            }
         }
 
         foreach (var contentRoot in GeneratedMaterialContentRoots(_currentProject))
@@ -1002,16 +1010,47 @@ public sealed partial class MainForm
         var updated = 0;
         foreach (var mesh in project.CustomStaticMeshes ?? new List<CustomStaticMeshImport>())
         {
-            if (!UnrealPathUtil.NormalizePackagePath(mesh.MaterialPath)
-                    .Equals(oldPackage, StringComparison.OrdinalIgnoreCase))
+            if (mesh.MaterialSlots is { Count: > 0 })
             {
+                foreach (var materialSlot in mesh.MaterialSlots)
+                {
+                    if (!UnrealPathUtil.NormalizePackagePath(materialSlot.MaterialPath)
+                            .Equals(oldPackage, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    materialSlot.MaterialPath = replacement;
+                    if (materialSlot.Slot == 0)
+                    {
+                        // Keep the legacy mirror current so an older Batcomputer build does not
+                        // silently put a different material back onto the first section.
+                        mesh.MaterialPath = replacement;
+                    }
+                    updated++;
+                }
                 continue;
             }
 
-            mesh.MaterialPath = replacement;
-            updated++;
+            if (UnrealPathUtil.NormalizePackagePath(mesh.MaterialPath)
+                .Equals(oldPackage, StringComparison.OrdinalIgnoreCase))
+            {
+                mesh.MaterialPath = replacement;
+                updated++;
+            }
         }
         return updated;
+    }
+
+    internal static int CountCustomStaticMeshMaterialReferences(
+        NativeSuitProject project,
+        string packagePath)
+    {
+        var package = UnrealPathUtil.NormalizePackagePath(packagePath);
+        return (project.CustomStaticMeshes ?? new List<CustomStaticMeshImport>())
+            .Sum(mesh => StaticMeshObjProbeService.EffectiveMaterialSlots(mesh).Count(slot =>
+                UnrealPathUtil.NormalizePackagePath(slot.MaterialPath)
+                    .Equals(package, StringComparison.OrdinalIgnoreCase)));
     }
 
     private async Task DeleteGeneratedMaterialAsync(string miPackagePath)
@@ -1040,12 +1079,12 @@ public sealed partial class MainForm
             .Where(assignment => UnrealPathUtil.NormalizePackagePath(assignment.MiPackagePath)
                 .Equals(package, StringComparison.OrdinalIgnoreCase))
             .ToList() ?? new List<SavedMaterialAssignment>();
-        var customMeshReferences = _currentProject?.CustomStaticMeshes
-            .Count(mesh => UnrealPathUtil.NormalizePackagePath(mesh.MaterialPath)
-                .Equals(package, StringComparison.OrdinalIgnoreCase)) ?? 0;
+        var customMeshReferences = _currentProject is null
+            ? 0
+            : CountCustomStaticMeshMaterialReferences(_currentProject, package);
         var detail = assignments.Count == 0 && customMeshReferences == 0
             ? "It is not assigned to this suit."
-            : $"It is assigned to {assignments.Count} slot(s) and {customMeshReferences} custom-mesh recipe(s). Those references will be removed and the stage rebuilt from the base.";
+            : $"It is assigned to {assignments.Count} component slot(s) and {customMeshReferences} custom-mesh material slot(s). Those references will be removed and the stage rebuilt from the base.";
         if (!Dialog.Confirm(this, "Delete material",
                 $"Delete '{UnrealPathUtil.AssetName(package)}'?\n\n{detail}\n\n{package}",
                 confirmText: "Delete material", severity: Dialog.Level.Crit))
@@ -1554,6 +1593,19 @@ public sealed partial class MainForm
             return;
         }
 
+        if (FindCustomStaticMeshForComponent(_currentProject, component) is { } declaredCustomMesh &&
+            !StaticMeshObjProbeService.EffectiveMaterialSlots(declaredCustomMesh)
+                .Any(materialSlot => materialSlot.Slot == slot))
+        {
+            var available = string.Join(", ", StaticMeshObjProbeService.EffectiveMaterialSlots(declaredCustomMesh)
+                .Select(materialSlot => materialSlot.Slot));
+            var message = $"Custom mesh '{declaredCustomMesh.DisplayName}' has no material slot {slot}. " +
+                          $"Available slot(s): {(string.IsNullOrWhiteSpace(available) ? "none" : available)}.";
+            AppendLog("Apply material stopped: " + message);
+            Dialog.Warn(this, "Material slot not found", message);
+            return;
+        }
+
         var materialLibrary = new ToolMaterialLibraryService(_projectRootText.Text.Trim());
         var knownMaterials = (_currentProject.GeneratedMaterials ?? new List<GeneratedMaterialEntry>())
             .Concat(materialLibrary.LoadAvailable())
@@ -1632,15 +1684,31 @@ public sealed partial class MainForm
                 Context = resolved.Context,
             });
         }
-        // A custom static mesh also stores its base component material declaratively. Keep that
-        // source of truth aligned with a normal "both" slot-0 assignment so rebuilding the mesh
-        // cannot silently restore the donor material after the user already changed it.
-        if (slot == 0 && context.Equals("both", StringComparison.OrdinalIgnoreCase) &&
+        // A custom static mesh also stores each OBJ section material declaratively. Keep that
+        // source of truth aligned with a normal "both" assignment so rebuilding the mesh cannot
+        // silently restore a donor/default material after the user already changed it.
+        if (context.Equals("both", StringComparison.OrdinalIgnoreCase) &&
             FindCustomStaticMeshForComponent(_currentProject, component) is { } customMesh)
         {
-            customMesh.MaterialPath = string.IsNullOrWhiteSpace(roleResolution.GameplayBaselinePackage)
+            var resolvedMaterial = string.IsNullOrWhiteSpace(roleResolution.GameplayBaselinePackage)
                 ? mi
                 : roleResolution.GameplayBaselinePackage;
+            if (customMesh.MaterialSlots is { Count: > 0 })
+            {
+                var materialSlot = customMesh.MaterialSlots.FirstOrDefault(candidate => candidate.Slot == slot);
+                if (materialSlot is not null)
+                {
+                    materialSlot.MaterialPath = resolvedMaterial;
+                    if (slot == 0)
+                    {
+                        customMesh.MaterialPath = resolvedMaterial;
+                    }
+                }
+            }
+            else if (slot == 0)
+            {
+                customMesh.MaterialPath = resolvedMaterial;
+            }
         }
 
         var projectSaved = false;
@@ -1896,7 +1964,8 @@ public sealed partial class MainForm
         (project.MaterialAssignments ?? new List<SavedMaterialAssignment>())
             .Select(assignment => assignment.MiPackagePath)
             .Concat((project.CustomStaticMeshes ?? new List<CustomStaticMeshImport>())
-                .Select(mesh => mesh.MaterialPath))
+                .SelectMany(mesh => StaticMeshObjProbeService.EffectiveMaterialSlots(mesh)
+                    .Select(slot => slot.MaterialPath)))
             .Select(UnrealPathUtil.NormalizePackagePath)
             .Where(package => !string.IsNullOrWhiteSpace(package));
 

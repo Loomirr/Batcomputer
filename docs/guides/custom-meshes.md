@@ -40,6 +40,13 @@ Custom meshes expose material slots in the inspector. Generate or select a compa
 then drag or apply it to the custom mesh slot as you would for a normal game part. Reopen the 3D
 viewer and confirm the material resolved on that mesh before baking.
 
+For more than one material, assign faces to named materials in the OBJ before importing it. Each
+distinct `usemtl` name becomes a separate Batcomputer slot in first-use order. For example, an OBJ
+using `usemtl Black` and `usemtl Metal` exposes separate **Black** and **Metal** slots. Batcomputer
+keeps an assignment with its exact material name when the OBJ is re-imported; removed names are
+dropped and surviving slots are compacted. The referenced `.mtl` file is not used to create Unreal
+materials, so apply cooked game or tool-created materials to the resulting slots yourself.
+
 For a textured cowl, use the paired custom-cowl template when possible. A paired template creates
 separate gameplay and cutscene material instances; applying the pair to both contexts keeps each
 Blueprint on the correct native material controller. The material keeps the donor shader's shared
@@ -58,6 +65,7 @@ place. Check Diagnostics for the first failed donor or file operation before try
 ## Current limits
 
 - OBJ static meshes only.
+- Up to 64 named OBJ material sections per imported mesh.
 - No custom skeletal-mesh cooking or skeleton transfer.
 - No custom collision or physics setup.
 - Geometry that does not fit the tested game-mesh template may be rejected.
