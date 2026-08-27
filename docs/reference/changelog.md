@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.0-beta.9
+
+- Paired cape/glider cleanup now distinguishes the authored native shell from independent user
+  grafts, so removing a hair or cowl no longer gets blocked just because the glider adapter also
+  contains a `Head` component.
+- The native paired-cape shell remains protected when no independent replacement targets that
+  component, with regression coverage for both cases.
+- Portable build and documentation version: **0.9.0-beta.9**.
+
 ## 0.9.0-beta.8
 
 - Material searches now include every material instance in the active extracted Content tree, so

@@ -409,8 +409,41 @@ public sealed partial class MainForm
         return project.PartGrafts.Any(graft =>
             (string.Equals(graft.InstanceId, adapter.CosmeticCapeGraftInstanceId, StringComparison.OrdinalIgnoreCase) ||
              string.Equals(graft.InstanceId, adapter.GlideCapeGraftInstanceId, StringComparison.OrdinalIgnoreCase)) &&
-            GraftTargetsComponent(graft, component));
+             GraftTargetsComponent(graft, component));
     }
+
+    /// <summary>
+    /// The authored paired-cape scaffold contains the donor's complete construction graph, but
+    /// that does not make every user graft on one of those component names part of the cape pair.
+    /// For example, a static hair graft can legitimately repoint the scaffold's existing Head
+    /// field. Removing that user graft should restore the certified visual-base Head recipe; it
+    /// must not be rejected merely because the scaffold also happens to contain a Head node.
+    /// Only a scaffold component with no independent user graft is protected here.
+    /// </summary>
+    private static bool IsPairedCapeShellRemovalBlocked(
+        NativeSuitProject project,
+        string component,
+        ISet<string> authoredShellComponents)
+    {
+        if (project.PairedCapeAdapter is null ||
+            string.IsNullOrWhiteSpace(component) ||
+            !authoredShellComponents.Contains(component))
+        {
+            return false;
+        }
+
+        return !(project.PartGrafts ?? [])
+            .Any(graft => !IsAdapterBoundGraft(project, graft) && GraftTargetsComponent(graft, component));
+    }
+
+    internal static bool IsPairedCapeShellRemovalBlockedForTest(
+        NativeSuitProject project,
+        string component,
+        IEnumerable<string> authoredShellComponents) =>
+        IsPairedCapeShellRemovalBlocked(
+            project,
+            component,
+            authoredShellComponents.ToHashSet(StringComparer.OrdinalIgnoreCase));
 
     /// <summary>
     /// The authored paired-cape shell is one atomic runtime layout. Once either member is removed,
@@ -1509,7 +1542,7 @@ public sealed partial class MainForm
                 _currentProject,
                 out var authoredShellComponents,
                 out _) &&
-            authoredShellComponents.Contains(component))
+            IsPairedCapeShellRemovalBlocked(_currentProject, component, authoredShellComponents))
         {
             Dialog.Warn(
                 this,

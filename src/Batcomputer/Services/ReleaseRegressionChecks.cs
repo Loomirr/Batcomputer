@@ -3091,6 +3091,33 @@ internal static class ReleaseRegressionChecks
         var repairedShellRemovals = MainForm.RemoveUnsafePairedCapeRemovalRulesForTest(
             shellRemovalRepairProject,
             ["Head", "TtCharacterAssetMinion", "Cape", "Torso"]);
+        var shellRemovalWithIndependentHairProject = CreateCertifiedNightwingCapeAdapterProject();
+        var shellRemovalWithIndependentHairAdapterConfigured = GliderService.TryConfigurePairedCapeAdapter(
+            shellRemovalWithIndependentHairProject,
+            AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
+            "Torso",
+            out _);
+        shellRemovalWithIndependentHairProject.PartGrafts.Add(new SavedPartGraft
+        {
+            Slot = "Head",
+            ResolvedComponent = "Head",
+            InstanceId = "user-hair",
+            OccupancyGroup = "head.scalp_hair"
+        });
+        var independentHairCanBeRemoved = !MainForm.IsPairedCapeShellRemovalBlockedForTest(
+            shellRemovalWithIndependentHairProject,
+            "Head",
+            ["Head", "Face", "Cape", "Torso"]);
+        var nativeShellHeadProject = CreateCertifiedNightwingCapeAdapterProject();
+        var nativeShellHeadAdapterConfigured = GliderService.TryConfigurePairedCapeAdapter(
+            nativeShellHeadProject,
+            AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
+            "Torso",
+            out _);
+        var nativeShellHeadRemainsProtected = MainForm.IsPairedCapeShellRemovalBlockedForTest(
+            nativeShellHeadProject,
+            "Head",
+            ["Head", "Face", "Cape", "Torso"]);
         Check(
             repairedShellRemovals.ToHashSet(StringComparer.OrdinalIgnoreCase)
                 .SetEquals(["Head", "TtCharacterAssetMinion"]) &&
@@ -3101,8 +3128,12 @@ internal static class ReleaseRegressionChecks
                 ["Head_2", "Torso", "Cape", "Head", "Face"]) &&
             !StageValidationService.AuthoredShellLiveComponentsRemainForTest(
                 ["Face", "Head", "Cape", "Torso"],
-                ["Head_2", "Cape", "Head", "Face"]),
-            "paired-cape rebuilds restore authored SCS removal rules and final validation requires every authored live node",
+                ["Head_2", "Cape", "Head", "Face"]) &&
+            independentHairCanBeRemoved &&
+            nativeShellHeadRemainsProtected &&
+            shellRemovalWithIndependentHairAdapterConfigured &&
+            nativeShellHeadAdapterConfigured,
+            "paired-cape rebuilds restore authored SCS removal rules, protect native shell nodes, and allow an independent hair graft to be removed",
             failures,
             output);
 
