@@ -13,8 +13,27 @@ namespace Batcomputer;
 /// </summary>
 public sealed partial class MainForm
 {
+    // Saved-suit loads deliberately keep their stage restore fire-and-forget so the WinForms UI
+    // remains responsive. These counters keep stage-backed view refreshes out of the restore
+    // window, while the generation prevents an older suit's completion from becoming the final
+    // refresh for a newer selection.
+    private int _loadedProjectSelectionGeneration;
+    private int _activeLoadedProjectStageRestores;
+    private int _currentLoadedProjectStageRestoreGeneration;
+    private bool _loadedProjectStageRefreshPending;
+    private TaskCompletionSource<bool>? _loadedProjectStageRestoresIdle;
+
     private void LoadProjectIntoUi(NativeSuitProject project)
     {
+        var loadGeneration = unchecked(++_loadedProjectSelectionGeneration);
+        if (loadGeneration == 0)
+        {
+            loadGeneration = ++_loadedProjectSelectionGeneration;
+        }
+        // Every selection invalidates the previous selection's right to perform a final refresh.
+        // A restore started below claims this generation after all load-time normalization is done.
+        _currentLoadedProjectStageRestoreGeneration = 0;
+
         _currentProject = project;
         MigratePartGraftInstances(project);
         if (NormalizeGeneratedUimdIconRecipes(project))
@@ -77,7 +96,9 @@ public sealed partial class MainForm
             // removal-only projects must not patch a previously certified stage in place: a role
             // failure there could leave a partial payload behind an old completion marker.
             AppendLog($"  restoring {project.PartGrafts.Count} part(s) + {project.MaterialAssignments.Count} material(s) + saved removals…");
-            _ = RestoreLoadedProjectStageAsync(project, _projectRootText.Text.Trim());
+            BeginLoadedProjectStageRestore();
+            _currentLoadedProjectStageRestoreGeneration = loadGeneration;
+            _ = RestoreLoadedProjectStageAsync(project, _projectRootText.Text.Trim(), loadGeneration);
         }
 
         SelectComboValue(_toyboxCategoryCombo, "Materials");
@@ -86,17 +107,141 @@ public sealed partial class MainForm
         UpdateToyboxChips();
     }
 
-    private async Task RestoreLoadedProjectStageAsync(NativeSuitProject project, string projectRoot)
+    private bool IsCurrentLoadedProjectStageRestore(NativeSuitProject project, int loadGeneration) =>
+        loadGeneration == _loadedProjectSelectionGeneration &&
+        loadGeneration == _currentLoadedProjectStageRestoreGeneration &&
+        ReferenceEquals(_currentProject, project);
+
+    private bool DeferStageBackedRefreshWhileLoadedProjectRestores()
+    {
+        if (_activeLoadedProjectStageRestores <= 0)
+        {
+            return false;
+        }
+
+        _loadedProjectStageRefreshPending = true;
+        return true;
+    }
+
+    private void BeginLoadedProjectStageRestore()
+    {
+        if (_activeLoadedProjectStageRestores == 0)
+        {
+            _loadedProjectStageRestoresIdle = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+        _activeLoadedProjectStageRestores++;
+    }
+
+    /// <summary>
+    /// User edits must not mutate the live project object while its saved declaration is being
+    /// replayed. The replay intentionally yields to the message loop, so merely serializing the
+    /// eventual stage write is too late: an edit could otherwise change the object the active
+    /// replay is still reading. Wait without blocking WinForms, then reject the action if the user
+    /// selected another suit while it was queued.
+    /// </summary>
+    private async Task<bool> AwaitLoadedProjectStageRestoresBeforeEditAsync(string operation)
+    {
+        var expectedProject = _currentProject;
+        var expectedGeneration = _loadedProjectSelectionGeneration;
+        var loggedWait = false;
+
+        while (_activeLoadedProjectStageRestores > 0)
+        {
+            var idleTask = _loadedProjectStageRestoresIdle?.Task;
+            if (idleTask is null)
+            {
+                break;
+            }
+            if (!loggedWait)
+            {
+                AppendLog($"  {operation}: waiting for the saved suit stage restore to finish…");
+                loggedWait = true;
+            }
+            await idleTask;
+        }
+
+        if (expectedGeneration == _loadedProjectSelectionGeneration &&
+            ReferenceEquals(expectedProject, _currentProject))
+        {
+            return true;
+        }
+
+        AppendLog($"  {operation} stopped because another suit was selected while it was waiting.");
+        return false;
+    }
+
+    private bool BlockSynchronousEditWhileLoadedProjectRestores(string operation)
+    {
+        if (_activeLoadedProjectStageRestores <= 0)
+        {
+            return false;
+        }
+
+        AppendLog($"  {operation} is waiting on the saved suit restore; retry when the restore finishes.");
+        return true;
+    }
+
+    private void CompleteLoadedProjectStageRestore(NativeSuitProject project, int loadGeneration)
+    {
+        if (_activeLoadedProjectStageRestores > 0)
+        {
+            _activeLoadedProjectStageRestores--;
+        }
+
+        // Only the currently selected project's restore can clear the current generation. Stale
+        // completions merely reduce the active count; they never refresh a newer suit early.
+        if (IsCurrentLoadedProjectStageRestore(project, loadGeneration))
+        {
+            _currentLoadedProjectStageRestoreGeneration = 0;
+        }
+
+        TaskCompletionSource<bool>? idleSignal = null;
+        if (_activeLoadedProjectStageRestores == 0)
+        {
+            // The active editor project may have changed through New/Delete while this restore was
+            // in flight. With no restore left, no generation can retain final-refresh ownership.
+            _currentLoadedProjectStageRestoreGeneration = 0;
+            idleSignal = _loadedProjectStageRestoresIdle;
+            _loadedProjectStageRestoresIdle = null;
+        }
+
+        try
+        {
+            if (_activeLoadedProjectStageRestores != 0 ||
+                _currentLoadedProjectStageRestoreGeneration != 0 ||
+                !_loadedProjectStageRefreshPending)
+            {
+                return;
+            }
+
+            _loadedProjectStageRefreshPending = false;
+            RefreshAllViewsNow();
+        }
+        finally
+        {
+            // RunContinuationsAsynchronously keeps a queued edit from re-entering this completion
+            // path before the final stage-backed refresh has returned.
+            idleSignal?.TrySetResult(true);
+        }
+    }
+
+    private async Task RestoreLoadedProjectStageAsync(
+        NativeSuitProject project,
+        string projectRoot,
+        int loadGeneration)
     {
         try
         {
-            await RebuildGraftStageFromDeclarativeAsync(project, projectRoot);
+            await RebuildGraftStageFromDeclarativeAsync(
+                project,
+                projectRoot,
+                loadedProjectRestore: true);
         }
         catch (Exception ex)
         {
             AppendLog($"Saved suit restore failed for '{project.DisplayName}': {ex.Message}");
-            if (_currentProject is not null &&
-                _currentProject.SlotId.Equals(project.SlotId, StringComparison.OrdinalIgnoreCase))
+            if (IsCurrentLoadedProjectStageRestore(project, loadGeneration))
             {
                 Dialog.Error(
                     this,
@@ -104,6 +249,10 @@ public sealed partial class MainForm
                     "Batcomputer kept the saved project, restored the prior generated payload where possible, and blocked packaging because the saved edits could not be replayed completely.\n\n" +
                     ex.Message);
             }
+        }
+        finally
+        {
+            CompleteLoadedProjectStageRestore(project, loadGeneration);
         }
     }
 
@@ -128,6 +277,11 @@ public sealed partial class MainForm
 
     private void OpenMaterialWizard()
     {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Creating a material"))
+        {
+            return;
+        }
+
         var mod = ExtractModFolder(_targetPlayableText.Text.Trim());
         if (string.IsNullOrWhiteSpace(mod))
         {
@@ -161,6 +315,12 @@ public sealed partial class MainForm
     /// </summary>
     private async void OpenMaterialFromBase(string miGamePath, bool editInPlace)
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync(
+                editInPlace ? "edit the generated material" : "create a material from the selected base"))
+        {
+            return;
+        }
+
         var diskPath = ResolveMaterialDiskPath(miGamePath, preferExport: editInPlace);
         if (diskPath is null)
         {
@@ -383,7 +543,7 @@ public sealed partial class MainForm
     /// assets. Called after the name-map stage is rebuilt (which wipes staged
     /// edits) and on load, so materials stick across sessions and regenerates.
     /// </summary>
-    private DeclarativeReplayOutcome ApplySavedMaterials(
+    private async Task<DeclarativeReplayOutcome> ApplySavedMaterials(
         NativeSuitProject project,
         bool logIfNone,
         string? stageContentRootOverride = null)
@@ -402,7 +562,8 @@ public sealed partial class MainForm
         var reapplied = 0;
         foreach (var m in project.MaterialAssignments)
         {
-            if (string.IsNullOrWhiteSpace(m.Component) || !m.MiPackagePath.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrWhiteSpace(m.Component) ||
+                !ExtractedPackagePathService.IsContentPackagePath(m.MiPackagePath))
             {
                 outcome.Failures.Add(
                     $"{m.Component}:{m.Slot}: saved material component/path is invalid ({m.MiPackagePath})");
@@ -428,7 +589,7 @@ public sealed partial class MainForm
                 ApplyToPlayable = applyToPlayable,
                 ApplyToCutscene = applyToCutscene,
             };
-            var result = RunWithStructuredFileLockRetry(
+            var result = await RunWithStructuredFileLockRetryAsync(
                 () => string.IsNullOrWhiteSpace(stageContentRootOverride)
                     ? service.Apply(slotId, playablePkg, cutscenePkg, assignment)
                     : service.ApplyToContentRoot(
@@ -483,7 +644,7 @@ public sealed partial class MainForm
     /// scaffold substitution. This runs before ordinary saved removals/material assignments, so an
     /// explicit user edit remains authoritative and is never overwritten by the automatic overlay.
     /// </summary>
-    private DeclarativeReplayOutcome ApplyPairedCapeVisualOverlayMaterials(
+    private async Task<DeclarativeReplayOutcome> ApplyPairedCapeVisualOverlayMaterials(
         NativeSuitProject project,
         string projectRoot)
     {
@@ -535,14 +696,14 @@ public sealed partial class MainForm
         {
             var role = assignment.ApplyToPlayable ? "playable" : "cutscene";
             if (string.IsNullOrWhiteSpace(assignment.MiPackagePath) ||
-                !assignment.MiPackagePath.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+                !ExtractedPackagePathService.IsContentPackagePath(assignment.MiPackagePath))
             {
                 outcome.Failures.Add(
                     $"{assignment.Component}:0/{role}: certified visual-base material path is invalid ({assignment.MiPackagePath})");
                 continue;
             }
 
-            var result = RunWithStructuredFileLockRetry(
+            var result = await RunWithStructuredFileLockRetryAsync(
                 () => service.Apply(
                     project.SlotId,
                     project.TargetPackages.Playable,
@@ -592,8 +753,12 @@ public sealed partial class MainForm
     // Group MIs by the first two path segments under /Game (e.g. "Characters/Minifig").
     internal static string MaterialGroupFolder(string gamePath)
     {
-        var p = gamePath.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase) ? gamePath["/Game/".Length..] : gamePath;
-        var segs = p.Split('/');
+        var p = UnrealPathUtil.NormalizePackagePath(gamePath).TrimStart('/');
+        if (p.StartsWith("Game/", StringComparison.OrdinalIgnoreCase))
+        {
+            p = p["Game/".Length..];
+        }
+        var segs = p.Split('/', StringSplitOptions.RemoveEmptyEntries);
         if (segs.Length <= 1) return "";
         return segs.Length >= 3 ? $"{segs[0]}/{segs[1]}" : segs[0];
     }
@@ -737,6 +902,11 @@ public sealed partial class MainForm
 
     private async Task RepairCurrentSuitMaterialsAsync()
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("repair suit materials"))
+        {
+            return;
+        }
+
         EnsureProject();
         if (_currentProject is null)
         {
@@ -1087,6 +1257,11 @@ public sealed partial class MainForm
 
     private async Task RenameGeneratedMaterialAsync(string oldPackagePath, string newPackagePath)
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("rename the generated material"))
+        {
+            return;
+        }
+
         var oldPackage = UnrealPathUtil.NormalizePackagePath(oldPackagePath);
         var newPackage = UnrealPathUtil.NormalizePackagePath(newPackagePath);
         if (oldPackage.Equals(newPackage, StringComparison.OrdinalIgnoreCase))
@@ -1254,6 +1429,11 @@ public sealed partial class MainForm
 
     private async Task DeleteGeneratedMaterialAsync(string miPackagePath)
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("delete the generated material"))
+        {
+            return;
+        }
+
         var package = UnrealPathUtil.NormalizePackagePath(miPackagePath);
         if (!package.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase))
         {
@@ -1591,6 +1771,11 @@ public sealed partial class MainForm
 
     private void GenerateMaterial()
     {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Generating the material"))
+        {
+            return;
+        }
+
         var basePath = _matBaseText.Text.Trim();
         var outputPackage = _matOutputText.Text.Trim();
         if (!File.Exists(basePath))
@@ -1776,13 +1961,18 @@ public sealed partial class MainForm
 
     private async Task ApplyMaterialAssignmentAsync()
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("apply the material assignment"))
+        {
+            return;
+        }
+
         var slotId = _slotIdText.Text.Trim();
         var component = _matAssignComponentText.Text.Trim();
         var mi = UnrealPathUtil.NormalizePackagePath(_matAssignMiText.Text.Trim());
 
         if (string.IsNullOrWhiteSpace(slotId)) { AppendLog("Slot ID is empty."); return; }
         if (string.IsNullOrWhiteSpace(component)) { AppendLog("Component is empty."); return; }
-        if (!mi.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase)) { AppendLog("MI path must start with /Game/ (generate a material first)."); return; }
+        if (!ExtractedPackagePathService.IsContentPackagePath(mi)) { AppendLog("MI path must be a valid game or installed DLC content package."); return; }
         if (!int.TryParse(_matAssignSlotText.Text.Trim(), out var slot) || slot < 0) { AppendLog("Slot must be a non-negative integer."); return; }
 
         var context = _matAssignContextCombo.SelectedItem?.ToString() ?? "both";
@@ -1836,21 +2026,10 @@ public sealed partial class MainForm
                 AppendLog("Apply material stopped: set a base character before assigning materials.");
                 return;
             }
-            try
-            {
-                await MarkDeclarativeStageIncompleteAsync(_currentProject, projectRoot);
-                if (!PatchNameMapsWithUAssetApi())
-                {
-                    AppendLog("Apply material stopped: no clean editable base stage could be created.");
-                    return;
-                }
-            }
-            catch (Exception ex)
-            {
-                AppendLog("Apply material stopped while creating the clean editable stage: " + ex.Message);
-                Dialog.Error(this, "Material stage failed", ex.Message);
-                return;
-            }
+            // The gated declarative rebuild below owns creation of a missing clean base. Keeping
+            // that write inside RebuildGate prevents a material click from racing a saved restore
+            // or another name-map rebuild before the assignment transaction has even started.
+            AppendLog("Apply material: the clean editable stage will be created during the transactional rebuild.");
         }
 
         NativeSuitProject previousProjectSnapshot;

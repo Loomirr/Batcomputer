@@ -330,6 +330,20 @@ public sealed partial class MainForm : AdaptiveForm
     /// </summary>
     private void RefreshAllViews()
     {
+        // Opening a saved declarative suit replays its generated stage asynchronously. Do not let
+        // the immediate project-changed notification parse GraftedPartStage while the restore is
+        // snapshotting/replacing those same files. The restore completion drains this pending
+        // refresh once every active saved-suit restore is finished.
+        if (DeferStageBackedRefreshWhileLoadedProjectRestores())
+        {
+            return;
+        }
+
+        RefreshAllViewsNow();
+    }
+
+    private void RefreshAllViewsNow()
+    {
         SyncProjectFieldsForViews();
         UpdateToyboxChips();
         PopulateToyboxSlots();
@@ -809,6 +823,11 @@ public sealed partial class MainForm : AdaptiveForm
     /// </summary>
     private void EditNativeIdentity()
     {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Editing the suit identity"))
+        {
+            return;
+        }
+
         if (_currentProject is null)
         {
             AppendLog("Set or load a base suit first, then set its native identity.");
@@ -840,6 +859,11 @@ public sealed partial class MainForm : AdaptiveForm
 
     private void LoadSuit()
     {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Opening another suit"))
+        {
+            return;
+        }
+
         var svc = new SuitProjectService(_projectRootText.Text.Trim());
         using var dlg = new LoadSuitDialog(svc.ListProjects(), DeleteSavedSuit);
         if (dlg.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(dlg.SelectedPath))
@@ -877,6 +901,11 @@ public sealed partial class MainForm : AdaptiveForm
     /// </summary>
     private void StartNewSuit(Action<NativeSuitProject>? afterCreated = null)
     {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Starting a new suit"))
+        {
+            return;
+        }
+
         if (!Dialog.Confirm(this,
                 "Start a new suit?",
                 "The editor will reset to a blank suit. Your current suit stays saved in its own file — reopen it any time with 'Open suit'.",
@@ -1010,7 +1039,11 @@ public sealed partial class MainForm : AdaptiveForm
     private static string? ResolveCutsceneSibling(string playablePackage)
     {
         var extracted = AppSettings.Current.EffectiveExtractedContentRoot();
-        var playableDisk = Path.Combine(extracted, playablePackage["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar) + ".uasset");
+        var playableDisk = ExtractedPackagePathService.ResolvePackageUasset(extracted, playablePackage);
+        if (string.IsNullOrWhiteSpace(playableDisk))
+        {
+            return null;
+        }
         var folder = Path.GetDirectoryName(playableDisk);
         if (folder is null || !Directory.Exists(folder))
         {
@@ -1032,28 +1065,41 @@ public sealed partial class MainForm : AdaptiveForm
     }
 
     /// <summary>
-    /// Resolves an MI /Game path to its .uasset on disk. User-made MIs live in
-    /// the export content root; base-game MIs in the extracted content root. We
+    /// Resolves an MI package path to its .uasset on disk. User-made /Game MIs live in
+    /// the export content root; base-game and Game Feature MIs live in extracted mounts. We
     /// try both, preferring the expected root for the tile kind.
     /// </summary>
     internal static string? ResolveMiDiskPath(string miGamePath, bool preferExport)
     {
         var pkg = miGamePath.Contains('.') ? miGamePath[..miGamePath.IndexOf('.')] : miGamePath;
-        if (!pkg.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+        if (!ExtractedPackagePathService.IsContentPackagePath(pkg))
         {
             return null;
         }
-        var rel = pkg["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar) + ".uasset";
         var export = AppSettings.Current.EffectiveExportContentRoot();
         var extracted = AppSettings.Current.EffectiveExtractedContentRoot();
-        var roots = preferExport ? new[] { export, extracted } : new[] { extracted, export };
-        foreach (var root in roots)
+
+        string? ExportCandidate()
         {
-            if (string.IsNullOrWhiteSpace(root)) continue;
-            var p = Path.Combine(root, rel);
-            if (File.Exists(p)) return p;
+            if (string.IsNullOrWhiteSpace(export) ||
+                !pkg.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+            var relative = pkg["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar) + ".uasset";
+            var candidate = Path.Combine(export, relative);
+            return File.Exists(candidate) ? candidate : null;
         }
-        return null;
+
+        string? ExtractedCandidate()
+        {
+            var candidate = ExtractedPackagePathService.ResolvePackageUasset(extracted, pkg);
+            return !string.IsNullOrWhiteSpace(candidate) && File.Exists(candidate) ? candidate : null;
+        }
+
+        return preferExport
+            ? ExportCandidate() ?? ExtractedCandidate()
+            : ExtractedCandidate() ?? ExportCandidate();
     }
 
     private static string Capitalize(string s) => string.IsNullOrEmpty(s) ? s : char.ToUpper(s[0]) + s[1..];
@@ -1258,8 +1304,16 @@ public sealed partial class MainForm : AdaptiveForm
         RefreshToyboxTiles();
     }
 
-    private bool DeleteSavedSuit(SuitProjectService.ProjectSummary summary, bool deleteFromGame, bool deleteFromTool)
+    private bool DeleteSavedSuit(
+        SuitProjectService.ProjectSummary summary,
+        bool deleteFromGame,
+        bool deleteFromTool)
     {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Deleting the saved suit"))
+        {
+            return false;
+        }
+
         var svc = new SuitProjectService(_projectRootText.Text.Trim());
         var project = svc.LoadProject(summary.Path);
         if (project is null)
@@ -1968,24 +2022,39 @@ public sealed partial class MainForm : AdaptiveForm
         _loadIndexButton.Click += (_, _) => LoadIndex();
         _buildPartIndexButton.Click += async (_, _) => await BuildPartIndexAsync();
         _useRecommendedButton.Click += (_, _) => UseRecommendedPlan();
-        _saveProjectButton.Click += (_, _) => SaveProject();
-        _createPatchPlanButton.Click += (_, _) => CreatePatchPlan();
-        _stageButton.Click += (_, _) => StageUnpatchedFiles();
+        _saveProjectButton.Click += async (_, _) => await SaveProjectAsync();
+        _createPatchPlanButton.Click += async (_, _) => await CreatePatchPlanAsync();
+        _stageButton.Click += async (_, _) => await StageUnpatchedFilesAsync();
         _uassetNameMapPatchButton.Click += async (_, _) =>
         {
+            if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("rebuild the name-map stage"))
+            {
+                return;
+            }
+
             EnsureProject();
             if (_currentProject is null)
             {
                 return;
             }
 
+            var project = _currentProject;
+            var projectRoot = _projectRootText.Text.Trim();
+            var workspaceWasEnabled = _mainWorkspaceHost.Enabled;
             await RebuildGate.WaitAsync();
             try
             {
-                await MarkDeclarativeStageIncompleteAsync(_currentProject, _projectRootText.Text.Trim());
-                if (PatchNameMapsWithUAssetApi())
+                if (!ReferenceEquals(project, _currentProject))
                 {
-                    await RebuildGraftStageCoreAsync();
+                    AppendLog("Name-map rebuild stopped because another suit was selected while it was waiting to stage.");
+                    return;
+                }
+
+                _mainWorkspaceHost.Enabled = false;
+                await MarkDeclarativeStageIncompleteAsync(project, projectRoot);
+                if (await PatchNameMapsWithUAssetApiAsync(project, projectRoot))
+                {
+                    await RebuildGraftStageCoreAsync(project, projectRoot);
                 }
             }
             catch (Exception ex)
@@ -1996,6 +2065,7 @@ public sealed partial class MainForm : AdaptiveForm
             finally
             {
                 RebuildGate.Release();
+                _mainWorkspaceHost.Enabled = workspaceWasEnabled;
             }
         };
         _graftTorso2Button.Click += async (_, _) => await GraftTorso2Async();
@@ -2086,16 +2156,12 @@ public sealed partial class MainForm : AdaptiveForm
             return null;
         }
         var full = Path.GetFullPath(filePath);
-        var root = Path.GetFullPath(contentRoot).TrimEnd(Path.DirectorySeparatorChar);
-        if (!full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        var packagePath = ExtractedPackagePathService.PackagePathFromFile(contentRoot, full);
+        if (string.IsNullOrWhiteSpace(packagePath))
         {
-            return null; // must live under the extracted game Content root
+            return null; // must live under a recognized extracted package mount
         }
-        var rel = full[(root.Length + 1)..];
-        var ext = Path.GetExtension(rel);
-        var relNoExt = string.IsNullOrEmpty(ext)
-            ? rel.Replace('\\', '/')
-            : rel[..^ext.Length].Replace('\\', '/');
+        var relNoExt = ExtractedPackagePathService.ContentRelativeFromFile(contentRoot, full) ?? "";
         var uexp = Path.ChangeExtension(full, ".uexp");
         var ubulk = Path.ChangeExtension(full, ".ubulk");
         return new TemplateRecord
@@ -2105,10 +2171,15 @@ public sealed partial class MainForm : AdaptiveForm
             Ubulk = File.Exists(ubulk) ? ubulk : null,
             Stem = Path.GetFileNameWithoutExtension(full),
             ContentRelative = relNoExt,
-            PackagePath = "/Game/" + relNoExt,
+            PackagePath = packagePath,
             Role = role
         };
     }
+
+    internal static TemplateRecord? TemplateFromUassetForTest(
+        string filePath,
+        string role,
+        string contentRoot) => TemplateFromUasset(filePath, role, contentRoot);
 
     private void OpenSettings()
     {
@@ -2320,6 +2391,11 @@ public sealed partial class MainForm : AdaptiveForm
 
     private void UseRecommendedPlan()
     {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Applying the recommended donor plan"))
+        {
+            return;
+        }
+
         if (_recommendedPlan is null)
         {
             LoadIndex();
@@ -2338,6 +2414,11 @@ public sealed partial class MainForm : AdaptiveForm
 
     private void PickPlayableFromGrid()
     {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Changing the playable donor"))
+        {
+            return;
+        }
+
         if (_currentProject is null || _playableGrid.CurrentRow?.DataBoundItem is not CandidateRow row)
         {
             return;
@@ -2355,6 +2436,11 @@ public sealed partial class MainForm : AdaptiveForm
 
     private void PickCutsceneFromGrid()
     {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Changing the cutscene donor"))
+        {
+            return;
+        }
+
         if (_currentProject is null || _cutsceneGrid.CurrentRow?.DataBoundItem is not CandidateRow row)
         {
             return;
@@ -2370,8 +2456,13 @@ public sealed partial class MainForm : AdaptiveForm
         UpdateSelectedLabels();
     }
 
-    private void SaveProject()
+    private async Task SaveProjectAsync()
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("save the project"))
+        {
+            return;
+        }
+
         EnsureProject();
         if (_currentProject is null || _projectService is null)
         {
@@ -2379,13 +2470,22 @@ public sealed partial class MainForm : AdaptiveForm
         }
 
         ReadFieldsIntoProject(_currentProject);
-        var path = _projectService.SaveProject(_currentProject);
+        var project = _currentProject;
+        var projectService = _projectService;
+        var path = await RunWithFileLockRetryAsync(
+            () => projectService.SaveProject(project),
+            "save the project");
         AppendLog($"Saved project: {path}");
     }
 
     /// <summary>Saves the open suit from the visible builder command bar.</summary>
-    private void SaveCurrentSuit()
+    private async Task SaveCurrentSuitAsync()
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("save the current suit"))
+        {
+            return;
+        }
+
         if (_currentProject is null)
         {
             return;
@@ -2395,7 +2495,10 @@ public sealed partial class MainForm : AdaptiveForm
         {
             ReadFieldsIntoProject(_currentProject);
             var projectService = _projectService ??= new SuitProjectService(_projectRootText.Text.Trim());
-            var path = projectService.SaveProject(_currentProject);
+            var project = _currentProject;
+            var path = await RunWithFileLockRetryAsync(
+                () => projectService.SaveProject(project),
+                "save the current suit");
             AppendLog($"Saved suit: {path}");
         }
         catch (Exception ex)
@@ -2405,8 +2508,13 @@ public sealed partial class MainForm : AdaptiveForm
         }
     }
 
-    private void CreatePatchPlan()
+    private async Task CreatePatchPlanAsync()
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("create the patch plan"))
+        {
+            return;
+        }
+
         EnsureProject();
         if (_currentProject is null || _projectService is null)
         {
@@ -2414,26 +2522,47 @@ public sealed partial class MainForm : AdaptiveForm
         }
 
         ReadFieldsIntoProject(_currentProject);
-        var plan = PatchPlanService.CreatePatchPlan(_currentProject);
-        var projectPath = _projectService.SaveProject(_currentProject);
-        var planPath = _projectService.SavePatchPlan(plan);
+        var project = _currentProject;
+        var projectService = _projectService;
+        var plan = PatchPlanService.CreatePatchPlan(project);
+        var paths = await RunWithFileLockRetryAsync(
+            () => (
+                Project: projectService.SaveProject(project),
+                Plan: projectService.SavePatchPlan(plan)),
+            "save the patch plan");
+        var projectPath = paths.Project;
+        var planPath = paths.Plan;
         AppendLog($"Saved project: {projectPath}");
         AppendLog($"Saved patch plan: {planPath}");
     }
 
-    private bool PatchNameMapsWithUAssetApi()
+    private async Task<bool> PatchNameMapsWithUAssetApiAsync(
+        NativeSuitProject? projectOverride = null,
+        string? projectRootOverride = null)
     {
-        EnsureProject();
-        if (_currentProject is null)
+        if (projectOverride is null)
+        {
+            EnsureProject();
+        }
+        var project = projectOverride ?? _currentProject;
+        if (project is null)
         {
             return false;
         }
 
-        ReadFieldsIntoProject(_currentProject);
+        if (ReferenceEquals(project, _currentProject))
+        {
+            ReadFieldsIntoProject(project);
+        }
         try
         {
-            var patchService = new UAssetPatchService(_projectRootText.Text.Trim());
-            var result = patchService.CreateNameMapPatchedStage(_currentProject);
+            var projectRoot = string.IsNullOrWhiteSpace(projectRootOverride)
+                ? _projectRootText.Text.Trim()
+                : projectRootOverride.Trim();
+            var patchService = new UAssetPatchService(projectRoot);
+            var result = await RunWithFileLockRetryAsync(
+                () => patchService.CreateNameMapPatchedStage(project),
+                "build the clean name-map stage");
             AppendLog($"UAssetAPI patch status: {result.Status}");
             AppendLog($"Patched content root: {result.PatchedContentRoot}");
             AppendLog($"Patch report: {result.ReportPath}");
@@ -2457,6 +2586,12 @@ public sealed partial class MainForm : AdaptiveForm
             // final package pass; mutating this clean stage would make later deletes unable
             // to restore the donor state.
             return true;
+        }
+        catch (Exception ex) when (FileLockUtil.IsTransient(ex))
+        {
+            AppendLog("UAssetAPI patch remained locked after retries:");
+            AppendLog(ex.ToString());
+            throw;
         }
         catch (Exception ex)
         {

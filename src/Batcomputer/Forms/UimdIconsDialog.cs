@@ -130,9 +130,10 @@ public sealed partial class UimdIconsDialog : AdaptiveForm
         {
             foreach (var path in new[] { IconMenu, IconSuit, IconLeft, IconRight })
             {
-                if (!string.IsNullOrWhiteSpace(path) && !path.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+                if (!string.IsNullOrWhiteSpace(path) &&
+                    !ExtractedPackagePathService.IsContentPackagePath(path))
                 {
-                    Dialog.Warn(this, "Suit icons", "Each icon path must start with /Game/ or be blank.");
+                    Dialog.Warn(this, "Suit icons", "Each icon path must identify game or installed DLC content, or be blank.");
                     return;
                 }
             }

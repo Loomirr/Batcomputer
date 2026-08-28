@@ -55,10 +55,11 @@ changed or a saved base points at an older extraction.
 
 ### Why did an older suit point at a deleted extract folder?
 
-Older projects saved absolute cache paths alongside their `/Game` package identities. Batcomputer
-now relocates those template records to the active extracted Content folder when the exact package
-is present. If the exact package is missing, refresh character assets and the part index, then
-re-select the visual base and gameplay donor. It will not guess a similarly named package.
+Older projects saved absolute cache paths alongside their Unreal package identities. Batcomputer
+now relocates those template records to the active extraction when the exact `/Game` or installed
+DLC Game Feature package is present. If the exact package is missing, refresh character assets and
+the part index, then re-select the visual base and gameplay donor. It will not guess a similarly
+named package.
 
 ### What is the difference between refreshing game assets and refreshing the part index?
 
@@ -69,13 +70,27 @@ index cannot repair an old or incomplete extraction.
 ### Why are DLC characters or parts missing from the picker?
 
 Run **Refresh game assets** → **Refresh all character assets**, then let Batcomputer rebuild the
-part index. When `Content\DLC` is installed, the refresh mounts it with the base game containers and
-adds the extracted `Content/AdditionalContent` packages to the same active dump. The base picker,
-part inspector, material browsers, and Research then use those DLC assets automatically.
+part index. When `Content\DLC` is installed, the refresh mounts it with the base game containers.
+Batcave display assets usually live under `/Game/AdditionalContent`, while the real playable and
+cutscene Blueprints use separate mounts such as `/DLC_BeyondPack`. Batcomputer reads both layouts,
+including their parts, metadata, animation donors, and materials.
 
-If the refresh says it could not create the temporary base/DLC mount, either keep the workspace on
-the same drive as the game or enable Windows Developer Mode. The mount contains links only; it does
-not copy, move, or change the game's container files.
+Owning a pack is not enough if its container has not downloaded yet. Batcomputer only lists DLC
+that is actually present in the game's `Content\DLC` folder; a future or uninstalled pack cannot be
+indexed. After Steam installs a pack, run the full refresh again.
+
+The workspace may be on a different drive from the game. Batcomputer automatically creates the
+temporary link folder on the game drive when hard links would otherwise cross volumes, then removes
+only that owned folder after extraction. If link creation still fails, confirm Batcomputer can
+create temporary files beside the game `Content` folder. The mount does not copy, move, or change
+the game's container files.
+
+### Why did selecting a saved suit say its staged Blueprint was in use?
+
+Older builds could let the Inspector or 3D preview read `GraftedPartStage` while the same Batcomputer
+window was restoring that stage. The current build waits for the restore before refreshing those
+views and retries short Windows/OneDrive sharing locks for several seconds. Close truly external
+asset viewers if the message persists.
 
 ### What is the safe order for repairing an old suit?
 

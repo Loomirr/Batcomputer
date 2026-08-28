@@ -94,19 +94,26 @@ public static class NativeMetadataDonorService
             CustomSerializationFlags.SkipPreloadDependencyLoading);
     }
 
-    private static string FindPackage(UAsset asset, string assetPrefix) =>
-        asset.GetNameMapIndexList()
-            .Select(name => name.ToString())
-            .FirstOrDefault(name => name.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase) &&
-                                    UnrealPathUtil.AssetName(name).StartsWith(assetPrefix, StringComparison.OrdinalIgnoreCase))
-        ?? "";
+    private static string FindPackage(UAsset asset, string assetPrefix)
+    {
+        var contentRoot = AppSettings.Current.EffectiveExtractedContentRoot();
+        return asset.GetNameMapIndexList()
+            .Select(name => UnrealPathUtil.NormalizePackagePath(name.ToString()))
+            .FirstOrDefault(package =>
+                UnrealPathUtil.AssetName(package).StartsWith(assetPrefix, StringComparison.OrdinalIgnoreCase) &&
+                ExtractedPackagePathService.ResolvePackageUasset(contentRoot, package) is { } path &&
+                File.Exists(path))
+            ?? "";
+    }
 
     private static Icons ReadIcons(UAsset asset)
     {
+        var contentRoot = AppSettings.Current.EffectiveExtractedContentRoot();
         var paths = asset.GetNameMapIndexList()
-            .Select(name => name.ToString())
-            .Where(path => path.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase) &&
-                           path.Contains("T_UI_Icon", StringComparison.OrdinalIgnoreCase))
+            .Select(name => UnrealPathUtil.NormalizePackagePath(name.ToString()))
+            .Where(path => path.Contains("T_UI_Icon", StringComparison.OrdinalIgnoreCase) &&
+                           ExtractedPackagePathService.ResolvePackageUasset(contentRoot, path) is { } uasset &&
+                           File.Exists(uasset))
             .ToList();
 
         string Pick(params string[] terms) => paths.FirstOrDefault(path =>
@@ -131,13 +138,9 @@ public static class NativeMetadataDonorService
 
     private static string PackageToUasset(string packagePath)
     {
-        var package = UnrealPathUtil.NormalizePackagePath(packagePath);
-        if (!package.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
-        {
-            return "";
-        }
-
-        return Path.Combine(AppSettings.Current.EffectiveExtractedContentRoot(),
-            package["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar) + ".uasset");
+        return ExtractedPackagePathService.ResolvePackageUasset(
+                   AppSettings.Current.EffectiveExtractedContentRoot(),
+                   packagePath)
+               ?? "";
     }
 }

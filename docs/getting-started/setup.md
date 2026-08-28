@@ -41,13 +41,16 @@ accept the full extraction offered at the end of setup.
 Both first-time extraction and **Refresh all character assets** include every character asset, the
 full shared `Content/Characters/Materials` tree, shared animation, localization, supporting
 metadata, and the equipment/glider materials stored under `Content/Models/Gadgets`. When installed,
-Batcomputer also mounts `Content\DLC` together with the base containers and extracts the DLC package
-tree under `Content/AdditionalContent`, including its characters, parts, materials, and textures. It
-uses roughly 18 GB or more and can take several minutes.
+Batcomputer also mounts `Content\DLC` together with the base containers. DLC Batcave display assets
+are extracted under `Content\AdditionalContent`; the actual playable and cutscene characters are
+extracted from their own `Plugins\GameFeatures\<pack>\Content` mounts. Both trees feed the base
+picker, part index, material browsers, and Research. Only packs installed on that PC can appear.
+The full extraction uses roughly 18 GB or more and can take several minutes.
 
 The temporary combined mount uses Windows file links and never moves or edits the installed
-containers. If the workspace and game are on different drives, enable Windows Developer Mode so
-Batcomputer can use symbolic links; otherwise keep the extraction workspace on the game drive.
+containers. The workspace and extraction output may be on a different drive: Batcomputer places
+the disposable link folder on the game drive when needed, then removes it after extraction. Normal
+NTFS game installs do not require Windows Developer Mode.
 
 Batcomputer reads the **active extracted Content** path shown in Setup. An old or empty
 `ExtractedPakData` folder beside a previous portable build is not an extraction destination unless

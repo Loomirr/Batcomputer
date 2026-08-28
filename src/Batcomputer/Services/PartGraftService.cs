@@ -2926,13 +2926,8 @@ public sealed class PartGraftService
 
     private static string PackagePathToBasePath(string contentRoot, string packagePath)
     {
-        packagePath = UnrealPathUtil.NormalizePackagePath(packagePath);
-        if (!packagePath.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException($"Only /Game package paths are supported. Got: {packagePath}");
-        }
-
-        return Path.Combine(contentRoot, packagePath["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar));
+        return ExtractedPackagePathService.ResolvePackageBase(contentRoot, packagePath)
+               ?? throw new InvalidOperationException($"Package is not present in a recognized extracted mount: {packagePath}");
     }
 
     private static void CopyDirectory(string sourceDirectory, string destinationDirectory)

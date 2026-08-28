@@ -179,7 +179,7 @@ public sealed class GameDataService
 
     /// <summary>
     /// Derives the character family from any base package path / tag by matching
-    /// the family folder segment (…/Minifig/&lt;Family&gt;/…) or the family name
+    /// the family folder segment (…/Minifig|Smallfig/&lt;Family&gt;/…) or the family name
     /// inside a pawn tag (Pawns.Playable.&lt;Family&gt;.…) / BP name.
     /// </summary>
     public GameDataFamily? FamilyForBasePath(string? basePathOrTag)
@@ -190,12 +190,19 @@ public sealed class GameDataService
         }
 
         var text = basePathOrTag.Replace('\\', '/');
-        foreach (var family in Db.Families)
+        var assetName = UnrealPathUtil.AssetName(text);
+        var compactAssetName = new string(assetName.Where(char.IsLetterOrDigit).ToArray());
+        foreach (var family in Db.Families.OrderByDescending(candidate => candidate.Name.Length))
         {
-            // /Minifig/Batman/ segment, or ".Batman." / "_Batman_" token.
+            // /Minifig/Batman/ or /Smallfig/Batman/ segment, a tag token, or a
+            // compact cooked BP token such as RobinDickGrayson for Robin_DickGrayson.
+            var compactFamily = new string(family.Name.Where(char.IsLetterOrDigit).ToArray());
             if (text.Contains($"/Minifig/{family.Name}/", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains($"/Smallfig/{family.Name}/", StringComparison.OrdinalIgnoreCase) ||
                 text.Contains($".{family.Name}.", StringComparison.OrdinalIgnoreCase) ||
-                text.Contains($"_{family.Name}_", StringComparison.OrdinalIgnoreCase))
+                text.Contains($"_{family.Name}_", StringComparison.OrdinalIgnoreCase) ||
+                (!string.IsNullOrWhiteSpace(compactFamily) &&
+                 compactAssetName.Contains(compactFamily, StringComparison.OrdinalIgnoreCase)))
             {
                 return family;
             }

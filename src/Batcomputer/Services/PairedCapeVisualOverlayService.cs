@@ -692,8 +692,8 @@ internal static class PairedCapeVisualOverlayService
             project.VisualSourceTemplate?.PackagePath ?? "");
         var gameplay = UnrealPathUtil.NormalizePackagePath(
             project.BaseProfile?.GameplayDonorPackage ?? project.PlayableTemplate?.PackagePath ?? "");
-        return visual.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase) &&
-               gameplay.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase);
+        return BaseEligibilityService.IsVisualCharacterPackage(visual) &&
+               BaseEligibilityService.IsGameplayDonorPackage(gameplay);
     }
 
     private static string DonorPairKey(string? packagePath)
@@ -718,10 +718,7 @@ internal static class PairedCapeVisualOverlayService
 
     private static string PackageToUasset(string contentRoot, string packagePath)
     {
-        var package = UnrealPathUtil.NormalizePackagePath(packagePath);
-        return package.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase)
-            ? Path.Combine(contentRoot, package["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar)) + ".uasset"
-            : "";
+        return ExtractedPackagePathService.ResolvePackageUasset(contentRoot, packagePath) ?? "";
     }
 
     private static bool SamePackage(string? left, string? right) =>
@@ -730,5 +727,7 @@ internal static class PairedCapeVisualOverlayService
             StringComparison.OrdinalIgnoreCase);
 
     private static bool ValidGamePackage(string? package) =>
-        UnrealPathUtil.NormalizePackagePath(package ?? "").StartsWith("/Game/", StringComparison.OrdinalIgnoreCase);
+        UnrealPathUtil.NormalizePackagePath(package ?? "") is { Length: > 1 } normalized &&
+        normalized.StartsWith('/') &&
+        !normalized.StartsWith("/Script/", StringComparison.OrdinalIgnoreCase);
 }

@@ -31,22 +31,49 @@ internal static class FileLockUtil
     /// </summary>
     internal static bool IsTransient(Exception? error)
     {
-        for (var current = error; current is not null; current = current.InnerException)
+        if (error is null)
         {
+            return false;
+        }
+
+        var pending = new Stack<Exception>();
+        var visited = new HashSet<Exception>(ReferenceEqualityComparer.Instance);
+        pending.Push(error);
+
+        while (pending.Count > 0)
+        {
+            var current = pending.Pop();
+            if (!visited.Add(current))
+            {
+                continue;
+            }
+
             if (current is TransientFileLockException)
             {
                 return true;
             }
 
-            if (current is not IOException io)
+            if (current is AggregateException aggregate)
             {
-                continue;
+                // AggregateException.InnerException exposes only its first branch. Lock failures
+                // are often paired with rollback/cleanup failures, so inspect every branch.
+                foreach (var inner in aggregate.InnerExceptions)
+                {
+                    pending.Push(inner);
+                }
+            }
+            else if (current.InnerException is not null)
+            {
+                pending.Push(current.InnerException);
             }
 
-            var win32Code = io.HResult & 0xFFFF;
-            if (win32Code is SharingViolation or LockViolation)
+            if (current is IOException io)
             {
-                return true;
+                var win32Code = io.HResult & 0xFFFF;
+                if (win32Code is SharingViolation or LockViolation)
+                {
+                    return true;
+                }
             }
         }
         return false;

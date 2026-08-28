@@ -60,8 +60,12 @@ public static class ModelPreviewService
         IEnumerable<string>? looseContentRoots = null)
     {
         // Asset paths use mixed casing, so preview lookups stay case-insensitive.
+        var paks = new DirectoryInfo(paksDir);
+        var dlcRoot = new DirectoryInfo(GameAssetRefreshService.DlcRootForPaksRoot(paks.FullName));
         var provider = new DefaultFileProvider(
-            paksDir, BaseGamePakSource.ShippedContainerSearchOption,
+            paks,
+            dlcRoot.Exists ? [dlcRoot] : [],
+            BaseGamePakSource.ShippedContainerSearchOption,
             versions: new VersionContainer(EGame.GAME_UE5_6),
             pathComparer: StringComparer.OrdinalIgnoreCase);
         provider.MappingsContainer = new FileUsmapTypeMappingsProvider(usmapPath);
@@ -1148,7 +1152,7 @@ public static class ModelPreviewService
         }
 
         var textures = info.TextureParams
-            .Where(texture => texture.ObjectPath.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+            .Where(texture => ExtractedPackagePathService.IsContentPackagePath(texture.ObjectPath))
             .GroupBy(texture => texture.Name, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
                 group => group.Key,
@@ -1195,10 +1199,34 @@ public static class ModelPreviewService
         {
             normalized = normalized[..^".uasset".Length];
         }
-        if (normalized.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase) ||
+        var extractedPackage = ExtractedPackagePathService.PackagePathFromFile(
+            AppSettings.Current.EffectiveExtractedContentRoot(),
+            normalized);
+        if (!string.IsNullOrWhiteSpace(extractedPackage))
+        {
+            return extractedPackage;
+        }
+        if (ExtractedPackagePathService.IsContentPackagePath(normalized) ||
             normalized.StartsWith("LEGOBatmanLotDK/Content/", StringComparison.OrdinalIgnoreCase))
         {
             return normalized;
+        }
+
+        const string gameFeaturesMarker = "/Plugins/GameFeatures/";
+        var gameFeaturesIndex = normalized.IndexOf(gameFeaturesMarker, StringComparison.OrdinalIgnoreCase);
+        if (gameFeaturesIndex >= 0)
+        {
+            var pluginAndPath = normalized[(gameFeaturesIndex + gameFeaturesMarker.Length)..];
+            var contentMarker = pluginAndPath.IndexOf("/Content/", StringComparison.OrdinalIgnoreCase);
+            if (contentMarker > 0)
+            {
+                var plugin = pluginAndPath[..contentMarker];
+                var relative = pluginAndPath[(contentMarker + "/Content/".Length)..];
+                if (!string.IsNullOrWhiteSpace(plugin) && !string.IsNullOrWhiteSpace(relative))
+                {
+                    return "/" + plugin + "/" + relative;
+                }
+            }
         }
 
         const string contentRoot = "LEGOBatmanLotDK/Content/";
@@ -1342,7 +1370,7 @@ public static class ModelPreviewService
         {
             Console.WriteLine($"  saved socket profiles: {socketProfiles.Count} bundled rig profile(s)");
         }
-        var provider = MakeProvider(paksDir, usmapPath, looseContentRoots);
+        using var provider = MakeProvider(paksDir, usmapPath, looseContentRoots);
         var resolvedComponents = ResolveVisualBlueprintComponents(provider, bpPath);
         var stagedComponents = string.IsNullOrWhiteSpace(options.StagedPlayablePath)
             ? Array.Empty<ResolvedBlueprintComponent>()
@@ -1568,8 +1596,12 @@ public static class ModelPreviewService
 
     /// <summary>Exports each mesh to glTF and writes the viewer that loads them into one scene.</summary>
     public static string BuildPreview(string paksDir, string usmapPath, IReadOnlyList<string> objectPaths)
-        => BuildPreviewCore(MakeProvider(paksDir, usmapPath),
+    {
+        using var provider = MakeProvider(paksDir, usmapPath);
+        return BuildPreviewCore(
+            provider,
             objectPaths.Select(p => new PreviewPart(p, AttachToHead: false)).ToList());
+    }
 
     /// <summary>Builds a read-only preview for one indexed native part using its authored component
     /// material overrides when present, otherwise the skeletal/static mesh's own default slots.</summary>
@@ -1596,7 +1628,7 @@ public static class ModelPreviewService
             })
             .Where(material => !string.IsNullOrWhiteSpace(material.Path))
             .ToDictionary(material => material.Slot, material => material.Path);
-        var provider = MakeProvider(paksDir, usmapPath);
+        using var provider = MakeProvider(paksDir, usmapPath);
         var mesh = provider.LoadPackageObject(part.MeshObjectPath);
         var defaults = MeshSlotMaterials(mesh);
         var resolvedMaterials = Enumerable.Range(

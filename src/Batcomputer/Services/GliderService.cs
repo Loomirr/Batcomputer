@@ -817,11 +817,12 @@ public static class GliderService
     {
         lasPackage = "";
         masPackage = "";
-        var playableFamily = CharacterFamilyFromNativeSource(glider.Playable?.SourcePackagePath);
-        var cutsceneFamily = CharacterFamilyFromNativeSource(glider.Cutscene?.SourcePackagePath);
+        var playableFamily = CharacterFamilyFromNativeSource(glider.Playable);
+        var playableIdentity = NativeCharacterIdentity(glider.Playable?.SourcePackagePath);
+        var cutsceneIdentity = NativeCharacterIdentity(glider.Cutscene?.SourcePackagePath);
         if (string.IsNullOrWhiteSpace(playableFamily) ||
-            string.IsNullOrWhiteSpace(cutsceneFamily) ||
-            !playableFamily.Equals(cutsceneFamily, StringComparison.OrdinalIgnoreCase))
+            string.IsNullOrWhiteSpace(playableIdentity) ||
+            !playableIdentity.Equals(cutsceneIdentity, StringComparison.OrdinalIgnoreCase))
         {
             detail =
                 "The Cape + Torso donor pair does not resolve to one native character animation family.";
@@ -834,25 +835,93 @@ public static class GliderService
         return true;
     }
 
-    private static string CharacterFamilyFromNativeSource(string? packagePath)
+    private static string CharacterFamilyFromNativeSource(SavedPartGraftDonor? donor)
     {
-        const string prefix = "/Game/Characters/Minifig/";
+        if (donor is null)
+        {
+            return "";
+        }
+
+        // The plugin's visual folder is not always the runtime animation-family name (for
+        // example a DLC Robin can still inherit DickGrayson's base-game archetype). Prefer the
+        // actual playable donor graph whenever its extracted bytes are available.
+        var detectedFamily = DetectAnimationFamily(donor.TemplateUasset, donor.SourcePackagePath);
+        return !string.IsNullOrWhiteSpace(detectedFamily)
+            ? detectedFamily
+            : NativeCharacterFolder(donor.SourcePackagePath);
+    }
+
+    private static string DetectAnimationFamily(string? sourceUasset, string? sourcePackagePath)
+    {
+        try
+        {
+            var extractedRoot = AppSettings.Current.EffectiveExtractedContentRoot();
+            var playableUasset = !string.IsNullOrWhiteSpace(sourceUasset) && File.Exists(sourceUasset)
+                ? sourceUasset
+                : ExtractedPackagePathService.ResolvePackageUasset(
+                    extractedRoot,
+                    sourcePackagePath ?? "") ?? "";
+            if (!string.IsNullOrWhiteSpace(playableUasset) && File.Exists(playableUasset))
+            {
+                var mappingsPath = AppSettings.Current.EffectiveUsmapPath();
+                var mappings = !string.IsNullOrWhiteSpace(mappingsPath) && File.Exists(mappingsPath)
+                    ? MappingsCache.Load(mappingsPath)
+                    : null;
+                var detected = AnimArchetypeGraftService.DetectDonor(
+                    playableUasset,
+                    extractedRoot,
+                    mappings);
+                if (detected is { Valid: true } && IsSafeFamily(detected.Family))
+                {
+                    return detected.Family;
+                }
+            }
+        }
+        catch
+        {
+            // Keep the saved-project/path fallback below. The final adapter validation still
+            // verifies the exact generated MAS/LAS parent sets before a package can ship.
+        }
+        return "";
+    }
+
+    private static string NativeCharacterIdentity(string? packagePath)
+    {
         var normalized = UnrealPathUtil.NormalizePackagePath(packagePath ?? "");
-        if (!normalized.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        var folder = NativeCharacterFolder(normalized);
+        if (string.IsNullOrWhiteSpace(folder))
         {
             return "";
         }
-        var relative = normalized[prefix.Length..];
-        var slash = relative.IndexOf('/');
-        if (slash <= 0)
-        {
-            return "";
-        }
-        var family = relative[..slash];
-        return family.All(character => char.IsLetterOrDigit(character) || character == '_')
-            ? family
+        var segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var characterIndex = Array.FindIndex(
+            segments,
+            segment => segment.Equals("Characters", StringComparison.OrdinalIgnoreCase));
+        return characterIndex >= 0 && characterIndex + 1 < segments.Length
+            ? segments[0] + "/" + segments[characterIndex + 1] + "/" + folder
             : "";
     }
+
+    private static string NativeCharacterFolder(string? packagePath)
+    {
+        var segments = UnrealPathUtil.NormalizePackagePath(packagePath ?? "")
+            .Split('/', StringSplitOptions.RemoveEmptyEntries);
+        for (var index = 0; index + 2 < segments.Length; index++)
+        {
+            if (!segments[index].Equals("Characters", StringComparison.OrdinalIgnoreCase) ||
+                (!segments[index + 1].Equals("Minifig", StringComparison.OrdinalIgnoreCase) &&
+                 !segments[index + 1].Equals("Smallfig", StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+            return IsSafeFamily(segments[index + 2]) ? segments[index + 2] : "";
+        }
+        return "";
+    }
+
+    private static bool IsSafeFamily(string? family) =>
+        !string.IsNullOrWhiteSpace(family) &&
+        family.All(character => char.IsLetterOrDigit(character) || character == '_');
 
     private static bool ValidateAdapterGrafts(
         SavedPartGraft cosmetic,
@@ -1328,6 +1397,11 @@ public static class GliderService
     /// </summary>
     private static string GliderAnimCharacter(NativeSuitPartRecord part)
     {
+        var detectedFamily = DetectAnimationFamily(part.SourceUasset, part.SourcePackagePath);
+        if (!string.IsNullOrWhiteSpace(detectedFamily))
+        {
+            return detectedFamily;
+        }
         var chr = (part.CharacterFolder ?? "").Trim();
         if (string.IsNullOrWhiteSpace(chr))
         {

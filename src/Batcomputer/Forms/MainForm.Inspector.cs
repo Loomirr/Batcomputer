@@ -89,7 +89,7 @@ public sealed partial class MainForm
         _inspector.Margin = new Padding(3);
         _inspector.RefreshRequested += (_, _) => RefreshInspector();
         _inspector.RoleChanged += (_, _) => RefreshInspector();
-        _inspector.BreakdownRequested += (_, _) => ViewAssetBreakdown(_inspector.Role);
+        _inspector.BreakdownRequested += async (_, _) => await ViewAssetBreakdownAsync(_inspector.Role);
         _inspector.PreflightRequested += (_, _) => RunV2PreflightFromUi();
         _inspector.ResolveMaterialPath = data =>
         {
@@ -254,6 +254,11 @@ public sealed partial class MainForm
     /// </summary>
     private void RefreshInspector()
     {
+        if (DeferStageBackedRefreshWhileLoadedProjectRestores())
+        {
+            return;
+        }
+
         _isRefreshingInspector = true;
         try
         {
@@ -519,8 +524,13 @@ public sealed partial class MainForm
         return $"{pkg}.{leaf}"; // /Game/...Path.ObjectName
     }
 
-    private void ViewAssetBreakdown(string role)
+    private async Task ViewAssetBreakdownAsync(string role)
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("open the asset breakdown"))
+        {
+            return;
+        }
+
         var slotId = _slotIdText.Text.Trim();
         if (string.IsNullOrWhiteSpace(slotId))
         {
@@ -651,6 +661,11 @@ public sealed partial class MainForm
 
     private void VerifyLastGameLogForCurrentSuit()
     {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Verifying the current suit log"))
+        {
+            return;
+        }
+
         EnsureProject();
         if (_currentProject is null)
         {

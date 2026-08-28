@@ -89,13 +89,14 @@ public static class ExtractedMaterialCatalogService
             // Every MaterialInstanceConstant in the current game catalog uses the MI_ package
             // prefix. Restricting the live scan to that convention avoids parsing thousands of
             // unrelated cooked packages on the UI thread while still covering every extracted MI.
-            discovered = Directory
-                .EnumerateFiles(contentRoot, "MI_*.uasset", options)
+            discovered = ExtractedPackagePathService
+                .EnumerateMounts(contentRoot)
+                .SelectMany(mount => Directory.EnumerateFiles(mount.ContentRoot, "MI_*.uasset", options))
                 .Where(path => Path.GetFileNameWithoutExtension(path)
                     .StartsWith("MI_", StringComparison.OrdinalIgnoreCase))
                 .Select(path => new GameDataAsset
                 {
-                    Path = ToGamePackagePath(contentRoot, path),
+                    Path = ExtractedPackagePathService.PackagePathFromFile(contentRoot, path) ?? "",
                     Class = "MaterialInstanceConstant",
                 })
                 .Where(asset => !string.IsNullOrWhiteSpace(asset.Path))
@@ -126,21 +127,6 @@ public static class ExtractedMaterialCatalogService
             .DistinctBy(asset => asset.Path, StringComparer.OrdinalIgnoreCase)
             .OrderBy(asset => asset.Path, StringComparer.OrdinalIgnoreCase)
             .ToList();
-    }
-
-    private static string ToGamePackagePath(string contentRoot, string uassetPath)
-    {
-        var relative = Path.GetRelativePath(contentRoot, uassetPath).Replace('\\', '/');
-        if (relative.StartsWith("../", StringComparison.Ordinal) ||
-            relative.Equals("..", StringComparison.Ordinal))
-        {
-            return "";
-        }
-
-        var withoutExtension = relative.EndsWith(".uasset", StringComparison.OrdinalIgnoreCase)
-            ? relative[..^".uasset".Length]
-            : relative;
-        return "/Game/" + withoutExtension.TrimStart('/');
     }
 
     private static string NormalizeRoot(string? contentRoot)

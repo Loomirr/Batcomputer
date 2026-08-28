@@ -210,10 +210,10 @@ public sealed class AnimLibraryService
                 }
             }
 
-            // Dependencies: distinct /Game object imports the asset references.
+            // Dependencies: distinct game or installed Game Feature object imports the asset references.
             entry.Dependencies = asset.Imports
                 .Select(i => i.ObjectName.ToString())
-                .Where(n => n.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+                .Where(ExtractedPackagePathService.IsContentPackagePath)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
                 .ToList();
@@ -361,32 +361,33 @@ public sealed class AnimLibraryService
         return "/Game/" + rel;
     }
 
-    /// <summary>Resolves a /Game package path to a cooked .uasset on disk (extracted dump), or null.</summary>
+    /// <summary>Resolves a game, Game Feature, or exported /Game package to a cooked .uasset on disk.</summary>
     private static string? ResolveOnDisk(string packagePath)
     {
         var norm = UnrealPathUtil.NormalizePackagePath(packagePath);
+        if (!ExtractedPackagePathService.IsContentPackagePath(norm))
+        {
+            return null;
+        }
+
+        var extracted = ExtractedPackagePathService.ResolvePackageUasset(
+            AppSettings.Current.EffectiveExtractedContentRoot(),
+            norm);
+        if (!string.IsNullOrWhiteSpace(extracted) && File.Exists(extracted))
+        {
+            return extracted;
+        }
+
         if (!norm.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }
-        var rel = norm["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar);
-        foreach (var root in new[]
-                 {
-                     AppSettings.Current.EffectiveExtractedContentRoot(),
-                     AppSettings.Current.EffectiveExportContentRoot()
-                 })
-        {
-            if (string.IsNullOrWhiteSpace(root))
-            {
-                continue;
-            }
-            var candidate = Path.Combine(root, rel) + ".uasset";
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-        }
-        return null;
+        var exportRoot = AppSettings.Current.EffectiveExportContentRoot();
+        var relative = norm["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar);
+        var exported = string.IsNullOrWhiteSpace(exportRoot)
+            ? ""
+            : Path.Combine(exportRoot, relative) + ".uasset";
+        return File.Exists(exported) ? exported : null;
     }
 
     private static string LeafOf(string packagePath)

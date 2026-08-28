@@ -177,16 +177,15 @@ public sealed class UAssetPatchService
         try
         {
             var package = UnrealPathUtil.NormalizePackagePath(sourcePlayablePackage);
-            if (!package.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+            var extractedRoot = AppSettings.Current.EffectiveExtractedContentRoot();
+            var path = ExtractedPackagePathService.ResolvePackageUasset(extractedRoot, package);
+            if (string.IsNullOrWhiteSpace(path))
             {
                 return null;
             }
-            var path = Path.Combine(
-                AppSettings.Current.EffectiveExtractedContentRoot(),
-                package["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar)) + ".uasset";
             return AnimArchetypeGraftService.DetectDonor(
                 path,
-                AppSettings.Current.EffectiveExtractedContentRoot(),
+                extractedRoot,
                 mappings: null)?.ArchetypePackage;
         }
         catch
@@ -379,7 +378,7 @@ public sealed class UAssetPatchService
             TargetPackagePath = request.TargetPackagePath
         };
 
-        try
+        ExecutePackagePatchOperation(result, () =>
         {
             var sourceBase = PackagePathToBasePath(unpatchedContentRoot, request.TargetPackagePath);
             var targetBase = PackagePathToBasePath(patchedContentRoot, request.TargetPackagePath);
@@ -437,13 +436,40 @@ public sealed class UAssetPatchService
             asset.Write(targetBase + ".uasset");
             result.Written = true;
             result.Success = true;
+        });
+
+        return result;
+    }
+
+    private static void ExecutePackagePatchOperation(
+        UAssetPackagePatchResult result,
+        Action operation)
+    {
+        try
+        {
+            operation();
+        }
+        catch (Exception ex) when (FileLockUtil.IsTransient(ex))
+        {
+            throw new TransientFileLockException(
+                $"The {result.Role} name-map package '{result.TargetPackagePath}' is temporarily locked.",
+                ex);
         }
         catch (Exception ex)
         {
             result.Success = false;
             result.Error = ex.ToString();
         }
+    }
 
+    internal static UAssetPackagePatchResult ExecutePackagePatchOperationForTest(Action operation)
+    {
+        var result = new UAssetPackagePatchResult
+        {
+            Role = "test",
+            TargetPackagePath = "/Game/Tests/BP_LockFixture",
+        };
+        ExecutePackagePatchOperation(result, operation);
         return result;
     }
 

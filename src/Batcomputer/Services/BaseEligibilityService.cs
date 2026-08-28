@@ -12,7 +12,8 @@ public static class BaseEligibilityService
     public static bool IsVisualCharacterPackage(string? packagePath)
     {
         var package = UnrealPathUtil.NormalizePackagePath(packagePath ?? "");
-        if (!package.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase) ||
+        if (!package.StartsWith('/') ||
+            package.StartsWith("/Script/", StringComparison.OrdinalIgnoreCase) ||
             !package.Contains("/Characters/", StringComparison.OrdinalIgnoreCase) ||
             package.Contains("/BP_Master/", StringComparison.OrdinalIgnoreCase))
         {

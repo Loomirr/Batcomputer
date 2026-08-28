@@ -276,9 +276,9 @@ public sealed class ModReleaseValidationService
         {
             var path = UnrealPathUtil.NormalizePackagePath(rawPath ?? "");
             if (string.IsNullOrWhiteSpace(path)) continue;
-            if (!path.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+            if (!ExtractedPackagePathService.IsContentPackagePath(path))
             {
-                result.AddError("icons", $"The {slot} icon is not a /Game package path.", suitId);
+                result.AddError("icons", $"The {slot} icon is not a valid game or installed DLC content package.", suitId);
             }
             else if (path.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase) && !generated.Contains(path))
             {
@@ -300,7 +300,8 @@ public sealed class ModReleaseValidationService
         {
             var package = UnrealPathUtil.NormalizePackagePath(assignment.MiPackagePath ?? "");
             var target = string.IsNullOrWhiteSpace(assignment.Component) ? "an unnamed component" : assignment.Component;
-            if (string.IsNullOrWhiteSpace(package) || !package.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrWhiteSpace(package) ||
+                !ExtractedPackagePathService.IsContentPackagePath(package))
             {
                 result.AddError("material", $"{target} has no valid material package path.", suitId);
                 continue;

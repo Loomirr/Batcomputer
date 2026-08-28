@@ -307,7 +307,8 @@ public sealed class MaterialCatalogPicker : AdaptiveForm
     }
 
     private static bool IsCharacterMaterial(string packagePath) =>
-        packagePath.StartsWith("/Game/Characters/", StringComparison.OrdinalIgnoreCase);
+        ExtractedPackagePathService.IsContentPackagePath(packagePath) &&
+        packagePath.Contains("/Characters/", StringComparison.OrdinalIgnoreCase);
 
     private bool MatchesPartType(GameDataAsset asset, string partType)
     {

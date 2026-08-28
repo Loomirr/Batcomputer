@@ -15,6 +15,11 @@ namespace Batcomputer;
 /// </summary>
 public sealed class GameAssetRefreshService
 {
+    private const string OutputLocalCombinedMountDirectoryName = ".retoc-base-and-dlc-input";
+    private const string GameLocalCombinedMountDirectoryPrefix = ".batcomputer-retoc-base-and-dlc-input-";
+    private const string CombinedMountOwnershipMarkerName = ".batcomputer-owned-retoc-mount";
+    private const string CombinedMountOwnershipMarkerContents = "Batcomputer temporary retoc container mount v1";
+
     public const string RetocEngineVersion = "UE5_6";
     public const string CharacterGadgetFilter = "Content/Models/Gadgets/";
     public const string CharacterMaterialsFilter = "Content/Characters/Materials/";
@@ -22,6 +27,9 @@ public sealed class GameAssetRefreshService
     // intentionally a package filter, not a physical Content directory: the
     // installed DLC IoStore containers live beside Paks in Content\DLC.
     public const string AdditionalContentFilter = "Content/AdditionalContent/";
+    // Actual DLC playables/cutscenes mount outside /Game. retoc writes them beside the base
+    // Content tree at LEGOBatmanLotDK/Plugins/GameFeatures/<Plugin>/Content.
+    public const string GameFeatureContentFilter = "Plugins/GameFeatures/";
     public const string CapeTransparentMaterialFilter =
         "Content/Art/TechnicalArt/Optimisation/M_Cape_Transparent";
 
@@ -79,6 +87,9 @@ public sealed class GameAssetRefreshService
         // bases, materials, attachments, meshes and supporting metadata stay
         // together in the active extracted Content dump.
         AdditionalContentFilter,
+        // Include complete installed DLC plugins, not only the /Game/AdditionalContent Batcave
+        // display assets that happen to accompany them.
+        GameFeatureContentFilter,
         CapeTransparentMaterialFilter,
         // Keep the clean-install viewer self-sufficient without broadening this into
         // a Red Brick authoring or collectables extraction profile.
@@ -102,7 +113,7 @@ public sealed class GameAssetRefreshService
         CapeTransparentMaterialFilter,
         "Content/UI/",
         "Content/Localization/StringTables/",
-        "Content/Plugins/GameFeatures/",
+        GameFeatureContentFilter,
         ViewerBaseGameRedBrickPaletteService.RetocFilter,
     };
 
@@ -129,6 +140,9 @@ public sealed class GameAssetRefreshService
         public int BaseContainersMounted { get; set; }
         public int DlcContainersMounted { get; set; }
         public int AdditionalContentAssets { get; set; }
+        public int GameFeatureAssets { get; set; }
+        public int DlcPlayableAssets { get; set; }
+        public int DlcCutsceneAssets { get; set; }
         public List<string> Warnings { get; } = new();
         public List<string> Logs { get; } = new();
     }
@@ -316,7 +330,11 @@ public sealed class GameAssetRefreshService
             throw new InvalidDataException($"retoc completed, but no LEGOBatmanLotDK\\Content folder was produced under {outputRoot}.");
         }
 
-        var assets = Directory.EnumerateFiles(contentRoot, "*.uasset", SearchOption.AllDirectories).ToList();
+        var packageMounts = ExtractedPackagePathService.EnumerateMounts(contentRoot);
+        var assets = packageMounts
+            .SelectMany(mount => Directory.EnumerateFiles(mount.ContentRoot, "*.uasset", SearchOption.AllDirectories))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
         ValidateProfileCoverage(profile, contentRoot, result);
         var pairs = assets.Count(path => File.Exists(Path.ChangeExtension(path, ".uexp")));
         result.ContentRoot = contentRoot;
@@ -329,6 +347,17 @@ public sealed class GameAssetRefreshService
         result.AdditionalContentAssets = Directory.Exists(additionalContentRoot)
             ? Directory.EnumerateFiles(additionalContentRoot, "*.uasset", SearchOption.AllDirectories).Count()
             : 0;
+        var pluginMounts = packageMounts
+            .Where(mount => !mount.PackageRoot.Equals("/Game", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var pluginAssets = pluginMounts
+            .SelectMany(mount => Directory.EnumerateFiles(mount.ContentRoot, "*.uasset", SearchOption.AllDirectories))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        result.GameFeatureAssets = pluginAssets.Count;
+        (result.DlcPlayableAssets, result.DlcCutsceneAssets) =
+            CountDlcCharacterBlueprints(contentRoot, pluginAssets);
+        EnsureDlcCharacterCoverageForActivation(result);
         if (result.DlcContainersMounted > 0)
         {
             if (result.AdditionalContentAssets == 0)
@@ -341,6 +370,18 @@ public sealed class GameAssetRefreshService
             {
                 result.Logs.Add($"DLC AdditionalContent assets={result.AdditionalContentAssets}");
             }
+
+            if (result.GameFeatureAssets == 0)
+            {
+                result.Warnings.Add(
+                    "DLC containers were mounted, but no Game Feature plugin assets were extracted. " +
+                    "DLC Batcave displays may appear while their playable characters remain unavailable; run Full refresh again and verify the installed DLC files.");
+            }
+            else
+            {
+                result.Logs.Add(
+                    $"DLC Game Feature assets={result.GameFeatureAssets}, playables={result.DlcPlayableAssets}, cutscenes={result.DlcCutsceneAssets}");
+            }
         }
 
         // Developer research can include thousands of animation/UI/collectable
@@ -349,9 +390,9 @@ public sealed class GameAssetRefreshService
         // access violation inside a native compression dependency. Character
         // assets remain fully validated; the broad research-only folders are
         // extraction data and are intentionally left for on-demand inspection.
+        var characterRoots = CharacterContentRootService.Enumerate(contentRoot);
         var assetsToValidate = profile == RefreshProfile.DeveloperResearch
-            ? assets.Where(path => Path.GetRelativePath(contentRoot, path)
-                .StartsWith("Characters" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            ? assets.Where(path => characterRoots.Any(root => FileSystemPathUtil.IsWithinDirectory(path, root)))
                 .ToList()
             : assets;
         var validationKind = profile == RefreshProfile.DeveloperResearch ? "character" : "extracted";
@@ -373,6 +414,65 @@ public sealed class GameAssetRefreshService
         progress?.Report(new Progress(90, "Complete", "Extraction and validation complete."));
         return result;
     }
+
+    /// <summary>
+    /// Fails closed when retoc exposed the base-mounted DLC presentation assets but omitted the
+    /// separately mounted Game Feature character Blueprints. The caller only activates a refresh
+    /// after <see cref="RefreshAsync"/> returns, so throwing here preserves the user's prior working
+    /// extract instead of replacing it with the exact "Batcave visuals but no playable characters"
+    /// partial state.
+    /// </summary>
+    internal static void EnsureDlcCharacterCoverageForActivation(Result result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        if (result.DlcContainersMounted <= 0 ||
+            result.AdditionalContentAssets <= 0 ||
+            result.DlcPlayableAssets > 0 ||
+            result.DlcCutsceneAssets > 0)
+        {
+            return;
+        }
+
+        throw new InvalidDataException(
+            "DLC containers produced Content\\AdditionalContent assets, but no playable or cutscene " +
+            "character Blueprints were extracted from their Game Feature mounts. Batcomputer kept " +
+            "the previous extracted dump active so DLC Batcave visuals cannot replace the usable " +
+            "character catalog. Verify the installed Content\\DLC files, then run Full refresh again.");
+    }
+
+    private static (int Playables, int Cutscenes) CountDlcCharacterBlueprints(
+        string contentRoot,
+        IEnumerable<string> pluginAssets)
+    {
+        var playables = 0;
+        var cutscenes = 0;
+        foreach (var path in pluginAssets)
+        {
+            var stem = Path.GetFileNameWithoutExtension(path);
+            if (!stem.StartsWith("BP_", StringComparison.OrdinalIgnoreCase) ||
+                ExtractedPackagePathService.PackagePathFromFile(contentRoot, path)?.Contains(
+                    "/Characters/",
+                    StringComparison.OrdinalIgnoreCase) != true)
+            {
+                continue;
+            }
+
+            if (stem.EndsWith("_Playable", StringComparison.OrdinalIgnoreCase))
+            {
+                playables++;
+            }
+            if (stem.Contains("_Cutscene", StringComparison.OrdinalIgnoreCase))
+            {
+                cutscenes++;
+            }
+        }
+
+        return (playables, cutscenes);
+    }
+
+    internal static (int Playables, int Cutscenes) CountDlcCharacterBlueprintsForTest(
+        string contentRoot,
+        IEnumerable<string> pluginAssets) => CountDlcCharacterBlueprints(contentRoot, pluginAssets);
 
     public static IReadOnlyList<string> FiltersFor(RefreshProfile profile) => profile switch
     {
@@ -409,33 +509,104 @@ public sealed class GameAssetRefreshService
     /// </summary>
     internal static string CreateCombinedContainerMount(string paksRoot, string dlcRoot, string outputRoot)
     {
-        var mountRoot = Path.Combine(outputRoot, ".retoc-base-and-dlc-input");
-        Directory.CreateDirectory(mountRoot);
-        var sources = new[] { paksRoot, dlcRoot };
-        foreach (var sourceRoot in sources)
+        var mountRoot = ResolveCombinedContainerMountRoot(paksRoot, outputRoot);
+        var createdMountDirectory = false;
+        var wroteOwnershipMarker = false;
+        try
         {
-            foreach (var source in Directory.EnumerateFiles(sourceRoot, "*", SearchOption.TopDirectoryOnly)
-                         .Where(IsIoStoreContainerFile)
-                         .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+            if (!Directory.Exists(mountRoot))
             {
-                var destination = Path.Combine(mountRoot, Path.GetFileName(source));
-                if (File.Exists(destination))
-                {
-                    throw new InvalidDataException(
-                        $"The base and DLC container folders both contain '{Path.GetFileName(source)}'. " +
-                        "Batcomputer will not guess which one retoc should mount.");
-                }
-
-                CreateContainerLink(destination, source);
+                Directory.CreateDirectory(mountRoot);
+                createdMountDirectory = true;
             }
-        }
+            else if (Directory.EnumerateFileSystemEntries(mountRoot).Any())
+            {
+                throw new IOException($"The temporary retoc mount is not empty: {mountRoot}");
+            }
 
-        if (CountIoStoreContainers(mountRoot) == 0)
+            File.WriteAllText(
+                Path.Combine(mountRoot, CombinedMountOwnershipMarkerName),
+                CombinedMountOwnershipMarkerContents);
+            wroteOwnershipMarker = true;
+
+            var sources = new[] { paksRoot, dlcRoot };
+            foreach (var sourceRoot in sources)
+            {
+                foreach (var source in Directory.EnumerateFiles(sourceRoot, "*", SearchOption.TopDirectoryOnly)
+                             .Where(IsIoStoreContainerFile)
+                             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+                {
+                    var destination = Path.Combine(mountRoot, Path.GetFileName(source));
+                    if (File.Exists(destination))
+                    {
+                        throw new InvalidDataException(
+                            $"The base and DLC container folders both contain '{Path.GetFileName(source)}'. " +
+                            "Batcomputer will not guess which one retoc should mount.");
+                    }
+
+                    CreateContainerLink(destination, source);
+                }
+            }
+
+            if (CountIoStoreContainers(mountRoot) == 0)
+            {
+                throw new InvalidDataException("The temporary base/DLC IoStore mount contains no .utoc containers.");
+            }
+
+            return mountRoot;
+        }
+        catch
         {
-            throw new InvalidDataException("The temporary base/DLC IoStore mount contains no .utoc containers.");
+            if (wroteOwnershipMarker)
+            {
+                TryDeleteCombinedContainerMount(mountRoot);
+            }
+            else if (createdMountDirectory)
+            {
+                try { Directory.Delete(mountRoot, recursive: false); } catch { /* best effort */ }
+            }
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Hard links cannot cross volumes. Keep the historical output-local mount when the extract and
+    /// game share a volume; otherwise put the disposable mount beside the source containers on the
+    /// game volume so ordinary hard links still work without Developer Mode.
+    /// </summary>
+    internal static string ResolveCombinedContainerMountRoot(
+        string paksRoot,
+        string outputRoot,
+        string? uniqueSuffix = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(paksRoot);
+        ArgumentException.ThrowIfNullOrWhiteSpace(outputRoot);
+
+        var fullPaksRoot = Path.GetFullPath(paksRoot.Trim());
+        var fullOutputRoot = Path.GetFullPath(outputRoot.Trim());
+        if (PathsShareVolume(fullPaksRoot, fullOutputRoot))
+        {
+            return Path.Combine(fullOutputRoot, OutputLocalCombinedMountDirectoryName);
         }
 
-        return mountRoot;
+        var contentRoot = Directory.GetParent(fullPaksRoot)?.FullName
+            ?? throw new InvalidDataException($"The game Paks folder has no Content parent: {fullPaksRoot}");
+        var suffix = uniqueSuffix ?? Guid.NewGuid().ToString("N");
+        if (suffix.Length is < 1 or > 64 || suffix.Any(character => !char.IsLetterOrDigit(character)))
+        {
+            throw new ArgumentException("The temporary retoc mount suffix must contain only letters and digits.", nameof(uniqueSuffix));
+        }
+
+        return Path.Combine(contentRoot, GameLocalCombinedMountDirectoryPrefix + suffix);
+    }
+
+    private static bool PathsShareVolume(string firstPath, string secondPath)
+    {
+        var firstRoot = Path.GetPathRoot(Path.GetFullPath(firstPath));
+        var secondRoot = Path.GetPathRoot(Path.GetFullPath(secondPath));
+        return !string.IsNullOrWhiteSpace(firstRoot) &&
+               !string.IsNullOrWhiteSpace(secondRoot) &&
+               firstRoot.Equals(secondRoot, StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsIoStoreContainerFile(string path)
@@ -471,7 +642,8 @@ public sealed class GameAssetRefreshService
             {
                 throw new IOException(
                     "Batcomputer could not create its temporary base/DLC container mount. " +
-                    "Keep the workspace on the game drive, or enable Windows Developer Mode so file links are allowed. " +
+                    "Make sure Batcomputer can create temporary files beside the game Content folder. " +
+                    "Windows Developer Mode is only needed when that drive does not support normal hard links. " +
                     $"Source: {source}",
                     new AggregateException(hardLinkError, symbolicLinkError));
             }
@@ -487,13 +659,30 @@ public sealed class GameAssetRefreshService
 
         try
         {
-            Directory.Delete(mountRoot, recursive: true);
+            var fullMountRoot = Path.GetFullPath(mountRoot);
+            var directoryName = Path.GetFileName(Path.TrimEndingDirectorySeparator(fullMountRoot));
+            var hasOwnedDirectoryName = directoryName.Equals(
+                                            OutputLocalCombinedMountDirectoryName,
+                                            StringComparison.OrdinalIgnoreCase) ||
+                                        directoryName.StartsWith(
+                                            GameLocalCombinedMountDirectoryPrefix,
+                                            StringComparison.OrdinalIgnoreCase);
+            var markerPath = Path.Combine(fullMountRoot, CombinedMountOwnershipMarkerName);
+            if (!hasOwnedDirectoryName ||
+                !File.Exists(markerPath) ||
+                !File.ReadAllText(markerPath).Equals(
+                    CombinedMountOwnershipMarkerContents,
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            Directory.Delete(fullMountRoot, recursive: true);
         }
         catch
         {
-            // It is a disposable child of the new output root. A later refresh
-            // uses a new timestamped root, so a locked cleanup never affects the
-            // active dump or any original game file.
+            // A later refresh uses a new timestamped output or game-local GUID.
+            // Never let a locked cleanup affect the active dump or source files.
         }
     }
 
@@ -627,7 +816,8 @@ public sealed class GameAssetRefreshService
             {
                 if (result.Errors.Count < 100)
                 {
-                    result.Errors.Add($"{Path.GetRelativePath(contentRoot, assetPath)}: {ex.Message}");
+                    var package = ExtractedPackagePathService.PackagePathFromFile(contentRoot, assetPath);
+                    result.Errors.Add($"{package ?? Path.GetRelativePath(contentRoot, assetPath)}: {ex.Message}");
                 }
             }
         }
@@ -700,8 +890,23 @@ public sealed class GameAssetRefreshService
 
     private static string? FindContentRoot(string outputRoot, bool requireCharacters = true)
     {
+        var expected = Path.Combine(outputRoot, "LEGOBatmanLotDK", "Content");
+        if (Directory.Exists(expected) &&
+            (!requireCharacters || Directory.Exists(Path.Combine(expected, "Characters"))))
+        {
+            return expected;
+        }
+
         return Directory
             .EnumerateDirectories(outputRoot, "Content", SearchOption.AllDirectories)
-            .FirstOrDefault(path => !requireCharacters || Directory.Exists(Path.Combine(path, "Characters")));
+            .Where(path => !requireCharacters || Directory.Exists(Path.Combine(path, "Characters")))
+            .OrderBy(path => path.Contains(
+                Path.DirectorySeparatorChar + "Plugins" + Path.DirectorySeparatorChar,
+                StringComparison.OrdinalIgnoreCase) ? 1 : 0)
+            .ThenBy(path => path.Length)
+            .FirstOrDefault();
     }
+
+    internal static string? FindContentRootForTest(string outputRoot, bool requireCharacters = true) =>
+        FindContentRoot(outputRoot, requireCharacters);
 }

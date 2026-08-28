@@ -18,12 +18,18 @@ public sealed class NativeBodyProfileService
     public const string IntentionallyAbsentHeadPolicy = "intentionally-absent";
     public const string SharedSkeleton = "/Game/Characters/LEGOfig/SKEL_LEGOfig";
 
-    public sealed record FileResult(string Role, string Path, bool Success, string Detail);
+    public sealed record FileResult(
+        string Role,
+        string Path,
+        bool Success,
+        string Detail,
+        bool TransientFileLock = false);
 
     public sealed class Result
     {
         public List<FileResult> Files { get; } = new();
         public bool Success => Files.Count == 2 && Files.All(file => file.Success);
+        public bool TransientFileLock => Files.Any(file => file.TransientFileLock);
     }
 
     private sealed record Definition(
@@ -191,7 +197,12 @@ public sealed class NativeBodyProfileService
             }
             catch (Exception ex)
             {
-                result.Files.Add(new FileResult(role, uassetPath, false, ex.Message));
+                result.Files.Add(new FileResult(
+                    role,
+                    uassetPath,
+                    false,
+                    ex.Message,
+                    FileLockUtil.IsTransient(ex)));
             }
         }
 
@@ -251,7 +262,7 @@ public sealed class NativeBodyProfileService
             }
             var current = asset.Imports[currentIndex];
             var name = current.ObjectName.ToString();
-            if (name.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+            if (ExtractedPackagePathService.IsContentPackagePath(name))
             {
                 return name;
             }

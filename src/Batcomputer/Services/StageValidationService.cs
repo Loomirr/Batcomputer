@@ -1757,12 +1757,12 @@ public sealed class StageValidationService
     {
         static string Package(string value) => UnrealPathUtil.NormalizePackagePath(value?.Trim() ?? "");
         static string Stem(string value) => UnrealPathUtil.AssetName(value);
-        static bool IsExactGamePackage(string value) =>
-            value.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase);
+        static bool IsExactContentPackage(string value) =>
+            ExtractedPackagePathService.IsContentPackagePath(value);
 
         var certified = Package(certifiedPackage);
         var certifiedStem = Stem(certified);
-        if (!IsExactGamePackage(certified) ||
+        if (!IsExactContentPackage(certified) ||
             !certifiedStem.StartsWith(categoryPrefix, StringComparison.OrdinalIgnoreCase))
         {
             detail = $"the certified set '{certifiedPackage}' is missing or is not a {categoryPrefix} block";
@@ -1770,14 +1770,14 @@ public sealed class StageValidationService
         }
 
         // Preserve entry cardinality. An empty value means a non-import, null, or an object import
-        // whose outer chain did not resolve to an exact /Game Package; silently filtering it would
+        // whose outer chain did not resolve to an exact content Package; silently filtering it would
         // let malformed ParentSetsArray entries bypass the fail-closed certificate check.
         var source = gameplayParents.Select(Package).ToList();
         var generated = generatedParents.Select(Package).ToList();
-        if (source.Any(parent => !IsExactGamePackage(parent)) ||
-            generated.Any(parent => !IsExactGamePackage(parent)))
+        if (source.Any(parent => !IsExactContentPackage(parent)) ||
+            generated.Any(parent => !IsExactContentPackage(parent)))
         {
-            detail = "one or more ParentSetsArray entries could not be resolved to an exact /Game package";
+            detail = "one or more ParentSetsArray entries could not be resolved to an exact game or installed DLC package";
             return false;
         }
         var sourceCategoryParents = source
@@ -1883,7 +1883,7 @@ public sealed class StageValidationService
             var candidate = outer.ToImport(asset);
             var candidateName = UnrealPathUtil.NormalizePackagePath(candidate.ObjectName.ToString());
             if (candidate.ClassName.ToString().Equals("Package", StringComparison.OrdinalIgnoreCase) &&
-                candidateName.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+                ExtractedPackagePathService.IsContentPackagePath(candidateName))
             {
                 return candidateName;
             }
@@ -1995,9 +1995,7 @@ public sealed class StageValidationService
                     generatedArchetype,
                     FPackageIndex.FromImport(index)),
                 ObjectName: import.ObjectName.ToString()))
-            .Where(reference => reference.PackagePath.StartsWith(
-                "/Game/",
-                StringComparison.OrdinalIgnoreCase))
+            .Where(reference => ExtractedPackagePathService.IsContentPackagePath(reference.PackagePath))
             .ToList();
         static bool HasExact(
             IEnumerable<(string PackagePath, string ObjectName)> values,
@@ -2048,7 +2046,7 @@ public sealed class StageValidationService
             reference.ObjectName.Equals(
                 UnrealPathUtil.AssetName(package),
                 StringComparison.OrdinalIgnoreCase));
-        return expected.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase) &&
+        return ExtractedPackagePathService.IsContentPackagePath(expected) &&
                HasExact(expected) &&
                (authored.Equals(expected, StringComparison.OrdinalIgnoreCase) ||
                 !HasExact(authored)) &&
@@ -2069,14 +2067,9 @@ public sealed class StageValidationService
 
     private static string PackagePathToBasePath(string contentRoot, string packagePath)
     {
-        var package = UnrealPathUtil.NormalizePackagePath(packagePath);
-        if (!package.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException($"Only /Game package paths are supported. Got: {packagePath}");
-        }
-        return Path.Combine(
-            contentRoot,
-            package["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar));
+        return ExtractedPackagePathService.ResolvePackageBase(contentRoot, packagePath)
+               ?? throw new InvalidOperationException(
+                   $"The source package is not available in the active game or installed DLC extract: {packagePath}");
     }
 
     private static void CheckCapeGliderContract(
@@ -2704,7 +2697,7 @@ public sealed class StageValidationService
         for (var depth = 0; depth <= asset.Imports.Count; depth++)
         {
             var name = current.ObjectName.ToString();
-            if (name.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+            if (ExtractedPackagePathService.IsContentPackagePath(name))
             {
                 return UnrealPathUtil.NormalizePackagePath(name);
             }
@@ -2730,7 +2723,7 @@ public sealed class StageValidationService
     }
 
     private static bool ValidExpectedPackage(string? package) =>
-        UnrealPathUtil.NormalizePackagePath(package ?? "").StartsWith("/Game/", StringComparison.OrdinalIgnoreCase);
+        ExtractedPackagePathService.IsContentPackagePath(package);
 
     private static void CheckAdapterComponent(
         UAsset asset,

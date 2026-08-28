@@ -77,6 +77,11 @@ public sealed partial class MainForm
 
     private void OpenIconsDialog()
     {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Editing suit icon paths"))
+        {
+            return;
+        }
+
         if (_currentProject is null)
         {
             AppendLog("Set or load a base suit first (Base → Set base / Open suit).");
@@ -203,6 +208,11 @@ public sealed partial class MainForm
 
     private void UseGeneratedSuitIconAsCover(SuitProjectService.ProjectSummary summary)
     {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Changing the suit cover"))
+        {
+            return;
+        }
+
         var svc = new SuitProjectService(_projectRootText.Text.Trim());
         var project = svc.LoadProject(summary.Path);
         var icon = project?.GeneratedTextures.FirstOrDefault(texture =>
@@ -352,6 +362,11 @@ public sealed partial class MainForm
 
     private void ReimportCurrentSuitTexture(GeneratedTextureEntry texture)
     {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Reimporting the generated texture"))
+        {
+            return;
+        }
+
         EnsureProject();
         if (_currentProject is null || !ReimportGeneratedTextureSource(texture, confirm: true, createBackup: true))
         {
@@ -365,6 +380,11 @@ public sealed partial class MainForm
 
     private async Task ReimportAllCurrentSuitTexturesAsync()
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("reimport all generated textures"))
+        {
+            return;
+        }
+
         EnsureProject();
         if (_currentProject is null || _currentProject.GeneratedTextures.Count == 0)
         {
@@ -613,6 +633,11 @@ public sealed partial class MainForm
 
     private void DeleteGeneratedTexture(GeneratedTextureEntry texture, bool deleteFiles)
     {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Deleting the generated texture"))
+        {
+            return;
+        }
+
         EnsureProject();
         if (_currentProject is null)
         {
@@ -693,6 +718,11 @@ public sealed partial class MainForm
 
     private async Task ImportTextureFromPngAsync()
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("import the generated texture"))
+        {
+            return;
+        }
+
         EnsureProject();
         if (_currentProject is null)
         {
@@ -1260,6 +1290,11 @@ public sealed partial class MainForm
 
     private void ChangeGeneratedTextureCookProfile(GeneratedTextureEntry texture)
     {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Changing the texture cook profile"))
+        {
+            return;
+        }
+
         EnsureProject();
         if (_currentProject is null)
         {
@@ -1464,6 +1499,11 @@ public sealed partial class MainForm
 
     private void RestoreLatestTextureBackup(GeneratedTextureEntry texture)
     {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Restoring the texture backup"))
+        {
+            return;
+        }
+
         EnsureProject();
         if (_currentProject is null)
         {

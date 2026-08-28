@@ -7,7 +7,9 @@ namespace Batcomputer;
 
 public sealed class PartIndexService
 {
-    public const int CurrentIndexSchemaVersion = 4;
+    // v5 adds source records from sibling Game Feature DLC mounts. Treat older caches as stale so
+    // a user's first launch after updating cannot keep an index that silently omits owned DLC.
+    public const int CurrentIndexSchemaVersion = 5;
 
     private static readonly string[] CharacterRigFolders = { "Minifig", "Smallfig" };
 
@@ -251,7 +253,8 @@ public sealed class PartIndexService
             sourcePackagePath = PackagePathFromContentPath(assetPath, contentRoot);
         }
 
-        var contentRelative = Path.GetRelativePath(contentRoot, assetPath);
+        var contentRelative = ExtractedPackagePathService.ContentRelativeFromFile(contentRoot, assetPath)
+                              ?? Path.GetRelativePath(contentRoot, assetPath);
         var stem = Path.GetFileNameWithoutExtension(assetPath);
         var characterFolder = GetCharacterFolder(assetPath, contentRoot);
         var context = DetermineContext(stem);
@@ -462,7 +465,7 @@ public sealed class PartIndexService
 
         var import = imports[importIndex - 1];
         var name = GetString(import, "ObjectName");
-        if (name.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase) ||
+        if ((name.StartsWith('/') && name.IndexOf('/', 1) >= 0) ||
             name.StartsWith("/Script/", StringComparison.OrdinalIgnoreCase))
         {
             return name;
@@ -560,9 +563,7 @@ public sealed class PartIndexService
 
     private static string PackagePathFromContentPath(string assetPath, string contentRoot)
     {
-        var relative = Path.GetRelativePath(contentRoot, assetPath);
-        var noExtension = Path.ChangeExtension(relative, null);
-        return "/Game/" + noExtension.Replace('\\', '/');
+        return ExtractedPackagePathService.PackagePathFromFile(contentRoot, assetPath) ?? "";
     }
 
     private static List<JsonElement> GetArray(JsonElement element, string name)

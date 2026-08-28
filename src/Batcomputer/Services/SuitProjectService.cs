@@ -238,9 +238,10 @@ public sealed class SuitProjectService
             return fallback;
         }
 
-        var relative = GamePackageRelativePath(package)
-            ?? throw new InvalidOperationException($"Authored paired-cape shell must be a /Game package: '{package}'.");
-        var sourceBase = Path.Combine(AppSettings.Current.EffectiveExtractedContentRoot(), relative);
+        var extractedRoot = AppSettings.Current.EffectiveExtractedContentRoot();
+        var sourceBase = ExtractedPackagePathService.ResolvePackageBase(extractedRoot, package)
+            ?? throw new InvalidOperationException(
+                $"Authored paired-cape shell is not available in the active game or installed DLC extract: '{package}'.");
         var uasset = sourceBase + ".uasset";
         if (!File.Exists(uasset))
         {
@@ -254,7 +255,7 @@ public sealed class SuitProjectService
         return new TemplateRecord
         {
             PackagePath = package,
-            ContentRelative = relative,
+            ContentRelative = ExtractedPackagePathService.ContentRelativeFromFile(extractedRoot, uasset) ?? "",
             Stem = UnrealPathUtil.AssetName(package),
             Character = fallback?.Character ?? "",
             Role = playable ? "playable" : "cutscene",
@@ -274,12 +275,11 @@ public sealed class SuitProjectService
         string stageContentRoot)
     {
         var extractedRoot = AppSettings.Current.EffectiveExtractedContentRoot();
-        var donorRel = GamePackageRelativePath(sourcePackagePath);
-        if (donorRel is null)
+        var donorBase = ExtractedPackagePathService.ResolvePackageBase(extractedRoot, sourcePackagePath);
+        if (string.IsNullOrWhiteSpace(donorBase))
         {
             return;
         }
-        var donorBase = Path.Combine(extractedRoot, donorRel);
         if (!File.Exists(donorBase + ".uasset"))
         {
             return; // donor not extracted — request will fail gracefully downstream
@@ -388,19 +388,32 @@ public sealed class SuitProjectService
             return !string.IsNullOrWhiteSpace(record.Uasset) && File.Exists(record.Uasset);
         }
 
-        var relative = GamePackageRelativePath(record.PackagePath) ??
-                       NormalizeContentRelative(record.ContentRelative) ??
-                       ContentRelativeFromSavedPath(record.Uasset);
-        if (string.IsNullOrWhiteSpace(relative))
-        {
-            return false;
-        }
-
         var contentRoot = Path.GetFullPath(activeContentRoot);
-        var sourceBase = Path.GetFullPath(Path.Combine(contentRoot, relative));
-        if (!FileSystemPathUtil.IsWithinDirectory(sourceBase, contentRoot))
+        var savedPackage = UnrealPathUtil.NormalizePackagePath(record.PackagePath);
+        var sourceBase = ExtractedPackagePathService.ResolvePackageBase(contentRoot, savedPackage);
+        if (string.IsNullOrWhiteSpace(sourceBase))
         {
-            return false;
+            // ContentRelative predates mount-aware records. It is safe only when the record has no
+            // package identity (legacy) or explicitly belongs to /Game. Falling back by this
+            // mountless relative path for a missing Game Feature could silently bind the suit to a
+            // different base-game asset with the same Characters/... path.
+            if (!string.IsNullOrWhiteSpace(savedPackage) &&
+                !savedPackage.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+            var relative = NormalizeContentRelative(record.ContentRelative) ??
+                           ContentRelativeFromSavedPath(record.Uasset);
+            if (string.IsNullOrWhiteSpace(relative))
+            {
+                return false;
+            }
+
+            sourceBase = Path.GetFullPath(Path.Combine(contentRoot, relative));
+            if (!FileSystemPathUtil.IsWithinDirectory(sourceBase, contentRoot))
+            {
+                return false;
+            }
         }
 
         var uasset = sourceBase + ".uasset";
@@ -411,9 +424,12 @@ public sealed class SuitProjectService
 
         var uexp = sourceBase + ".uexp";
         var ubulk = sourceBase + ".ubulk";
-        var normalizedRelative = Path.GetRelativePath(contentRoot, sourceBase)
-            .Replace('\\', '/');
-        var package = "/Game/" + normalizedRelative;
+        var normalizedRelative = ExtractedPackagePathService.ContentRelativeFromFile(contentRoot, uasset) ?? "";
+        var package = ExtractedPackagePathService.PackagePathFromFile(contentRoot, uasset);
+        if (string.IsNullOrWhiteSpace(package))
+        {
+            return false;
+        }
         var resolvedUexp = File.Exists(uexp) ? uexp : null;
         var resolvedUbulk = File.Exists(ubulk) ? ubulk : null;
 

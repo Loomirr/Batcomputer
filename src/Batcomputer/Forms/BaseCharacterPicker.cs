@@ -14,7 +14,7 @@ public sealed partial class BaseCharacterPicker : AdaptiveForm
     private List<GameDataAsset> _all = new();
     private List<GameDataAsset> _view = new();
 
-    /// <summary>Selected visual /Game package path (no extension), or null.</summary>
+    /// <summary>Selected visual package path (no extension), or null.</summary>
     public string? SelectedVisualPackage { get; private set; }
 
     /// <summary>
@@ -113,7 +113,8 @@ public sealed partial class BaseCharacterPicker : AdaptiveForm
     /// <summary>
     /// Merges the shipped path catalog with every compatible extracted character Blueprint.
     /// This adds new base-game discoveries as well as DLC visual bases stored below
-    /// /Game/AdditionalContent/.../Characters without requiring a hard-coded DLC list.
+    /// /Game/AdditionalContent and installed Game Feature mounts such as
+    /// /DLC_BeyondPack without requiring a hard-coded DLC list.
     /// </summary>
     internal static List<GameDataAsset> BuildVisualAssetList(
         IEnumerable<GameDataAsset> catalogAssets,
@@ -169,8 +170,9 @@ public sealed partial class BaseCharacterPicker : AdaptiveForm
                     charactersRoot,
                     "BP_*.uasset",
                     SearchOption.AllDirectories))
-                .Select(path => "/Game/" + Path.ChangeExtension(
-                    Path.GetRelativePath(contentRoot, path), null)!.Replace('\\', '/'))
+                .Select(path => ExtractedPackagePathService.PackagePathFromFile(contentRoot, path))
+                .Where(package => !string.IsNullOrWhiteSpace(package))
+                .Select(package => package!)
                 .Where(package => BaseEligibilityService.IsVisualCharacterPackage(package) &&
                                   (!playablesOnly || BaseEligibilityService.IsGameplayDonorPackage(package)))
                 .Distinct(StringComparer.OrdinalIgnoreCase)

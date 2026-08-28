@@ -175,7 +175,7 @@ public sealed partial class MainForm
         try
         {
             var settings = AppSettings.Current;
-            var paks = settings.GamePaksRoot ?? string.Empty;
+            var paks = settings.EffectiveGamePaksRoot();
             var usmap = settings.EffectiveUsmapPath() ?? string.Empty;
             _viewerEntries = CharacterCatalogService.Load(paks, usmap);
             _viewerEntries.AddRange(CharacterCatalogService.CustomSuits(settings.EffectiveProjectRoot()));
@@ -317,25 +317,48 @@ public sealed partial class MainForm
                     AppendLog("Viewer: " + message);
                 }
             }
-            var folder = await Task.Run(() =>
-                project is null
-                    ? ModelPreviewService.BuildPreviewCharacter(
-                        paks,
-                        usmap,
-                        objectPath,
-                        previewOptions: new ModelPreviewService.CharacterPreviewOptions
-                        {
-                            RedBrickTints = allowBaseGameRedBrickPreview
-                                ? ViewerBaseGameRedBrickPaletteService.LoadPreviewTints()
-                                : [],
-                        })
-                    : ModelPreviewService.BuildPreviewSuit(
+            string folder;
+            if (project is null)
+            {
+                folder = await Task.Run(() => ModelPreviewService.BuildPreviewCharacter(
+                    paks,
+                    usmap,
+                    objectPath,
+                    previewOptions: new ModelPreviewService.CharacterPreviewOptions
+                    {
+                        RedBrickTints = allowBaseGameRedBrickPreview
+                            ? ViewerBaseGameRedBrickPaletteService.LoadPreviewTints()
+                            : [],
+                    }));
+            }
+            else
+            {
+                // Custom-project previews overlay GraftedPartStage and therefore read the same
+                // loose packages that a saved-suit restore deletes and rewrites. Hold the shared
+                // stage gate across the background build so neither operation can make the other
+                // trip UAssetAPI's exclusive file-open behavior. Waiting remains asynchronous.
+                await RebuildGate.WaitAsync();
+                try
+                {
+                    // A hidden/replaced viewer may have gone stale while waiting behind a rebuild.
+                    if (loadGeneration != _viewerLoadGeneration || _viewerPanel?.Visible != true)
+                    {
+                        return;
+                    }
+
+                    folder = await Task.Run(() => ModelPreviewService.BuildPreviewSuit(
                         paks,
                         usmap,
                         project,
                         settings.EffectiveProjectRoot(),
                         previewDiagnostics.Enqueue,
                         ViewerBaseGameRedBrickPaletteService.LoadPreviewTints()));
+                }
+                finally
+                {
+                    RebuildGate.Release();
+                }
+            }
             FlushPreviewDiagnostics();
             if (loadGeneration != _viewerLoadGeneration || _viewerPanel?.Visible != true)
             {
@@ -445,6 +468,11 @@ public sealed partial class MainForm
         int expectedViewerGeneration,
         int placementRequest)
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("save the custom-mesh placement"))
+        {
+            return;
+        }
+
         if (args.CustomMeshTransform is not { } transform)
         {
             return;

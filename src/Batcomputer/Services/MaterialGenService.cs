@@ -481,14 +481,14 @@ public sealed class MaterialGenService
             if (outerIndex >= 0 && outerIndex < asset.Imports.Count)
             {
                 var packageName = asset.Imports[outerIndex].ObjectName.ToString();
-                if (packageName.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+                if (ExtractedPackagePathService.IsContentPackagePath(packageName))
                 {
                     return packageName + "." + objectName;
                 }
             }
         }
 
-        return objectName.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase) ? objectName : "";
+        return ExtractedPackagePathService.IsContentPackagePath(objectName) ? objectName : "";
     }
 
     private static void UpdateTextureStreamingData(

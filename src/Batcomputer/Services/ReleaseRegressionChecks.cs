@@ -32,12 +32,106 @@ internal static class ReleaseRegressionChecks
             GameAssetRefreshService.DeveloperResearchFilters.Contains(
                 GameAssetRefreshService.AdditionalContentFilter,
                 StringComparer.OrdinalIgnoreCase) &&
+            GameAssetRefreshService.AllCharacterFilters.Contains(
+                GameAssetRefreshService.GameFeatureContentFilter,
+                StringComparer.OrdinalIgnoreCase) &&
+            GameAssetRefreshService.DeveloperResearchFilters.Contains(
+                GameAssetRefreshService.GameFeatureContentFilter,
+                StringComparer.OrdinalIgnoreCase) &&
             GameAssetRefreshService.DlcRootForPaksRoot(
                     Path.Combine("C:", "Games", "LEGOBatmanLotDK", "Content", "Paks"))
                 .Equals(
                     Path.Combine("C:", "Games", "LEGOBatmanLotDK", "Content", "DLC"),
                     StringComparison.OrdinalIgnoreCase),
-            "first-time and full refresh mount Content/DLC and extract Content/AdditionalContent",
+            "first-time and full refresh mount Content/DLC and extract AdditionalContent plus Game Feature DLC",
+            failures,
+            output);
+
+        var partialDlcDumpRejected = false;
+        try
+        {
+            GameAssetRefreshService.EnsureDlcCharacterCoverageForActivation(
+                new GameAssetRefreshService.Result
+                {
+                    DlcContainersMounted = 4,
+                    AdditionalContentAssets = 12,
+                    GameFeatureAssets = 7,
+                    DlcPlayableAssets = 0,
+                    DlcCutsceneAssets = 0,
+                });
+        }
+        catch (InvalidDataException ex)
+        {
+            partialDlcDumpRejected = ex.Message.Contains(
+                "previous extracted dump active",
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        var completeDlcDumpAccepted = true;
+        var noDlcDumpAccepted = true;
+        try
+        {
+            GameAssetRefreshService.EnsureDlcCharacterCoverageForActivation(
+                new GameAssetRefreshService.Result
+                {
+                    DlcContainersMounted = 4,
+                    AdditionalContentAssets = 12,
+                    GameFeatureAssets = 20,
+                    DlcPlayableAssets = 3,
+                    DlcCutsceneAssets = 3,
+                });
+        }
+        catch
+        {
+            completeDlcDumpAccepted = false;
+        }
+        try
+        {
+            GameAssetRefreshService.EnsureDlcCharacterCoverageForActivation(
+                new GameAssetRefreshService.Result
+                {
+                    DlcContainersMounted = 0,
+                    AdditionalContentAssets = 0,
+                    DlcPlayableAssets = 0,
+                    DlcCutsceneAssets = 0,
+                });
+        }
+        catch
+        {
+            noDlcDumpAccepted = false;
+        }
+        Check(
+            partialDlcDumpRejected && completeDlcDumpAccepted && noDlcDumpAccepted,
+            "refresh rejects Batcave-only partial DLC extraction before replacing the active dump",
+            failures,
+            output);
+
+        var syntheticGamePaks = Path.Combine(
+            "C:\\",
+            "Games",
+            "LEGOBatmanLotDK",
+            "Content",
+            "Paks");
+        var syntheticSameVolumeOutput = Path.Combine("C:\\", "Batcomputer", "Extracts", "Current");
+        var syntheticOtherVolumeOutput = Path.Combine("D:\\", "Batcomputer", "Extracts", "Current");
+        var sameVolumeMountRoot = GameAssetRefreshService.ResolveCombinedContainerMountRoot(
+            syntheticGamePaks,
+            syntheticSameVolumeOutput,
+            "regression");
+        var crossVolumeMountRoot = GameAssetRefreshService.ResolveCombinedContainerMountRoot(
+            syntheticGamePaks,
+            syntheticOtherVolumeOutput,
+            "regression");
+        Check(
+            sameVolumeMountRoot.Equals(
+                Path.Combine(Path.GetFullPath(syntheticSameVolumeOutput), ".retoc-base-and-dlc-input"),
+                StringComparison.OrdinalIgnoreCase) &&
+            crossVolumeMountRoot.Equals(
+                Path.Combine(
+                    Path.GetFullPath(Path.Combine("C:\\", "Games", "LEGOBatmanLotDK", "Content")),
+                    ".batcomputer-retoc-base-and-dlc-input-regression"),
+                StringComparison.OrdinalIgnoreCase),
+            "cross-volume DLC refresh keeps the legacy same-volume mount but places hard links on the game volume when needed",
             failures,
             output);
 
@@ -74,12 +168,22 @@ internal static class ReleaseRegressionChecks
                 File.ReadAllText(Path.Combine(mount, "pakchunk0-Windows.utoc")) == "base-.utoc" &&
                 File.ReadAllText(Path.Combine(mount, "pakchunk101-Windows.utoc")) == "dlc-.utoc";
             GameAssetRefreshService.TryDeleteCombinedContainerMount(mount);
+
+            var markerlessLookalike = Path.Combine(outputRoot, ".retoc-base-and-dlc-input");
+            Directory.CreateDirectory(markerlessLookalike);
+            var markerlessFile = Path.Combine(markerlessLookalike, "do-not-delete.txt");
+            File.WriteAllText(markerlessFile, "not owned by Batcomputer's mount creator");
+            GameAssetRefreshService.TryDeleteCombinedContainerMount(markerlessLookalike);
+            var markerlessLookalikePreserved = Directory.Exists(markerlessLookalike) &&
+                                               File.Exists(markerlessFile);
+            Directory.Delete(markerlessLookalike, recursive: true);
             Check(
                 mountWorks &&
                 !Directory.Exists(mount) &&
+                markerlessLookalikePreserved &&
                 File.Exists(Path.Combine(baseContainers, "pakchunk0-Windows.utoc")) &&
                 File.Exists(Path.Combine(dlcContainers, "pakchunk101-Windows.utoc")),
-                "the disposable retoc input safely combines base and DLC container trios without moving sources",
+                "the owned disposable retoc input cleans up exactly while preserving sources and markerless lookalike folders",
                 failures,
                 output);
         }
@@ -87,7 +191,7 @@ internal static class ReleaseRegressionChecks
         {
             Check(
                 false,
-                "the disposable retoc input safely combines base and DLC container trios without moving sources (" + ex.Message + ")",
+                "the owned disposable retoc input cleans up exactly while preserving sources and markerless lookalike folders (" + ex.Message + ")",
                 failures,
                 output);
         }
@@ -101,26 +205,80 @@ internal static class ReleaseRegressionChecks
             "Batcomputer-character-roots-" + Guid.NewGuid().ToString("N"));
         try
         {
-            var baseCharacters = Path.Combine(characterRootFixture, "Characters");
+            var gameRoot = Path.Combine(characterRootFixture, "LEGOBatmanLotDK");
+            var contentRoot = Path.Combine(gameRoot, "Content");
+            var baseCharacters = Path.Combine(contentRoot, "Characters");
             var dlcCharacters = Path.Combine(
-                characterRootFixture,
+                contentRoot,
                 "AdditionalContent",
                 "DlcPack",
                 "Content",
                 "Characters");
+            var pluginCharacters = Path.Combine(
+                gameRoot,
+                "Plugins",
+                "GameFeatures",
+                "DLC_BeyondPack",
+                "Content",
+                "Characters");
             var unrelatedCharacters = Path.Combine(
-                characterRootFixture,
+                contentRoot,
                 "UnrelatedLargeTree",
                 "Characters");
             Directory.CreateDirectory(baseCharacters);
             Directory.CreateDirectory(dlcCharacters);
+            Directory.CreateDirectory(pluginCharacters);
             Directory.CreateDirectory(unrelatedCharacters);
 
+            var basePlayable = Path.Combine(baseCharacters, "Minifig", "Batman", "BP_Batman_Base_Playable.uasset");
+            var pluginPlayable = Path.Combine(pluginCharacters, "Minifig", "Batman", "BP_Batman_Beyond_Playable.uasset");
+            var pluginCutscene = Path.Combine(pluginCharacters, "Minifig", "Batman", "BP_Batman_Beyond_Cutscene.uasset");
+            var pluginDcmd = Path.Combine(pluginCharacters, "Minifig", "Batman", "DA_DCMD_Batman_Beyond_Playable.uasset");
+            Directory.CreateDirectory(Path.GetDirectoryName(basePlayable)!);
+            Directory.CreateDirectory(Path.GetDirectoryName(pluginPlayable)!);
+            File.WriteAllText(basePlayable, "base");
+            File.WriteAllText(pluginPlayable, "plugin-playable");
+            File.WriteAllText(pluginCutscene, "plugin-cutscene");
+            File.WriteAllText(pluginDcmd, "plugin-dcmd");
+
+            var dlcBlueprintCounts = GameAssetRefreshService.CountDlcCharacterBlueprintsForTest(
+                contentRoot,
+                [pluginPlayable, pluginCutscene, pluginDcmd]);
+
             Check(
-                CharacterContentRootService.Enumerate(characterRootFixture)
+                CharacterContentRootService.Enumerate(contentRoot)
                     .ToHashSet(StringComparer.OrdinalIgnoreCase)
-                    .SetEquals([baseCharacters, dlcCharacters]),
-                "character discovery scans the direct base root and AdditionalContent without walking unrelated extracted folders",
+                    .SetEquals([baseCharacters, dlcCharacters, pluginCharacters]) &&
+                string.Equals(
+                    ExtractedPackagePathService.PackagePathFromFile(contentRoot, pluginPlayable),
+                    "/DLC_BeyondPack/Characters/Minifig/Batman/BP_Batman_Beyond_Playable",
+                    StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(
+                    ExtractedPackagePathService.ResolvePackageUasset(
+                        contentRoot,
+                        "/DLC_BeyondPack/Characters/Minifig/Batman/BP_Batman_Beyond_Playable"),
+                    pluginPlayable,
+                    StringComparison.OrdinalIgnoreCase) &&
+                BaseEligibilityService.IsGameplayDonorPackage(
+                    "/DLC_BeyondPack/Characters/Minifig/Batman/BP_Batman_Beyond_Playable") &&
+                MainForm.TemplateFromUassetForTest(pluginPlayable, "playable", contentRoot)?.PackagePath ==
+                    "/DLC_BeyondPack/Characters/Minifig/Batman/BP_Batman_Beyond_Playable" &&
+                ExtractedPackagePathService.ResolvePackageBase(
+                    contentRoot,
+                    "/DLC_BeyondPack/../DLC_Missing/Characters/BP_Escape") is null &&
+                ExtractedPackagePathService.ResolvePackageBase(
+                    contentRoot,
+                    "/DLC_NotInstalled/Characters/BP_Missing") is null &&
+                BaseCharacterPicker.EnumerateExtractedVisualPackages(contentRoot, playablesOnly: true)
+                    .Contains(
+                        "/DLC_BeyondPack/Characters/Minifig/Batman/BP_Batman_Beyond_Playable",
+                        StringComparer.OrdinalIgnoreCase) &&
+                dlcBlueprintCounts == (Playables: 1, Cutscenes: 1) &&
+                string.Equals(
+                    GameAssetRefreshService.FindContentRootForTest(characterRootFixture),
+                    contentRoot,
+                    StringComparison.OrdinalIgnoreCase),
+                "character discovery and package resolution include real Game Feature DLC mounts without scanning unrelated folders",
                 failures,
                 output);
         }
@@ -128,7 +286,7 @@ internal static class ReleaseRegressionChecks
         {
             Check(
                 false,
-                "character discovery scans only base and AdditionalContent roots (" + ex.Message + ")",
+                "character discovery includes base, AdditionalContent, and Game Feature roots (" + ex.Message + ")",
                 failures,
                 output);
         }
@@ -186,6 +344,16 @@ internal static class ReleaseRegressionChecks
                 "Materials",
                 "MI_RegressionOnlyA_D71A4F9E.uasset");
             var wingsuitMi = Path.Combine(contentA, "Models", "Gadgets", "MI_DECAL_Wingsuit_Test.uasset");
+            var pluginMi = Path.Combine(
+                materialCatalogRoot,
+                "A",
+                "Plugins",
+                "GameFeatures",
+                "DLC_BeyondPack",
+                "Content",
+                "Characters",
+                "Materials",
+                "MI_Beyond_Test.uasset");
             var masterMaterial = Path.Combine(contentA, "Characters", "Materials", "M_Master.uasset");
             var wrongExtension = Path.Combine(contentA, "Characters", "Materials", "MI_NotCooked.txt");
             var replacementMi = Path.Combine(contentB, "Characters", "Materials", "MI_Replacement.uasset");
@@ -194,8 +362,9 @@ internal static class ReleaseRegressionChecks
                          deepCowl,
                          attachmentCowl,
                          faceMi,
-                         topLevelMi,
-                         wingsuitMi,
+                          topLevelMi,
+                          wingsuitMi,
+                          pluginMi,
                          masterMaterial,
                          wrongExtension,
                          replacementMi,
@@ -246,9 +415,9 @@ internal static class ReleaseRegressionChecks
             var attachmentPackage = "/Game/Characters/Attachments/HAT/BatmanCowl_MoldedEyes/Materials/MI_BatmanCowlEyes_Molded_Black";
             var rootAOnlyPackage = "/Game/Characters/Materials/MI_RegressionOnlyA_D71A4F9E";
             var catalogOk =
-                extractedA.Count == 5 &&
-                cachedA.Count == 5 &&
-                refreshedA.Count == 6 &&
+                extractedA.Count == 6 &&
+                cachedA.Count == 6 &&
+                refreshedA.Count == 7 &&
                 refreshedA.Any(asset => asset.Path.EndsWith(
                     "/MI_AfterCacheRefresh",
                     StringComparison.OrdinalIgnoreCase)) &&
@@ -257,15 +426,20 @@ internal static class ReleaseRegressionChecks
                 extractedA.Any(asset => asset.Path.Equals(
                     "/Game/Models/Gadgets/MI_DECAL_Wingsuit_Test",
                     StringComparison.OrdinalIgnoreCase)) &&
+                extractedA.Any(asset => asset.Path.Equals(
+                    "/DLC_BeyondPack/Characters/Materials/MI_Beyond_Test",
+                    StringComparison.OrdinalIgnoreCase)) &&
                 extractedA.All(asset => !asset.Path.EndsWith("M_Master", StringComparison.OrdinalIgnoreCase) &&
                                         !asset.Path.EndsWith("MI_NotCooked", StringComparison.OrdinalIgnoreCase)) &&
                 extractedB.Count == 1 &&
                 extractedB[0].Path.EndsWith("/MI_Replacement", StringComparison.OrdinalIgnoreCase) &&
-                merged.Count == 6 &&
+                merged.Count == 7 &&
                 merged.Count(asset => asset.Path.Equals(deepPackage, StringComparison.OrdinalIgnoreCase)) == 1 &&
                 merged.Count(asset => asset.Path.Contains("BatmanCowl", StringComparison.OrdinalIgnoreCase)) == 2 &&
                 merged.Select(asset => MainForm.MaterialGroupFolder(asset.Path))
                     .Contains("Characters/Materials", StringComparer.OrdinalIgnoreCase) &&
+                merged.Select(asset => MainForm.MaterialGroupFolder(asset.Path))
+                    .Contains("DLC_BeyondPack/Characters", StringComparer.OrdinalIgnoreCase) &&
                 MaterialCatalogPicker.MatchesCharacter(deepPackage, "Batman") &&
                 MaterialCatalogPicker.MatchesCharacter(attachmentPackage, "Batman") &&
                 missingRootFallback.Count == shipped.Length &&
@@ -274,13 +448,16 @@ internal static class ReleaseRegressionChecks
                 centralizedA.Any(asset => asset.Path.EndsWith(
                     "/MI_DECAL_Wingsuit_Test",
                     StringComparison.OrdinalIgnoreCase)) &&
+                centralizedA.Any(asset => asset.Path.Equals(
+                    "/DLC_BeyondPack/Characters/Materials/MI_Beyond_Test",
+                    StringComparison.OrdinalIgnoreCase)) &&
                 centralizedFaces.Count == 1 &&
                 centralizedFaces[0].Path.EndsWith("/MI_FACE_Regression", StringComparison.OrdinalIgnoreCase) &&
                 centralizedB.Any(asset => asset.Path.EndsWith("/MI_Replacement", StringComparison.OrdinalIgnoreCase)) &&
                 centralizedB.All(asset => !asset.Path.Equals(rootAOnlyPackage, StringComparison.OrdinalIgnoreCase));
             Check(
                 catalogOk,
-                "every material browser merges recursive active-extract MIs, deduplicates paths, and follows root changes",
+                "every material browser merges base-game and Game Feature MIs, deduplicates paths, and follows root changes",
                 failures,
                 output);
         }
@@ -288,7 +465,7 @@ internal static class ReleaseRegressionChecks
         {
             Check(
                 false,
-                $"every material browser merges recursive active-extract MIs, deduplicates paths, and follows root changes ({ex.Message})",
+                $"every material browser merges base-game and Game Feature MIs, deduplicates paths, and follows root changes ({ex.Message})",
                 failures,
                 output);
         }
@@ -818,6 +995,20 @@ internal static class ReleaseRegressionChecks
             Directory.CreateDirectory(Path.GetDirectoryName(activeBase)!);
             File.WriteAllText(activeBase + ".uasset", "current-uasset");
             File.WriteAllText(activeBase + ".uexp", "current-uexp");
+            var pluginBase = Path.Combine(
+                movedExtractRoot,
+                "Current",
+                "Plugins",
+                "GameFeatures",
+                "DLC_BeyondPack",
+                "Content",
+                "Characters",
+                "Minifig",
+                "Batman",
+                "BP_Batman_Beyond_Playable");
+            Directory.CreateDirectory(Path.GetDirectoryName(pluginBase)!);
+            File.WriteAllText(pluginBase + ".uasset", "plugin-uasset");
+            File.WriteAllText(pluginBase + ".uexp", "plugin-uexp");
             var staleTemplate = new TemplateRecord
             {
                 PackagePath = "/Game/Characters/Minifig/Batman/BP_Batman_1989_Playable",
@@ -826,12 +1017,33 @@ internal static class ReleaseRegressionChecks
                 Uexp = Path.Combine(movedExtractRoot, "Retired", "Content", "Characters", "Minifig", "Batman", "BP_Batman_1989_Playable.uexp"),
                 Role = "playable",
             };
+            var stalePluginTemplate = new TemplateRecord
+            {
+                PackagePath = "/DLC_BeyondPack/Characters/Minifig/Batman/BP_Batman_Beyond_Playable",
+                ContentRelative = "Characters/Minifig/Batman/BP_Batman_Beyond_Playable",
+                Uasset = Path.Combine(movedExtractRoot, "Retired", "Plugins", "DLC_BeyondPack", "BP_Batman_Beyond_Playable.uasset"),
+                Role = "playable",
+            };
+            var missingPluginWithBaseCollision = new TemplateRecord
+            {
+                PackagePath = "/DLC_NotInstalled/Characters/Minifig/Batman/BP_Batman_1989_Playable",
+                ContentRelative = "Characters/Minifig/Batman/BP_Batman_1989_Playable",
+                Uasset = Path.Combine(movedExtractRoot, "Retired", "Plugins", "DLC_NotInstalled", "BP_Batman_1989_Playable.uasset"),
+                Role = "playable",
+            };
             Check(
                 SuitProjectService.RefreshTemplateSourceForTest(staleTemplate, activeContent) &&
                 staleTemplate.Uasset.Equals(activeBase + ".uasset", StringComparison.OrdinalIgnoreCase) &&
                 staleTemplate.Uexp?.Equals(activeBase + ".uexp", StringComparison.OrdinalIgnoreCase) == true &&
-                staleTemplate.PackagePath == "/Game/Characters/Minifig/Batman/BP_Batman_1989_Playable",
-                "saved suits relocate retired absolute template paths to the active extract by exact /Game package",
+                staleTemplate.PackagePath == "/Game/Characters/Minifig/Batman/BP_Batman_1989_Playable" &&
+                SuitProjectService.RefreshTemplateSourceForTest(stalePluginTemplate, activeContent) &&
+                stalePluginTemplate.Uasset.Equals(pluginBase + ".uasset", StringComparison.OrdinalIgnoreCase) &&
+                stalePluginTemplate.Uexp?.Equals(pluginBase + ".uexp", StringComparison.OrdinalIgnoreCase) == true &&
+                stalePluginTemplate.PackagePath == "/DLC_BeyondPack/Characters/Minifig/Batman/BP_Batman_Beyond_Playable" &&
+                !SuitProjectService.RefreshTemplateSourceForTest(missingPluginWithBaseCollision, activeContent) &&
+                missingPluginWithBaseCollision.PackagePath ==
+                    "/DLC_NotInstalled/Characters/Minifig/Batman/BP_Batman_1989_Playable",
+                "saved suits relocate retired base-game and Game Feature templates by exact package identity without crossing mounts",
                 failures,
                 output);
         }
@@ -917,7 +1129,7 @@ internal static class ReleaseRegressionChecks
                     .Equals("BP_Batmite_Quest", StringComparison.OrdinalIgnoreCase)) &&
                 indexedBlueprints.Any(path => Path.GetFileNameWithoutExtension(path)
                     .Equals("BP_BatGirl_Arkhamverse_Playable", StringComparison.OrdinalIgnoreCase)) &&
-                !PartIndexService.IsCurrentIndexForTest(new NativeSuitPartIndex { SchemaVersion = 2 }) &&
+                !PartIndexService.IsCurrentIndexForTest(new NativeSuitPartIndex { SchemaVersion = 4 }) &&
                 PartIndexService.IsCurrentIndexForTest(new NativeSuitPartIndex()),
                 "the native part index scans Smallfig and AdditionalContent DLC character Blueprints",
                 failures,
@@ -965,6 +1177,9 @@ internal static class ReleaseRegressionChecks
             Check(
                 AppSettings.NormalizeContentRoot(smallfigRoot)
                     .Equals(contentRoot, StringComparison.OrdinalIgnoreCase) &&
+                GameDataService.Instance.FamilyForBasePath(
+                    "/DLC_BeyondPack/Characters/Smallfig/Robin/BP_RobinDickGrayson_Beyond_Playable")?.Name
+                    .Equals("Robin_DickGrayson", StringComparison.OrdinalIgnoreCase) == true &&
                 AnimArchetypeGraftService.IsCharacterOwnedMaterialPackage(
                     "/Game/Characters/Smallfig/Batmite/Materials/MI_Batmite_EoM",
                     "Batmite"),
@@ -2279,14 +2494,168 @@ internal static class ReleaseRegressionChecks
             failures,
             output);
         var sharingViolation = new IOException("locked", unchecked((int)0x80070020));
+        var lockViolation = new IOException("locked range", unchecked((int)0x80070021));
         Check(
             FileLockUtil.IsTransient(new InvalidOperationException("wrapped", sharingViolation)) &&
             FileLockUtil.IsTransient(new InvalidOperationException(
                 "wrapped",
                 new TransientFileLockException("structured lock"))) &&
+            FileLockUtil.IsTransient(new AggregateException(
+                new FileNotFoundException("first deterministic branch"),
+                new InvalidOperationException("second lock branch", lockViolation))) &&
+            !FileLockUtil.IsTransient(new AggregateException(
+                new FileNotFoundException("missing"),
+                new InvalidDataException("bad data"))) &&
             !FileLockUtil.IsTransient(new FileNotFoundException("missing")) &&
             !FileLockUtil.IsTransient(new IOException("sharing violation text without a sharing-violation code")),
             "only transient sharing violations enter the bounded file-lock retry path",
+            failures,
+            output);
+
+        var successfulRetryAttempts = 0;
+        var successfulRetryDelays = new List<int>();
+        string? successfulRetryResult = null;
+        Exception? successfulRetryFailure = null;
+        try
+        {
+            successfulRetryResult = MainForm.RunFileLockRetryPolicyAsync(
+                    () =>
+                    {
+                        successfulRetryAttempts++;
+                        if (successfulRetryAttempts < 3)
+                        {
+                            throw new IOException("deterministic sharing violation", unchecked((int)0x80070020));
+                        }
+                        return "ready";
+                    },
+                    "exercise the deterministic retry fixture",
+                    delayAsync: delay =>
+                    {
+                        successfulRetryDelays.Add(delay);
+                        return Task.CompletedTask;
+                    })
+                .GetAwaiter()
+                .GetResult();
+        }
+        catch (Exception ex)
+        {
+            successfulRetryFailure = ex;
+        }
+        Check(
+            successfulRetryFailure is null &&
+            successfulRetryResult == "ready" &&
+            successfulRetryAttempts == 3 &&
+            successfulRetryDelays.SequenceEqual([150, 300]),
+            "transient file locks retry deterministically and return the eventual successful result",
+            failures,
+            output);
+
+        var exhaustedRetryAttempts = 0;
+        var exhaustedRetryDelays = new List<int>();
+        TransientFileLockException? exhaustedRetryFailure = null;
+        Exception? unexpectedExhaustedFailure = null;
+        try
+        {
+            MainForm.RunFileLockRetryPolicyAsync<int>(
+                    () =>
+                    {
+                        exhaustedRetryAttempts++;
+                        throw new IOException("persistent sharing violation", unchecked((int)0x80070020));
+                    },
+                    "exercise retry exhaustion",
+                    delayAsync: delay =>
+                    {
+                        exhaustedRetryDelays.Add(delay);
+                        return Task.CompletedTask;
+                    })
+                .GetAwaiter()
+                .GetResult();
+        }
+        catch (TransientFileLockException ex)
+        {
+            exhaustedRetryFailure = ex;
+        }
+        catch (Exception ex)
+        {
+            unexpectedExhaustedFailure = ex;
+        }
+
+        var nonTransientRetryAttempts = 0;
+        var nonTransientRetryDelays = new List<int>();
+        Exception? nonTransientRetryFailure = null;
+        try
+        {
+            MainForm.RunFileLockRetryPolicyAsync<int>(
+                    () =>
+                    {
+                        nonTransientRetryAttempts++;
+                        throw new InvalidDataException("deterministic parse failure");
+                    },
+                    "exercise a non-transient failure",
+                    delayAsync: delay =>
+                    {
+                        nonTransientRetryDelays.Add(delay);
+                        return Task.CompletedTask;
+                    })
+                .GetAwaiter()
+                .GetResult();
+        }
+        catch (Exception ex)
+        {
+            nonTransientRetryFailure = ex;
+        }
+        Check(
+            unexpectedExhaustedFailure is null &&
+            exhaustedRetryFailure is not null &&
+            FileLockUtil.IsTransient(exhaustedRetryFailure.InnerException) &&
+            exhaustedRetryAttempts == 6 &&
+            exhaustedRetryDelays.SequenceEqual([150, 300, 600, 1000, 1500]) &&
+            nonTransientRetryFailure is InvalidDataException &&
+            nonTransientRetryAttempts == 1 &&
+            nonTransientRetryDelays.Count == 0,
+            "file-lock retry exhaustion is bounded and non-transient failures are never retried",
+            failures,
+            output);
+
+        var structuredRetryAttempts = 0;
+        var structuredRetryDelays = new List<int>();
+        var structuredRetryResult = MainForm.RunStructuredFileLockRetryPolicyAsync(
+                () => ++structuredRetryAttempts,
+                result => result < 3,
+                "exercise a structured lock result",
+                delayAsync: delay =>
+                {
+                    structuredRetryDelays.Add(delay);
+                    return Task.CompletedTask;
+                })
+            .GetAwaiter()
+            .GetResult();
+        Check(
+            structuredRetryResult == 3 &&
+            structuredRetryAttempts == 3 &&
+            structuredRetryDelays.SequenceEqual([150, 300]),
+            "structured stage writers use the same asynchronous transient-lock retry schedule",
+            failures,
+            output);
+
+        TransientFileLockException? packagePatchLock = null;
+        try
+        {
+            UAssetPatchService.ExecutePackagePatchOperationForTest(
+                () => throw new IOException("package sharing violation", unchecked((int)0x80070020)));
+        }
+        catch (TransientFileLockException ex)
+        {
+            packagePatchLock = ex;
+        }
+        var ordinaryPackageFailure = UAssetPatchService.ExecutePackagePatchOperationForTest(
+            () => throw new InvalidDataException("package parse fixture"));
+        Check(
+            packagePatchLock is not null &&
+            FileLockUtil.IsTransient(packagePatchLock.InnerException) &&
+            !ordinaryPackageFailure.Success &&
+            ordinaryPackageFailure.Error?.Contains("package parse fixture", StringComparison.Ordinal) == true,
+            "name-map package writes expose transient locks to the retry policy without losing ordinary structured errors",
             failures,
             output);
         var emptyCapeProject = new NativeSuitProject();
@@ -2777,6 +3146,20 @@ internal static class ReleaseRegressionChecks
                 certifiedBatmanMas,
                 "MAS_Glide_",
                 out _);
+        const string dlcCertifiedMas = "/DLC_BeyondPack/Animation/MontageAnimSets/MAS_Glide_Beyond";
+        var dlcParentsRemainExactContentPackages =
+            StageValidationService.PairedCapeAnimationParentsAreSafeForTest(
+                [
+                    "/DLC_BeyondPack/Animation/MontageAnimSets/MAS_Glide_Native",
+                    "/Game/Animation/MontageAnimSets/Character/MAS_Playable"
+                ],
+                [
+                    dlcCertifiedMas,
+                    "/Game/Animation/MontageAnimSets/Character/MAS_Playable"
+                ],
+                dlcCertifiedMas,
+                "MAS_Glide_",
+                out _);
         Check(
             masBridgeReplacesNightwingGlide &&
             lasBridgeReplacesNightwingGlide &&
@@ -2786,8 +3169,9 @@ internal static class ReleaseRegressionChecks
             competingNightwingGlideRejected &&
             sameStemWrongPackageRejected &&
             unresolvedStemOnlyRejected &&
-            unresolvedParentEntryRejected,
-            "paired-cape MAS/LAS clones retain every non-glide Nightwing parent while replacing each native glide category with exactly one certified Batman package (duplicates and same-stem aliases rejected)",
+            unresolvedParentEntryRejected &&
+            dlcParentsRemainExactContentPackages,
+            "paired-cape MAS/LAS clones retain every non-glide parent across game/DLC mounts while replacing each native glide category with exactly one certified package (duplicates and same-stem aliases rejected)",
             failures,
             output);
 
@@ -2816,6 +3200,11 @@ internal static class ReleaseRegressionChecks
                 ],
                 authoredBatmanDprd,
                 gameplayNightwingDprd);
+        var exactDlcBehaviorBridgeAccepted =
+            StageValidationService.BehaviorBridgeReferencesAreSafeForTest(
+                [("/DLC_BeyondPack/Characters/DA_DPRD_Beyond", "DA_DPRD_Beyond")],
+                authoredBatmanDprd,
+                "/DLC_BeyondPack/Characters/DA_DPRD_Beyond");
         var equipmentFreeDprd = StageValidationService.ExpectedPairedCapeDprdPackageForTest(
             certifiedNightwingCapePair,
             regressionMod,
@@ -2907,6 +3296,7 @@ internal static class ReleaseRegressionChecks
                 StringComparison.Ordinal);
         Check(
             exactGameplayBehaviorBridgeAccepted &&
+            exactDlcBehaviorBridgeAccepted &&
             sameStemWrongBehaviorBridgeRejected &&
             retainedAuthoredBehaviorBridgeRejected &&
             equipmentFreeDprd.Equals(gameplayNightwingDprd, StringComparison.OrdinalIgnoreCase) &&

@@ -88,6 +88,11 @@ public sealed partial class MainForm
     /// </summary>
     private async Task BuildModForCurrentSuitAsync()
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("build the current suit mod"))
+        {
+            return;
+        }
+
         if (_currentProject is null)
         {
             Dialog.Info(this, "Build mod", "Create or open a suit before building a mod.");
@@ -157,6 +162,11 @@ public sealed partial class MainForm
 
     private void InstallModForCurrentSuit()
     {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Installing the current suit mod"))
+        {
+            return;
+        }
+
         if (_currentProject is null)
         {
             Dialog.Info(this, "Install mod", "Create or open a suit before installing a mod.");
@@ -1995,7 +2005,7 @@ public sealed partial class MainForm
             if (!string.IsNullOrWhiteSpace(gliderComponent))
             {
                 RequireCompleteDeclarativeReplay(
-                    RestoreProtectedGliderComponent(
+                    await RestoreProtectedGliderComponent(
                         suit,
                         gliderComponent,
                         projectService.ProjectRoot,
@@ -2008,7 +2018,7 @@ public sealed partial class MainForm
             }
 
             RequireCompleteDeclarativeReplay(
-                ApplySavedComponentRemovals(
+                await ApplySavedComponentRemovals(
                     suit,
                     logNoRemovals: false,
                     stageContentRootOverride: contentRoot),
@@ -2045,7 +2055,7 @@ public sealed partial class MainForm
             // Grafting can replace the stage from the donor, so material bindings must
             // be applied after the last possible stage rebuild.
             RequireCompleteDeclarativeReplay(
-                ApplySavedMaterials(
+                await ApplySavedMaterials(
                     suit,
                     logIfNone: false,
                     stageContentRootOverride: contentRoot),

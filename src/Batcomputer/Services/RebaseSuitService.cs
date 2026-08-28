@@ -1,8 +1,8 @@
 namespace Batcomputer;
 
 /// <summary>
-/// Repoints a suit project's BASE TEMPLATE source paths (playable / cutscene / DCMD) at the
-/// currently active extracted game dump.
+/// Repoints a suit project's gameplay, visual, cutscene, and DCMD template source paths at the
+/// currently active extracted game/DLC dump.
 ///
 /// Why this exists: a game update changes cooked Blueprint layouts, so assets generated from a
 /// pre-update dump can parse fine in tools yet crash in-game. After a refresh, every suit must be
@@ -23,10 +23,12 @@ public sealed class RebaseSuitService
         var changes = new List<Change>();
         foreach (var (role, template) in new (string, TemplateRecord?)[]
                  {
-                     ("playable", project.PlayableTemplate),
-                     ("cutscene", project.CutsceneTemplate),
-                     ("dcmd", project.DcmdTemplate),
-                 })
+                      ("playable", project.PlayableTemplate),
+                      ("cutscene", project.CutsceneTemplate),
+                      ("dcmd", project.DcmdTemplate),
+                      ("visual-playable", project.VisualSourceTemplate),
+                      ("visual-cutscene", project.VisualCutsceneSourceTemplate),
+                  })
         {
             changes.Add(RebaseOne(role, template, newContentRoot, apply));
         }
@@ -40,13 +42,25 @@ public sealed class RebaseSuitService
             return new Change(role, "", "", "skipped");
         }
 
-        var rel = RelativeFor(template);
-        if (rel is null)
+        var newBase = ExtractedPackagePathService.ResolvePackageBase(newContentRoot, template.PackagePath);
+        if (string.IsNullOrWhiteSpace(newBase))
         {
-            return new Change(role, template.Uasset, "", "missing");
-        }
+            var package = UnrealPathUtil.NormalizePackagePath(template.PackagePath);
+            if (!string.IsNullOrWhiteSpace(package) &&
+                !package.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+            {
+                // ContentRelative has no mount identity. Never let an unavailable Game Feature
+                // record collide with a same-relative-path asset under /Game.
+                return new Change(role, template.Uasset, "", "missing");
+            }
+            var rel = RelativeFor(template);
+            if (rel is null)
+            {
+                return new Change(role, template.Uasset, "", "missing");
+            }
 
-        var newBase = Path.Combine(newContentRoot, rel);
+            newBase = Path.Combine(newContentRoot, rel);
+        }
         var newUasset = newBase + ".uasset";
 
         if (!File.Exists(newUasset))
@@ -65,6 +79,10 @@ public sealed class RebaseSuitService
             template.Uasset = newUasset;
             template.Uexp = File.Exists(newBase + ".uexp") ? newBase + ".uexp" : null;
             template.Ubulk = File.Exists(newBase + ".ubulk") ? newBase + ".ubulk" : null;
+            template.PackagePath = ExtractedPackagePathService.PackagePathFromFile(newContentRoot, newUasset)
+                                   ?? template.PackagePath;
+            template.ContentRelative = ExtractedPackagePathService.ContentRelativeFromFile(newContentRoot, newUasset)
+                                       ?? template.ContentRelative;
         }
         return change;
     }

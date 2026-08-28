@@ -352,7 +352,7 @@ public sealed partial class MainForm
         Theme.StyleDarkButton(_toyboxSaveButton);
         _toyboxSaveButton.Enabled = false;
         _toyboxToolTip.SetToolTip(_toyboxSaveButton, "Save the current suit project");
-        _toyboxSaveButton.Click += (_, _) => SaveCurrentSuit();
+        _toyboxSaveButton.Click += async (_, _) => await SaveCurrentSuitAsync();
 
         // Kept alive off-bar: still referenced by other code paths.
         _settingsButton.Text = "Settings";
@@ -951,6 +951,11 @@ public sealed partial class MainForm
     /// </summary>
     private async Task ApplyBaseCharacterFromCatalog(string playablePackage)
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("apply the base character"))
+        {
+            return;
+        }
+
         if (BaseEligibilityService.RequiresSeparateGameplayDonor(playablePackage))
         {
             await ApplyVisualOnlyBaseFromCatalog(playablePackage);
@@ -963,7 +968,8 @@ public sealed partial class MainForm
             : stem;
 
         var extracted = AppSettings.Current.EffectiveExtractedContentRoot();
-        string Disk(string pkg) => Path.Combine(extracted, pkg["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar) + ".uasset");
+        string Disk(string pkg) =>
+            ExtractedPackagePathService.ResolvePackageUasset(extracted, pkg) ?? "";
 
         var playableDisk = Disk(playablePackage);
         if (!File.Exists(playableDisk))
@@ -1115,7 +1121,7 @@ public sealed partial class MainForm
                 _currentProject.MaterialAssignments.Add(new SavedMaterialAssignment { Component = "Face", Slot = 0, MiPackagePath = villainVisual.FaceMi, Context = "both" });
             }
             try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject); } catch { /* best effort */ }
-            ApplySavedMaterials(_currentProject, logIfNone: false);
+            await ApplySavedMaterials(_currentProject, logIfNone: false);
             AppendLog("Applied the villain's body + face materials to the donor playable.");
         }
 
@@ -1281,7 +1287,7 @@ public sealed partial class MainForm
 
         RecordBaseProfile(visual, isCutsceneVisual ? visual : null, gameplay);
         await PreserveVisualBodyProfileAsync(visual);
-        ApplyVisualSourceMaterials(visual);
+        await ApplyVisualSourceMaterialsAsync(visual);
         await ApplyVisualAttachmentsToGameplayDonorAsync(visual.PackagePath);
 
         var visualFamily = _currentProject?.BaseProfile?.VisualFamily;
@@ -1296,10 +1302,7 @@ public sealed partial class MainForm
 
     private static string PackageToExtractedUasset(string packagePath, string extractedRoot)
     {
-        var package = UnrealPathUtil.NormalizePackagePath(packagePath);
-        return package.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase)
-            ? Path.Combine(extractedRoot, package["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar) + ".uasset")
-            : "";
+        return ExtractedPackagePathService.ResolvePackageUasset(extractedRoot, packagePath) ?? "";
     }
 
     private static string? FindPlayableSiblingForVisual(string visualUasset)
@@ -1427,7 +1430,7 @@ public sealed partial class MainForm
         }
     }
 
-    private void ApplyVisualSourceMaterials(TemplateRecord visualSource)
+    private async Task ApplyVisualSourceMaterialsAsync(TemplateRecord visualSource)
     {
         if (_currentProject is null)
         {
@@ -1456,12 +1459,17 @@ public sealed partial class MainForm
         }
 
         try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject); } catch { /* best effort */ }
-        ApplySavedMaterials(_currentProject, logIfNone: false);
+        await ApplySavedMaterials(_currentProject, logIfNone: false);
         AppendLog("Applied the visual source's body and face materials.");
     }
 
     private async Task ApplyVisualAttachmentsToGameplayDonorAsync(string visualSourcePackage)
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("apply the visual attachments"))
+        {
+            return;
+        }
+
         if (_currentProject is null)
         {
             return;
@@ -1559,6 +1567,11 @@ public sealed partial class MainForm
 
     private async void OpenBaseWizardManual()
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("open the manual base editor"))
+        {
+            return;
+        }
+
         using var wiz = new BaseWizard(
             _suitNameText.Text.Trim(),
             _modFolderText.Text.Trim(),
@@ -1653,6 +1666,11 @@ public sealed partial class MainForm
 
     private async Task ApplyToyboxDropAsync(ToyboxDragPayload payload, string label, string component, int slot)
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("apply the dropped toybox item"))
+        {
+            return;
+        }
+
         SelectToyboxSlot(label, component, slot);
 
         if (payload.Kind.Equals("material", StringComparison.OrdinalIgnoreCase) &&
@@ -2618,6 +2636,11 @@ public sealed partial class MainForm
     /// </summary>
     private async Task RemoveReviewChangeAsync(SavedChange change)
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("remove the saved change"))
+        {
+            return;
+        }
+
         if (_currentProject is null)
         {
             return;
@@ -3365,6 +3388,11 @@ public sealed partial class MainForm
     /// </summary>
     private async Task<bool> PreserveVisualBodyProfileAsync(TemplateRecord visual)
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("preserve the visual body profile"))
+        {
+            return false;
+        }
+
         var project = _currentProject;
         if (project is null)
         {
@@ -4048,10 +4076,15 @@ public sealed partial class MainForm
 
         _useAsBaseInProgress = true;
         var workspaceWasEnabled = _mainWorkspaceHost.Enabled;
-        _mainWorkspaceHost.Enabled = false;
         var gateHeld = false;
         try
         {
+            if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("change the base character"))
+            {
+                return false;
+            }
+
+            _mainWorkspaceHost.Enabled = false;
             // Own the rebuild gate before EnsureProject or any shared project/UI mutation. The
             // disabled workspace prevents another edit from changing _currentProject while an
             // awaited copy/retry yields back to the WinForms message loop.
@@ -4271,7 +4304,7 @@ public sealed partial class MainForm
 
                 _projectService.CreateUnpatchedStage(_currentProject);
                 AppendLog($"Staged base: {playable.Stem} + {cutscene.Stem}{(_currentProject.DcmdTemplate is null ? " (no DCMD)" : " + DCMD")}");
-                if (!PatchNameMapsWithUAssetApi())
+                if (!await PatchNameMapsWithUAssetApiAsync())
                 {
                     throw new InvalidOperationException(
                         "Base stage did not complete. Fix the patch error logged above, then set the base again.");
@@ -4448,6 +4481,11 @@ public sealed partial class MainForm
 
     private void RebaseCurrentSuitToActiveDump()
     {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Rebasing the current suit"))
+        {
+            return;
+        }
+
         EnsureProject();
         if (_currentProject is null)
         {

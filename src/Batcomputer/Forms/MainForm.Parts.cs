@@ -129,6 +129,11 @@ public sealed partial class MainForm
 
     private void PopulateToyboxSlots()
     {
+        if (DeferStageBackedRefreshWhileLoadedProjectRestores())
+        {
+            return;
+        }
+
         _characterSlots.Clear();
         _characterSlots.AddRange(DiscoverToyboxSlots()
             .Where(slot => IsToyboxVisualComponent(slot.Component)));
@@ -186,6 +191,11 @@ public sealed partial class MainForm
 
     private async Task ApplyGliderMaterialAsync(string materialPath)
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("apply the glider material"))
+        {
+            return;
+        }
+
         EnsureProject();
         if (_currentProject is null)
         {
@@ -319,6 +329,11 @@ public sealed partial class MainForm
 
     private async Task<bool> ApplyNativeBodyProfileAsync(NativeBodyProfile profile, bool confirm)
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("apply the native body profile"))
+        {
+            return false;
+        }
+
         EnsureProject();
         var project = _currentProject;
         if (project?.PlayableTemplate is null || project.CutsceneTemplate is null)
@@ -643,14 +658,11 @@ public sealed partial class MainForm
             var extractedRoot = AppSettings.Current.EffectiveExtractedContentRoot();
             foreach (var package in new[] { playablePackage, cutscenePackage })
             {
-                var normalized = UnrealPathUtil.NormalizePackagePath(package);
-                if (!normalized.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new InvalidOperationException($"Authored shell package '{package}' is not under /Game/.");
-                }
-                var relative = normalized[6..].Replace('/', Path.DirectorySeparatorChar);
+                var sourceBase = ExtractedPackagePathService.ResolvePackageBase(extractedRoot, package)
+                    ?? throw new InvalidOperationException(
+                        $"Authored shell package '{package}' is not available in the active game or installed DLC extract.");
                 var source = new UAsset(
-                    Path.Combine(extractedRoot, relative) + ".uasset",
+                    sourceBase + ".uasset",
                     EngineVersion.VER_UE5_6,
                     UiMappings(),
                     CustomSerializationFlags.SkipPreloadDependencyLoading);
@@ -902,7 +914,7 @@ public sealed partial class MainForm
         return migrated;
     }
 
-    private DeclarativeReplayOutcome RestoreProtectedGliderComponent(
+    private async Task<DeclarativeReplayOutcome> RestoreProtectedGliderComponent(
         NativeSuitProject project,
         string glideComponent,
         string? projectRootOverride = null,
@@ -913,7 +925,7 @@ public sealed partial class MainForm
             ? _projectRootText.Text.Trim()
             : projectRootOverride;
         var service = new ComponentRemoveService(projectRoot);
-        var result = RunWithStructuredFileLockRetry(
+        var result = await RunWithStructuredFileLockRetryAsync(
             () => string.IsNullOrWhiteSpace(stageContentRootOverride)
                 ? service.RestoreScsReferences(
                     project.SlotId,
@@ -976,6 +988,11 @@ public sealed partial class MainForm
 
     private async Task ApplyNativeGliderPresetAsync(NativeSuitPartRecord part, string? materialOverride = null)
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("apply the native glider preset"))
+        {
+            return;
+        }
+
         EnsureProject();
         var project = _currentProject;
         if (project is null)
@@ -1524,6 +1541,11 @@ public sealed partial class MainForm
 
     private async Task ApplyToyboxPartDropToCharacterAsync(NativeSuitPartRecord part)
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("apply the dropped part"))
+        {
+            return;
+        }
+
         var component = string.IsNullOrWhiteSpace(part.Slot) ? "Part" : part.Slot;
         var label = FriendlySlotLabel(component, 0);
         AppendLog($"Dropped part {CleanPartMeshDisplayName(part)} into Your Character. Native slot={component}.");
@@ -1562,6 +1584,11 @@ public sealed partial class MainForm
 
     private async Task RemoveToyboxPartAsync(string label, string component, int slot)
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("remove the selected part"))
+        {
+            return;
+        }
+
         EnsureProject();
         if (_currentProject is null)
         {
@@ -1747,7 +1774,7 @@ public sealed partial class MainForm
         RefreshToyboxTiles();
     }
 
-    private DeclarativeReplayOutcome ApplySavedComponentRemovals(
+    private async Task<DeclarativeReplayOutcome> ApplySavedComponentRemovals(
         NativeSuitProject project,
         bool logNoRemovals,
         string? stageContentRootOverride = null)
@@ -1814,7 +1841,7 @@ public sealed partial class MainForm
                 authoredPairedCapeShellComponents?.Contains(component) == true;
 
             var service = new ComponentRemoveService(_projectRootText.Text.Trim());
-            var result = RunWithStructuredFileLockRetry(
+            var result = await RunWithStructuredFileLockRetryAsync(
                 () => preserveAuthoredShellNode
                     ? string.IsNullOrWhiteSpace(stageContentRootOverride)
                         ? service.HideVisual(
@@ -2134,6 +2161,11 @@ public sealed partial class MainForm
 
     private async Task RemoveCustomStaticMeshAsync(CustomStaticMeshImport mesh)
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("remove the custom mesh"))
+        {
+            return;
+        }
+
         var project = _currentProject;
         if (project is null || !project.CustomStaticMeshes.Contains(mesh))
         {
@@ -2257,6 +2289,11 @@ public sealed partial class MainForm
 
     private async Task AdoptLegacyStaticMeshAsync(CustomStaticMeshImportService.LegacyObjProof legacy)
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("adopt the legacy custom mesh"))
+        {
+            return;
+        }
+
         EnsureProject();
         var project = _currentProject;
         if (project?.PlayableTemplate is null || project.CutsceneTemplate is null)
@@ -2303,6 +2340,11 @@ public sealed partial class MainForm
 
     private async Task OpenCustomStaticMeshDialogAsync(CustomStaticMeshImport? existing)
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("edit the custom mesh"))
+        {
+            return;
+        }
+
         EnsureProject();
         var project = _currentProject;
         if (project?.PlayableTemplate is null || project.CutsceneTemplate is null)
@@ -2465,50 +2507,95 @@ public sealed partial class MainForm
         Incompatible,
     }
 
-    private async Task<T> RunWithFileLockRetryAsync<T>(Func<T> action, string operation)
+    // Six total attempts over a bounded 3.55-second delay window cover ordinary OneDrive,
+    // antivirus, and just-finished preview handoffs without making a deterministic failure hang.
+    private static readonly int[] FileLockRetryDelaysMs = [150, 300, 600, 1_000, 1_500];
+
+    private Task<T> RunWithFileLockRetryAsync<T>(Func<T> action, string operation) =>
+        RunFileLockRetryPolicyAsync(action, operation, AppendLog);
+
+    internal static async Task<T> RunFileLockRetryPolicyAsync<T>(
+        Func<T> action,
+        string operation,
+        Action<string>? log = null,
+        Func<int, Task>? delayAsync = null)
     {
-        const int attempts = 3;
-        for (var attempt = 1; ; attempt++)
+        delayAsync ??= Task.Delay;
+        for (var attempt = 0; ; attempt++)
         {
             try
             {
                 return await Task.Run(action);
             }
-            catch (Exception ex) when (attempt < attempts && FileLockUtil.IsTransient(ex))
+            catch (Exception ex) when (FileLockUtil.IsTransient(ex))
             {
-                AppendLog($"  {operation}: a generated file is temporarily locked; retrying ({attempt}/{attempts - 1})…");
-                await Task.Delay(180 * attempt);
+                if (attempt >= FileLockRetryDelaysMs.Length)
+                {
+                    throw new TransientFileLockException(
+                        $"Could not {operation} because a generated file remained locked after " +
+                        $"{FileLockRetryDelaysMs.Length + 1} attempts over about 3.6 seconds.",
+                        ex);
+                }
+
+                log?.Invoke(
+                    $"  {operation}: a generated file is temporarily locked; " +
+                    $"retrying ({attempt + 1}/{FileLockRetryDelaysMs.Length})…");
+                await delayAsync(FileLockRetryDelaysMs[attempt]);
             }
         }
     }
 
-    private T RunWithStructuredFileLockRetry<T>(
+    private Task<T> RunWithStructuredFileLockRetryAsync<T>(
         Func<T> action,
         Func<T, bool> hasTransientFileLock,
-        string operation)
+        string operation) =>
+        RunStructuredFileLockRetryPolicyAsync(
+            action,
+            hasTransientFileLock,
+            operation,
+            AppendLog);
+
+    internal static async Task<T> RunStructuredFileLockRetryPolicyAsync<T>(
+        Func<T> action,
+        Func<T, bool> hasTransientFileLock,
+        string operation,
+        Action<string>? log = null,
+        Func<int, Task>? delayAsync = null)
     {
-        const int attempts = 3;
-        for (var attempt = 1; ; attempt++)
+        delayAsync ??= Task.Delay;
+        for (var attempt = 0; ; attempt++)
         {
             T result;
             try
             {
-                result = action();
+                result = await Task.Run(action);
             }
-            catch (Exception ex) when (attempt < attempts && FileLockUtil.IsTransient(ex))
+            catch (Exception ex) when (FileLockUtil.IsTransient(ex))
             {
-                AppendLog($"  {operation}: a generated file is temporarily locked; retrying ({attempt}/{attempts - 1})…");
-                Thread.Sleep(180 * attempt);
+                if (attempt >= FileLockRetryDelaysMs.Length)
+                {
+                    throw new TransientFileLockException(
+                        $"Could not {operation} because a generated file remained locked after " +
+                        $"{FileLockRetryDelaysMs.Length + 1} attempts over about 3.6 seconds.",
+                        ex);
+                }
+
+                log?.Invoke(
+                    $"  {operation}: a generated file is temporarily locked; " +
+                    $"retrying ({attempt + 1}/{FileLockRetryDelaysMs.Length})…");
+                await delayAsync(FileLockRetryDelaysMs[attempt]);
                 continue;
             }
 
-            if (!hasTransientFileLock(result) || attempt >= attempts)
+            if (!hasTransientFileLock(result) || attempt >= FileLockRetryDelaysMs.Length)
             {
                 return result;
             }
 
-            AppendLog($"  {operation}: a generated file is temporarily locked; retrying ({attempt}/{attempts - 1})…");
-            Thread.Sleep(180 * attempt);
+            log?.Invoke(
+                $"  {operation}: a generated file is temporarily locked; " +
+                $"retrying ({attempt + 1}/{FileLockRetryDelaysMs.Length})…");
+            await delayAsync(FileLockRetryDelaysMs[attempt]);
         }
     }
 
@@ -2985,6 +3072,11 @@ public sealed partial class MainForm
 
     private async Task ClearCustomGliderAsync()
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("remove the custom glider"))
+        {
+            return;
+        }
+
         EnsureProject();
         var project = _currentProject;
         if (project is null)
@@ -3964,6 +4056,11 @@ public sealed partial class MainForm
 
     private async Task GraftTorso2Async()
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("create the Torso2 graft"))
+        {
+            return;
+        }
+
         EnsureProject();
         if (_currentProject is null)
         {
@@ -4169,9 +4266,14 @@ public sealed partial class MainForm
 
         _graftSelectedPartInProgress = true;
         var workspaceWasEnabled = _mainWorkspaceHost.Enabled;
-        _mainWorkspaceHost.Enabled = false;
         try
         {
+            if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("graft the selected parts"))
+            {
+                return false;
+            }
+
+            _mainWorkspaceHost.Enabled = false;
             return await GraftSelectedPartsCoreAsync();
         }
         finally
@@ -4353,7 +4455,7 @@ public sealed partial class MainForm
                         AppendLog($"Glider part: removed stale remove-component rule for native glide component '{glideComp}'.");
                     }
 
-                    RestoreProtectedGliderComponent(transactionProject, glideComp);
+                    await RestoreProtectedGliderComponent(transactionProject, glideComp);
 
                     // The glider owns the glide component's materials (its own decal + solid).
                     // Drop any saved material override so replay cannot paint over the glider.
@@ -4802,12 +4904,22 @@ public sealed partial class MainForm
     private async Task RebuildGraftStageFromDeclarativeAsync(
         NativeSuitProject? projectOverride = null,
         string? projectRootOverride = null,
-        bool persistProject = true)
+        bool persistProject = true,
+        bool loadedProjectRestore = false)
     {
         var project = projectOverride ?? _currentProject;
         if (project is null)
         {
             return;
+        }
+        var requiresCurrentProjectIdentity =
+            !loadedProjectRestore &&
+            ReferenceEquals(project, _currentProject);
+        if (!loadedProjectRestore &&
+            !await AwaitLoadedProjectStageRestoresBeforeEditAsync("rebuild the generated suit stage"))
+        {
+            throw new InvalidOperationException(
+                "The generated-stage rebuild was cancelled because another suit was selected while it was waiting.");
         }
         var projectRoot = string.IsNullOrWhiteSpace(projectRootOverride)
             ? _projectRootText.Text.Trim()
@@ -4816,6 +4928,12 @@ public sealed partial class MainForm
         BaseStageFilesystemSnapshot? stageFilesystemSnapshot = null;
         try
         {
+            if (requiresCurrentProjectIdentity && !ReferenceEquals(project, _currentProject))
+            {
+                throw new InvalidOperationException(
+                    "The generated-stage rebuild was cancelled because another suit was selected while it was waiting to stage.");
+            }
+
             // Saved-project restore, material replay, removals, and custom meshes all enter through
             // this wrapper. Their replay can fail after the clean/grafted stages were already
             // replaced, so keep a complete payload snapshot until the new stage is certified.
@@ -5121,19 +5239,28 @@ public sealed partial class MainForm
 
             if (project.BodyProfile is not null)
             {
-                var bodyResult = new NativeBodyProfileService().ApplyToContentRoot(
-                    graftedContentRoot,
-                    project,
-                    UiMappings());
+                var mappings = UiMappings();
+                var bodyResult = await RunWithStructuredFileLockRetryAsync(
+                    () => new NativeBodyProfileService().ApplyToContentRoot(
+                        graftedContentRoot,
+                        project,
+                        mappings),
+                    result => result.TransientFileLock,
+                    "apply the native body profile");
                 foreach (var file in bodyResult.Files)
                 {
                     AppendLog($"  native body {file.Role}: {(file.Success ? "OK" : "FAILED")} — {file.Detail}");
                 }
                 if (!bodyResult.Success)
                 {
-                    throw new InvalidOperationException(
+                    var message =
                         $"Native body profile '{project.BodyProfile.DisplayName}' could not be written to both required character packages. " +
-                        string.Join(" | ", bodyResult.Files.Where(file => !file.Success).Select(file => $"{file.Role}: {file.Detail}")));
+                        string.Join(" | ", bodyResult.Files.Where(file => !file.Success).Select(file => $"{file.Role}: {file.Detail}"));
+                    if (bodyResult.TransientFileLock)
+                    {
+                        throw new TransientFileLockException(message);
+                    }
+                    throw new InvalidOperationException(message);
                 }
             }
         }
@@ -5149,7 +5276,7 @@ public sealed partial class MainForm
                 // Apply its identity materials immediately after its automatic Head/Face grafts
                 // and before every ordinary part graft. A later user Face/Body graft must keep its
                 // own donor material until an explicit saved material assignment says otherwise.
-                var adapterVisualMaterials = ApplyPairedCapeVisualOverlayMaterials(project, projectRoot);
+                var adapterVisualMaterials = await ApplyPairedCapeVisualOverlayMaterials(project, projectRoot);
                 RequireCompleteDeclarativeReplay(adapterVisualMaterials, "Paired-cape visual-base material replay");
                 pairedCapeVisualMaterialsApplied = true;
             }
@@ -5254,7 +5381,7 @@ public sealed partial class MainForm
 
         if (!pairedCapeVisualMaterialsApplied)
         {
-            var adapterVisualMaterials = ApplyPairedCapeVisualOverlayMaterials(project, projectRoot);
+            var adapterVisualMaterials = await ApplyPairedCapeVisualOverlayMaterials(project, projectRoot);
             RequireCompleteDeclarativeReplay(adapterVisualMaterials, "Paired-cape visual-base material replay");
         }
 
@@ -5273,9 +5400,9 @@ public sealed partial class MainForm
         await StageCustomStaticMeshesAsync(project);
 
         // Re-apply the rest of the suit's declarative edits onto the freshly grafted stage.
-        var removalReplay = ApplySavedComponentRemovals(project, logNoRemovals: false);
+        var removalReplay = await ApplySavedComponentRemovals(project, logNoRemovals: false);
         RequireCompleteDeclarativeReplay(removalReplay, "Saved component removal replay");
-        var materialReplay = ApplySavedMaterials(project, logIfNone: false);
+        var materialReplay = await ApplySavedMaterials(project, logIfNone: false);
         RequireCompleteDeclarativeReplay(materialReplay, "Saved material replay");
         if (persistProject)
         {

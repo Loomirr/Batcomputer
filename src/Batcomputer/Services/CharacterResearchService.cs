@@ -158,11 +158,9 @@ public sealed class CharacterResearchService
 
     private static ResearchAssetRecord CreateRecord(string contentRoot, string uassetPath)
     {
-        var relative = Path.GetRelativePath(contentRoot, uassetPath).Replace('\\', '/');
-        var withoutExtension = relative.EndsWith(".uasset", StringComparison.OrdinalIgnoreCase)
-            ? relative[..^6]
-            : relative;
-        var package = "/Game/" + withoutExtension.TrimStart('/');
+        var package = ExtractedPackagePathService.PackagePathFromFile(contentRoot, uassetPath) ?? "";
+        var relative = ExtractedPackagePathService.ContentRelativeFromFile(contentRoot, uassetPath)
+                       ?? Path.GetRelativePath(contentRoot, uassetPath).Replace('\\', '/');
         var uexpPath = Path.ChangeExtension(uassetPath, ".uexp");
         var ubulkPath = Path.ChangeExtension(uassetPath, ".ubulk");
         return new ResearchAssetRecord

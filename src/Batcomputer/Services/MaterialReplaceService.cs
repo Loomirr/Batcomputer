@@ -112,7 +112,7 @@ public sealed class MaterialReplaceService
             for (var depth = 0; depth < asset.Imports.Count + 1; depth++)
             {
                 var name = current.ObjectName.ToString();
-                if (name.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+                if (ExtractedPackagePathService.IsContentPackagePath(name))
                 {
                     return UnrealPathUtil.NormalizePackagePath(name);
                 }
@@ -151,10 +151,10 @@ public sealed class MaterialReplaceService
             cutscenePackagePath = UnrealPathUtil.NormalizePackagePath(cutscenePackagePath);
 
             if (string.IsNullOrWhiteSpace(assignment.MiPackagePath) ||
-                !assignment.MiPackagePath.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+                !ExtractedPackagePathService.IsContentPackagePath(assignment.MiPackagePath))
             {
                 result.Status = "bad-mi-path";
-                result.Error = $"MI package path must start with /Game/. Got: {assignment.MiPackagePath}";
+                result.Error = $"MI package path must identify game or installed DLC content. Got: {assignment.MiPackagePath}";
                 return result;
             }
 

@@ -292,6 +292,11 @@ public sealed partial class MainForm
 
     private void InstallTrio()
     {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Installing the packaged suit"))
+        {
+            return;
+        }
+
         EnsureProject();
         if (_currentProject is not null)
         {
@@ -386,8 +391,13 @@ public sealed partial class MainForm
         return menu;
     }
 
-    private void StageUnpatchedFiles()
+    private async Task StageUnpatchedFilesAsync()
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("stage the unpatched donor files"))
+        {
+            return;
+        }
+
         EnsureProject();
         if (_currentProject is null || _projectService is null)
         {
@@ -395,13 +405,22 @@ public sealed partial class MainForm
         }
 
         ReadFieldsIntoProject(_currentProject);
-        var stageRoot = _projectService.CreateUnpatchedStage(_currentProject);
+        var project = _currentProject;
+        var projectService = _projectService;
+        var stageRoot = await RunWithFileLockRetryAsync(
+            () => projectService.CreateUnpatchedStage(project),
+            "stage the unpatched donor files");
         AppendLog($"Staged unpatched donor package files under: {stageRoot}");
         AppendLog("These files are NOT game-ready yet. They still need UAssetAPI internal package/class/name-map rewriting.");
     }
 
     private async Task<PackageBuildResult> PackagePatchedIoStoreAsync()
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("package the current suit"))
+        {
+            return PackageBuildResult.Failed("The active suit changed while packaging was waiting for its saved-stage restore.");
+        }
+
         EnsureProject();
         if (_currentProject is null)
         {
@@ -492,7 +511,7 @@ public sealed partial class MainForm
             var packageGliderComponent = ActiveGliderVisualComponent(packageProject);
             if (!string.IsNullOrWhiteSpace(packageGliderComponent))
             {
-                var gliderRestore = RestoreProtectedGliderComponent(
+                var gliderRestore = await RestoreProtectedGliderComponent(
                     packageProject,
                     packageGliderComponent,
                     projectRoot,
@@ -516,7 +535,7 @@ public sealed partial class MainForm
                 }
             }
 
-            var removalReplay = ApplySavedComponentRemovals(
+            var removalReplay = await ApplySavedComponentRemovals(
                 packageProject,
                 logNoRemovals: false,
                 stageContentRootOverride: contentRootToPackage);
@@ -589,7 +608,7 @@ public sealed partial class MainForm
         // glider graft can rebuild the stage from the base playable (dropping the
         // materials), so without this the pak ships with base-game materials instead
         // of the suit's (e.g. Batman face/body instead of the chosen ThomasWayne ones).
-        var materialReplay = ApplySavedMaterials(
+        var materialReplay = await ApplySavedMaterials(
             packageProject,
             logIfNone: false,
             stageContentRootOverride: contentRootToPackage);
@@ -890,6 +909,11 @@ public sealed partial class MainForm
     /// </summary>
     private void EditPackageBaseName()
     {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Changing the package name"))
+        {
+            return;
+        }
+
         EnsureProject();
         if (_currentProject is null)
         {
@@ -929,6 +953,11 @@ public sealed partial class MainForm
     /// </summary>
     private async void ShowPackageContentsPreview()
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("prepare the package preview"))
+        {
+            return;
+        }
+
         EnsureProject();
         if (_currentProject is null)
         {
@@ -1066,6 +1095,11 @@ public sealed partial class MainForm
 
     private async void RunV2PreflightFromUi()
     {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("run the package preflight"))
+        {
+            return;
+        }
+
         EnsureProject();
         if (_currentProject is null)
         {

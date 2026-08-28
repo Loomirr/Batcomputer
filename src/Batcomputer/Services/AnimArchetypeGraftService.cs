@@ -253,8 +253,10 @@ public sealed class AnimArchetypeGraftService
         }
         if (!string.IsNullOrWhiteSpace(template.PackagePath))
         {
-            var refreshed = PackageToBase(extractedContentRoot, template.PackagePath) + ".uasset";
-            if (File.Exists(refreshed))
+            var refreshed = ExtractedPackagePathService.ResolvePackageUasset(
+                extractedContentRoot,
+                template.PackagePath);
+            if (!string.IsNullOrWhiteSpace(refreshed) && File.Exists(refreshed))
             {
                 return refreshed;
             }
@@ -266,8 +268,8 @@ public sealed class AnimArchetypeGraftService
     {
         // 1) The base character's OWN machinery (normal heroes have a BP_CAT_Archetype).
         // Saved projects retain absolute donor paths after an extract refresh, so resolve
-        // the stable /Game package path against the active extract before looking at the
-        // generated stage.
+        // the stable Unreal package path (base /Game or an installed DLC mount) against the
+        // active extract before looking at the generated stage.
         var extractedRoot = AppSettings.Current.EffectiveExtractedContentRoot();
         var basePlayable = ResolveTemplateUasset(project.PlayableTemplate, extractedRoot);
         if (!string.IsNullOrWhiteSpace(basePlayable))
@@ -288,8 +290,11 @@ public sealed class AnimArchetypeGraftService
         // from the machinery donor the user chose - a hero playable in extracted content.
         if (!string.IsNullOrWhiteSpace(project.MachineryDonorPlayable))
         {
-            var donorUasset = PackageToBase(AppSettings.Current.EffectiveExtractedContentRoot(), project.MachineryDonorPlayable) + ".uasset";
-            var md = DetectDonor(donorUasset, AppSettings.Current.EffectiveExtractedContentRoot(), mappings);
+            var donorRoot = AppSettings.Current.EffectiveExtractedContentRoot();
+            var donorUasset = ExtractedPackagePathService.ResolvePackageUasset(
+                donorRoot,
+                project.MachineryDonorPlayable) ?? "";
+            var md = DetectDonor(donorUasset, donorRoot, mappings);
             if (md is not null && md.Valid)
             {
                 return md;
@@ -323,16 +328,16 @@ public sealed class AnimArchetypeGraftService
         try
         {
             g.LasDefaultPackage = $"/Game/Animation/LayerAnimSets/Default/LAS_Default_{family}";
-            var lasFile = PackageToBase(extracted, g.LasDefaultPackage) + ".uasset";
+            var lasFile = ExtractedPackagePathService.ResolvePackageUasset(extracted, g.LasDefaultPackage) ?? "";
             if (!File.Exists(lasFile)) return g;
 
             List<string> Imports(string pkg)
             {
-                var f = PackageToBase(extracted, pkg) + ".uasset";
+                var f = ExtractedPackagePathService.ResolvePackageUasset(extracted, pkg) ?? "";
                 if (!File.Exists(f)) return new List<string>();
                 var a = new UAsset(f, EngineVersion.VER_UE5_6, mappings, NameMapOnly);
                 return a.Imports.Select(i => i.ObjectName.ToString())
-                    .Where(n => n.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase)).Distinct().ToList();
+                    .Where(n => IsExtractedPackagePath(extracted, n)).Distinct().ToList();
             }
 
             bool IsSeq(string n) => n.Contains("/A_", StringComparison.OrdinalIgnoreCase) && UnrealPathUtil.AssetName(n).StartsWith("A_", StringComparison.OrdinalIgnoreCase);
@@ -387,18 +392,20 @@ public sealed class AnimArchetypeGraftService
                 ArchetypeStem = UnrealPathUtil.AssetName(archPkg),
             };
 
-            var archUasset = PackageToBase(contentRoot, archPkg) + ".uasset";
+            var archUasset = ExtractedPackagePathService.ResolvePackageUasset(contentRoot, archPkg) ?? "";
             if (!File.Exists(archUasset))
             {
                 // Archetype lives in the base game, not our stage - read from extracted content.
-                archUasset = PackageToBase(AppSettings.Current.EffectiveExtractedContentRoot(), archPkg) + ".uasset";
+                archUasset = ExtractedPackagePathService.ResolvePackageUasset(
+                    AppSettings.Current.EffectiveExtractedContentRoot(),
+                    archPkg) ?? "";
             }
             if (File.Exists(archUasset))
             {
                 var arch = new UAsset(archUasset, EngineVersion.VER_UE5_6, mappings, NameMapOnly);
                 foreach (var n in arch.Imports.Select(i => i.ObjectName.ToString()))
                 {
-                    if (n.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+                    if (IsExtractedPackagePath(AppSettings.Current.EffectiveExtractedContentRoot(), n))
                     {
                         if (n.Contains("/MAS_Char_", StringComparison.OrdinalIgnoreCase)) info.MasCharPackage = n;
                         else if (n.Contains("/LAS_Char_", StringComparison.OrdinalIgnoreCase)) info.LasCharPackage = n;
@@ -417,13 +424,15 @@ public sealed class AnimArchetypeGraftService
                     info.Family = info.LasCharStem["LAS_Char_".Length..];
                 }
 
-                var dprdUasset = PackageToBase(AppSettings.Current.EffectiveExtractedContentRoot(), info.DprdPackage) + ".uasset";
+                var dprdUasset = ExtractedPackagePathService.ResolvePackageUasset(
+                    AppSettings.Current.EffectiveExtractedContentRoot(),
+                    info.DprdPackage) ?? "";
                 if (!string.IsNullOrEmpty(info.DprdPackage) && File.Exists(dprdUasset))
                 {
                     var dprd = new UAsset(dprdUasset, EngineVersion.VER_UE5_6, mappings, NameMapOnly);
                     info.AbilitySetPackage = dprd.Imports
                         .Select(i => i.ObjectName.ToString())
-                        .FirstOrDefault(n => n.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase) &&
+                        .FirstOrDefault(n => IsExtractedPackagePath(AppSettings.Current.EffectiveExtractedContentRoot(), n) &&
                                              n.Contains($"/AS_{info.Family}", StringComparison.OrdinalIgnoreCase)) ?? "";
                 }
             }
@@ -445,7 +454,11 @@ public sealed class AnimArchetypeGraftService
     internal static bool IsCharacterArchetypePackage(string? packagePath)
     {
         var package = UnrealPathUtil.NormalizePackagePath(packagePath);
-        if (!package.StartsWith("/Game/Characters/Minifig/", StringComparison.OrdinalIgnoreCase))
+        var segments = package.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length < 4 ||
+            !segments[1].Equals("Characters", StringComparison.OrdinalIgnoreCase) ||
+            (!segments[2].Equals("Minifig", StringComparison.OrdinalIgnoreCase) &&
+             !segments[2].Equals("Smallfig", StringComparison.OrdinalIgnoreCase)))
         {
             return false;
         }
@@ -465,8 +478,9 @@ public sealed class AnimArchetypeGraftService
             if (!File.Exists(playableUasset)) return null;
             var a = new UAsset(playableUasset, EngineVersion.VER_UE5_6, mappings, NameMapOnly);
             // Prefer a /BP_Master/ base class (the real parent); fall back to any archetype.
+            var extractedRoot = AppSettings.Current.EffectiveExtractedContentRoot();
             var names = a.Imports.Select(i => i.ObjectName.ToString())
-                .Where(n => n.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+                .Where(n => IsExtractedPackagePath(extractedRoot, n))
                 .ToList();
             return names.FirstOrDefault(n => n.Contains("/BP_Master/", StringComparison.OrdinalIgnoreCase))
                    ?? names.FirstOrDefault(n => n.Contains("/BP_CAT_Archetype_", StringComparison.OrdinalIgnoreCase));
@@ -488,8 +502,9 @@ public sealed class AnimArchetypeGraftService
         {
             if (!File.Exists(playableUasset)) return ("", "");
             var a = new UAsset(playableUasset, EngineVersion.VER_UE5_6, mappings, NameMapOnly);
+            var extractedRoot = AppSettings.Current.EffectiveExtractedContentRoot();
             var mis = a.Imports.Select(i => i.ObjectName.ToString())
-                .Where(n => n.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase) &&
+                .Where(n => IsExtractedPackagePath(extractedRoot, n) &&
                             UnrealPathUtil.AssetName(n).StartsWith("MI_", StringComparison.OrdinalIgnoreCase))
                 .Distinct()
                 .ToList();
@@ -533,17 +548,6 @@ public sealed class AnimArchetypeGraftService
                 return "";
             }
 
-            var contentRoot = new DirectoryInfo(characterRoot);
-            while (contentRoot is not null &&
-                   !contentRoot.Name.Equals("Content", StringComparison.OrdinalIgnoreCase))
-            {
-                contentRoot = contentRoot.Parent;
-            }
-            if (contentRoot is null)
-            {
-                return "";
-            }
-
             var prefix = $"MI_{characterFolder}_";
             var candidates = Directory.EnumerateFiles(characterRoot, "MI_*.uasset", SearchOption.AllDirectories)
                 .Select(path => new
@@ -565,8 +569,10 @@ public sealed class AnimArchetypeGraftService
                 return "";
             }
 
-            var relative = Path.GetRelativePath(contentRoot.FullName, selected.Path);
-            return "/Game/" + Path.ChangeExtension(relative, null)!.Replace('\\', '/');
+            return ExtractedPackagePathService.PackagePathFromFile(
+                       AppSettings.Current.EffectiveExtractedContentRoot(),
+                       selected.Path)
+                   ?? "";
         }
         catch
         {
@@ -642,7 +648,9 @@ public sealed class AnimArchetypeGraftService
             DonorInfo? authoredShellDonor = null;
             if (hasAuthoredCapeShell)
             {
-                var authoredShellUasset = PackageToBase(extractedRoot, authoredShellPlayable) + ".uasset";
+                var authoredShellUasset = ExtractedPackagePathService.ResolvePackageUasset(
+                    extractedRoot,
+                    authoredShellPlayable) ?? "";
                 authoredShellDonor = DetectDonor(authoredShellUasset, extractedRoot, mappings);
                 if (authoredShellDonor is null || !authoredShellDonor.Valid)
                 {
@@ -882,7 +890,10 @@ public sealed class AnimArchetypeGraftService
             var gliderExtractedRoot = AppSettings.Current.EffectiveExtractedContentRoot();
             if (!string.IsNullOrWhiteSpace(project.GliderAnimLas) && !foreignLas.Contains(project.GliderAnimLas))
             {
-                if (File.Exists(PackageToBase(gliderExtractedRoot, project.GliderAnimLas) + ".uasset"))
+                var gliderLas = ExtractedPackagePathService.ResolvePackageUasset(
+                    gliderExtractedRoot,
+                    project.GliderAnimLas);
+                if (!string.IsNullOrWhiteSpace(gliderLas) && File.Exists(gliderLas))
                 {
                     if (!usesPairedCapeAdapter)
                     {
@@ -904,7 +915,10 @@ public sealed class AnimArchetypeGraftService
             }
             if (!string.IsNullOrWhiteSpace(project.GliderAnimMas) && !foreignMas.Contains(project.GliderAnimMas))
             {
-                if (File.Exists(PackageToBase(gliderExtractedRoot, project.GliderAnimMas) + ".uasset"))
+                var gliderMas = ExtractedPackagePathService.ResolvePackageUasset(
+                    gliderExtractedRoot,
+                    project.GliderAnimMas);
+                if (!string.IsNullOrWhiteSpace(gliderMas) && File.Exists(gliderMas))
                 {
                     if (!usesPairedCapeAdapter)
                     {
@@ -1319,19 +1333,19 @@ public sealed class AnimArchetypeGraftService
     private static void CloneDonorAsset(string extractedRoot, string donorPackage, string donorStem,
         string patchedRoot, string targetPackage, string targetStem, Usmap? mappings, Result result)
     {
-        if (string.IsNullOrWhiteSpace(donorPackage) || !donorPackage.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+        var donorBase = ExtractedPackagePathService.ResolvePackageBase(extractedRoot, donorPackage);
+        if (string.IsNullOrWhiteSpace(donorBase))
         {
             result.Log.Add($"clone {donorStem}: invalid donor package '{donorPackage}' — skipped");
             return;
         }
-        var donorBase = Path.Combine(extractedRoot, donorPackage["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar));
         if (!File.Exists(donorBase + ".uasset"))
         {
             result.Log.Add($"clone {donorStem}: donor not extracted ({donorBase}.uasset) — skipped");
             return;
         }
 
-        var targetBase = PackageToBase(patchedRoot, targetPackage);
+        var targetBase = PackageToStageBase(patchedRoot, targetPackage);
         Directory.CreateDirectory(Path.GetDirectoryName(targetBase)!);
         File.Copy(donorBase + ".uasset", targetBase + ".uasset", overwrite: true);
         if (File.Exists(donorBase + ".uexp")) File.Copy(donorBase + ".uexp", targetBase + ".uexp", overwrite: true);
@@ -1488,7 +1502,10 @@ public sealed class AnimArchetypeGraftService
         return slash > 0 ? rest[..slash] : rest;
     }
 
-    private static string PackageToBase(string contentRoot, string packagePath)
+    private static bool IsExtractedPackagePath(string contentRoot, string packagePath) =>
+        ExtractedPackagePathService.ResolvePackageBase(contentRoot, packagePath) is not null;
+
+    private static string PackageToStageBase(string contentRoot, string packagePath)
     {
         var pkg = UnrealPathUtil.NormalizePackagePath(packagePath);
         if (!pkg.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
@@ -1500,7 +1517,7 @@ public sealed class AnimArchetypeGraftService
         return Path.Combine(contentRoot, pkg["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar));
     }
 
-    private static string StageUasset(string contentRoot, string packagePath) => PackageToBase(contentRoot, packagePath) + ".uasset";
+    private static string StageUasset(string contentRoot, string packagePath) => PackageToStageBase(contentRoot, packagePath) + ".uasset";
 
     private static string ErrSuffix(string? error) => string.IsNullOrWhiteSpace(error) ? "" : " ERROR=" + error.Split('\n')[0];
 

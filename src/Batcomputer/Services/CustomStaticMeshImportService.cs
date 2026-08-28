@@ -613,10 +613,10 @@ public sealed class CustomStaticMeshImportService
     private static string ValidateMaterialPackagePath(string? path, string sourceMaterialName)
     {
         var materialPackage = UnrealPathUtil.NormalizePackagePath(path ?? "");
-        if (!materialPackage.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+        if (!ExtractedPackagePathService.IsContentPackagePath(materialPackage))
         {
             throw new InvalidOperationException(
-                $"Custom mesh material '{sourceMaterialName}' must use a /Game/ material path.");
+                $"Custom mesh material '{sourceMaterialName}' must identify game or installed DLC content.");
         }
         return materialPackage;
     }

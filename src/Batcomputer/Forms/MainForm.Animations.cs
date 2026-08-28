@@ -271,10 +271,10 @@ public sealed partial class MainForm
             return null;
         }
 
-        // A typed /Game path wins (custom-path entry); otherwise use the selected row.
+        // A typed game or installed Game Feature path wins; otherwise use the selected row.
         var typed = search.Text.Trim();
         string? pkg = null;
-        if (typed.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+        if (ExtractedPackagePathService.IsContentPackagePath(typed))
         {
             pkg = UnrealPathUtil.NormalizePackagePath(typed);
         }
@@ -377,6 +377,11 @@ public sealed partial class MainForm
 
     private void PickAnimSwapFamily(string category)
     {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Changing the animation family"))
+        {
+            return;
+        }
+
         EnsureProject();
         if (_currentProject is null) { AppendLog("Set a base suit first."); return; }
 

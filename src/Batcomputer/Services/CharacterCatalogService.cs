@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 using CUE4Parse.Encryption.Aes;
 using CUE4Parse.FileProvider;
 using CUE4Parse.MappingsProvider.Usmap;
@@ -11,11 +13,13 @@ namespace Batcomputer;
 /// Lists the characters the 3D viewer can load: the game's playable and cutscene blueprints, plus
 /// the user's own suit projects.
 ///
-/// Only the shipped top-level Paks containers are mounted; nested ~mods folders are deliberately
-/// excluded. The result is cached to disk so the viewer opens instantly on later runs.
+/// Only the shipped top-level Paks and DLC containers are mounted; nested ~mods folders are
+/// deliberately excluded. The result is cached to disk so the viewer opens instantly on later runs.
 /// </summary>
 internal static class CharacterCatalogService
 {
+    private const int CacheSchemaVersion = 2;
+
     /// <summary>Where a character came from, which is also how the viewer groups them.</summary>
     public enum Source
     {
@@ -31,13 +35,19 @@ internal static class CharacterCatalogService
 
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
+    private sealed record CacheDocument(
+        int SchemaVersion,
+        string ContainerSignature,
+        List<Entry> Entries);
+
     private static string CachePath =>
         Path.Combine(AppSettings.CacheRoot, "characters.base-game.json");
 
     /// <summary>Loads the cached catalogue, or scans the paks when there is no cache yet.</summary>
     public static List<Entry> Load(string paksDir, string usmapPath, bool forceRescan = false)
     {
-        if (!forceRescan && TryReadCache() is { Count: > 0 } cached)
+        var containerSignature = ContainerSignature(paksDir);
+        if (!forceRescan && TryReadCache(containerSignature) is { Count: > 0 } cached)
         {
             return cached;
         }
@@ -45,7 +55,11 @@ internal static class CharacterCatalogService
         try
         {
             Directory.CreateDirectory(AppSettings.CacheRoot);
-            File.WriteAllText(CachePath, JsonSerializer.Serialize(scanned, Json));
+            File.WriteAllText(
+                CachePath,
+                JsonSerializer.Serialize(
+                    new CacheDocument(CacheSchemaVersion, containerSignature, scanned),
+                    Json));
         }
         catch
         {
@@ -54,18 +68,65 @@ internal static class CharacterCatalogService
         return scanned;
     }
 
-    private static List<Entry>? TryReadCache()
+    private static List<Entry>? TryReadCache(string expectedContainerSignature)
     {
         try
         {
-            return File.Exists(CachePath)
-                ? JsonSerializer.Deserialize<List<Entry>>(File.ReadAllText(CachePath))
+            if (!File.Exists(CachePath))
+            {
+                return null;
+            }
+
+            // Earlier builds wrote a bare Entry array here. Deserializing only the versioned
+            // envelope intentionally invalidates that catalogue, because it can never contain DLC.
+            var cached = JsonSerializer.Deserialize<CacheDocument>(File.ReadAllText(CachePath));
+            return cached is
+                {
+                    SchemaVersion: CacheSchemaVersion,
+                    Entries.Count: > 0,
+                } && string.Equals(
+                    cached.ContainerSignature,
+                    expectedContainerSignature,
+                    StringComparison.Ordinal)
+                ? cached.Entries
                 : null;
         }
         catch
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Keys the on-disk catalogue to this user's installed top-level game and DLC containers.
+    /// Installing/removing a DLC therefore refreshes the viewer without requiring a manual cache
+    /// delete, while files below Paks\~mods remain deliberately invisible to the signature.
+    /// </summary>
+    private static string ContainerSignature(string paksDir)
+    {
+        var identity = new StringBuilder();
+        identity.Append("viewer-character-catalog|").Append(CacheSchemaVersion);
+        foreach (var root in ContainerRoots(paksDir))
+        {
+            identity.Append('|').Append(root.FullName.ToUpperInvariant());
+            if (!root.Exists)
+            {
+                identity.Append("|missing");
+                continue;
+            }
+
+            foreach (var file in root.EnumerateFiles("*", SearchOption.TopDirectoryOnly)
+                         .Where(IsContainerFile)
+                         .OrderBy(file => file.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                identity.Append('|')
+                    .Append(file.Name.ToUpperInvariant()).Append(':')
+                    .Append(file.Length).Append(':')
+                    .Append(file.LastWriteTimeUtc.Ticks);
+            }
+        }
+
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity.ToString())));
     }
 
     /// <summary>Walks the mounted paks for character blueprints.</summary>
@@ -77,8 +138,10 @@ internal static class CharacterCatalogService
             return found;
         }
 
-        var provider = new DefaultFileProvider(
-            paksDir, BaseGamePakSource.ShippedContainerSearchOption,
+        using var provider = new DefaultFileProvider(
+            new DirectoryInfo(paksDir),
+            DlcContainerRoots(paksDir),
+            BaseGamePakSource.ShippedContainerSearchOption,
             versions: new VersionContainer(EGame.GAME_UE5_6),
             pathComparer: StringComparer.OrdinalIgnoreCase);
         provider.MappingsContainer = new FileUsmapTypeMappingsProvider(usmapPath);
@@ -123,6 +186,31 @@ internal static class CharacterCatalogService
             .OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
+
+    private static DirectoryInfo[] DlcContainerRoots(string paksDir)
+    {
+        var roots = ContainerRoots(paksDir);
+        return roots.Length > 1 && roots[1].Exists
+            ? [roots[1]]
+            : [];
+    }
+
+    private static DirectoryInfo[] ContainerRoots(string paksDir)
+    {
+        if (string.IsNullOrWhiteSpace(paksDir))
+        {
+            return [];
+        }
+
+        var paks = new DirectoryInfo(Path.GetFullPath(paksDir.Trim()));
+        var dlc = new DirectoryInfo(GameAssetRefreshService.DlcRootForPaksRoot(paks.FullName));
+        return [paks, dlc];
+    }
+
+    private static bool IsContainerFile(FileInfo file) =>
+        file.Extension.Equals(".utoc", StringComparison.OrdinalIgnoreCase) ||
+        file.Extension.Equals(".ucas", StringComparison.OrdinalIgnoreCase) ||
+        file.Extension.Equals(".pak", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>"BP_Batman_TheBatman2025_Playable" -> "Batman TheBatman2025".</summary>
     private static string Pretty(string file)

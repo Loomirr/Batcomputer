@@ -21,6 +21,14 @@
   filename endings when choosing a texture use.
 - First-time and full character refreshes include installed `Content\DLC` containers and index their
   extracted `/Game/AdditionalContent` characters, parts, materials, and textures with the base game.
+- Full refresh now finds the actual playable and cutscene characters in installed Game Feature DLC
+  mounts, not just their Batcave displays. DLC parts, materials, animations, cape/glider data, and
+  3D previews keep their real package identities throughout Batcomputer.
+- Fixed a file-lock race that could make a saved suit report its staged Blueprint was already in
+  use while Batcomputer was restoring it. Inspector, Toybox, preview, editing, and packaging now
+  wait for the restore and retry brief Windows or OneDrive sharing locks.
+- DLC extraction now works when the game and workspace are on different drives. An incomplete
+  display-only refresh keeps the last good dump, and older part indexes rebuild for the DLC mounts.
 - Bumps the portable build and documentation to beta 9.
 
 ## 0.9.0-beta.8 — 2026-08-25
