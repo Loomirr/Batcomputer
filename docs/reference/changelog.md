@@ -1,12 +1,26 @@
 # Changelog
 
-## 0.9.0-beta.9
+## Unreleased
 
-- Paired cape/glider cleanup now distinguishes the authored native shell from independent user
-  grafts, so removing a hair or cowl no longer gets blocked just because the glider adapter also
-  contains a `Head` component.
-- The native paired-cape shell remains protected when no independent replacement targets that
-  component, with regression coverage for both cases.
+- No changes yet.
+
+## 0.9.0-beta.9 — corrected build
+
+- Ordinary `Head`, `Face`, hair, and cowl visuals can be removed from paired cape/glider suits in
+  playable and cutscene. Their invisible authored construction node stays live for runtime safety;
+  the real `Cape` and `Torso` glide fields still come out together.
+- Inspector removal checks both character roles first, and custom-mesh removal does not delete its
+  project OBJ before the rebuilt suit is saved and certified.
+- Material-slot menus now clearly remove the whole part rather than presenting a slot-numbered
+  component removal.
+- UIMD menu, left, and right portraits use a verified native 512px character-icon cook, while the
+  suit-selector tile keeps its native 256px profile.
+- Added compact and larger **Face detail** / **Face detail normal** profiles, plus native CT and RAO
+  cooks.
+- Texture import recognizes `_BC`, `_MMR`, `_NRM`/`_DNRM`, `_ColorMask`/`_ColourMask`, `_CT`, and
+  `_RAO` filename endings and starts on the matching use.
+- First-time and full character refreshes include installed `Content\DLC` and index the extracted
+  `/Game/AdditionalContent` assets with the base-game dump.
 - Portable build and documentation version: **0.9.0-beta.9**.
 
 ## 0.9.0-beta.8

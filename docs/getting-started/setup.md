@@ -38,10 +38,16 @@ so installed mods cannot contaminate the base-game donor index.
 If you already have a current Content extraction, select it. Otherwise leave the field blank and
 accept the full extraction offered at the end of setup.
 
-The normal extraction includes every character asset, the full shared
-`Content/Characters/Materials` tree, shared animation, localization, supporting metadata, and the
-equipment/glider materials stored under `Content/Models/Gadgets`. It uses roughly 18 GB and can take
-several minutes.
+Both first-time extraction and **Refresh all character assets** include every character asset, the
+full shared `Content/Characters/Materials` tree, shared animation, localization, supporting
+metadata, and the equipment/glider materials stored under `Content/Models/Gadgets`. When installed,
+Batcomputer also mounts `Content\DLC` together with the base containers and extracts the DLC package
+tree under `Content/AdditionalContent`, including its characters, parts, materials, and textures. It
+uses roughly 18 GB or more and can take several minutes.
+
+The temporary combined mount uses Windows file links and never moves or edits the installed
+containers. If the workspace and game are on different drives, enable Windows Developer Mode so
+Batcomputer can use symbolic links; otherwise keep the extraction workspace on the game drive.
 
 Batcomputer reads the **active extracted Content** path shown in Setup. An old or empty
 `ExtractedPakData` folder beside a previous portable build is not an extraction destination unless

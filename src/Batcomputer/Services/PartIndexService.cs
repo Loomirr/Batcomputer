@@ -7,7 +7,7 @@ namespace Batcomputer;
 
 public sealed class PartIndexService
 {
-    public const int CurrentIndexSchemaVersion = 3;
+    public const int CurrentIndexSchemaVersion = 4;
 
     private static readonly string[] CharacterRigFolders = { "Minifig", "Smallfig" };
 
@@ -62,10 +62,7 @@ public sealed class PartIndexService
         // Preserve the legacy diagnostic field for existing part-index readers while the scan
         // itself now covers both supported character rigs.
         var legacyMinifigRoot = Path.Combine(contentRoot, "Characters", "Minifig");
-        var characterRoots = CharacterRigFolders
-            .Select(folder => Path.Combine(contentRoot, "Characters", folder))
-            .Where(Directory.Exists)
-            .ToList();
+        var characterRoots = EnumerateCharacterRigRoots(contentRoot);
 
         var index = new NativeSuitPartIndex
         {
@@ -83,7 +80,7 @@ public sealed class PartIndexService
             index.Errors.Add(new NativeSuitPartScanError
             {
                 Uasset = Path.Combine(contentRoot, "Characters"),
-                Error = "No extracted Minifig or Smallfig character root was found."
+                Error = "No extracted Minifig or Smallfig character root was found, including under AdditionalContent."
             });
             SavePartIndex(index);
             return index;
@@ -213,15 +210,28 @@ public sealed class PartIndexService
         EnumerateCharacterBlueprints(AppSettings.NormalizeContentRoot(contentRoot));
 
     private static List<string> EnumerateCharacterBlueprints(string contentRoot) =>
-        CharacterRigFolders
-            .Select(folder => Path.Combine(contentRoot, "Characters", folder))
-            .Where(Directory.Exists)
+        EnumerateCharacterRigRoots(contentRoot)
             .SelectMany(root => Directory.EnumerateFiles(root, "BP_*.uasset", SearchOption.AllDirectories))
             .Where(path => !Path.GetFileNameWithoutExtension(path)
                 .StartsWith("BP_CAT_Archetype", StringComparison.OrdinalIgnoreCase))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+    private static List<string> EnumerateCharacterRigRoots(string contentRoot)
+    {
+        if (!Directory.Exists(contentRoot))
+        {
+            return new List<string>();
+        }
+
+        return CharacterContentRootService.Enumerate(contentRoot)
+            .SelectMany(charactersRoot => CharacterRigFolders.Select(rig => Path.Combine(charactersRoot, rig)))
+            .Where(Directory.Exists)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
 
     private static List<NativeSuitPartRecord> ExtractParts(JsonElement root, string assetPath, string contentRoot)
     {
@@ -536,13 +546,16 @@ public sealed class PartIndexService
             return "";
         }
 
-        var charactersRoot = Path.Combine(contentRoot, "Characters");
-        var segments = Path.GetRelativePath(charactersRoot, directory)
+        var segments = Path.GetRelativePath(contentRoot, directory)
             .Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
                 StringSplitOptions.RemoveEmptyEntries);
-        return segments.Length >= 2 && CharacterRigFolders.Contains(segments[0], StringComparer.OrdinalIgnoreCase)
-            ? segments[1]
-            : segments.FirstOrDefault() ?? "";
+        var charactersIndex = Array.FindIndex(segments, segment =>
+            segment.Equals("Characters", StringComparison.OrdinalIgnoreCase));
+        return charactersIndex >= 0 &&
+               charactersIndex + 2 < segments.Length &&
+               CharacterRigFolders.Contains(segments[charactersIndex + 1], StringComparer.OrdinalIgnoreCase)
+            ? segments[charactersIndex + 2]
+            : segments.LastOrDefault() ?? "";
     }
 
     private static string PackagePathFromContentPath(string assetPath, string contentRoot)

@@ -12,7 +12,8 @@
   Smallfig 08, and armless Smallfig. These profiles preserve the chosen gameplay donor and all use
   the native shared `SKEL_LEGOfig` skeleton.
 - Game-material templates and face tools.
-- Character, mask, normal/packed, and verified UI texture cooking.
+- Character, face-detail, CT, RAO, mask, normal/packed, 512px character-icon, and 256px
+  suit-selector-icon texture cooking.
 - Supported equipment, glider, and animation-data grafting.
 - A separate regular cape plus a replacement glide cape when both come from the same indexed native
   character variant and the preset is marked as a supported **Glide cape**. On a glide-only gameplay

@@ -1536,7 +1536,7 @@ public sealed partial class MainForm : AdaptiveForm
         {
             Text = "Batcomputer - Texture import",
             StartPosition = FormStartPosition.CenterParent,
-            ClientSize = new Size(Width, 376),
+            ClientSize = new Size(Width, 412),
             AutoScaleMode = AutoScaleMode.Dpi,
             MinimizeBox = false,
             MaximizeBox = false,
@@ -1563,7 +1563,7 @@ public sealed partial class MainForm : AdaptiveForm
 
         var fields = new RoundedPanel
         {
-            Left = Padding, Top = 80, Width = Width - Padding * 2, Height = 226,
+            Left = Padding, Top = 80, Width = Width - Padding * 2, Height = 250,
             BackColor = Theme.CardBg, BorderColor = Theme.LineSoft, CornerRadius = Theme.RadiusSm
         };
 
@@ -1588,8 +1588,8 @@ public sealed partial class MainForm : AdaptiveForm
         {
             foreach (var textureKind in new[]
                      {
-                         "Character texture", "Color mask", "Suit selector icon", "UI artwork",
-                         "Normal map", "Roughness/spec mask", "Other texture"
+                         "Character texture", "Normal map", "Roughness/spec mask", "Color mask",
+                         "CT map", "RAO map", "Face detail", "Face detail normal", "Suit selector icon", "Character icon", "UI artwork", "Other texture"
                      })
             {
                 kind.Items.Add(textureKind);
@@ -1609,9 +1609,9 @@ public sealed partial class MainForm : AdaptiveForm
         var profileStatus = new Label
         {
             Left = 14,
-            Top = 174,
+            Top = 196,
             Width = fields.Width - 28,
-            Height = 34,
+            Height = 40,
             Font = Theme.Caption,
             ForeColor = Theme.OnDarkMuted,
             BackColor = Color.Transparent,
@@ -1638,7 +1638,10 @@ public sealed partial class MainForm : AdaptiveForm
             }
             else
             {
-                profileStatus.Text = IsSuitSelectorIconTextureKind(kind.SelectedItem?.ToString())
+                var selectedKind = kind.SelectedItem?.ToString();
+                profileStatus.Text = selectedKind?.StartsWith("Face detail", StringComparison.OrdinalIgnoreCase) == true
+                    ? "The matching face-detail donor is not in the current extract. Run Full refresh, then reopen this import dialog."
+                    : IsSuitSelectorIconTextureKind(selectedKind)
                     ? "Native suit-icon donor unavailable. Refresh game assets to prepare the verified 256px BC7 profile."
                     : "No compatible native cook profile is available for this texture type.";
                 profileStatus.ForeColor = Theme.Warn;

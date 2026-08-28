@@ -29,6 +29,7 @@ public sealed class InspectorControl : UserControl
         public string DisplayMesh = "";
         public IReadOnlyList<SlotRow> Slots = Array.Empty<SlotRow>();
         public bool CanRemove;
+        public string RemoveDisabledText = "Inherited body — choose a replacement instead";
         public bool Customized => Slots.Any(s => s.Overridden);
     }
 
@@ -566,7 +567,7 @@ public sealed class InspectorControl : UserControl
         var componentMenu = new ContextMenuStrip();
         var removeItem = new ToolStripMenuItem(comp.CanRemove
             ? "Remove from suit…"
-            : "Inherited body — choose a replacement instead")
+            : comp.RemoveDisabledText)
         {
             Enabled = comp.CanRemove,
         };

@@ -17,16 +17,36 @@ internal static class TextureCookTemplateService
     // 0x64. Both carry the same native BC7 mip stream and are verified below.
     private const int InlineMipInterRecordBytes = 0x10;
     public const string NativeSuitIconTemplateFolder = "TextureStandaloneTemplate_SuitIconUI_BC7";
+    public const string NativeCharacterIconTemplateFolder = "TextureStandaloneTemplate_CharacterIconUI_BC7";
     public const string NativeMmrTemplateFolder = "TextureStandaloneTemplate_EoMMMR_DXT1";
+    public const string NativeFaceDetailColorTemplateFolder = "TextureStandaloneTemplate_FaceDetail256x128_BC7";
+    public const string NativeFaceDetailNormalTemplateFolder = "TextureStandaloneTemplate_FaceDetail128_BC5";
+    public const string NativeFaceDetailFullColorTemplateFolder = "TextureStandaloneTemplate_FaceDetail2048_BC7";
+    public const string NativeFaceDetailFullNormalTemplateFolder = "TextureStandaloneTemplate_FaceDetail512_BC5";
+    public const string NativeCtTemplateFolder = "TextureStandaloneTemplate_CT512_DXT1";
+    public const string NativeRaoTemplateFolder = "TextureStandaloneTemplate_RAO1024_DXT1";
     private const string NativeSuitIconAssetName = "T_SuitIcon_NULL_BCA";
+    private const string NativeCharacterIconAssetName = "T_UI_IconChar_Batman_TheBatman2025_Menu_BCA";
     private const int NativeSuitIconFullUassetBytes = 1616;
     private const int NativeSuitIconFullUexpBytes = 87708;
     private const int NativeSuitIconRetocUassetBytes = 1133;
     private const int NativeSuitIconRetocUexpBytes = 87681;
     private const int NativeSuitIconFullFirstMipOffset = 0x7F;
     private const int NativeSuitIconRetocFirstMipOffset = 0x64;
+    private const int NativeCharacterIconRetocUassetBytes = 1260;
+    private const int NativeCharacterIconRetocUexpBytes = 349841;
+    private const int NativeCharacterIconFullUexpBytes = 349868;
+    private const int NativeCharacterIconFullFirstMipOffset = 0x7F;
+    private const int NativeCharacterIconRetocFirstMipOffset = 0x64;
 
     private enum NativeSuitIconLayout
+    {
+        None,
+        FullLegacy,
+        RetocLegacy,
+    }
+
+    private enum NativeCharacterIconLayout
     {
         None,
         FullLegacy,
@@ -135,6 +155,79 @@ internal static class TextureCookTemplateService
             "/Game/UI/Icons/Suits/T_SuitIcon_NULL_BCA",
             256, 256, "PF_BC7", 1, 9, 0, NativeSuitIconFullFirstMipOffset, 0x11,
             0, 0, 0, "", "", ""),
+        // Menu, left, and right character-card artwork uses a different,
+        // native 512px UI Texture2D layout. It must never be substituted with
+        // the compact 256px suit-selector tile.
+        new(
+            NativeCharacterIconTemplateFolder,
+            "T_UI_IconChar_Batman_TheBatman2025_Menu_BCA.json",
+            "UI/Icons/Characters/T_UI_IconChar_Batman_TheBatman2025_Menu_BCA",
+            "/Game/UI/Icons/Characters/T_UI_IconChar_Batman_TheBatman2025_Menu_BCA",
+            512, 512, "PF_BC7", 1, 10, 0, NativeCharacterIconRetocFirstMipOffset, 0x11,
+            0, 0, 0, "", "", ""),
+        // Small face atlases are deliberately kept separate from full-size body
+        // textures. These shipped donors have no optional .uptnl payload, so the
+        // cooker can reproduce their complete external+inline mip layouts.
+        new(
+            NativeFaceDetailColorTemplateFolder,
+            "T_Brow_80sFemale_DIST_BC.json",
+            "Characters/Textures/Attachments/LEGOface/T_Brow_80sFemale_DIST_BC",
+            "/Game/Characters/Textures/Attachments/LEGOface/T_Brow_80sFemale_DIST_BC",
+            256, 128, "PF_BC7", 1, 9, 2, 150, 0,
+            1200, 3042, 40960,
+            "81F6D5CD5459F337D917AF756603D04D12FE74B5196728F22624E47117C95F2C",
+            "BB25F966D2BB23090592D127CDDC2B22B7A66429D0868BD61C68404D0B028F80",
+            "55D3B5A7241A1CAD2B4A22AB3E15B1DADADA99052B997900F3C06D59474B34F9"),
+        new(
+            NativeFaceDetailNormalTemplateFolder,
+            "T_EyeSpec_WaylonJones_DIST_DNRM.json",
+            "Characters/Textures/Attachments/LEGOface/T_EyeSpec_WaylonJones_DIST_DNRM",
+            "/Game/Characters/Textures/Attachments/LEGOface/T_EyeSpec_WaylonJones_DIST_DNRM",
+            128, 128, "PF_BC5", 1, 8, 1, 134, 0,
+            1176, 5746, 16384,
+            "4A1DCCBE1AAE90EBE703CDC4D491CCD241B3F429877F99C30FDF62508C0ECF94",
+            "3B4A470ED7EF509CEF765BE6E20D5D74FEC44E1C584EC0977A669CB26FE980BA",
+            "BA9D97D111A39D5067A597B67DA7BD660F7FB7738AF1BC27D5B94068C0ABD85E"),
+        new(
+            NativeFaceDetailFullColorTemplateFolder,
+            "T_Bandage_HarveyDent_DIST_BC.json",
+            "Characters/Textures/Attachments/LEGOface/T_Bandage_HarveyDent_DIST_BC",
+            "/Game/Characters/Textures/Attachments/LEGOface/T_Bandage_HarveyDent_DIST_BC",
+            2048, 2048, "PF_BC7", 1, 12, 5, 198, 0,
+            1347, 5810, 5586944,
+            "A2B92B2A4A52FEB835E999D20D6D570889E1B6788E36283C90FEE5FED45BC900",
+            "D3A7256E3893A60C5A92618069B0B0CEEA113324B42162A4498C362C8AA9E12D",
+            "D4B5E9DC89B33F4902C63C2FA5CAD335C53BBE480430F36331B4F14811F78E20"),
+        new(
+            NativeFaceDetailFullNormalTemplateFolder,
+            "T_LEGOface_Mouth_NRM.json",
+            "Characters/Textures/Attachments/LEGOface/T_LEGOface_Mouth_NRM",
+            "/Game/Characters/Textures/Attachments/LEGOface/T_LEGOface_Mouth_NRM",
+            512, 512, "PF_BC5", 1, 10, 3, 166, 0,
+            1233, 5778, 344064,
+            "8167B0108D8374D702EBAB36C842F1366B3A1B6A9E1F59223C9770C0CA4D06CB",
+            "B5BC67667A38AF0A344E62415D651BC484D1F8D0D09443F309CD55D49E90332D",
+            "28462543D21E20F59956F0528A20E5E3DA94C4D9F58C2C769C3008DF079E4C93"),
+        new(
+            NativeCtTemplateFolder,
+            "T_HAIR_Batgirl_CostumeParty_CT.json",
+            "Characters/Textures/Attachments/Hair/Batgirl_CostumeParty/T_HAIR_Batgirl_CostumeParty_CT",
+            "/Game/Characters/Textures/Attachments/Hair/Batgirl_CostumeParty/T_HAIR_Batgirl_CostumeParty_CT",
+            512, 512, "PF_DXT1", 1, 10, 3, 164, 0,
+            1298, 3032, 172032,
+            "3770C7882AF81B1F84C1EDD3838B6D8058E4CA9A6B9E4BA5F8E7E7719C8E5CE6",
+            "5D11644B1D4A6E1F5C61A13D9188418DF912049C101802A61D3EBD60FEB979D3",
+            "AA6DBCF972999DFFEEDDE264DB02BBD2872FE4C279761BB98D89CC71769B4440"),
+        new(
+            NativeRaoTemplateFolder,
+            "T_HAIR_Batgirl_CostumeParty_RAO.json",
+            "Characters/Textures/Attachments/Hair/Batgirl_CostumeParty/T_HAIR_Batgirl_CostumeParty_RAO",
+            "/Game/Characters/Textures/Attachments/Hair/Batgirl_CostumeParty/T_HAIR_Batgirl_CostumeParty_RAO",
+            1024, 1024, "PF_DXT1", 1, 11, 4, 180, 0,
+            1346, 3048, 696320,
+            "D64EE9BFDCB1284BB5201A8C003D9AA245459287B50B8BD98564BD3297F13CB0",
+            "5D441871E07ACC05D37EF364A9145AB9569D1FC766779BD74FA582C876FC99FB",
+            "BDC49AB6F4AB30A63959D64D17684A56154A1C3CCBBF7E4A05043C8B0F883FF8"),
     };
 
     public static IReadOnlyList<string> RetocFilters { get; } = Definitions
@@ -154,14 +247,14 @@ internal static class TextureCookTemplateService
         // encoder-version recook without asking the user to extract again.
         NormalizeCoreTemplates(projectRoot);
         return Definitions
-            .Where(definition => !IsNativeSuitIconDefinition(definition))
+            .Where(definition => !IsOptionalProfileDefinition(definition))
             .All(definition => IsCoreTemplateReady(projectRoot, definition));
     }
 
     public static int NormalizeCoreTemplates(string projectRoot)
     {
         var normalized = 0;
-        foreach (var definition in Definitions.Where(definition => !IsNativeSuitIconDefinition(definition)))
+        foreach (var definition in Definitions.Where(definition => !IsOptionalProfileDefinition(definition)))
         {
             var templateJson = TemplateJsonPath(projectRoot, definition.Folder);
             var assetBase = Path.Combine(Path.GetDirectoryName(templateJson)!, Path.GetFileNameWithoutExtension(templateJson));
@@ -206,6 +299,15 @@ internal static class TextureCookTemplateService
             DetectNativeSuitIconLayout(assetBase + ".uasset", assetBase + ".uexp") != NativeSuitIconLayout.None;
     }
 
+    public static bool HasNativeCharacterIconTemplate(string projectRoot)
+    {
+        var definition = NativeCharacterIconDefinition();
+        var templateJson = TemplateJsonPath(projectRoot, definition.Folder);
+        var assetBase = Path.Combine(Path.GetDirectoryName(templateJson)!, NativeCharacterIconAssetName);
+        return IsTemplateReady(templateJson) &&
+            DetectNativeCharacterIconLayout(assetBase + ".uasset", assetBase + ".uexp") != NativeCharacterIconLayout.None;
+    }
+
     /// <summary>
     /// Restores the canonical 256px BC7 recipe when a verified native donor is
     /// available. This also upgrades workspaces left by the retired Red Brick
@@ -247,6 +349,44 @@ internal static class TextureCookTemplateService
 
         Directory.CreateDirectory(destination);
         WriteCanonicalTemplateJson(DefinitionForNativeLayout(definition, layout), Path.Combine(destination, definition.JsonFile));
+        return true;
+    }
+
+    /// <summary>Restores the verified 512px BC7 character-card icon recipe.</summary>
+    public static bool NormalizeNativeCharacterIconTemplate(string projectRoot)
+    {
+        var definition = NativeCharacterIconDefinition();
+        var generatedRoot = AppSettings.GeneratedRootFor(projectRoot);
+        var destination = Path.Combine(generatedRoot, definition.Folder);
+        var destinationBase = Path.Combine(destination, NativeCharacterIconAssetName);
+
+        if (DetectNativeCharacterIconLayout(destinationBase + ".uasset", destinationBase + ".uexp") == NativeCharacterIconLayout.None)
+        {
+            var candidates = new[]
+            {
+                Path.Combine(AppSettings.Current.EffectiveExtractedContentRoot(), "UI", "Icons", "Characters", NativeCharacterIconAssetName),
+                Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "UAssetGUI", "Extracted", "LEGOBatmanLotDK", "Content", "UI", "Icons", "Characters", NativeCharacterIconAssetName),
+            };
+            var sourceBase = candidates.FirstOrDefault(candidate =>
+                DetectNativeCharacterIconLayout(candidate + ".uasset", candidate + ".uexp") != NativeCharacterIconLayout.None);
+            if (!string.IsNullOrWhiteSpace(sourceBase))
+            {
+                Directory.CreateDirectory(destination);
+                File.Copy(sourceBase + ".uasset", destinationBase + ".uasset", overwrite: true);
+                File.Copy(sourceBase + ".uexp", destinationBase + ".uexp", overwrite: true);
+            }
+        }
+
+        var layout = DetectNativeCharacterIconLayout(destinationBase + ".uasset", destinationBase + ".uexp");
+        if (layout == NativeCharacterIconLayout.None)
+        {
+            return false;
+        }
+
+        Directory.CreateDirectory(destination);
+        WriteCanonicalTemplateJson(DefinitionForNativeCharacterIconLayout(definition, layout), Path.Combine(destination, definition.JsonFile));
         return true;
     }
 
@@ -313,7 +453,9 @@ internal static class TextureCookTemplateService
         {
             var recognizedLayout = IsNativeSuitIconDefinition(managedDefinition)
                 ? DetectNativeSuitIconLayout(assetBase + ".uasset", assetBase + ".uexp") != NativeSuitIconLayout.None
-                : IsKnownCoreLayout(managedDefinition, assetBase);
+                : IsNativeCharacterIconDefinition(managedDefinition)
+                    ? DetectNativeCharacterIconLayout(assetBase + ".uasset", assetBase + ".uexp") != NativeCharacterIconLayout.None
+                    : IsKnownCoreLayout(managedDefinition, assetBase);
             if (!recognizedLayout)
             {
                 return false;
@@ -344,10 +486,22 @@ internal static class TextureCookTemplateService
         var result = new Result();
         foreach (var definition in Definitions)
         {
+            var existingTemplate = TemplateJsonPath(projectRoot, definition.Folder);
+            if (IsTemplateReady(existingTemplate))
+            {
+                continue;
+            }
             if (IsNativeSuitIconDefinition(definition) && NormalizeNativeSuitIconTemplate(projectRoot))
             {
                 result.Prepared++;
                 result.Logs.Add($"Texture template ready: {definition.Folder} (native UI, {definition.PixelFormat} {definition.Width}x{definition.Height})");
+                continue;
+            }
+
+            if (IsNativeCharacterIconDefinition(definition) && NormalizeNativeCharacterIconTemplate(projectRoot))
+            {
+                result.Prepared++;
+                result.Logs.Add($"Texture template ready: {definition.Folder} (native character UI, {definition.PixelFormat} {definition.Width}x{definition.Height})");
                 continue;
             }
 
@@ -365,7 +519,7 @@ internal static class TextureCookTemplateService
                 continue;
             }
 
-            if (!IsNativeSuitIconDefinition(definition) && !IsKnownCoreLayout(definition, sourceBase))
+            if (!IsNativeUiIconDefinition(definition) && !IsKnownCoreLayout(definition, sourceBase))
             {
                 result.Warnings.Add(
                     $"Texture template donor has an unrecognized cooked mip layout and was not installed: {definition.ContentRelativePath}. " +
@@ -376,10 +530,21 @@ internal static class TextureCookTemplateService
             var nativeLayout = IsNativeSuitIconDefinition(definition)
                 ? DetectNativeSuitIconLayout(sourceBase + ".uasset", sourceBase + ".uexp")
                 : NativeSuitIconLayout.None;
+            var nativeCharacterLayout = IsNativeCharacterIconDefinition(definition)
+                ? DetectNativeCharacterIconLayout(sourceBase + ".uasset", sourceBase + ".uexp")
+                : NativeCharacterIconLayout.None;
             if (IsNativeSuitIconDefinition(definition) && nativeLayout == NativeSuitIconLayout.None)
             {
                 result.Warnings.Add(
                     "Native suit-icon donor did not match either verified 256px BC7 layout and was not installed. " +
+                    "Refresh game assets after updating Batcomputer or select another icon cook profile.");
+                continue;
+            }
+
+            if (IsNativeCharacterIconDefinition(definition) && nativeCharacterLayout == NativeCharacterIconLayout.None)
+            {
+                result.Warnings.Add(
+                    "Native character-icon donor did not match either verified 512px BC7 layout and was not installed. " +
                     "Refresh game assets after updating Batcomputer or select another icon cook profile.");
                 continue;
             }
@@ -422,12 +587,16 @@ internal static class TextureCookTemplateService
 
             var recipeDefinition = IsNativeSuitIconDefinition(definition)
                 ? DefinitionForNativeLayout(definition, nativeLayout)
-                : definition;
+                : IsNativeCharacterIconDefinition(definition)
+                    ? DefinitionForNativeCharacterIconLayout(definition, nativeCharacterLayout)
+                    : definition;
             WriteCanonicalTemplateJson(recipeDefinition, Path.Combine(destination, definition.JsonFile));
             result.Prepared++;
             var layoutDetail = IsNativeSuitIconDefinition(definition)
                 ? $", {nativeLayout}"
-                : "";
+                : IsNativeCharacterIconDefinition(definition)
+                    ? $", {nativeCharacterLayout}"
+                    : "";
             result.Logs.Add($"Texture template ready: {definition.Folder} ({definition.PixelFormat} {definition.Width}x{definition.Height}{layoutDetail})");
         }
 
@@ -435,6 +604,8 @@ internal static class TextureCookTemplateService
     }
 
     private static Definition NativeSuitIconDefinition() => Definitions.Single(IsNativeSuitIconDefinition);
+
+    private static Definition NativeCharacterIconDefinition() => Definitions.Single(IsNativeCharacterIconDefinition);
 
     private static IReadOnlyList<string> RequiredPackageExtensions(Definition definition) =>
         definition.ExternalMipCount > 0
@@ -450,7 +621,7 @@ internal static class TextureCookTemplateService
 
     private static bool IsKnownCoreLayout(Definition definition, string assetBase)
     {
-        if (IsNativeSuitIconDefinition(definition))
+        if (IsNativeUiIconDefinition(definition))
         {
             return false;
         }
@@ -497,6 +668,25 @@ internal static class TextureCookTemplateService
     private static bool IsNativeSuitIconDefinition(Definition definition) =>
         definition.Folder.Equals(NativeSuitIconTemplateFolder, StringComparison.Ordinal);
 
+    private static bool IsNativeCharacterIconDefinition(Definition definition) =>
+        definition.Folder.Equals(NativeCharacterIconTemplateFolder, StringComparison.Ordinal);
+
+    private static bool IsNativeUiIconDefinition(Definition definition) =>
+        IsNativeSuitIconDefinition(definition) || IsNativeCharacterIconDefinition(definition);
+
+    // These profiles are enhancements supplied by narrower game donors. An
+    // existing workspace made before they were added must still be able to
+    // import the original world textures; a Full refresh adds the new donor
+    // packages and makes each matching profile available automatically.
+    private static bool IsOptionalProfileDefinition(Definition definition) =>
+        IsNativeUiIconDefinition(definition) ||
+        definition.Folder.Equals(NativeFaceDetailColorTemplateFolder, StringComparison.Ordinal) ||
+        definition.Folder.Equals(NativeFaceDetailNormalTemplateFolder, StringComparison.Ordinal) ||
+        definition.Folder.Equals(NativeFaceDetailFullColorTemplateFolder, StringComparison.Ordinal) ||
+        definition.Folder.Equals(NativeFaceDetailFullNormalTemplateFolder, StringComparison.Ordinal) ||
+        definition.Folder.Equals(NativeCtTemplateFolder, StringComparison.Ordinal) ||
+        definition.Folder.Equals(NativeRaoTemplateFolder, StringComparison.Ordinal);
+
     private static NativeSuitIconLayout DetectNativeSuitIconLayout(string uassetPath, string uexpPath)
     {
         if (!File.Exists(uassetPath) || !File.Exists(uexpPath))
@@ -529,6 +719,36 @@ internal static class TextureCookTemplateService
             FirstInlineMipOffset = layout == NativeSuitIconLayout.RetocLegacy
                 ? NativeSuitIconRetocFirstMipOffset
                 : NativeSuitIconFullFirstMipOffset,
+        };
+
+    private static NativeCharacterIconLayout DetectNativeCharacterIconLayout(string uassetPath, string uexpPath)
+    {
+        if (!File.Exists(uassetPath) || !File.Exists(uexpPath) || !HasSplitExportFooter(uexpPath))
+        {
+            return NativeCharacterIconLayout.None;
+        }
+
+        var uassetBytes = new FileInfo(uassetPath).Length;
+        var uexpBytes = new FileInfo(uexpPath).Length;
+        if (uassetBytes == NativeCharacterIconRetocUassetBytes && uexpBytes == NativeCharacterIconRetocUexpBytes)
+        {
+            return NativeCharacterIconLayout.RetocLegacy;
+        }
+
+        // UAssetGUI's legacy split export keeps the equivalent UI mip stream
+        // 27 bytes later in the .uexp. Its .uasset differs by exporter version,
+        // so the known stream length and package footer are the stable proof.
+        return uexpBytes == NativeCharacterIconFullUexpBytes && uassetBytes > 0
+            ? NativeCharacterIconLayout.FullLegacy
+            : NativeCharacterIconLayout.None;
+    }
+
+    private static Definition DefinitionForNativeCharacterIconLayout(Definition definition, NativeCharacterIconLayout layout) =>
+        definition with
+        {
+            FirstInlineMipOffset = layout == NativeCharacterIconLayout.FullLegacy
+                ? NativeCharacterIconFullFirstMipOffset
+                : NativeCharacterIconRetocFirstMipOffset,
         };
 
     private static void WriteCanonicalTemplateJson(Definition definition, string destination)

@@ -287,16 +287,17 @@ public sealed partial class MainForm
             var service = new MaterialReplaceService(_projectRootText.Text.Trim());
             var rows = new List<InspectorControl.ComponentRow>();
             var issues = new List<InspectorControl.IssueRow>();
+            var reports = new Dictionary<string, MaterialReplaceService.InspectorReport>(
+                StringComparer.OrdinalIgnoreCase);
 
             foreach (var role in new[] { "playable", "cutscene" })
             {
-                MaterialReplaceService.InspectorReport report;
                 try
                 {
                     var targetPackage = role.Equals("cutscene", StringComparison.OrdinalIgnoreCase)
                         ? _targetCutsceneText.Text.Trim()
                         : _targetPlayableText.Text.Trim();
-                    report = service.DescribeStageComponents(slotId, role, targetPackage);
+                    reports[role] = service.DescribeStageComponents(slotId, role, targetPackage);
                 }
                 catch (Exception ex)
                 {
@@ -306,6 +307,13 @@ public sealed partial class MainForm
                         Detail = ex.Message,
                         Level = InspectorControl.Severity.Crit,
                     });
+                }
+            }
+
+            foreach (var role in new[] { "playable", "cutscene" })
+            {
+                if (!reports.TryGetValue(role, out var report))
+                {
                     continue;
                 }
 
@@ -323,6 +331,16 @@ public sealed partial class MainForm
 
                 foreach (var comp in report.Components)
                 {
+                    if (_currentProject?.Requirements.Any(requirement =>
+                            requirement.Kind.Equals("remove-component", StringComparison.OrdinalIgnoreCase) &&
+                            RequirementTargetsComponent(requirement.TargetComponent, comp.Name)) == true)
+                    {
+                        // Preserve-node hides remain physically present for Blueprint safety, but
+                        // they are declaratively absent from the authored suit just like an
+                        // ordinary unlinked component. Do not make a hidden Head appear to survive.
+                        continue;
+                    }
+
                     var customMesh = FindCustomStaticMeshForComponent(_currentProject, comp.Name);
                     var friendlyComponent = customMesh?.DisplayName?.Trim();
                     var friendlyMesh = customMesh is null
@@ -343,6 +361,13 @@ public sealed partial class MainForm
                         continue;
                     }
 
+                    var removableInBothRoles = new[] { "playable", "cutscene" }.All(requiredRole =>
+                        reports.TryGetValue(requiredRole, out var requiredReport) &&
+                        requiredReport.Found &&
+                        requiredReport.Components.Any(requiredComponent =>
+                            requiredComponent.IsScsCreated &&
+                            requiredComponent.Name.Equals(comp.Name, StringComparison.OrdinalIgnoreCase)));
+
                     rows.Add(new InspectorControl.ComponentRow
                     {
                         Name = comp.Name,
@@ -350,7 +375,14 @@ public sealed partial class MainForm
                         Class = comp.Class,
                         Mesh = comp.Mesh,
                         DisplayMesh = friendlyMesh,
-                        CanRemove = customMesh is not null || comp.IsScsCreated,
+                        // A normal component edit always rebuilds both character roles. Do not
+                        // offer an action that is known up-front to succeed in only the viewed role.
+                        // Project-owned custom meshes remain removable even from a damaged stage so
+                        // the declarative cleanup path can recover the suit.
+                        CanRemove = customMesh is not null || removableInBothRoles,
+                        RemoveDisabledText = comp.IsScsCreated
+                            ? "Not removable — matching playable/cutscene component is missing"
+                            : "Inherited body — choose a replacement instead",
                         Slots = comp.Slots.OrderBy(s => s.Slot).Select(s => new InspectorControl.SlotRow
                         {
                             Slot = s.Slot,

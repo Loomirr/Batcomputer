@@ -75,12 +75,26 @@ Batman face in this recipe.
 Batcomputer records a cook profile with new texture entries. Select a profile that matches the use:
 
 - Character/body color map.
+- Face detail or Face detail normal.
+- CT or RAO surface map.
 - Color mask.
 - Normal or packed material map.
-- Native UI/suit icon.
+- 512px character portrait or 256px suit-selector icon.
 
 Do not assume all images are color masks. The texture kind controls how the result is validated and
 how materials consume it.
+
+The import window makes a first guess from the PNG name. Common game-style endings map as follows:
+
+- `_BC` → **Character texture**.
+- `_MMR` → **Roughness/spec mask**.
+- `_NRM` or `_DNRM` → **Normal map**.
+- `_ColorMask` or `_ColourMask` → **Color mask**.
+- `_CT` or `_CTUV` → **CT map**.
+- `_RAO` → **RAO map**.
+
+This is only a shortcut. Check the selected use before importing, especially when a filename contains
+the word `mask` but is not an MMR or colour mask.
 
 Current cook profiles write the full mip chain, including the small inline mips Unreal can select
 when texture quality is lowered or the streaming pool is busy. A 2K character texture should carry
@@ -94,6 +108,28 @@ renormalizes filtered BC5 normals before compression.
 Choose **Reimport all** at the start of the Textures list to recook every saved source PNG for the
 current suit. Each texture keeps its own saved profile. Batcomputer checks every recipe first,
 backs up the existing cooked packages, and restores the whole batch if any one texture fails.
+
+### Face detail textures
+
+Use **Face detail** for colour artwork that belongs to the face material rather than the body:
+
+- **Native 256×128 BC7 facial detail** for compact brows, face-print strips, and similar non-square
+  maps.
+- **Native 2K BC7 full face detail** for full-face prints, wraps, masks, and decals.
+
+Use **Face detail normal** for the matching normal-map families:
+
+- **Native 128px BC5 facial normal** for small eye, brow, and facial-normal details.
+- **Native 512px BC5 face normal** for larger full-face normal detail.
+
+Pick the profile that matches the native map you are replacing. Upscaling a compact donor to the
+larger profile does not add detail and can change how the material samples it.
+
+### CT and RAO maps
+
+CT and RAO are their own texture uses, not generic colour textures. Use **Native 512px DXT1 CT** for
+the game's compact character, hair, and attachment surface-detail maps. Use **Native 1K DXT1 RAO**
+for roughness/ambient-occlusion surface maps. Both profiles keep the native linear sampling layout.
 
 ### MMR packed maps
 
@@ -137,8 +173,16 @@ metallic switch and unusually strong negative decal-roughness value.
 
 ### UI icons
 
-Use the current verified native suit-icon profile. Old experimental BC7/DXT5 outputs may look
-plausible in an extractor while decoding incorrectly in-game. After cooking:
+The four UIMD icon fields do not all use the same size:
+
+- **Menu**, **Left-facing**, and **Right-facing** use **Character icon** and the verified native
+  **512px BC7 character icon** profile.
+- **Suit** uses **Suit selector icon** and the verified native **256px BC7 suit selector icon**
+  profile.
+
+Batcomputer keeps both choices available, but the icon assignment window only offers a generated
+texture to a field with the matching role. Old experimental BC7/DXT5 outputs may look plausible in
+an extractor while decoding incorrectly in-game. After cooking:
 
 1. Confirm the texture is present in the staged build.
 2. Confirm FModel can display it at the expected path.

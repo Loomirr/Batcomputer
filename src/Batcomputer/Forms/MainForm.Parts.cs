@@ -413,12 +413,10 @@ public sealed partial class MainForm
     }
 
     /// <summary>
-    /// The authored paired-cape scaffold contains the donor's complete construction graph, but
-    /// that does not make every user graft on one of those component names part of the cape pair.
-    /// For example, a static hair graft can legitimately repoint the scaffold's existing Head
-    /// field. Removing that user graft should restore the certified visual-base Head recipe; it
-    /// must not be rejected merely because the scaffold also happens to contain a Head node.
-    /// Only a scaffold component with no independent user graft is protected here.
+    /// Only the adapter's exact cosmetic Cape + Torso glider fields are one atomic pair. The
+    /// authored scaffold also contains ordinary Head/Face/helper nodes, but those nodes are not
+    /// semantically owned by the cape. They can be hidden while their construction nodes remain
+    /// live, which preserves the certified Blueprint graph without tying a cowl or hair to a cape.
     /// </summary>
     private static bool IsPairedCapeShellRemovalBlocked(
         NativeSuitProject project,
@@ -432,8 +430,7 @@ public sealed partial class MainForm
             return false;
         }
 
-        return !(project.PartGrafts ?? [])
-            .Any(graft => !IsAdapterBoundGraft(project, graft) && GraftTargetsComponent(graft, component));
+        return PairedCapeAdapterTargetsComponent(project, component);
     }
 
     internal static bool IsPairedCapeShellRemovalBlockedForTest(
@@ -444,6 +441,55 @@ public sealed partial class MainForm
             project,
             component,
             authoredShellComponents.ToHashSet(StringComparer.OrdinalIgnoreCase));
+
+    private static HashSet<string> PairedCapeAdapterOwnedComponents(NativeSuitProject project)
+    {
+        var components = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var adapter = project.PairedCapeAdapter;
+        if (adapter is null)
+        {
+            return components;
+        }
+
+        foreach (var component in new[]
+                 {
+                     adapter.ResolvedCosmeticComponent,
+                     adapter.ResolvedGliderComponent,
+                 }.Where(component => !string.IsNullOrWhiteSpace(component)))
+        {
+            components.Add(component.Trim());
+        }
+
+        foreach (var graft in project.PartGrafts ?? [])
+        {
+            if (!IsAdapterBoundGraft(project, graft))
+            {
+                continue;
+            }
+            var component = string.IsNullOrWhiteSpace(graft.ResolvedComponent)
+                ? graft.Slot
+                : graft.ResolvedComponent;
+            if (!string.IsNullOrWhiteSpace(component))
+            {
+                components.Add(component.Trim());
+            }
+        }
+        return components;
+    }
+
+    internal static bool ShouldPreservePairedCapeShellNodeForVisualHideForTest(
+        NativeSuitProject project,
+        string component,
+        IEnumerable<string> authoredShellComponents)
+    {
+        if (project.PairedCapeAdapter is null || string.IsNullOrWhiteSpace(component))
+        {
+            return false;
+        }
+        var authored = authoredShellComponents.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return authored.Contains(component) &&
+               !PairedCapeAdapterOwnedComponents(project).Contains(component);
+    }
 
     /// <summary>
     /// The authored paired-cape shell is one atomic runtime layout. Once either member is removed,
@@ -656,19 +702,12 @@ public sealed partial class MainForm
         {
             return;
         }
-        if (!TryGetPairedCapeAuthoredShellComponents(project, out var protectedComponents, out var detail))
-        {
-            if (!string.IsNullOrWhiteSpace(detail))
-            {
-                AppendLog("  paired-cape shell removal repair deferred to final validation: " + detail);
-            }
-            return;
-        }
-
+        var protectedComponents = PairedCapeAdapterOwnedComponents(project);
         var restored = RemoveUnsafePairedCapeRemovalRulesForTest(project, protectedComponents);
         if (restored.Count > 0)
         {
-            AppendLog("  restored authored paired-cape construction node(s): " + string.Join(", ", restored));
+            AppendLog("  cleared unsafe removal rule(s) for the atomic paired-cape fields: " +
+                      string.Join(", ", restored));
         }
     }
 
@@ -1274,16 +1313,20 @@ public sealed partial class MainForm
     /// <summary>The per-slot actions, as fresh items (so they can go in a menu OR a submenu).</summary>
     private ToolStripItem[] BuildSlotMenuItems(string label, string component, int slot)
     {
+        // Material rows are slots *inside* one component. Removing slot 1 must never look like a
+        // slot-only edit and then unlink the whole SCS component. Keep the action explicitly
+        // component-scoped and persist one canonical component removal key.
+        var componentLabel = FriendlySlotLabel(component, 0);
         return new ToolStripItem[]
         {
             new ToolStripMenuItem("Change material here", null, (_, _) => { SelectToyboxSlot(label, component, slot); SelectComboValue(_toyboxCategoryCombo, "Materials"); }),
             new ToolStripMenuItem("Create new material…", null, (_, _) => { SelectToyboxSlot(label, component, slot); OpenMaterialWizard(); }),
             new ToolStripMenuItem("Browse game material…", null, (_, _) => { SelectToyboxSlot(label, component, slot); BrowseAndApplyGameMaterial(); }),
             new ToolStripSeparator(),
-            new ToolStripMenuItem("Remove / hide part", null, async (_, _) =>
+            new ToolStripMenuItem("Remove / hide entire part", null, async (_, _) =>
             {
-                SelectToyboxSlot(label, component, slot);
-                await RemoveToyboxPartAsync(label, component, slot);
+                SelectToyboxSlot(componentLabel, component, 0);
+                await RemoveToyboxPartAsync(componentLabel, component, 0);
             }),
             new ToolStripSeparator(),
             new ToolStripMenuItem("Copy component name", null, (_, _) => { try { Clipboard.SetText(component); AppendLog($"Copied: {component}"); } catch { } }),
@@ -1512,7 +1555,9 @@ public sealed partial class MainForm
 
     private bool IsToyboxSlotRemoved(string component, int slot)
     {
-        return RemovedToyboxSlotKeys().Contains(ToyboxSlotKey(component, slot));
+        // remove-component is intentionally component-scoped even though the inspector renders
+        // material slots. Once one row requests removal, every row for that component is absent.
+        return RemovedToyboxSlotKeys().Any(key => RequirementTargetsComponent(key, component));
     }
 
     private async Task RemoveToyboxPartAsync(string label, string component, int slot)
@@ -1533,24 +1578,6 @@ public sealed partial class MainForm
         {
             Dialog.Warn(null, "Glider component is protected", $"'{component}' is this base suit's native glide-visual component. The wingsuit system needs that component to stay constructed.\n\nChange the glider type back to base/none before removing it.");
             AppendLog($"Remove blocked: '{component}' is the active native glider component for this suit.");
-            return;
-        }
-
-        if (!removingPairedCapeMember &&
-            _currentProject.PairedCapeAdapter is not null &&
-            TryGetPairedCapeAuthoredShellComponents(
-                _currentProject,
-                out var authoredShellComponents,
-                out _) &&
-            IsPairedCapeShellRemovalBlocked(_currentProject, component, authoredShellComponents))
-        {
-            Dialog.Warn(
-                this,
-                "Cape shell component is protected",
-                $"'{component}' belongs to the authored cape-and-glider shell this cape-less glide base needs. " +
-                "Batcomputer will keep that component constructed so the suit cannot produce a crash-prone Blueprint.\n\n" +
-                "You can still add a compatible attachment, or remove the regular cape/glide-cape pair first.");
-            AppendLog($"Remove blocked: '{component}' is required by the active authored paired-cape shell.");
             return;
         }
 
@@ -1580,7 +1607,7 @@ public sealed partial class MainForm
             Kind = "remove-component",
             SourcePackage = _targetPlayableText.Text.Trim(),
             TargetComponent = key,
-            Notes = $"Removed declaratively from both staged SCS construction arrays for {label} ({component} slot {slot})."
+            Notes = $"Removed or visually hidden declaratively in both staged character roles for {label} ({component} slot {slot})."
         });
 
         // If the removed component was a DECLARATIVE part graft, drop its entry so a rebuild
@@ -1714,8 +1741,8 @@ public sealed partial class MainForm
             return;
         }
 
-        RecordChange("Parts", $"{component} slot {slot}", $"removed SCS part {label}");
-        AppendLog($"Removed {label} from both staged character roles. Package the current stage to test it in-game.");
+        RecordChange("Parts", $"{component} slot {slot}", $"removed or hidden part {label}");
+        AppendLog($"Removed or hidden {label} in both staged character roles. Package the current stage to test it in-game.");
         _session.RaiseChanged();
         RefreshToyboxTiles();
     }
@@ -1743,6 +1770,22 @@ public sealed partial class MainForm
         }
 
         var protectedGliderComponent = ActiveGliderVisualComponent(project);
+        HashSet<string>? authoredPairedCapeShellComponents = null;
+        var pairedCapeOwnedComponents = PairedCapeAdapterOwnedComponents(project);
+        if (project.PairedCapeAdapter is not null)
+        {
+            if (!TryGetPairedCapeAuthoredShellComponents(
+                    project,
+                    out authoredPairedCapeShellComponents,
+                    out var shellDetail))
+            {
+                outcome.Failures.Add(
+                    "paired-cape removal replay: the authored shell could not be resolved safely" +
+                    (string.IsNullOrWhiteSpace(shellDetail) ? "" : $" ({shellDetail})"));
+                return outcome;
+            }
+        }
+
         foreach (var removal in removals)
         {
             var component = removal;
@@ -1759,20 +1802,44 @@ public sealed partial class MainForm
                 continue;
             }
 
+            if (project.PairedCapeAdapter is not null && pairedCapeOwnedComponents.Contains(component))
+            {
+                outcome.Failures.Add(
+                    $"{removal}: '{component}' is one member of the active atomic Cape/Torso adapter pair");
+                AppendLog($"  ERROR saved remove-component {removal} targets an active paired-cape field.");
+                continue;
+            }
+
+            var preserveAuthoredShellNode =
+                authoredPairedCapeShellComponents?.Contains(component) == true;
+
             var service = new ComponentRemoveService(_projectRootText.Text.Trim());
             var result = RunWithStructuredFileLockRetry(
-                () => string.IsNullOrWhiteSpace(stageContentRootOverride)
-                    ? service.Remove(
-                        project.SlotId,
-                        project.TargetPackages.Playable,
-                        project.TargetPackages.Cutscene,
-                        component)
-                    : service.RemoveFromContentRoot(
-                        stageContentRootOverride,
-                        project.SlotId,
-                        project.TargetPackages.Playable,
-                        project.TargetPackages.Cutscene,
-                        component),
+                () => preserveAuthoredShellNode
+                    ? string.IsNullOrWhiteSpace(stageContentRootOverride)
+                        ? service.HideVisual(
+                            project.SlotId,
+                            project.TargetPackages.Playable,
+                            project.TargetPackages.Cutscene,
+                            component)
+                        : service.HideVisualFromContentRoot(
+                            stageContentRootOverride,
+                            project.SlotId,
+                            project.TargetPackages.Playable,
+                            project.TargetPackages.Cutscene,
+                            component)
+                    : string.IsNullOrWhiteSpace(stageContentRootOverride)
+                        ? service.Remove(
+                            project.SlotId,
+                            project.TargetPackages.Playable,
+                            project.TargetPackages.Cutscene,
+                            component)
+                        : service.RemoveFromContentRoot(
+                            stageContentRootOverride,
+                            project.SlotId,
+                            project.TargetPackages.Playable,
+                            project.TargetPackages.Cutscene,
+                            component),
                 removalResult => removalResult.TransientFileLock ||
                                  removalResult.Files.Any(file => file.TransientFileLock),
                 $"re-apply saved removal '{removal}'");
@@ -1793,7 +1860,8 @@ public sealed partial class MainForm
 
                 var file = result.Files.FirstOrDefault(candidate =>
                     candidate.Role.Equals(required.Role, StringComparison.OrdinalIgnoreCase));
-                if (file is not null && (file.Success || file.AlreadyRemoved))
+                if (file is not null &&
+                    (file.Success || file.AlreadyRemoved || file.VisualAlreadyHidden))
                 {
                     satisfiedRoles++;
                     continue;
@@ -1810,9 +1878,13 @@ public sealed partial class MainForm
             var successes = result.Files.Count(file => file.Success);
             var alreadyRemoved = result.Files.Count(file => file.AlreadyRemoved);
             var changedRefs = result.Files.Sum(file => file.RemovedNodeReferences);
+            var clearedMeshes = result.Files.Sum(file => file.ClearedMeshReferences);
+            var alreadyHidden = result.Files.Count(file => file.VisualAlreadyHidden);
             if (satisfiedRoles == requiredRoles.Length)
             {
-                AppendLog($"Re-applied saved remove-component {removal}: files={successes} alreadyRemoved={alreadyRemoved} removedRefs={changedRefs} status={result.Status}");
+                AppendLog(preserveAuthoredShellNode
+                    ? $"Re-applied saved remove-component {removal} as a safe visual hide: files={successes} alreadyHidden={alreadyHidden} clearedMeshRefs={clearedMeshes} constructionNode=preserved status={result.Status}"
+                    : $"Re-applied saved remove-component {removal}: files={successes} alreadyRemoved={alreadyRemoved} removedRefs={changedRefs} status={result.Status}");
             }
             else
             {
@@ -2076,21 +2148,39 @@ public sealed partial class MainForm
         }
 
         var projectRoot = _projectRootText.Text.Trim();
-        var outputDirectory = new SuitProjectService(projectRoot).ProjectOutputDirectory(project);
+        var projectService = _projectService ??= new SuitProjectService(projectRoot);
+        NativeSuitProject previousProjectSnapshot;
+        try
+        {
+            previousProjectSnapshot = JsonSerializer.Deserialize<NativeSuitProject>(
+                JsonSerializer.Serialize(project))
+                ?? throw new InvalidOperationException("Could not snapshot the suit before removing the custom mesh.");
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Custom mesh removal stopped before staging: {ex.Message}");
+            Dialog.Error(this, "Custom mesh was not removed", ex.Message, windowTitle: "Parts");
+            return;
+        }
+
+        string? sourceFull = null;
         if (!string.IsNullOrWhiteSpace(mesh.SourceObjRelativePath))
         {
             try
             {
-                var outputFull = Path.GetFullPath(outputDirectory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-                var sourceFull = Path.GetFullPath(Path.Combine(outputDirectory, mesh.SourceObjRelativePath));
-                if (sourceFull.StartsWith(outputFull, StringComparison.OrdinalIgnoreCase) && File.Exists(sourceFull))
+                var outputDirectory = projectService.ProjectOutputDirectory(project);
+                var outputFull = Path.GetFullPath(outputDirectory)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) +
+                    Path.DirectorySeparatorChar;
+                var candidate = Path.GetFullPath(Path.Combine(outputDirectory, mesh.SourceObjRelativePath));
+                if (candidate.StartsWith(outputFull, StringComparison.OrdinalIgnoreCase))
                 {
-                    File.Delete(sourceFull);
+                    sourceFull = candidate;
                 }
             }
             catch (Exception ex)
             {
-                AppendLog($"Custom mesh: could not delete the project OBJ copy for '{mesh.DisplayName}': {ex.Message}");
+                AppendLog($"Custom mesh: its project OBJ cleanup path is invalid and will be left untouched: {ex.Message}");
             }
         }
 
@@ -2104,8 +2194,60 @@ public sealed partial class MainForm
                 placement.Component.Equals(componentName, StringComparison.OrdinalIgnoreCase));
         }
         SyncCustomStaticMeshHeadRemoval(project);
-        (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(project);
-        await RebuildGraftStageFromDeclarativeAsync();
+
+        var projectSaved = false;
+        try
+        {
+            // Keep the OBJ and saved recipe intact until both generated roles rebuild cleanly.
+            // This makes inspector/tile removal transactional instead of deleting the only source
+            // copy before a package lock or replay failure can be reported.
+            await RebuildGraftStageFromDeclarativeAsync(persistProject: false);
+            await RunWithFileLockRetryAsync(
+                () => projectService.SaveProject(project),
+                "save the completed custom-mesh removal");
+            projectSaved = true;
+            await FinalizeDeclarativeGraftStageAsync(project, projectRoot);
+        }
+        catch (Exception ex)
+        {
+            if (!projectSaved)
+            {
+                _currentProject = previousProjectSnapshot;
+                ApplyProjectToFields(_currentProject);
+                UpdateSelectedLabels();
+            }
+            AppendLog(projectSaved
+                ? "Custom mesh removal was saved, but its completed stage could not be certified:"
+                : "Custom mesh removal failed; the prior saved recipe and OBJ remain active:");
+            AppendLog(ex.ToString());
+            Dialog.Error(
+                this,
+                projectSaved ? "Custom mesh saved; stage incomplete" : "Custom mesh was not removed",
+                (projectSaved
+                    ? "The project was saved without this mesh, but packaging remains blocked until its declarative stage rebuild can be certified."
+                    : "Batcomputer restored the prior suit recipe. The project-owned OBJ was not deleted.") +
+                "\n\n" + ex.Message,
+                windowTitle: "Parts");
+            _session.RaiseChanged();
+            RefreshToyboxTiles();
+            RefreshInspector();
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(sourceFull) && File.Exists(sourceFull))
+        {
+            try
+            {
+                File.Delete(sourceFull);
+            }
+            catch (Exception ex)
+            {
+                // The committed recipe no longer references this copy. Leaving an unreferenced OBJ
+                // is recoverable and safer than rolling back a fully certified two-role rebuild.
+                AppendLog($"Custom mesh: removal succeeded, but the unused project OBJ copy could not be deleted: {ex.Message}");
+            }
+        }
+
         RecordChange("Parts", mesh.DisplayName, "removed custom mesh", status: "removed");
         AppendLog($"Custom mesh: removed '{mesh.DisplayName}' from the suit.");
         _session.RaiseChanged();
@@ -4860,10 +5002,9 @@ public sealed partial class MainForm
             AppendLog("  migrated retired paired-cape layout: " + migrationDetail);
         }
 
-        // A visual-base selection made before the adapter exists can leave saved hide rules for
-        // Head or support components. Once an authored cape shell is selected those nodes are part
-        // of its certified construction graph and must stay live. Repair the declarative intent so
-        // both the current rebuild and all later rebuilds preserve that graph.
+        // Clear stale attempts to remove the adapter-owned Cape/Torso fields themselves. Ordinary
+        // authored-shell visuals (Head/Face/etc.) keep their saved intent: removal replay safely
+        // clears the mesh while preserving the certified construction node.
         RestorePairedCapeAuthoredShellRemovalRules(project);
 
         // Resolve every donor before deleting the last generated payload. This catches a genuinely

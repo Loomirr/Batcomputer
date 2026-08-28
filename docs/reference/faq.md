@@ -66,6 +66,17 @@ re-select the visual base and gameplay donor. It will not guess a similarly name
 index** rebuilds the searchable part recipes from the active extracted Content folder. Updating the
 index cannot repair an old or incomplete extraction.
 
+### Why are DLC characters or parts missing from the picker?
+
+Run **Refresh game assets** → **Refresh all character assets**, then let Batcomputer rebuild the
+part index. When `Content\DLC` is installed, the refresh mounts it with the base game containers and
+adds the extracted `Content/AdditionalContent` packages to the same active dump. The base picker,
+part inspector, material browsers, and Research then use those DLC assets automatically.
+
+If the refresh says it could not create the temporary base/DLC mount, either keep the workspace on
+the same drive as the game or enable Windows Developer Mode. The mount contains links only; it does
+not copy, move, or change the game's container files.
+
 ### What is the safe order for repairing an old suit?
 
 Use current mappings, refresh the character assets, choose **Refresh part index**, rebase the suit to
@@ -120,6 +131,13 @@ A regular cape cannot safely be mixed with an unrelated wingsuit or glider contr
 supported **Glide cape** preset and its matching native cape, or remove the regular `Cape` and keep
 the glide-only visual.
 
+### Why did an older build say Head belonged to the cape shell?
+
+The adapter uses a complete authored Blueprint shell, and older builds protected every component
+inside it as though it belonged to the cape. Current builds protect only the actual `Cape` and
+`Torso` glide pair. Right-clicking an ordinary `Head`, hair, cowl, or `Face` now hides its visual in
+both character roles while leaving the safe construction node in place.
+
 ## Materials, models, and previews
 
 ### Can I reuse a material I created in another suit?
@@ -140,6 +158,16 @@ from a component override or the mesh default. Its map switches are viewer-only.
 
 You can copy a compatible game face material and change its supported print layers. The face mesh
 family still matters: standard LEGOface and SuperheroFace recipes are not interchangeable.
+
+For imported face maps, choose **Face detail** or **Face detail normal** instead of Character
+texture. Batcomputer offers the shipped compact and larger face-map sizes so the new texture can
+follow the native map it replaces.
+
+### Why are some suit icons 256px and others 512px?
+
+The suit-selector tile under `UI/Icons/Suits` is 256px. The UIMD menu, left, and right character
+portraits under `UI/Icons/Characters` are 512px. Import the tile as **Suit selector icon** and the
+other three as **Character icon**; the icon window labels each field with the expected size.
 
 ### Can I import a model?
 

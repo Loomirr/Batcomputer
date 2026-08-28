@@ -1,12 +1,26 @@
 # Changelog
 
-## 0.9.0-beta.9 — 2026-08-27
+## Unreleased
 
-- Paired cape/glider cleanup now distinguishes the authored native shell from independent user
-  grafts, so removing a hair or cowl no longer gets blocked just because the glider adapter also
-  contains a Head component.
-- Keeps the certified paired-cape shell protected when no independent replacement targets that
-  component, and adds a regression check for both removal paths.
+- No changes yet.
+
+## 0.9.0-beta.9 — 2026-08-27 (corrected 2026-08-28)
+
+- Paired cape/glider cleanup now lets ordinary `Head`, `Face`, hair, and cowl visuals be removed in
+  both character roles. Batcomputer preserves the invisible authored construction node needed for
+  runtime safety, while the actual `Cape` and `Torso` glide visual remain one atomic pair.
+- Inspector removal checks playable and cutscene eligibility before offering the action. Custom-mesh
+  removal keeps its project OBJ and prior recipe until both roles are rebuilt, saved, and certified.
+- Material-slot menus now say when they remove the entire part and use one component-level removal
+  instead of making a secondary material slot look independently removable.
+- Adds separate verified 512px character-portrait and 256px suit-selector icon cooks, and labels the
+  four UIMD fields with the size they actually use.
+- Adds native compact and larger **Face detail** / **Face detail normal** profiles plus dedicated CT
+  and RAO cooks.
+- Recognizes common `_BC`, `_MMR`, `_NRM`/`_DNRM`, `_ColorMask`/`_ColourMask`, `_CT`, and `_RAO`
+  filename endings when choosing a texture use.
+- First-time and full character refreshes include installed `Content\DLC` containers and index their
+  extracted `/Game/AdditionalContent` characters, parts, materials, and textures with the base game.
 - Bumps the portable build and documentation to beta 9.
 
 ## 0.9.0-beta.8 — 2026-08-25

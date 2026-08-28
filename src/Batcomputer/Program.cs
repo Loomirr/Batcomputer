@@ -28,6 +28,48 @@ internal static class Program
             return ModelPreviewProbe.Run(args[1], args[2], args[3]);
         }
 
+        if (args.Length >= 6 && args[0].Equals("--component-visual-hide-probe", StringComparison.OrdinalIgnoreCase))
+        {
+            // --component-visual-hide-probe <projectRoot> <stageContentRoot> <playable> <cutscene> <component> [projectJson]
+            var result = new ComponentRemoveService(args[1]).HideVisualFromContentRoot(
+                args[2],
+                slotId: "component-visual-hide-probe",
+                args[3],
+                args[4],
+                args[5]);
+            Console.WriteLine(JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
+            var succeeded = result.Files.Count == 2 &&
+                            result.Files.All(file => file.Success || file.VisualAlreadyHidden);
+            if (succeeded && args.Length >= 7)
+            {
+                var project = JsonSerializer.Deserialize<NativeSuitProject>(
+                    File.ReadAllText(args[6]),
+                    JsonOptions) ?? throw new InvalidOperationException("Could not read the visual-hide probe project.");
+                project.Requirements.RemoveAll(requirement =>
+                    requirement.Kind.Equals("remove-component", StringComparison.OrdinalIgnoreCase) &&
+                    requirement.TargetComponent.StartsWith(args[5] + ":", StringComparison.OrdinalIgnoreCase));
+                project.Requirements.Add(new NativeSuitRequirement
+                {
+                    Id = "component-visual-hide-probe",
+                    Kind = "remove-component",
+                    SourcePackage = project.TargetPackages.Playable,
+                    TargetComponent = args[5] + ":0",
+                });
+                var findings = new StageValidationService(
+                    args[2],
+                    AppSettings.Current.EffectiveUsmapPath(),
+                    args[1]).Validate(project);
+                foreach (var finding in findings)
+                {
+                    Console.WriteLine($"[{finding.Severity}] {finding.Message}");
+                }
+                succeeded = findings.All(finding =>
+                    !finding.Severity.Equals("ERROR", StringComparison.OrdinalIgnoreCase));
+                Console.WriteLine($"visual-hide validation: {findings.Count(finding => finding.Severity.Equals("ERROR", StringComparison.OrdinalIgnoreCase))} error(s)");
+            }
+            return succeeded ? 0 : 1;
+        }
+
         if (args.Length >= 5 && args[0].Equals("--preview-suit", StringComparison.OrdinalIgnoreCase))
         {
             // --preview-suit <paksDir> <usmap> <suitProjectJson> <projectRoot>
@@ -751,6 +793,16 @@ internal static class Program
             using var context = new HeadlessModBuildContext(args[1], args[2], args[3]);
             Application.Run(context);
             return context.ExitCode;
+        }
+
+        if (args.Length >= 4 && args[0].Equals("--create-icon-acceptance-probe", StringComparison.OrdinalIgnoreCase))
+        {
+            var result = new IconAcceptanceProbeService().Create(args[1], args[2], args[3]);
+            Console.WriteLine($"icon acceptance probe: {result.Status}");
+            Console.WriteLine(result.Status.Equals("created", StringComparison.OrdinalIgnoreCase)
+                ? $"suit={result.SuitProjectPath}\nmod={result.ModProjectPath}"
+                : result.Error);
+            return result.Status.Equals("created", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
         }
 
         if (args.Length >= 1 && args[0].Equals("--capture-ui-gallery", StringComparison.OrdinalIgnoreCase))

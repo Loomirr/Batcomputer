@@ -109,10 +109,10 @@ public sealed partial class UimdIconsDialog : AdaptiveForm
         {
             fields.RowStyles.Add(new RowStyle(SizeType.Percent, 25));
         }
-        fields.Controls.Add(Row("Menu icon", "Character menu portrait", _menu, generatedTextures), 0, 0);
-        fields.Controls.Add(Row("Suit icon", "Suit selector tile", _suit, generatedTextures), 0, 1);
-        fields.Controls.Add(Row("Left-facing", "Character-card left view", _left, generatedTextures), 0, 2);
-        fields.Controls.Add(Row("Right-facing", "Character-card right view", _right, generatedTextures), 0, 3);
+        fields.Controls.Add(Row("Menu icon", "Character menu portrait · 512px", _menu, generatedTextures, characterIcon: true), 0, 0);
+        fields.Controls.Add(Row("Suit icon", "Suit selector tile · 256px", _suit, generatedTextures, characterIcon: false), 0, 1);
+        fields.Controls.Add(Row("Left-facing", "Character-card left view · 512px", _left, generatedTextures, characterIcon: true), 0, 2);
+        fields.Controls.Add(Row("Right-facing", "Character-card right view · 512px", _right, generatedTextures, characterIcon: true), 0, 3);
         card.Controls.Add(fields);
         root.Controls.Add(card, 0, 1);
 
@@ -161,7 +161,8 @@ public sealed partial class UimdIconsDialog : AdaptiveForm
         string title,
         string detail,
         TextBox input,
-        IReadOnlyList<GeneratedTextureEntry> generatedTextures)
+        IReadOnlyList<GeneratedTextureEntry> generatedTextures,
+        bool characterIcon)
     {
         var row = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Margin = Padding.Empty };
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 148));
@@ -191,25 +192,32 @@ public sealed partial class UimdIconsDialog : AdaptiveForm
         Theme.StyleDarkInput(input);
         row.Controls.Add(input, 1, 0);
 
+        var compatibleTextures = generatedTextures
+            .Where(texture => characterIcon
+                ? texture.Kind.Equals("Character icon", StringComparison.OrdinalIgnoreCase) ||
+                  texture.Kind.Equals("UI artwork", StringComparison.OrdinalIgnoreCase)
+                : texture.Kind.Equals("Suit selector icon", StringComparison.OrdinalIgnoreCase) ||
+                  texture.Kind.Equals("UI icon", StringComparison.OrdinalIgnoreCase))
+            .ToList();
         var picker = new ThemedDropDown
         {
             Dock = DockStyle.Fill,
             Margin = new Padding(8, 8, 0, 8),
-            Placeholder = generatedTextures.Count == 0 ? "No generated UI textures" : "Use generated UI texture",
-            Enabled = generatedTextures.Count > 0,
+            Placeholder = compatibleTextures.Count == 0 ? "No matching generated icon" : "Use generated icon",
+            Enabled = compatibleTextures.Count > 0,
         };
         picker.Items.Add(new GeneratedUiTextureChoice(null));
-        foreach (var texture in generatedTextures)
+        foreach (var texture in compatibleTextures)
         {
             picker.Items.Add(new GeneratedUiTextureChoice(texture));
         }
 
         var currentPath = UnrealPathUtil.NormalizePackagePath(input.Text);
         var currentIndex = -1;
-        for (var index = 0; index < generatedTextures.Count; index++)
+        for (var index = 0; index < compatibleTextures.Count; index++)
         {
             if (string.Equals(
-                    UnrealPathUtil.NormalizePackagePath(generatedTextures[index].PackagePath),
+                    UnrealPathUtil.NormalizePackagePath(compatibleTextures[index].PackagePath),
                     currentPath,
                     StringComparison.OrdinalIgnoreCase))
             {
@@ -248,7 +256,10 @@ public sealed partial class UimdIconsDialog : AdaptiveForm
             var name = string.IsNullOrWhiteSpace(Texture.DisplayName)
                 ? UnrealPathUtil.AssetName(Texture.PackagePath)
                 : Texture.DisplayName;
-            return name + " · " + UnrealPathUtil.AssetName(Texture.PackagePath);
+            var size = Texture.CookWidth > 0 && Texture.CookHeight > 0
+                ? $" · {Texture.CookWidth}px"
+                : "";
+            return name + size + " · " + UnrealPathUtil.AssetName(Texture.PackagePath);
         }
     }
 }

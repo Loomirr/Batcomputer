@@ -26,6 +26,118 @@ internal static class ReleaseRegressionChecks
             failures,
             output);
         Check(
+            GameAssetRefreshService.AllCharacterFilters.Contains(
+                GameAssetRefreshService.AdditionalContentFilter,
+                StringComparer.OrdinalIgnoreCase) &&
+            GameAssetRefreshService.DeveloperResearchFilters.Contains(
+                GameAssetRefreshService.AdditionalContentFilter,
+                StringComparer.OrdinalIgnoreCase) &&
+            GameAssetRefreshService.DlcRootForPaksRoot(
+                    Path.Combine("C:", "Games", "LEGOBatmanLotDK", "Content", "Paks"))
+                .Equals(
+                    Path.Combine("C:", "Games", "LEGOBatmanLotDK", "Content", "DLC"),
+                    StringComparison.OrdinalIgnoreCase),
+            "first-time and full refresh mount Content/DLC and extract Content/AdditionalContent",
+            failures,
+            output);
+
+        var dlcMountFixtureRoot = Path.Combine(
+            Path.GetTempPath(),
+            "Batcomputer-dlc-mount-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var baseContainers = Path.Combine(dlcMountFixtureRoot, "Paks");
+            var dlcContainers = Path.Combine(dlcMountFixtureRoot, "DLC");
+            var outputRoot = Path.Combine(dlcMountFixtureRoot, "Output");
+            Directory.CreateDirectory(baseContainers);
+            Directory.CreateDirectory(dlcContainers);
+            Directory.CreateDirectory(outputRoot);
+            foreach (var extension in new[] { ".utoc", ".ucas", ".pak" })
+            {
+                File.WriteAllText(Path.Combine(baseContainers, "pakchunk0-Windows" + extension), "base-" + extension);
+                File.WriteAllText(Path.Combine(dlcContainers, "pakchunk101-Windows" + extension), "dlc-" + extension);
+            }
+
+            var mount = GameAssetRefreshService.CreateCombinedContainerMount(
+                baseContainers,
+                dlcContainers,
+                outputRoot);
+            var mountWorks = new[]
+                {
+                    "pakchunk0-Windows.utoc",
+                    "pakchunk0-Windows.ucas",
+                    "pakchunk0-Windows.pak",
+                    "pakchunk101-Windows.utoc",
+                    "pakchunk101-Windows.ucas",
+                    "pakchunk101-Windows.pak",
+                }.All(name => File.Exists(Path.Combine(mount, name))) &&
+                File.ReadAllText(Path.Combine(mount, "pakchunk0-Windows.utoc")) == "base-.utoc" &&
+                File.ReadAllText(Path.Combine(mount, "pakchunk101-Windows.utoc")) == "dlc-.utoc";
+            GameAssetRefreshService.TryDeleteCombinedContainerMount(mount);
+            Check(
+                mountWorks &&
+                !Directory.Exists(mount) &&
+                File.Exists(Path.Combine(baseContainers, "pakchunk0-Windows.utoc")) &&
+                File.Exists(Path.Combine(dlcContainers, "pakchunk101-Windows.utoc")),
+                "the disposable retoc input safely combines base and DLC container trios without moving sources",
+                failures,
+                output);
+        }
+        catch (Exception ex)
+        {
+            Check(
+                false,
+                "the disposable retoc input safely combines base and DLC container trios without moving sources (" + ex.Message + ")",
+                failures,
+                output);
+        }
+        finally
+        {
+            try { Directory.Delete(dlcMountFixtureRoot, recursive: true); } catch { /* best effort */ }
+        }
+
+        var characterRootFixture = Path.Combine(
+            Path.GetTempPath(),
+            "Batcomputer-character-roots-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var baseCharacters = Path.Combine(characterRootFixture, "Characters");
+            var dlcCharacters = Path.Combine(
+                characterRootFixture,
+                "AdditionalContent",
+                "DlcPack",
+                "Content",
+                "Characters");
+            var unrelatedCharacters = Path.Combine(
+                characterRootFixture,
+                "UnrelatedLargeTree",
+                "Characters");
+            Directory.CreateDirectory(baseCharacters);
+            Directory.CreateDirectory(dlcCharacters);
+            Directory.CreateDirectory(unrelatedCharacters);
+
+            Check(
+                CharacterContentRootService.Enumerate(characterRootFixture)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase)
+                    .SetEquals([baseCharacters, dlcCharacters]),
+                "character discovery scans the direct base root and AdditionalContent without walking unrelated extracted folders",
+                failures,
+                output);
+        }
+        catch (Exception ex)
+        {
+            Check(
+                false,
+                "character discovery scans only base and AdditionalContent roots (" + ex.Message + ")",
+                failures,
+                output);
+        }
+        finally
+        {
+            try { Directory.Delete(characterRootFixture, recursive: true); } catch { /* best effort */ }
+        }
+
+        Check(
             new[]
             {
                 GameAssetRefreshService.AllCharacterFilters,
@@ -469,6 +581,16 @@ internal static class ReleaseRegressionChecks
             Check(
                 MainForm.GuessTextureImportKind("CowlMMR") == "Roughness/spec mask" &&
                 MainForm.GuessTextureImportKind("T_Body_ORM") == "Roughness/spec mask" &&
+                MainForm.GuessTextureImportKind("T_Body_DNRM") == "Normal map" &&
+                MainForm.GuessTextureImportKind("T_Body_NRM") == "Normal map" &&
+                MainForm.GuessTextureImportKind("T_Body_ColorMask") == "Color mask" &&
+                MainForm.GuessTextureImportKind("T_Body_ColourMask") == "Color mask" &&
+                MainForm.GuessTextureImportKind("T_Hair_CT") == "CT map" &&
+                MainForm.GuessTextureImportKind("T_Hair_CTUV") == "CT map" &&
+                MainForm.GuessTextureImportKind("T_Hair_RAO") == "RAO map" &&
+                MainForm.GuessTextureImportKind("T_Body_BC") == "Character texture" &&
+                MainForm.GuessTextureImportKind("T_RightArm_MMR") == "Roughness/spec mask" &&
+                MainForm.GuessTextureImportKind("T_Face_Left_BC") == "Character texture" &&
                 MainForm.GuessTextureImportKind("Uniform") == "Character texture" &&
                 MainForm.GuessTextureImportKind("Storm") == "Character texture" &&
                 MainForm.TextureKindForCookProfileChange(
@@ -480,7 +602,7 @@ internal static class ReleaseRegressionChecks
                     "Character texture",
                     "StormBody",
                     "C:/legacy/UniformBase.png") == "Character texture",
-                "bare MMR and delimited ORM suffixes select surface masks without matching ordinary names",
+                "common BC/MMR/DNRM/NRM/ColorMask/CT/RAO filename suffixes select the intended texture use without matching ordinary names",
                 failures,
                 output);
 
@@ -554,6 +676,31 @@ internal static class ReleaseRegressionChecks
                 uiMips[0].GetProperty("BulkData").GetProperty("OffsetInFile").GetInt32() == 0x7F &&
                 0x11L + uiLast.GetProperty("OffsetInFile").GetInt64() + uiLast.GetProperty("SizeOnDisk").GetInt64() == 87708 - 28,
                 "native suit-icon recipes keep their explicit +0x11 inline payload bias and package footer",
+                failures,
+                output);
+
+            var characterUiFolder = Path.Combine(generated, TextureCookTemplateService.NativeCharacterIconTemplateFolder);
+            var characterUiBase = Path.Combine(characterUiFolder, "T_UI_IconChar_Batman_TheBatman2025_Menu_BCA");
+            Directory.CreateDirectory(characterUiFolder);
+            CreateSizedTextureFixture(characterUiBase + ".uasset", 1260);
+            CreateSizedTextureFixture(characterUiBase + ".uexp", 349841, packageFooter: true);
+            var characterUiNormalized = TextureCookTemplateService.NormalizeNativeCharacterIconTemplate(textureMipRecipeRoot);
+            var characterUiJson = TextureCookTemplateService.TemplateJsonPath(
+                textureMipRecipeRoot,
+                TextureCookTemplateService.NativeCharacterIconTemplateFolder);
+            using var characterUiDocument = System.Text.Json.JsonDocument.Parse(File.ReadAllText(characterUiJson));
+            var characterUiRoot = characterUiDocument.RootElement;
+            var characterUiMips = characterUiRoot.GetProperty("Mips").EnumerateArray().ToArray();
+            var characterUiLast = characterUiMips[^1].GetProperty("BulkData");
+            Check(
+                characterUiNormalized &&
+                characterUiRoot.GetProperty("SizeX").GetInt32() == 512 &&
+                characterUiRoot.GetProperty("PixelFormat").GetString() == "PF_BC7" &&
+                characterUiRoot.GetProperty("InlinePayloadOffsetBias").GetInt32() == 0x11 &&
+                characterUiMips.Length == 10 &&
+                characterUiMips[0].GetProperty("BulkData").GetProperty("OffsetInFile").GetInt32() == 0x64 &&
+                0x11L + characterUiLast.GetProperty("OffsetInFile").GetInt64() + characterUiLast.GetProperty("SizeOnDisk").GetInt64() == 349841 - 28,
+                "native character-icon recipes keep the distinct 512px BC7 inline-mip layout used by UIMD portraits",
                 failures,
                 output);
 
@@ -712,6 +859,17 @@ internal static class ReleaseRegressionChecks
             File.WriteAllBytes(
                 Path.Combine(batmiteRoot, "BP_CAT_Archetype_Batmite.uasset"),
                 Array.Empty<byte>());
+            var dlcBatgirlRoot = Path.Combine(
+                contentRoot,
+                "AdditionalContent",
+                "DLC_Arkham",
+                "Characters",
+                "Minifig",
+                "Batgirl");
+            Directory.CreateDirectory(dlcBatgirlRoot);
+            File.WriteAllBytes(
+                Path.Combine(dlcBatgirlRoot, "BP_BatGirl_Arkhamverse_Playable.uasset"),
+                Array.Empty<byte>());
 
             var questPackages = BaseCharacterPicker.EnumerateExtractedQuestVisualPackages(contentRoot);
             var visualAssets = BaseCharacterPicker.BuildVisualAssetList(
@@ -727,8 +885,11 @@ internal static class ReleaseRegressionChecks
                 questPackages.Contains(
                     "/Game/Characters/Smallfig/Batmite/BP_Batmite_Quest",
                     StringComparer.OrdinalIgnoreCase) &&
-                visualAssets.Count == 3 &&
-                gameplayAssets.Count == 0 &&
+                visualAssets.Count == 4 &&
+                visualAssets.Any(asset => asset.Path.Equals(
+                    "/Game/AdditionalContent/DLC_Arkham/Characters/Minifig/Batgirl/BP_BatGirl_Arkhamverse_Playable",
+                    StringComparison.OrdinalIgnoreCase)) &&
+                gameplayAssets.Count == 1 &&
                 BaseEligibilityService.RequiresSeparateGameplayDonor(
                     "/Game/Characters/Smallfig/Batmite/BP_Batmite_Quest") &&
                 !BaseEligibilityService.RequiresSeparateGameplayDonor(
@@ -745,18 +906,20 @@ internal static class ReleaseRegressionChecks
                 !BaseEligibilityService.IsSameCharacterVariant(
                     "/Game/Characters/Minifig/Alfred/BP_Alfred_Default_Quest",
                     "/Game/Characters/Minifig/Alfred/BP_Alfred_1966_Cutscene"),
-                "extracted Smallfig _Quest Blueprints appear as visual bases and require an explicit gameplay donor",
+                "extracted Smallfig and AdditionalContent DLC Blueprints appear as selectable visual/gameplay bases",
                 failures,
                 output);
 
             var indexedBlueprints = PartIndexService.EnumerateCharacterBlueprintsForTest(contentRoot);
             Check(
-                indexedBlueprints.Count == 3 &&
+                indexedBlueprints.Count == 4 &&
                 indexedBlueprints.Any(path => Path.GetFileNameWithoutExtension(path)
                     .Equals("BP_Batmite_Quest", StringComparison.OrdinalIgnoreCase)) &&
+                indexedBlueprints.Any(path => Path.GetFileNameWithoutExtension(path)
+                    .Equals("BP_BatGirl_Arkhamverse_Playable", StringComparison.OrdinalIgnoreCase)) &&
                 !PartIndexService.IsCurrentIndexForTest(new NativeSuitPartIndex { SchemaVersion = 2 }) &&
                 PartIndexService.IsCurrentIndexForTest(new NativeSuitPartIndex()),
-                "the native part index scans Smallfig quest-character Blueprints",
+                "the native part index scans Smallfig and AdditionalContent DLC character Blueprints",
                 failures,
                 output);
 
@@ -3085,12 +3248,13 @@ internal static class ReleaseRegressionChecks
         shellRemovalRepairProject.Requirements =
         [
             new NativeSuitRequirement { Kind = "remove-component", TargetComponent = "Head:0" },
+            new NativeSuitRequirement { Kind = "remove-component", TargetComponent = "Torso:0" },
             new NativeSuitRequirement { Kind = "remove-component", TargetComponent = "TtCharacterAssetMinion:0" },
             new NativeSuitRequirement { Kind = "remove-component", TargetComponent = "UnrelatedAttachment:0" },
         ];
         var repairedShellRemovals = MainForm.RemoveUnsafePairedCapeRemovalRulesForTest(
             shellRemovalRepairProject,
-            ["Head", "TtCharacterAssetMinion", "Cape", "Torso"]);
+            ["Cape", "Torso"]);
         var shellRemovalWithIndependentHairProject = CreateCertifiedNightwingCapeAdapterProject();
         var shellRemovalWithIndependentHairAdapterConfigured = GliderService.TryConfigurePairedCapeAdapter(
             shellRemovalWithIndependentHairProject,
@@ -3114,15 +3278,33 @@ internal static class ReleaseRegressionChecks
             AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly,
             "Torso",
             out _);
-        var nativeShellHeadRemainsProtected = MainForm.IsPairedCapeShellRemovalBlockedForTest(
+        var nativeShellHeadCanBeHidden = !MainForm.IsPairedCapeShellRemovalBlockedForTest(
             nativeShellHeadProject,
             "Head",
             ["Head", "Face", "Cape", "Torso"]);
+        var nativeShellHeadUsesPreserveNodeHide =
+            MainForm.ShouldPreservePairedCapeShellNodeForVisualHideForTest(
+                nativeShellHeadProject,
+                "Head",
+                ["Head", "Face", "Cape", "Torso"]) &&
+            !MainForm.ShouldPreservePairedCapeShellNodeForVisualHideForTest(
+                nativeShellHeadProject,
+                "Cape",
+                ["Head", "Face", "Cape", "Torso"]);
+        var exactCapeFieldRemainsAtomic = MainForm.IsPairedCapeShellRemovalBlockedForTest(
+            nativeShellHeadProject,
+            "Cape",
+            ["Head", "Face", "Cape", "Torso"]);
         Check(
             repairedShellRemovals.ToHashSet(StringComparer.OrdinalIgnoreCase)
-                .SetEquals(["Head", "TtCharacterAssetMinion"]) &&
-            shellRemovalRepairProject.Requirements.Count == 1 &&
-            shellRemovalRepairProject.Requirements[0].TargetComponent == "UnrelatedAttachment:0" &&
+                .SetEquals(["Torso"]) &&
+            shellRemovalRepairProject.Requirements.Count == 3 &&
+            shellRemovalRepairProject.Requirements.Any(requirement =>
+                requirement.TargetComponent == "Head:0") &&
+            shellRemovalRepairProject.Requirements.Any(requirement =>
+                requirement.TargetComponent == "TtCharacterAssetMinion:0") &&
+            shellRemovalRepairProject.Requirements.Any(requirement =>
+                requirement.TargetComponent == "UnrelatedAttachment:0") &&
             StageValidationService.AuthoredShellLiveComponentsRemainForTest(
                 ["Face", "Head", "Cape", "Torso"],
                 ["Head_2", "Torso", "Cape", "Head", "Face"]) &&
@@ -3130,10 +3312,16 @@ internal static class ReleaseRegressionChecks
                 ["Face", "Head", "Cape", "Torso"],
                 ["Head_2", "Cape", "Head", "Face"]) &&
             independentHairCanBeRemoved &&
-            nativeShellHeadRemainsProtected &&
+            nativeShellHeadCanBeHidden &&
+            nativeShellHeadUsesPreserveNodeHide &&
+            exactCapeFieldRemainsAtomic &&
+            ComponentRemoveService.IsVisualMeshProperty("StaticMesh") &&
+            ComponentRemoveService.IsVisualMeshProperty("SkeletalMesh") &&
+            ComponentRemoveService.IsVisualMeshProperty("SkinnedAsset") &&
+            !ComponentRemoveService.IsVisualMeshProperty("OverrideMaterials") &&
             shellRemovalWithIndependentHairAdapterConfigured &&
             nativeShellHeadAdapterConfigured,
-            "paired-cape rebuilds restore authored SCS removal rules, protect native shell nodes, and allow an independent hair graft to be removed",
+            "paired-cape removal keeps Cape/Torso atomic while ordinary shell Head visuals use a preserve-node hide",
             failures,
             output);
 

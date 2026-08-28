@@ -1387,6 +1387,16 @@ public sealed partial class MainForm
         // Generate the suit's own UIMD (icon + description) first, then the DCMD
         // that points at it. Icons currently inherit the Batman defaults; retarget
         // to modder icon textures is a follow-up.
+        var iconRoleConflict = UimdIconRoleConflictError(project);
+        if (!string.IsNullOrWhiteSpace(iconRoleConflict))
+        {
+            AppendLog("UIMD generation blocked: " + iconRoleConflict);
+            if (requireSuccess)
+            {
+                throw new InvalidOperationException(iconRoleConflict);
+            }
+            return;
+        }
         if (AutoAssignGeneratedUiIconSlots(project) && persistAutoAssignedIcons)
         {
             try

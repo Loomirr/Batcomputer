@@ -64,7 +64,7 @@ Use the left navigation:
 - **Parts** — graft compatible hair, hats, capes, torsos, accessories, and other indexed components.
 - **Materials** — copy working game materials and apply them to mesh slots.
 - **Faces** — choose only recipes compatible with the selected face mesh family.
-- **Textures** — import and cook body maps, masks, and UI icons.
+- **Textures** — import and cook body maps, face details, CT/RAO maps, masks, and UI icons.
 - **Equipment / Gliders / Animations** — apply compatible data from another character, then test it
   in-game.
 
@@ -104,6 +104,10 @@ Open **Native identity** and review:
 - The DCMD and UIMD identities.
 - Display name and description StringTable entries.
 - Menu, suit, left, and right icon paths.
+
+The menu, left, and right character portraits use the 512px **Character icon** profile. The suit
+selector tile uses the 256px **Suit selector icon** profile. Importing all four as 256px suit icons
+can make the character-card portraits look wrong even when the suit tile is fine.
 
 Use unique PawnTags and package paths. Duplicate identities are blocked by release validation.
 

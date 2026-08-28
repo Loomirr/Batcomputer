@@ -175,6 +175,45 @@ public sealed class ComponentRemoveService
             applyToCutscene,
             stageContentRoot);
 
+    /// <summary>
+    /// Hides an SCS-created visual without unlinking its construction node. Paired-cape adapters
+    /// use this for ordinary authored-shell visuals such as Head/Face: Unreal still constructs the
+    /// certified Blueprint graph, but the selected mesh is no longer rendered.
+    /// </summary>
+    public ComponentRemoveResult HideVisual(
+        string slotId,
+        string playablePackagePath,
+        string cutscenePackagePath,
+        string componentName,
+        bool applyToPlayable = true,
+        bool applyToCutscene = true) =>
+        HideVisualCore(
+            slotId,
+            playablePackagePath,
+            cutscenePackagePath,
+            componentName,
+            applyToPlayable,
+            applyToCutscene,
+            stageContentRootOverride: null);
+
+    /// <summary>Hides an SCS visual only inside an explicit disposable Content root.</summary>
+    public ComponentRemoveResult HideVisualFromContentRoot(
+        string stageContentRoot,
+        string slotId,
+        string playablePackagePath,
+        string cutscenePackagePath,
+        string componentName,
+        bool applyToPlayable = true,
+        bool applyToCutscene = true) =>
+        HideVisualCore(
+            slotId,
+            playablePackagePath,
+            cutscenePackagePath,
+            componentName,
+            applyToPlayable,
+            applyToCutscene,
+            stageContentRoot);
+
     private ComponentRemoveResult RemoveCore(
         string slotId,
         string playablePackagePath,
@@ -221,6 +260,65 @@ public sealed class ComponentRemoveService
             result.Status = result.Files.Any(file => file.Success)
                 ? "removed"
                 : "no-change";
+            return result;
+        }
+        catch (Exception ex)
+        {
+            result.Status = "error";
+            result.Error = ex.ToString();
+            result.TransientFileLock = FileLockUtil.IsTransient(ex);
+            return result;
+        }
+    }
+
+    private ComponentRemoveResult HideVisualCore(
+        string slotId,
+        string playablePackagePath,
+        string cutscenePackagePath,
+        string componentName,
+        bool applyToPlayable,
+        bool applyToCutscene,
+        string? stageContentRootOverride)
+    {
+        var result = new ComponentRemoveResult
+        {
+            SlotId = slotId,
+            Component = componentName
+        };
+
+        try
+        {
+            var stageRoot = string.IsNullOrWhiteSpace(stageContentRootOverride)
+                ? ResolveStageContentRoot(slotId)
+                : Path.GetFullPath(stageContentRootOverride);
+            if (stageRoot is null || !Directory.Exists(stageRoot))
+            {
+                result.Status = "no-stage";
+                result.Error = string.IsNullOrWhiteSpace(stageContentRootOverride)
+                    ? "No staged content found. Set a base suit / create a stage first."
+                    : $"The explicit package-preparation Content root does not exist: {stageRoot}";
+                return result;
+            }
+
+            result.StageContentRoot = stageRoot;
+            var mappings = LoadMappings();
+            if (applyToPlayable && !string.IsNullOrWhiteSpace(playablePackagePath))
+            {
+                result.Files.Add(HideVisualInAsset(
+                    "playable", stageRoot, playablePackagePath, componentName, mappings));
+            }
+            if (applyToCutscene && !string.IsNullOrWhiteSpace(cutscenePackagePath))
+            {
+                result.Files.Add(HideVisualInAsset(
+                    "cutscene", stageRoot, cutscenePackagePath, componentName, mappings));
+            }
+
+            result.TransientFileLock = result.Files.Any(file => file.TransientFileLock);
+            result.Status = result.Files.Any(file => file.Success)
+                ? "visual-hidden"
+                : result.Files.Any(file => file.VisualAlreadyHidden)
+                    ? "already-hidden"
+                    : "no-change";
             return result;
         }
         catch (Exception ex)
@@ -411,6 +509,117 @@ public sealed class ComponentRemoveService
             return fileResult;
         }
     }
+
+    private ComponentRemoveFileResult HideVisualInAsset(
+        string role,
+        string stageRoot,
+        string packagePath,
+        string componentName,
+        Usmap? mappings)
+    {
+        var fileResult = new ComponentRemoveFileResult
+        {
+            Role = role,
+            TargetPackagePath = packagePath
+        };
+
+        try
+        {
+            var uassetPath = PackagePathToBasePath(stageRoot, packagePath) + ".uasset";
+            fileResult.Path = uassetPath;
+            if (!File.Exists(uassetPath))
+            {
+                fileResult.Error = $"Staged asset not found: {uassetPath}";
+                return fileResult;
+            }
+
+            var asset = new UAsset(
+                uassetPath,
+                EngineVersion.VER_UE5_6,
+                mappings,
+                CustomSerializationFlags.SkipPreloadDependencyLoading);
+            var nodeIndex = FindScsNodeBySlotLive(asset, componentName);
+            if (nodeIndex == 0)
+            {
+                fileResult.Error = $"SCS component '{componentName}' was not found in {role}.";
+                return fileResult;
+            }
+
+            var nodeRef = FromExportNumber(nodeIndex);
+            if (!AnyArrayContainsObjectIndexLive(asset, "RootNodes", nodeRef) &&
+                !AnyArrayContainsObjectIndexLive(asset, "AllNodes", nodeRef) &&
+                !AnyArrayContainsObjectIndexLive(asset, "ChildNodes", nodeRef))
+            {
+                fileResult.Error =
+                    $"SCS component '{componentName}' exists in {role}, but its construction node is already inactive.";
+                return fileResult;
+            }
+
+            fileResult.ComponentFound = true;
+            fileResult.ScsNodeExportIndex = nodeIndex;
+            var node = asset.Exports[nodeIndex - 1] as NormalExport
+                ?? throw new InvalidOperationException($"SCS node export {nodeIndex} was not a NormalExport.");
+            var templateIndex = GetObjectPropertyValueLive(node.Data, "ComponentTemplate").Index;
+            fileResult.ComponentTemplateExportIndex = templateIndex;
+            if (templateIndex <= 0 || templateIndex > asset.Exports.Count ||
+                asset.Exports[templateIndex - 1] is not NormalExport template)
+            {
+                fileResult.Error =
+                    $"SCS component '{componentName}' in {role} has no readable component-template export.";
+                return fileResult;
+            }
+
+            var meshProperties = template.Data
+                .OfType<ObjectPropertyData>()
+                .Where(property => IsVisualMeshProperty(property.Name.ToString()))
+                .ToList();
+            if (meshProperties.Count == 0)
+            {
+                fileResult.Error =
+                    $"SCS component '{componentName}' in {role} has no explicit StaticMesh, SkeletalMesh, or SkinnedAsset reference to hide safely.";
+                return fileResult;
+            }
+
+            var cleared = 0;
+            foreach (var property in meshProperties)
+            {
+                if (property.Value.IsNull())
+                {
+                    continue;
+                }
+                property.Value = FPackageIndex.FromRawIndex(0);
+                cleared++;
+            }
+            fileResult.ClearedMeshReferences = cleared;
+            if (cleared == 0)
+            {
+                fileResult.VisualAlreadyHidden = true;
+                return fileResult;
+            }
+
+            if (role.Equals("cutscene", StringComparison.OrdinalIgnoreCase))
+            {
+                EnsureMinimalSchema(
+                    asset,
+                    "BP_CutsceneMinifigCharacter_C",
+                    "/Game/Characters/BP_Master/BP_CutsceneMinifigCharacter");
+            }
+            asset.Write(uassetPath);
+            fileResult.Success = true;
+            return fileResult;
+        }
+        catch (Exception ex)
+        {
+            fileResult.Error = ex.ToString();
+            fileResult.TransientFileLock = FileLockUtil.IsTransient(ex);
+            return fileResult;
+        }
+    }
+
+    internal static bool IsVisualMeshProperty(string propertyName) =>
+        propertyName.Equals("StaticMesh", StringComparison.OrdinalIgnoreCase) ||
+        propertyName.Equals("SkeletalMesh", StringComparison.OrdinalIgnoreCase) ||
+        propertyName.Equals("SkinnedAsset", StringComparison.OrdinalIgnoreCase);
 
     private ComponentRemoveFileResult RestoreScsReferencesInAsset(
         string role,
@@ -752,5 +961,7 @@ public sealed class ComponentRemoveFileResult
     public int ComponentTemplateExportIndex { get; set; }
     public int RemovedNodeReferences { get; set; }
     public int RestoredNodeReferences { get; set; }
+    public int ClearedMeshReferences { get; set; }
+    public bool VisualAlreadyHidden { get; set; }
     public string? Error { get; set; }
 }

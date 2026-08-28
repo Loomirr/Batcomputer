@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
 using UAssetAPI;
 using UAssetAPI.UnrealTypes;
 using UAssetAPI.Unversioned;
@@ -16,6 +18,10 @@ public sealed class GameAssetRefreshService
     public const string RetocEngineVersion = "UE5_6";
     public const string CharacterGadgetFilter = "Content/Models/Gadgets/";
     public const string CharacterMaterialsFilter = "Content/Characters/Materials/";
+    // DLC packages mount their content below this normal /Game folder. This is
+    // intentionally a package filter, not a physical Content directory: the
+    // installed DLC IoStore containers live beside Paks in Content\DLC.
+    public const string AdditionalContentFilter = "Content/AdditionalContent/";
     public const string CapeTransparentMaterialFilter =
         "Content/Art/TechnicalArt/Optimisation/M_Cape_Transparent";
 
@@ -68,6 +74,11 @@ public sealed class GameAssetRefreshService
         "Content/Localization/StringTables/",
         "Content/Animation/",
         CharacterGadgetFilter,
+        // Shipped character DLC is authored below /Game/AdditionalContent rather
+        // than /Game/Characters. Include the whole package tree so its visual
+        // bases, materials, attachments, meshes and supporting metadata stay
+        // together in the active extracted Content dump.
+        AdditionalContentFilter,
         CapeTransparentMaterialFilter,
         // Keep the clean-install viewer self-sufficient without broadening this into
         // a Red Brick authoring or collectables extraction profile.
@@ -87,6 +98,7 @@ public sealed class GameAssetRefreshService
         "Content/Abilities/",
         "Content/Gameplay/",
         CharacterGadgetFilter,
+        AdditionalContentFilter,
         CapeTransparentMaterialFilter,
         "Content/UI/",
         "Content/Localization/StringTables/",
@@ -113,6 +125,10 @@ public sealed class GameAssetRefreshService
         public int PairsFound { get; set; }
         public int AssetsValidated { get; set; }
         public int ValidationErrors { get; set; }
+        public string DlcSourceRoot { get; set; } = "";
+        public int BaseContainersMounted { get; set; }
+        public int DlcContainersMounted { get; set; }
+        public int AdditionalContentAssets { get; set; }
         public List<string> Warnings { get; } = new();
         public List<string> Logs { get; } = new();
     }
@@ -238,29 +254,60 @@ public sealed class GameAssetRefreshService
 
         var filters = FiltersFor(profile);
         var result = new Result { Profile = profile, OutputRoot = outputRoot };
-        progress?.Report(new Progress(2, "Preparing", $"Source: {paksRoot}"));
+        var dlcRoot = DlcRootForPaksRoot(paksRoot);
+        var includeDlc = ProfileIncludesDlc(profile) && CountIoStoreContainers(dlcRoot) > 0;
+        string? mountedInputRoot = null;
+
+        progress?.Report(new Progress(2, "Preparing", includeDlc
+            ? "Preparing base-game and DLC containers…"
+            : $"Source: {paksRoot}"));
         result.Logs.Add($"Refresh profile: {profile}");
-        result.Logs.Add("retoc reads the top-level Paks containers; nested mod folders are not mounted.");
+        result.BaseContainersMounted = CountIoStoreContainers(paksRoot);
+        result.Logs.Add("retoc reads only the direct IoStore containers in its input folder; installed mods are never mounted.");
 
-        for (var i = 0; i < filters.Count; i++)
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var filter = filters[i];
-            var start = 5 + (i * 70 / filters.Count);
-            var end = 5 + ((i + 1) * 70 / filters.Count);
-            progress?.Report(new Progress(start, "Extracting", filter));
-
-            var command = await RunRetocAsync(retoc, paksRoot, outputRoot, filter, cancellationToken);
-            result.Logs.AddRange(command.OutputLines.TakeLast(12));
-            if (command.ExitCode != 0)
+            var retocInputRoot = paksRoot;
+            if (includeDlc)
             {
-                var detail = command.ErrorLines.Count == 0
-                    ? string.Join(Environment.NewLine, command.OutputLines.TakeLast(8))
-                    : string.Join(Environment.NewLine, command.ErrorLines.TakeLast(8));
-                throw new InvalidOperationException($"retoc failed for '{filter}' (exit {command.ExitCode}).\n{detail}");
+                cancellationToken.ThrowIfCancellationRequested();
+                progress?.Report(new Progress(3, "Preparing", "Mounting base-game script data with DLC containers…"));
+                mountedInputRoot = CreateCombinedContainerMount(paksRoot, dlcRoot, outputRoot);
+                retocInputRoot = mountedInputRoot;
+                result.DlcSourceRoot = dlcRoot;
+                result.DlcContainersMounted = CountIoStoreContainers(dlcRoot);
+                result.Logs.Add($"Mounted {result.BaseContainersMounted} base and {result.DlcContainersMounted} DLC IoStore container(s).");
+                result.Logs.Add($"DLC source: {dlcRoot}");
+            }
+            else if (ProfileIncludesDlc(profile))
+            {
+                result.Warnings.Add($"No DLC IoStore containers were found at {dlcRoot}. The base-game extract will remain usable, but DLC donors will not be available.");
             }
 
-            progress?.Report(new Progress(end, "Extracting", $"Finished {filter}"));
+            for (var i = 0; i < filters.Count; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var filter = filters[i];
+                var start = 5 + (i * 70 / filters.Count);
+                var end = 5 + ((i + 1) * 70 / filters.Count);
+                progress?.Report(new Progress(start, "Extracting", filter));
+
+                var command = await RunRetocAsync(retoc, retocInputRoot, outputRoot, filter, cancellationToken);
+                result.Logs.AddRange(command.OutputLines.TakeLast(12));
+                if (command.ExitCode != 0)
+                {
+                    var detail = command.ErrorLines.Count == 0
+                        ? string.Join(Environment.NewLine, command.OutputLines.TakeLast(8))
+                        : string.Join(Environment.NewLine, command.ErrorLines.TakeLast(8));
+                    throw new InvalidOperationException($"retoc failed for '{filter}' (exit {command.ExitCode}).\n{detail}");
+                }
+
+                progress?.Report(new Progress(end, "Extracting", $"Finished {filter}"));
+            }
+        }
+        finally
+        {
+            TryDeleteCombinedContainerMount(mountedInputRoot);
         }
 
         var contentRoot = FindContentRoot(outputRoot);
@@ -278,6 +325,23 @@ public sealed class GameAssetRefreshService
         result.PairsFound = pairs;
         result.Logs.Add($"retoc output: {outputRoot}");
         result.Logs.Add($"Extracted assets={assets.Count}, asset/uexp pairs={pairs}");
+        var additionalContentRoot = Path.Combine(contentRoot, "AdditionalContent");
+        result.AdditionalContentAssets = Directory.Exists(additionalContentRoot)
+            ? Directory.EnumerateFiles(additionalContentRoot, "*.uasset", SearchOption.AllDirectories).Count()
+            : 0;
+        if (result.DlcContainersMounted > 0)
+        {
+            if (result.AdditionalContentAssets == 0)
+            {
+                result.Warnings.Add(
+                    "DLC containers were mounted, but no Content\\AdditionalContent assets were extracted. " +
+                    "The installed DLC may not match this game's expected package layout.");
+            }
+            else
+            {
+                result.Logs.Add($"DLC AdditionalContent assets={result.AdditionalContentAssets}");
+            }
+        }
 
         // Developer research can include thousands of animation/UI/collectable
         // packages. Those assets are useful to inspect, but parsing every one
@@ -316,6 +380,129 @@ public sealed class GameAssetRefreshService
         RefreshProfile.DeveloperResearch => DeveloperResearchFilters,
         _ => BatmanFilters,
     };
+
+    private static bool ProfileIncludesDlc(RefreshProfile profile) =>
+        profile is RefreshProfile.AllCharacterAssets or RefreshProfile.DeveloperResearch;
+
+    internal static string DlcRootForPaksRoot(string paksRoot)
+    {
+        var paks = Path.GetFullPath(paksRoot.Trim());
+        var contentRoot = Directory.GetParent(paks)?.FullName;
+        return string.IsNullOrWhiteSpace(contentRoot)
+            ? Path.Combine(paks, "..", "DLC")
+            : Path.Combine(contentRoot, "DLC");
+    }
+
+    private static int CountIoStoreContainers(string? root)
+    {
+        return !string.IsNullOrWhiteSpace(root) && Directory.Exists(root)
+            ? Directory.EnumerateFiles(root, "*.utoc", SearchOption.TopDirectoryOnly).Count()
+            : 0;
+    }
+
+    /// <summary>
+    /// retoc accepts one flat container directory. DLC asset conversion still
+    /// needs the base game's global script-object container, so a DLC-only pass
+    /// fails even when the DLC itself is valid. A disposable link farm exposes
+    /// the original base and DLC trios as one flat input without copying them or
+    /// changing the installed game files.
+    /// </summary>
+    internal static string CreateCombinedContainerMount(string paksRoot, string dlcRoot, string outputRoot)
+    {
+        var mountRoot = Path.Combine(outputRoot, ".retoc-base-and-dlc-input");
+        Directory.CreateDirectory(mountRoot);
+        var sources = new[] { paksRoot, dlcRoot };
+        foreach (var sourceRoot in sources)
+        {
+            foreach (var source in Directory.EnumerateFiles(sourceRoot, "*", SearchOption.TopDirectoryOnly)
+                         .Where(IsIoStoreContainerFile)
+                         .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+            {
+                var destination = Path.Combine(mountRoot, Path.GetFileName(source));
+                if (File.Exists(destination))
+                {
+                    throw new InvalidDataException(
+                        $"The base and DLC container folders both contain '{Path.GetFileName(source)}'. " +
+                        "Batcomputer will not guess which one retoc should mount.");
+                }
+
+                CreateContainerLink(destination, source);
+            }
+        }
+
+        if (CountIoStoreContainers(mountRoot) == 0)
+        {
+            throw new InvalidDataException("The temporary base/DLC IoStore mount contains no .utoc containers.");
+        }
+
+        return mountRoot;
+    }
+
+    private static bool IsIoStoreContainerFile(string path)
+    {
+        var extension = Path.GetExtension(path);
+        return extension.Equals(".utoc", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".ucas", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".pak", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void CreateContainerLink(string destination, string source)
+    {
+        try
+        {
+            if (!CreateHardLink(destination, source, IntPtr.Zero))
+            {
+                throw new IOException(
+                    $"Windows could not create a hard link for '{Path.GetFileName(source)}'.",
+                    new Win32Exception(Marshal.GetLastWin32Error()));
+            }
+            return;
+        }
+        catch (Exception hardLinkError) when (
+            hardLinkError is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            try
+            {
+                File.CreateSymbolicLink(destination, source);
+                return;
+            }
+            catch (Exception symbolicLinkError) when (
+                symbolicLinkError is IOException or UnauthorizedAccessException or NotSupportedException)
+            {
+                throw new IOException(
+                    "Batcomputer could not create its temporary base/DLC container mount. " +
+                    "Keep the workspace on the game drive, or enable Windows Developer Mode so file links are allowed. " +
+                    $"Source: {source}",
+                    new AggregateException(hardLinkError, symbolicLinkError));
+            }
+        }
+    }
+
+    internal static void TryDeleteCombinedContainerMount(string? mountRoot)
+    {
+        if (string.IsNullOrWhiteSpace(mountRoot) || !Directory.Exists(mountRoot))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.Delete(mountRoot, recursive: true);
+        }
+        catch
+        {
+            // It is a disposable child of the new output root. A later refresh
+            // uses a new timestamped root, so a locked cleanup never affects the
+            // active dump or any original game file.
+        }
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateHardLink(
+        string fileName,
+        string existingFileName,
+        IntPtr securityAttributes);
 
     internal static bool FiltersRecursivelyCover(
         IEnumerable<string> filters,

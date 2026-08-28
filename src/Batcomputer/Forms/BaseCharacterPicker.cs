@@ -111,9 +111,9 @@ public sealed partial class BaseCharacterPicker : AdaptiveForm
     }
 
     /// <summary>
-    /// Merges the shipped path catalog with extracted quest-character Blueprints. Some native
-    /// characters, including Batmite, live under Characters/Smallfig and are absent from older
-    /// shipped catalogs even though the normal refresh extracted them successfully.
+    /// Merges the shipped path catalog with every compatible extracted character Blueprint.
+    /// This adds new base-game discoveries as well as DLC visual bases stored below
+    /// /Game/AdditionalContent/.../Characters without requiring a hard-coded DLC list.
     /// </summary>
     internal static List<GameDataAsset> BuildVisualAssetList(
         IEnumerable<GameDataAsset> catalogAssets,
@@ -131,16 +131,13 @@ public sealed partial class BaseCharacterPicker : AdaptiveForm
             }
         }
 
-        if (!playablesOnly)
+        foreach (var package in EnumerateExtractedVisualPackages(extractedContentRoot, playablesOnly))
         {
-            foreach (var package in EnumerateExtractedQuestVisualPackages(extractedContentRoot))
+            assetsByPath.TryAdd(package, new GameDataAsset
             {
-                assetsByPath.TryAdd(package, new GameDataAsset
-                {
-                    Path = package,
-                    Class = "BlueprintGeneratedClass"
-                });
-            }
+                Path = package,
+                Class = "BlueprintGeneratedClass"
+            });
         }
 
         return assetsByPath.Values
@@ -150,22 +147,32 @@ public sealed partial class BaseCharacterPicker : AdaptiveForm
     }
 
     internal static IReadOnlyList<string> EnumerateExtractedQuestVisualPackages(string extractedContentRoot)
+        => EnumerateExtractedVisualPackages(extractedContentRoot, playablesOnly: false)
+            .Where(package => UnrealPathUtil.AssetName(package)
+                .EndsWith("_Quest", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+    internal static IReadOnlyList<string> EnumerateExtractedVisualPackages(
+        string extractedContentRoot,
+        bool playablesOnly)
     {
         try
         {
             var contentRoot = AppSettings.NormalizeContentRoot(extractedContentRoot);
-            var charactersRoot = Path.Combine(contentRoot, "Characters");
-            if (!Directory.Exists(charactersRoot))
+            if (!Directory.Exists(contentRoot))
             {
                 return Array.Empty<string>();
             }
 
-            return Directory.EnumerateFiles(charactersRoot, "BP_*.uasset", SearchOption.AllDirectories)
-                .Where(path => Path.GetFileNameWithoutExtension(path)
-                    .EndsWith("_Quest", StringComparison.OrdinalIgnoreCase))
+            return CharacterContentRootService.Enumerate(contentRoot)
+                .SelectMany(charactersRoot => Directory.EnumerateFiles(
+                    charactersRoot,
+                    "BP_*.uasset",
+                    SearchOption.AllDirectories))
                 .Select(path => "/Game/" + Path.ChangeExtension(
                     Path.GetRelativePath(contentRoot, path), null)!.Replace('\\', '/'))
-                .Where(BaseEligibilityService.IsVisualCharacterPackage)
+                .Where(package => BaseEligibilityService.IsVisualCharacterPackage(package) &&
+                                  (!playablesOnly || BaseEligibilityService.IsGameplayDonorPackage(package)))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
                 .ToList();

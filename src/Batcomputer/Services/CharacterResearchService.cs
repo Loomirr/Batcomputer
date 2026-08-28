@@ -137,13 +137,20 @@ public sealed class CharacterResearchService
 
     private static List<ResearchAssetRecord> EnumerateAssets(string contentRoot)
     {
-        var charactersRoot = Path.Combine(contentRoot, "Characters");
-        if (!Directory.Exists(charactersRoot))
+        if (!Directory.Exists(contentRoot))
         {
             return new List<ResearchAssetRecord>();
         }
 
-        return Directory.EnumerateFiles(charactersRoot, "*.uasset", SearchOption.AllDirectories)
+        // DLC character packages live below AdditionalContent/.../Characters,
+        // whereas the base game uses Content/Characters. Scan each logical
+        // Characters root so the research browser mirrors the base picker and
+        // part index without turning into a full-game asset browser.
+        return CharacterContentRootService.Enumerate(contentRoot)
+            .SelectMany(charactersRoot => Directory.EnumerateFiles(
+                charactersRoot,
+                "*.uasset",
+                SearchOption.AllDirectories))
             .Select(path => CreateRecord(contentRoot, path))
             .OrderBy(asset => asset.PackagePath, StringComparer.OrdinalIgnoreCase)
             .ToList();

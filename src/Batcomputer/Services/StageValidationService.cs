@@ -2249,8 +2249,12 @@ public sealed class StageValidationService
         var overlayGrafts = overlay.ComponentGrafts ?? [];
         foreach (var slot in new[] { "Head", "Face" })
         {
-            if (ProjectExplicitlyRemovesComponentSafe(project, slot) ||
-                HasLaterUserPartOverride(project, slot))
+            if (ProjectExplicitlyRemovesComponentSafe(project, slot))
+            {
+                CheckPairedCapeHiddenVisual(asset, role, slot, findings);
+                continue;
+            }
+            if (HasLaterUserPartOverride(project, slot))
             {
                 // Automatic overlay replay precedes user grafts/removals. The user's later
                 // declaration is authoritative, so requiring Nightwing's original field here
@@ -2282,6 +2286,33 @@ public sealed class StageValidationService
                 : overlay.CutsceneBodyMaterialPackage;
             expectedBody = FinalMaterialPackage(project, role, "CharacterMesh0", 0, expectedBody);
             CheckComponentMaterialSlot(asset, role, "CharacterMesh0", 0, expectedBody, "visual-base body", findings);
+        }
+    }
+
+    private static void CheckPairedCapeHiddenVisual(
+        UAsset asset,
+        string role,
+        string componentName,
+        List<Finding> findings)
+    {
+        var component = FindActiveComponentExport(asset, componentName);
+        if (component is null)
+        {
+            findings.Add(new("ERROR",
+                $"{role}: paired-cape visual '{componentName}' was removed by unlinking its authored construction node. " +
+                "Rebuild the suit so Batcomputer can keep the safe shell and hide only its mesh."));
+            return;
+        }
+
+        var meshReferences = component.Data
+            .OfType<ObjectPropertyData>()
+            .Where(property => ComponentRemoveService.IsVisualMeshProperty(property.Name.ToString()))
+            .ToList();
+        if (meshReferences.Count == 0 || meshReferences.Any(property => !property.Value.IsNull()))
+        {
+            findings.Add(new("ERROR",
+                $"{role}: paired-cape visual '{componentName}' is declared hidden, but its authored component still has a mesh. " +
+                "Rebuild the suit before packaging."));
         }
     }
 

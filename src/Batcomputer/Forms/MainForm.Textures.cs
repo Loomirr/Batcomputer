@@ -15,6 +15,13 @@ namespace Batcomputer;
 public sealed partial class MainForm
 {
     private const string NativeUimdIconCookProfile = "ui-suit-256-bc7";
+    private const string NativeCharacterIconCookProfile = "ui-character-512-bc7";
+    private const string NativeFaceDetailColorCookProfile = "face-detail-256x128-bc7";
+    private const string NativeFaceDetailNormalCookProfile = "face-detail-128-bc5";
+    private const string NativeFaceDetailFullColorCookProfile = "face-detail-2048-bc7";
+    private const string NativeFaceDetailFullNormalCookProfile = "face-detail-512-bc5";
+    private const string NativeCtCookProfile = "ct-512-dxt1-native";
+    private const string NativeRaoCookProfile = "rao-1024-dxt1-native";
     internal const string NativeMmrCookProfile = "mmr-2k-dxt1-native";
 
     private enum TextureProfileSafety
@@ -860,6 +867,31 @@ public sealed partial class MainForm
         // whenever it is available, even when the core donors were already
         // prepared by an older Batcomputer build.
         TextureCookTemplateService.NormalizeNativeSuitIconTemplate(projectRoot);
+        TextureCookTemplateService.NormalizeNativeCharacterIconTemplate(projectRoot);
+        var extractedContentRoot = AppSettings.Current.EffectiveExtractedContentRoot();
+        var optionalFolders = new[]
+        {
+            TextureCookTemplateService.NativeFaceDetailColorTemplateFolder,
+            TextureCookTemplateService.NativeFaceDetailNormalTemplateFolder,
+            TextureCookTemplateService.NativeFaceDetailFullColorTemplateFolder,
+            TextureCookTemplateService.NativeFaceDetailFullNormalTemplateFolder,
+            TextureCookTemplateService.NativeCtTemplateFolder,
+            TextureCookTemplateService.NativeRaoTemplateFolder,
+        };
+        var optionalTemplateMissing = optionalFolders.Any(folder =>
+            !TextureCookTemplateService.IsTemplateReady(TextureCookTemplateService.TemplateJsonPath(projectRoot, folder)));
+        if (optionalTemplateMissing && Directory.Exists(extractedContentRoot))
+        {
+            // Face, CT, and RAO donors are optional enhancements. Do not let
+            // them block normal importing, but do prepare every compatible new
+            // donor from an already-extracted Content tree before returning on
+            // the core-template fast path.
+            var optionalResult = TextureCookTemplateService.PrepareFromContentRoot(projectRoot, extractedContentRoot);
+            foreach (var line in optionalResult.Logs)
+            {
+                AppendLog("  " + line);
+            }
+        }
         if (TextureCookTemplateService.HasCoreTemplates(projectRoot))
         {
             return true;
@@ -881,6 +913,7 @@ public sealed partial class MainForm
             }
 
             TextureCookTemplateService.NormalizeNativeSuitIconTemplate(projectRoot);
+            TextureCookTemplateService.NormalizeNativeCharacterIconTemplate(projectRoot);
             return TextureCookTemplateService.HasCoreTemplates(projectRoot);
         }
         catch (Exception ex)
@@ -981,6 +1014,13 @@ public sealed partial class MainForm
         var dxt5Path = TextureCookTemplateService.TemplateJsonPath(projectRoot, "TextureStandaloneTemplate_BatclawLogo_DXT5");
         var nativeMmrPath = TextureCookTemplateService.TemplateJsonPath(projectRoot, TextureCookTemplateService.NativeMmrTemplateFolder);
         var nativeSuitIconPath = TextureCookTemplateService.TemplateJsonPath(projectRoot, TextureCookTemplateService.NativeSuitIconTemplateFolder);
+        var nativeCharacterIconPath = TextureCookTemplateService.TemplateJsonPath(projectRoot, TextureCookTemplateService.NativeCharacterIconTemplateFolder);
+        var nativeFaceDetailColorPath = TextureCookTemplateService.TemplateJsonPath(projectRoot, TextureCookTemplateService.NativeFaceDetailColorTemplateFolder);
+        var nativeFaceDetailNormalPath = TextureCookTemplateService.TemplateJsonPath(projectRoot, TextureCookTemplateService.NativeFaceDetailNormalTemplateFolder);
+        var nativeFaceDetailFullColorPath = TextureCookTemplateService.TemplateJsonPath(projectRoot, TextureCookTemplateService.NativeFaceDetailFullColorTemplateFolder);
+        var nativeFaceDetailFullNormalPath = TextureCookTemplateService.TemplateJsonPath(projectRoot, TextureCookTemplateService.NativeFaceDetailFullNormalTemplateFolder);
+        var nativeCtPath = TextureCookTemplateService.TemplateJsonPath(projectRoot, TextureCookTemplateService.NativeCtTemplateFolder);
+        var nativeRaoPath = TextureCookTemplateService.TemplateJsonPath(projectRoot, TextureCookTemplateService.NativeRaoTemplateFolder);
         var dxt1Path = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureStandaloneTemplate_EoMColorMask_DXT1", "T_TPAGE_Batman_TheBatman2025_ColourMask.json");
         var candidates = new List<TextureCookPreset>();
         void Add(
@@ -999,11 +1039,54 @@ public sealed partial class MainForm
             }
         }
 
-        if (IsUiTextureKind(textureKind))
+        if (IsSuitSelectorIconTextureKind(textureKind))
         {
             Add(NativeUimdIconCookProfile, "Native 256px BC7 UIMD icon", nativeSuitIconPath, 256, 256, "PF_BC7",
                 TextureProfileSafety.Verified,
-                "Uses the game's native suit-menu Texture2D layout: BC7 with nine inline mips. Verified for suit, menu, left, and right UIMD icon slots.");
+                "Uses the game's native suit-selector Texture2D layout: BC7 with nine inline mips.");
+        }
+        else if (IsCharacterIconTextureKind(textureKind))
+        {
+            Add(NativeCharacterIconCookProfile, "Native 512px BC7 character icon", nativeCharacterIconPath, 512, 512, "PF_BC7",
+                TextureProfileSafety.Verified,
+                "Uses the native UIMD character-card layout for menu, left, and right portraits: 512px BC7 with ten inline mips.");
+        }
+        else if (IsUiTextureKind(textureKind))
+        {
+            Add(NativeCharacterIconCookProfile, "Native 512px BC7 character icon", nativeCharacterIconPath, 512, 512, "PF_BC7",
+                TextureProfileSafety.Verified,
+                "For UIMD menu, left, and right portraits. Use Suit selector icon for the 256px tile.");
+            Add(NativeUimdIconCookProfile, "Native 256px BC7 suit selector icon", nativeSuitIconPath, 256, 256, "PF_BC7",
+                TextureProfileSafety.Verified,
+                "For the UIMD suit-selector tile only. Use Character icon for menu, left, and right portraits.");
+        }
+        else if (textureKind.Equals("Face detail", StringComparison.OrdinalIgnoreCase))
+        {
+            Add(NativeFaceDetailColorCookProfile, "Native 256×128 BC7 facial detail", nativeFaceDetailColorPath, 256, 128, "PF_BC7",
+                TextureProfileSafety.Verified,
+                "For brows, face-print strips, and other compact non-square facial detail maps. Do not use for a full body texture.");
+            Add(NativeFaceDetailFullColorCookProfile, "Native 2K BC7 full face detail", nativeFaceDetailFullColorPath, 2048, 2048, "PF_BC7",
+                TextureProfileSafety.Verified,
+                "For full face-print, wrap, mask, and decal artwork. Native 2K BC7 layout with a complete external and inline mip chain.");
+        }
+        else if (textureKind.Equals("Face detail normal", StringComparison.OrdinalIgnoreCase))
+        {
+            Add(NativeFaceDetailNormalCookProfile, "Native 128px BC5 facial normal", nativeFaceDetailNormalPath, 128, 128, "PF_BC5",
+                TextureProfileSafety.Verified,
+                "For compact eye, brow, and other small facial-normal details.");
+            Add(NativeFaceDetailFullNormalCookProfile, "Native 512px BC5 face normal", nativeFaceDetailFullNormalPath, 512, 512, "PF_BC5",
+                TextureProfileSafety.Verified,
+                "For larger full-face normal detail maps. Native 512px BC5 layout with a complete external and inline mip chain.");
+        }
+        else if (textureKind.Equals("CT map", StringComparison.OrdinalIgnoreCase))
+        {
+            Add(NativeCtCookProfile, "Native 512px DXT1 CT", nativeCtPath, 512, 512, "PF_DXT1", TextureProfileSafety.Verified,
+                "Linear native CT layout for compact character, hair, and attachment surface-detail maps.");
+        }
+        else if (textureKind.Equals("RAO map", StringComparison.OrdinalIgnoreCase))
+        {
+            Add(NativeRaoCookProfile, "Native 1K DXT1 RAO", nativeRaoPath, 1024, 1024, "PF_DXT1", TextureProfileSafety.Verified,
+                "Linear native RAO layout for roughness/ambient-occlusion surface maps.");
         }
         else if (textureKind.Contains("normal", StringComparison.OrdinalIgnoreCase))
         {
@@ -1053,6 +1136,13 @@ public sealed partial class MainForm
             "mask-2k-bgra8" => TextureProfileSafety.Verified,
             NativeMmrCookProfile => TextureProfileSafety.Verified,
             NativeUimdIconCookProfile => TextureProfileSafety.Verified,
+            NativeCharacterIconCookProfile => TextureProfileSafety.Verified,
+            NativeFaceDetailColorCookProfile => TextureProfileSafety.Verified,
+            NativeFaceDetailNormalCookProfile => TextureProfileSafety.Verified,
+            NativeFaceDetailFullColorCookProfile => TextureProfileSafety.Verified,
+            NativeFaceDetailFullNormalCookProfile => TextureProfileSafety.Verified,
+            NativeCtCookProfile => TextureProfileSafety.Verified,
+            NativeRaoCookProfile => TextureProfileSafety.Verified,
             _ => TextureProfileSafety.Experimental,
         };
     }
@@ -1079,6 +1169,13 @@ public sealed partial class MainForm
         "mask-2k-bgra8" => "Verified on Electric's current colour mask.",
         NativeMmrCookProfile => "Verified on Electric's MMR in game at all texture-quality settings. Native linear PF_DXT1 with a complete 2048px-to-1px mip chain. R is metalness and B is roughness; G is unused.",
         NativeUimdIconCookProfile => "Verified native UIMD icon layout: 256px BC7 with nine inline mips.",
+        NativeCharacterIconCookProfile => "Verified native character-icon layout: 512px BC7 with ten inline mips.",
+        NativeFaceDetailColorCookProfile => "Verified compact face-detail layout: 256×128 BC7 with two external mips and a complete inline tail.",
+        NativeFaceDetailNormalCookProfile => "Verified compact facial-normal layout: 128px BC5 with one external mip and a complete inline tail.",
+        NativeFaceDetailFullColorCookProfile => "Verified full face-detail layout: 2048px BC7 with five external mips and a complete inline tail.",
+        NativeFaceDetailFullNormalCookProfile => "Verified full face-normal layout: 512px BC5 with three external mips and a complete inline tail.",
+        NativeCtCookProfile => "Verified linear PF_DXT1 CT layout: 512px with three external mips and a complete inline tail.",
+        NativeRaoCookProfile => "Verified linear PF_DXT1 RAO layout: 1024px with four external mips and a complete inline tail.",
         "ui-2k-dxt5-legacy" => "Retired for UIMD icons: its world/decal layout corrupts suit-menu images.",
         "ui-2k-bgra8" => "Retired for UIMD icons: its external-mip world-texture layout corrupts suit-menu images.",
         "ui-1k-bgra8" => "Retired for UIMD icons: use the native 256px BC7 profile.",
@@ -1467,20 +1564,49 @@ public sealed partial class MainForm
     internal static string GuessTextureImportKind(string suggestedName)
     {
         var name = suggestedName ?? "";
+        if (name.EndsWith("_RAO", StringComparison.OrdinalIgnoreCase))
+        {
+            return "RAO map";
+        }
+        if (name.EndsWith("_CT", StringComparison.OrdinalIgnoreCase) ||
+            name.EndsWith("_CTUV", StringComparison.OrdinalIgnoreCase))
+        {
+            return "CT map";
+        }
         if (name.Contains("normal", StringComparison.OrdinalIgnoreCase) ||
             name.Contains("_nrm", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("_dnrm", StringComparison.OrdinalIgnoreCase) ||
             name.EndsWith("_n", StringComparison.OrdinalIgnoreCase) ||
             name.Contains("_N_", StringComparison.Ordinal))
         {
             return "Normal map";
         }
 
-        if (name.Contains("color mask", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("colour mask", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("colormask", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("colourmask", StringComparison.OrdinalIgnoreCase))
+        var compactName = new string(name.Where(char.IsLetterOrDigit).ToArray());
+        if (compactName.Contains("colormask", StringComparison.OrdinalIgnoreCase) ||
+            compactName.Contains("colourmask", StringComparison.OrdinalIgnoreCase))
         {
             return "Color mask";
+        }
+
+        // Strong texture-channel conventions win over broad UI words. Character textures often
+        // contain body-region names such as Left/Right/Front, so T_RightArm_MMR must not become a
+        // character portrait just because it contains "right".
+        if (HasMmrNameSuffix(name) ||
+            HasDelimitedOrmNameSuffix(name) ||
+            name.Contains("rough", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("metal", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("spec", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("mask", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Roughness/spec mask";
+        }
+
+        // _BC is the game convention for a base-colour texture. The current authoring label is
+        // "Character texture", so this is intentional rather than a duplicate profile choice.
+        if (HasBaseColorNameSuffix(name))
+        {
+            return "Character texture";
         }
 
         if (name.Contains("front", StringComparison.OrdinalIgnoreCase) ||
@@ -1488,7 +1614,7 @@ public sealed partial class MainForm
             name.Contains("right", StringComparison.OrdinalIgnoreCase) ||
             name.Contains("menu", StringComparison.OrdinalIgnoreCase))
         {
-            return "UI artwork";
+            return "Character icon";
         }
 
         if (name.Contains("suiticon", StringComparison.OrdinalIgnoreCase) ||
@@ -1503,16 +1629,6 @@ public sealed partial class MainForm
         if (name.Contains("ui", StringComparison.OrdinalIgnoreCase))
         {
             return "UI artwork";
-        }
-
-        if (HasMmrNameSuffix(name) ||
-            HasDelimitedOrmNameSuffix(name) ||
-            name.Contains("rough", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("metal", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("spec", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("mask", StringComparison.OrdinalIgnoreCase))
-        {
-            return "Roughness/spec mask";
         }
 
         return "Character texture";
@@ -1553,6 +1669,14 @@ public sealed partial class MainForm
         return !char.IsLetterOrDigit(value[^4]);
     }
 
+    private static bool HasBaseColorNameSuffix(string? name)
+    {
+        var value = (name ?? "").Trim();
+        return value.EndsWith("_BC", StringComparison.OrdinalIgnoreCase) ||
+               value.EndsWith("_BASECOLOR", StringComparison.OrdinalIgnoreCase) ||
+               value.EndsWith("_BASECOLOUR", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool IsUiTextureKind(string? textureKind) =>
         !string.IsNullOrWhiteSpace(textureKind) &&
         (textureKind.Contains("ui", StringComparison.OrdinalIgnoreCase) ||
@@ -1569,8 +1693,14 @@ public sealed partial class MainForm
         (textureKind.Equals("Suit selector icon", StringComparison.OrdinalIgnoreCase) ||
          textureKind.Contains("suit selector", StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsCharacterIconTextureKind(string? textureKind) =>
+        !string.IsNullOrWhiteSpace(textureKind) &&
+        (textureKind.Equals("Character icon", StringComparison.OrdinalIgnoreCase) ||
+         textureKind.Contains("character portrait", StringComparison.OrdinalIgnoreCase));
+
     private static bool IsNativeUimdIconCookProfile(string? cookProfile) =>
-        string.Equals(cookProfile, NativeUimdIconCookProfile, StringComparison.OrdinalIgnoreCase);
+        string.Equals(cookProfile, NativeUimdIconCookProfile, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(cookProfile, NativeCharacterIconCookProfile, StringComparison.OrdinalIgnoreCase);
 
     private static bool UseNearestNeighborMipsForTextureKind(string? textureKind, string? cookProfile = null) => false;
 
@@ -1616,31 +1746,44 @@ public sealed partial class MainForm
     }
 
     /// <summary>
-    /// Every generated texture referenced by a UIMD icon slot must use the
-    /// game's compact 256px BC7 layout. The retired 1K/2K UI profiles borrowed
-    /// world-texture donors with external mips; FModel could parse parts of
-    /// those assets, but the suit menu sampled corrupted data in game.
-    ///
-    /// This is deliberately role-based rather than name-based so old projects
-    /// such as Electric (legacy "UI icon") and projects already saved with a
-    /// generic profile are upgraded without renaming their package paths.
+    /// UIMD has two distinct native icon formats: the suit selector is 256px,
+    /// while the menu/left/right character portraits are 512px. Normalize by
+    /// UIMD role, not filename, so legacy projects are repaired safely.
     /// </summary>
     private bool NormalizeGeneratedUimdIconRecipes(NativeSuitProject project)
     {
-        var slots = new (string Name, string Path, string Kind)[]
+        var slots = new (string Name, string Path, string Kind, string Profile, string Folder, int Size)[]
         {
-            ("menu", project.IconMenu, "UI artwork"),
-            ("suit", project.IconSuit, "Suit selector icon"),
-            ("left", project.IconLeft, "UI artwork"),
-            ("right", project.IconRight, "UI artwork"),
+            ("menu", project.IconMenu, "Character icon", NativeCharacterIconCookProfile, TextureCookTemplateService.NativeCharacterIconTemplateFolder, 512),
+            ("suit", project.IconSuit, "Suit selector icon", NativeUimdIconCookProfile, TextureCookTemplateService.NativeSuitIconTemplateFolder, 256),
+            ("left", project.IconLeft, "Character icon", NativeCharacterIconCookProfile, TextureCookTemplateService.NativeCharacterIconTemplateFolder, 512),
+            ("right", project.IconRight, "Character icon", NativeCharacterIconCookProfile, TextureCookTemplateService.NativeCharacterIconTemplateFolder, 512),
         };
-        var targets = slots
+        var referenced = slots
             .Select(slot => new { Slot = slot, Texture = FindGeneratedTextureByPackage(project, slot.Path) })
             .Where(item => item.Texture is not null)
+            .ToList();
+        if (referenced.Count == 0)
+        {
+            return false;
+        }
+
+        var conflicts = referenced
             .GroupBy(item => item.Texture!.PackagePath, StringComparer.OrdinalIgnoreCase)
-            .Select(group => group
-                .OrderByDescending(item => item.Slot.Name.Equals("suit", StringComparison.OrdinalIgnoreCase))
-                .First())
+            .Where(group => group.Select(item => item.Slot.Profile).Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
+            .ToList();
+        foreach (var conflict in conflicts)
+        {
+            AppendLog($"UIMD icon recipe needs separate files: '{conflict.Key}' is assigned to both the 256px suit tile and a 512px character portrait. Import separate icon textures before packaging.");
+        }
+
+        var conflictPaths = conflicts
+            .Select(group => group.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var targets = referenced
+            .Where(item => !conflictPaths.Contains(item.Texture!.PackagePath))
+            .GroupBy(item => item.Texture!.PackagePath, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
             .ToList();
         if (targets.Count == 0)
         {
@@ -1648,34 +1791,29 @@ public sealed partial class MainForm
         }
 
         var projectRoot = _projectRootText.Text.Trim();
-        if (!TextureCookTemplateService.NormalizeNativeSuitIconTemplate(projectRoot))
+        var needsSuit = targets.Any(item => item.Slot.Profile.Equals(NativeUimdIconCookProfile, StringComparison.OrdinalIgnoreCase));
+        var needsCharacter = targets.Any(item => item.Slot.Profile.Equals(NativeCharacterIconCookProfile, StringComparison.OrdinalIgnoreCase));
+        var suitReady = !needsSuit || TextureCookTemplateService.NormalizeNativeSuitIconTemplate(projectRoot);
+        var characterReady = !needsCharacter || TextureCookTemplateService.NormalizeNativeCharacterIconTemplate(projectRoot);
+        if (!suitReady || !characterReady)
         {
-            var needsUpgrade = targets.Any(item =>
-                !IsNativeUimdIconCookProfile(item.Texture!.CookProfile) ||
-                !item.Texture.TemplateJson.Contains(
-                    TextureCookTemplateService.NativeSuitIconTemplateFolder,
-                    StringComparison.OrdinalIgnoreCase));
-            if (needsUpgrade)
-            {
-                AppendLog("UIMD icon migration blocked: the native 256px BC7 donor is unavailable. Refresh game assets before packaging this suit.");
-            }
+            var missing = !suitReady ? "256px suit-icon" : "512px character-icon";
+            AppendLog($"UIMD icon migration blocked: the native {missing} donor is unavailable. Refresh game assets before packaging this suit.");
             return false;
         }
 
-        var nativeTemplate = TextureCookTemplateService.TemplateJsonPath(
-            projectRoot,
-            TextureCookTemplateService.NativeSuitIconTemplateFolder);
         var changed = false;
         foreach (var item in targets)
         {
             var texture = item.Texture!;
             var desiredKind = item.Slot.Kind;
+            var nativeTemplate = TextureCookTemplateService.TemplateJsonPath(projectRoot, item.Slot.Folder);
             var recipeChanged =
                 !string.Equals(texture.Kind, desiredKind, StringComparison.OrdinalIgnoreCase) ||
-                !IsNativeUimdIconCookProfile(texture.CookProfile) ||
+                !string.Equals(texture.CookProfile, item.Slot.Profile, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(texture.TemplateJson, nativeTemplate, StringComparison.OrdinalIgnoreCase) ||
-                texture.CookWidth != 256 ||
-                texture.CookHeight != 256 ||
+                texture.CookWidth != item.Slot.Size ||
+                texture.CookHeight != item.Slot.Size ||
                 !string.Equals(texture.CookPixelFormat, "PF_BC7", StringComparison.OrdinalIgnoreCase);
             if (!recipeChanged)
             {
@@ -1683,16 +1821,38 @@ public sealed partial class MainForm
             }
 
             texture.Kind = desiredKind;
-            texture.CookProfile = NativeUimdIconCookProfile;
-            texture.CookWidth = 256;
-            texture.CookHeight = 256;
+            texture.CookProfile = item.Slot.Profile;
+            texture.CookWidth = item.Slot.Size;
+            texture.CookHeight = item.Slot.Size;
             texture.CookPixelFormat = "PF_BC7";
             texture.TemplateJson = nativeTemplate;
-            AppendLog($"UIMD icon recipe normalized: {item.Slot.Name} '{texture.DisplayName}' -> native 256px BC7 inline-mip layout.");
+            AppendLog($"UIMD icon recipe normalized: {item.Slot.Name} '{texture.DisplayName}' -> native {item.Slot.Size}px BC7 inline-mip layout.");
             changed = true;
         }
 
         return changed;
+    }
+
+    private static string? UimdIconRoleConflictError(NativeSuitProject project)
+    {
+        var slots = new[]
+        {
+            new { Role = "menu", Path = project.IconMenu, Size = 512 },
+            new { Role = "suit selector", Path = project.IconSuit, Size = 256 },
+            new { Role = "left", Path = project.IconLeft, Size = 512 },
+            new { Role = "right", Path = project.IconRight, Size = 512 },
+        };
+        var conflicting = slots
+            .Where(slot => !string.IsNullOrWhiteSpace(slot.Path))
+            .GroupBy(slot => slot.Path, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(group => group.Select(slot => slot.Size).Distinct().Count() > 1);
+        if (conflicting is null)
+        {
+            return null;
+        }
+
+        return $"UIMD icon '{conflicting.Key}' is assigned to both the 256px suit selector and a 512px character portrait. " +
+               "Import separate files for those roles before packaging.";
     }
 
     private bool AutoFillEmptyGeneratedUiIconSlot(NativeSuitProject project, string slot)
@@ -2172,6 +2332,14 @@ public sealed partial class MainForm
         bool persistProjectChanges = true)
     {
         error = "";
+
+        var iconRoleConflict = UimdIconRoleConflictError(project);
+        if (!string.IsNullOrWhiteSpace(iconRoleConflict))
+        {
+            error = iconRoleConflict;
+            AppendLog("Texture stage blocked: " + iconRoleConflict);
+            return false;
+        }
 
         if (NormalizeGeneratedUimdIconRecipes(project) && persistProjectChanges)
         {
