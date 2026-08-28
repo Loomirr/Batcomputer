@@ -40,6 +40,9 @@
     <!-- Unreal build rules are not part of Batcomputer. -->
     <Compile Remove="Tools\BatcomputerRegistryWriter\**\*.cs" />
     <Compile Remove="artifacts\**\*.cs" />
+    <!-- Release/acceptance snapshots can contain copied WinForms .resx files. Keep every
+         disposable artifact out of MSBuild's embedded-resource glob as well as compilation. -->
+    <EmbeddedResource Remove="artifacts\**\*.resx" />
     <Compile Remove="Generated\**\*.cs" />
     <!-- Embed app art in the single-file release. -->
     <EmbeddedResource Include="Assets\**\*.png" />
