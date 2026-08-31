@@ -4,6 +4,26 @@
 
 - No changes yet.
 
+## 0.9.0-beta.10 — 2026-08-31
+
+- Adds every used facial region to the 3D viewer's Material editor. Each entry names the face
+  feature and its Base, Normal, MMR, Emissive, Eye-spec, Teeth, and Tongue textures, with safe
+  layer visibility, solo, and restore controls that never rewrite the suit.
+- Fixes the false **Different face rig** warning caused by comparing a full `SK_LEGOface` package
+  path with the same inspector asset name. Joker '89, Superhero, and other distinct rigs remain
+  protected from incompatible materials.
+- Home and Build Mod show every saved mod and suit instead of hiding older entries after a fixed
+  tile limit. Included suits stay first, while enabled, disabled, omitted, and missing entries keep
+  distinct states; disabled suits no longer make an otherwise empty mod buildable.
+- Writes and verifies each selected UIMD icon by its actual metadata role, including donors that
+  omit a default icon property. Legacy reimports move menu/left/right portraits to their native
+  512px cook and keep the suit selector at 256px.
+- Lets enabled suits in the same combined release share a generated icon while continuing to block
+  references owned only by omitted content.
+- Paired cape/glider validation now accepts declared user material overrides independently for
+  playable and cutscene roles while retaining strict structural and untouched-slot checks.
+- Bumps the portable build and documentation to beta 10.
+
 ## 0.9.0-beta.9 — 2026-08-27 (corrected 2026-08-28)
 
 - Paired cape/glider cleanup now lets ordinary `Head`, `Face`, hair, and cowl visuals be removed in

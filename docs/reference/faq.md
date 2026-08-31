@@ -178,6 +178,10 @@ For imported face maps, choose **Face detail** or **Face detail normal** instead
 texture. Batcomputer offers the shipped compact and larger face-map sizes so the new texture can
 follow the native map it replaces.
 
+In the 3D viewer, select a `Face` entry in **Material editor** to see which texture feeds each face
+region. Use **Solo layer** to identify it on the model and **Restore face** when finished. This does
+not alter the suit.
+
 ### Why are some suit icons 256px and others 512px?
 
 The suit-selector tile under `UI/Icons/Suits` is 256px. The UIMD menu, left, and right character

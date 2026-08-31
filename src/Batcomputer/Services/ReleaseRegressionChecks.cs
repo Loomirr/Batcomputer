@@ -737,6 +737,32 @@ internal static class ReleaseRegressionChecks
             output);
 
         Check(
+            UnrealPathUtil.MeshIdentityMatches(
+                "/Game/Characters/Attachments/LEGOface/SK_LEGOface",
+                "SK_LEGOface") &&
+            UnrealPathUtil.MeshIdentityMatches(
+                "SK_LEGOface",
+                "/Game/Characters/Attachments/LEGOface/SK_LEGOface.SK_LEGOface") &&
+            !UnrealPathUtil.MeshIdentityMatches(
+                "/Game/Characters/Attachments/LEGOface/SK_LEGOface",
+                "SK_LEGOface_Joker89") &&
+            !UnrealPathUtil.MeshIdentityMatches(
+                "/Game/Characters/Attachments/LEGOface/SK_LEGOface",
+                "SK_LEGOface_Superhero") &&
+            !UnrealPathUtil.MeshIdentityMatches(
+                "/Game/Characters/Attachments/LEGOface/SK_LEGOface",
+                "/Game/Legacy/Faces/SK_LEGOface"),
+            "face mesh identity accepts inspector short names without collapsing distinct rigs or qualified packages",
+            failures,
+            output);
+
+        Check(
+            ModelPreviewService.FaceMaterialEditorContractForTest(),
+            "the 3D viewer Material editor exposes live face layers and their nested texture roles without removing shader base maps",
+            failures,
+            output);
+
+        Check(
             new[]
             {
                 GameAssetRefreshService.BatmanFilters,

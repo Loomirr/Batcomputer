@@ -87,6 +87,35 @@ internal static class UnrealPathUtil
         return slash >= 0 ? packagePath[(slash + 1)..] : packagePath;
     }
 
+    /// <summary>
+    /// Compares a mesh package with inspector data that may contain only the exported asset
+    /// name. Two qualified package paths must still match exactly; the asset-name fallback is
+    /// used only when at least one side is unqualified.
+    /// </summary>
+    public static bool MeshIdentityMatches(string? left, string? right)
+    {
+        var normalizedLeft = NormalizePackagePath(left);
+        var normalizedRight = NormalizePackagePath(right);
+        if (string.IsNullOrWhiteSpace(normalizedLeft) || string.IsNullOrWhiteSpace(normalizedRight))
+        {
+            return false;
+        }
+
+        if (normalizedLeft.Equals(normalizedRight, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (normalizedLeft.Contains('/') && normalizedRight.Contains('/'))
+        {
+            return false;
+        }
+
+        return AssetName(normalizedLeft).Equals(
+            AssetName(normalizedRight),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
     public static string ObjectPath(string? value)
     {
         var packagePath = NormalizePackagePath(value);

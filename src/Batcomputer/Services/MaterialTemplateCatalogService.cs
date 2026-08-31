@@ -138,7 +138,7 @@ internal sealed class MaterialTemplateCatalogService
                     resolved);
             }
 
-            if (!recipe.CompatibleMeshPackagePaths.Any(mesh => MeshMatches(mesh, targetMesh)))
+            if (!recipe.CompatibleMeshPackagePaths.Any(mesh => UnrealPathUtil.MeshIdentityMatches(mesh, targetMesh)))
             {
                 return new Compatibility(
                     false,
@@ -502,27 +502,6 @@ internal sealed class MaterialTemplateCatalogService
     }
 
     private static string Normalize(string? path) => UnrealPathUtil.NormalizePackagePath(path);
-
-    /// <summary>
-    /// Inspector data sometimes contains the complete mesh package and sometimes only the
-    /// exported asset name (for example <c>SK_LEGOface</c>). Asset-name equality is still an
-    /// exact mesh-family match; importantly, it does not collapse SK_LEGOface, the Joker89
-    /// mesh, and the Superhero mesh into one family.
-    /// </summary>
-    private static bool MeshMatches(string requiredMesh, string targetMesh)
-    {
-        var required = Normalize(requiredMesh);
-        var target = Normalize(targetMesh);
-        if (required.Equals(target, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        var requiredName = UnrealPathUtil.AssetName(required);
-        var targetName = UnrealPathUtil.AssetName(target);
-        return !string.IsNullOrWhiteSpace(requiredName) &&
-               requiredName.Equals(targetName, StringComparison.OrdinalIgnoreCase);
-    }
 
     private static string DescribeMeshes(IEnumerable<string> meshes) => string.Join(", ", meshes
         .Select(UnrealPathUtil.AssetName)

@@ -4,7 +4,7 @@ Batcomputer is a Windows tool for creating playable suit mods for
 *LEGO Batman: Legacy of the Dark Knight*. It builds suits from character assets in your own copy of
 the game, then packages and installs them.
 
-> **Current release:** `0.9.0-beta.9`
+> **Current release:** `0.9.0-beta.10`
 > **Documentation:** [loomirr.github.io/Batcomputer](https://loomirr.github.io/Batcomputer/)
 
 This repository contains Batcomputer only. It does not contain game files, extracted assets, Oodle,
@@ -127,6 +127,10 @@ cannot change the base-game catalog or preview material resolution.
 
 Generated 3D preview files are cleaned automatically by default. The cleanup setting can be changed
 in Settings when a generated model or texture needs to be inspected.
+
+Face materials appear in the viewer's **Material editor** as separate named regions. Pick a face
+entry to see its Base, Normal, MMR, Emissive, Eye-spec, Teeth, and Tongue textures, or use **Solo
+layer** to identify that region on the model. These controls affect only the preview.
 
 For built-in **Playable** entries and modded suit projects, the viewer can also preview the base
 game's Red Brick colours. The selector is hidden unless the assembled

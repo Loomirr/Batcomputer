@@ -4293,9 +4293,15 @@ public static class ModelPreviewService
   #matedit select{margin-bottom:3px;padding:2px 3px}
   #matedit .maptoggle{display:flex;align-items:center;justify-content:space-between;border-top:1px solid #303640;padding:2px 0;color:#cbd1d9}
   #matedit .maptoggle input{width:13px;height:13px;accent-color:#f0c230}
+  #matedit .matdetails{margin:2px 0 4px;padding:3px 4px;background:#181b20;border:1px solid #303640;border-radius:4px;color:#9ea6b2}
+  #matedit .matdetail{display:grid;grid-template-columns:42px minmax(0,1fr);gap:4px;padding:1px 0}
+  #matedit .matdetail b{color:#cbd1d9;font-weight:600}
+  #matedit .matdetail span{overflow-wrap:anywhere}
   #matedit .actions{display:flex;gap:4px;margin-top:3px}
   #matedit .actions button{padding:2px 5px}
   #matedit .actions button{border-color:#aa8b1b;color:#f0c230}
+  #matedit .faceactions{display:none;gap:4px;margin-top:3px}
+  #matedit .faceactions button{flex:1;padding:2px 4px;border-color:#536174;color:#dce8f7}
   .panel-drag-handle{cursor:move;user-select:none;touch-action:none}
   .panel-dragging{opacity:.92}
   #err{position:absolute;left:12px;bottom:12px;color:#f0c230;font-size:12px;line-height:1.5;font-family:Consolas,monospace}
@@ -4414,41 +4420,106 @@ function buildRedBrickTintUi(){
   select.onchange=()=>setRedBrickPalette(select.value===''?null:presets[Number(select.value)]);
   panel.appendChild(select);document.body.appendChild(panel);makePanelDraggable(panel,label);
 }
+function textureLeaf(path){
+  if(!path)return '';
+  const clean=String(path).replace(/\\/g,'/');
+  return clean.substring(clean.lastIndexOf('/')+1);
+}
+function faceTextureDetail(label,path){
+  return path?{label:label,name:textureLeaf(path),path:String(path)}:null;
+}
+function registerFaceMaterialEditorEntry(state,paths){
+  if(!state||!state.mat||state.mat.visible===false)return;
+  const original={map:state.mat.map,normalMap:state.mat.normalMap,
+    roughnessMap:state.mat.roughnessMap,metalnessMap:state.mat.metalnessMap,
+    aoMap:state.mat.aoMap,roughness:state.mat.roughness,metalness:state.mat.metalness,
+    visible:state.mat.visible!==false};
+  const primary=textureLeaf(paths.base)||(state.tint?'solid tint '+state.tint:'face layer');
+  const zone=Number.isFinite(state.band)?' · zone '+state.band:'';
+  const details=[
+    {label:'Feature',name:state.feature+zone,path:''},
+    faceTextureDetail('Base',paths.base),
+    !paths.base&&state.tint?{label:'Base',name:'Tint '+state.tint,path:''}:null,
+    faceTextureDetail('Normal',paths.normal),
+    faceTextureDetail('MMR',paths.mmr),
+    faceTextureDetail('Emissive',paths.emissive),
+    faceTextureDetail('Eye spec',paths.eyeSpec),
+    faceTextureDetail('Teeth U',paths.teethU),
+    faceTextureDetail('Teeth D',paths.teethD),
+    faceTextureDetail('Tongue',paths.tongue)
+  ].filter(Boolean);
+  materialEditorEntries.push({
+    kind:'face',label:(state.owner||'Face')+' · '+state.feature+zone+' · '+primary,
+    resolveMaterial:()=>state.mat,faceBand:state,details:details,
+    enabled:{base:original.visible,normal:true,mmr:true,ao:true},
+    available:{base:true,normal:!!original.normalMap,
+      mmr:!!(original.roughnessMap||original.metalnessMap),ao:!!original.aoMap},
+    original:original
+  });
+}
+function materialEditorMaterial(entry){
+  return entry&&entry.resolveMaterial?entry.resolveMaterial():entry&&entry.material;
+}
+function resetMaterialEditorEntry(entry){
+  if(!entry)return;
+  Object.keys(entry.enabled).forEach(key=>entry.enabled[key]=true);
+  if(entry.kind==='face')entry.enabled.base=entry.original.visible!==false;
+  applyMaterialEditorEntry(entry);
+}
 function buildMaterialEditor(){
   if(!materialEditorEntries.length)return;
-  const panel=document.createElement('div');panel.id='matedit';panel.title='Viewer-only map switches. These never change the suit or cooked files.';
+  const panel=document.createElement('div');panel.id='matedit';panel.title='Viewer-only map and face-layer controls. These never change the suit or cooked files.';
   const label=document.createElement('label');label.textContent='Material editor';panel.appendChild(label);
   const select=document.createElement('select');
   materialEditorEntries.forEach((entry,index)=>{const option=document.createElement('option');option.value=String(index);
-    option.textContent=entry.label;select.appendChild(option);});
+    option.textContent=entry.label;option.title=entry.label;select.appendChild(option);});
   panel.appendChild(select);
+  const detailBox=document.createElement('div');detailBox.className='matdetails';panel.appendChild(detailBox);
   const toggles=[];
-  const addToggle=(label,key)=>{
+  const addToggle=(labelText,key)=>{
     const row=document.createElement('label');row.className='maptoggle';
-    const text=document.createElement('span');text.textContent=label;row.appendChild(text);
+    const text=document.createElement('span');text.textContent=labelText;row.appendChild(text);
     const input=document.createElement('input');input.type='checkbox';input.checked=true;
     input.onchange=()=>{const entry=materialEditorEntries[Number(select.value)];if(!entry)return;
       entry.enabled[key]=input.checked;applyMaterialEditorEntry(entry);};
-    row.appendChild(input);panel.appendChild(row);toggles.push([key,input]);
+    row.appendChild(input);panel.appendChild(row);toggles.push([key,text,input]);
   };
   addToggle('Base colour map','base');
   addToggle('Normal map','normal');
   addToggle('MMR maps','mmr');
   addToggle('Ambient occlusion','ao');
+  const faceActions=document.createElement('div');faceActions.className='faceactions';
+  const solo=document.createElement('button');solo.type='button';solo.textContent='Solo layer';
+  solo.onclick=()=>{const selected=materialEditorEntries[Number(select.value)];if(!selected||selected.kind!=='face')return;
+    materialEditorEntries.filter(entry=>entry.kind==='face').forEach(entry=>{
+      entry.enabled.base=entry===selected;applyMaterialEditorEntry(entry);});sync();};
+  const restoreFace=document.createElement('button');restoreFace.type='button';restoreFace.textContent='Restore face';
+  restoreFace.onclick=()=>{materialEditorEntries.filter(entry=>entry.kind==='face').forEach(resetMaterialEditorEntry);sync();};
+  faceActions.appendChild(solo);faceActions.appendChild(restoreFace);panel.appendChild(faceActions);
   const actions=document.createElement('div');actions.className='actions';
   const reset=document.createElement('button');reset.type='button';reset.textContent='Reset material';
-  reset.onclick=()=>{const entry=materialEditorEntries[Number(select.value)];if(!entry)return;
-    Object.keys(entry.enabled).forEach(key=>entry.enabled[key]=true);applyMaterialEditorEntry(entry);sync();};
+  reset.onclick=()=>{resetMaterialEditorEntry(materialEditorEntries[Number(select.value)]);sync();};
   actions.appendChild(reset);panel.appendChild(actions);
   function sync(){const entry=materialEditorEntries[Number(select.value)];if(!entry)return;
-    toggles.forEach(([key,input])=>{input.checked=entry.available[key]&&!!entry.enabled[key];
-      input.disabled=!entry.available[key];});
+    toggles.forEach(([key,text,input])=>{
+      text.textContent=key==='base'&&entry.kind==='face'?'Face layer visible':
+        key==='base'?'Base colour map':key==='normal'?'Normal map':key==='mmr'?'MMR maps':'Ambient occlusion';
+      input.checked=entry.available[key]&&!!entry.enabled[key];input.disabled=!entry.available[key];});
+    detailBox.replaceChildren();
+    (entry.details||[]).forEach(detail=>{const row=document.createElement('div');row.className='matdetail';
+      const key=document.createElement('b');key.textContent=detail.label;
+      const value=document.createElement('span');value.textContent=detail.name;value.title=detail.path||detail.name;
+      row.appendChild(key);row.appendChild(value);detailBox.appendChild(row);});
+    detailBox.style.display=entry.details&&entry.details.length?'block':'none';
+    faceActions.style.display=entry.kind==='face'?'flex':'none';
   }
   select.onchange=sync;sync();document.body.appendChild(panel);makePanelDraggable(panel,label);
 }
 function applyMaterialEditorEntry(entry){
-  const m=entry.material,original=entry.original,enabled=entry.enabled;
-  m.map=enabled.base?original.map:null;
+  const m=materialEditorMaterial(entry),original=entry&&entry.original,enabled=entry&&entry.enabled;
+  if(!m||!original||!enabled)return;
+  if(entry.kind==='face')m.visible=original.visible!==false&&!!enabled.base;
+  else m.map=enabled.base?original.map:null;
   m.normalMap=enabled.normal?original.normalMap:null;
   m.roughnessMap=enabled.mmr?original.roughnessMap:null;
   m.metalnessMap=enabled.mmr?original.metalnessMap:null;
@@ -4456,7 +4527,8 @@ function applyMaterialEditorEntry(entry){
   m.metalness=enabled.mmr?original.metalness:0;
   m.aoMap=enabled.ao?original.aoMap:null;
   m.needsUpdate=true;
-  const disabled=Object.entries(enabled).filter(([,on])=>!on).map(([key])=>key+' off').join(', ');
+  const names={base:entry.kind==='face'?'layer hidden':'base off',normal:'normal off',mmr:'MMR off',ao:'AO off'};
+  const disabled=Object.entries(enabled).filter(([,on])=>!on).map(([key])=>names[key]||key+' off').join(', ');
   say('material editor: '+entry.label+' - '+(disabled||'all maps on'));
 }
 function postToHost(message){
@@ -4822,6 +4894,7 @@ function dress(g,info){
       o.material=Array.isArray(o.material)?explicit:explicit[0];
     }
     const list=Array.isArray(o.material)?o.material:[o.material];
+    const hasFaceBandSplit=!!(info.isface&&info.fbands&&info.fbands.length&&o.geometry.index);
     list.forEach((m,li)=>{if(!m)return;
       // OBJ preview materials carry the writer's stable slot id. Use it instead of glTF
       // primitive traversal order, which loaders are free to reorder or merge.
@@ -4927,11 +5000,20 @@ function dress(g,info){
             aoMap:m.aoMap,roughness:m.roughness,metalness:m.metalness}
         });
       }
+      else if(!hasFaceBandSplit){
+        // If a converted face does not expose the band/index data needed for feature splitting,
+        // still expose its live slot rather than making Face disappear from the editor entirely.
+        registerFaceMaterialEditorEntry({
+          mat:m,owner:info.label||info.part||'Face',feature:'Face material '+(li+1),
+          tint:s.col||null,band:null
+        },{base:s.tex,normal:s.nrm,mmr:s.mmr,emissive:null,
+          eyeSpec:null,teethU:null,teethD:null,tongue:null});
+      }
       m.needsUpdate=true;});
     // Face feature split: the cooked face mesh is ONE section; C# reordered its index buffer into
     // [base][mouth][hidden] runs so the mouth shell can wear its own print (black stern mouth) and
     // the unused feature shells (eyes etc., dummied by this character's material) stay hidden.
-    if(info.isface&&info.fbands&&info.fbands.length&&o.geometry.index){
+    if(hasFaceBandSplit){
       // One group + material per ExtraUV0 band. A band with no texture is a feature this
       // character does not use (its material parameter is a dummy), so it is not drawn.
       const geo=o.geometry;
@@ -4942,6 +5024,12 @@ function dress(g,info){
         const feature=b[5]||('Zone'+band),pdo=b[6]||0;
         const nrmPath=b[7],ormPath=b[8],rough=b[9],metal=b[10],emisPath=b[11],emisCol=b[12],emisStr=b[13];
         const eyeSpecLayer=b[14],mouthLayers=b[15];
+        const faceOwner=info.label||info.part||'Face';
+        const faceTextures={base:texPath,normal:nrmPath,mmr:ormPath,emissive:emisPath,
+          eyeSpec:eyeSpecLayer&&eyeSpecLayer[0],
+          teethU:mouthLayers&&mouthLayers[0]&&mouthLayers[0][0],
+          teethD:mouthLayers&&mouthLayers[1]&&mouthLayers[1][0],
+          tongue:mouthLayers&&mouthLayers[2]&&mouthLayers[2][0]};
         // Use the material's OWN roughness/metallic (the face sets 0.3 nearly everywhere) rather
         // than a viewer default.
         const m2=new THREE.MeshStandardMaterial({color:0xffffff,
@@ -4981,7 +5069,10 @@ function dress(g,info){
               blending:THREE.AdditiveBlending,side:THREE.DoubleSide,toneMapped:false,skinning:o.isSkinnedMesh});
             om.polygonOffset=true;om.polygonOffsetFactor=-4;om.polygonOffsetUnits=-4;
             om.needsUpdate=true;
-            mats.push(om);faceBandMats.push({band:band,mat:om,tris:tris,tex:texPath,feature:feature,tint:tint,pdo:pdo,mesh:o,slot:mats.length-1});
+            mats.push(om);
+            const additiveState={band:band,mat:om,tris:tris,tex:texPath,feature:feature,tint:tint,pdo:pdo,
+              mesh:o,slot:mats.length-1,owner:faceOwner,textures:faceTextures};
+            faceBandMats.push(additiveState);registerFaceMaterialEditorEntry(additiveState,faceTextures);
             geo.addGroup(off,tris*3,mats.length-1);off+=tris*3;return;
           }
         }}
@@ -5005,7 +5096,10 @@ function dress(g,info){
         // keeps its unskinned program and the face stays in bind pose.
         m2.needsUpdate=true;
         mats.push(m2);
-        faceBandMats.push({band:band,mat:m2,tris:tris,tex:texPath,feature:feature,tint:tint,pdo:pdo,mesh:o,slot:mats.length-1,eyeSpec:m2.userData.faceEyeSpec||null,mouth:m2.userData.faceMouth||null});
+        const faceState={band:band,mat:m2,tris:tris,tex:texPath,feature:feature,tint:tint,pdo:pdo,
+          mesh:o,slot:mats.length-1,owner:faceOwner,textures:faceTextures,
+          eyeSpec:m2.userData.faceEyeSpec||null,mouth:m2.userData.faceMouth||null};
+        faceBandMats.push(faceState);registerFaceMaterialEditorEntry(faceState,faceTextures);
         geo.addGroup(off,tris*3,mats.length-1);
         off+=tris*3;
       });
@@ -5033,16 +5127,17 @@ addEventListener('keydown',e=>{
   // Cycle ONE band at a time: these shells are stacked full-face variants, so showing them all
   // together just z-fights into stripes and identifies nothing.
   if(bandIndex<0){
-    faceBandMats.forEach(b=>{b.mat.userData.savedMap=b.mat.map;b.mat.userData.savedVisible=b.mat.visible;});
+    faceBandMats.forEach(b=>{b.mat.userData.savedMap=b.mat.map;b.mat.userData.savedVisible=b.mat.visible;
+      b.mat.userData.savedFaceColor=b.mat.color.clone();b.mat.userData.savedAlphaTest=b.mat.alphaTest;});
   }
   bandIndex++;
   if(bandIndex>=faceBandMats.length){
     bandIndex=-1;
     faceBandMats.forEach(b=>{
       b.mat.map=b.mat.userData.savedMap||null;
-      b.mat.color=new THREE.Color(0xffffff);
-      b.mat.visible=b.mat.userData.savedVisible!==false&&!!b.mat.map;
-      if(b.mat.map)b.mat.alphaTest=0.5;
+      b.mat.color.copy(b.mat.userData.savedFaceColor||new THREE.Color(0xffffff));
+      b.mat.visible=b.mat.userData.savedVisible!==false;
+      b.mat.alphaTest=b.mat.userData.savedAlphaTest||0;
       b.mat.needsUpdate=true;});
     say('band debug off - normal face restored');
     return;
@@ -5275,4 +5370,13 @@ let skinFixFrame=0;
 })();
 </script></body></html>
 """;
+
+    internal static bool FaceMaterialEditorContractForTest() =>
+        ViewerHtml.Contains("registerFaceMaterialEditorEntry", StringComparison.Ordinal) &&
+        ViewerHtml.Contains("resolveMaterial:()=>state.mat", StringComparison.Ordinal) &&
+        ViewerHtml.Contains("entry.kind==='face')m.visible", StringComparison.Ordinal) &&
+        ViewerHtml.Contains("Solo layer", StringComparison.Ordinal) &&
+        ViewerHtml.Contains("Restore face", StringComparison.Ordinal) &&
+        ViewerHtml.Contains("faceTextureDetail('Teeth U'", StringComparison.Ordinal) &&
+        ViewerHtml.Contains("faceTextureDetail('Tongue'", StringComparison.Ordinal);
 }

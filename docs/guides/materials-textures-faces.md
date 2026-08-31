@@ -70,6 +70,13 @@ Batman face in this recipe.
 
 ![Face-aware material editor helpers](../assets/screenshots/face-helper-material-editor.jpg){ .bc-doc-shot loading=lazy }
 
+Open the assembled suit in the **3D viewer** to inspect what the face material resolved to. Every
+used face region appears in the viewer's **Material editor** with its feature and zone name. The
+details list the exact Base, Normal, MMR, Emissive, Eye-spec, Teeth, and Tongue textures used by
+that region. **Solo layer** hides the other used face regions so the selected print can be found on
+the model; **Restore face** returns every region to its authored visibility. These are viewer-only
+controls and never rewrite the generated material.
+
 ## Textures
 
 Batcomputer records a cook profile with new texture entries. Select a profile that matches the use:

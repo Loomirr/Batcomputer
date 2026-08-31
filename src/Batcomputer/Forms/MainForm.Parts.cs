@@ -2840,8 +2840,7 @@ public sealed partial class MainForm
         }
 
         var normalizedTargetMesh = targetMesh;
-        return sourceMeshes.Any(source => UnrealPathUtil.NormalizePackagePath(source)
-                .Equals(normalizedTargetMesh, StringComparison.OrdinalIgnoreCase))
+        return sourceMeshes.Any(source => UnrealPathUtil.MeshIdentityMatches(source, normalizedTargetMesh))
             ? FaceMaterialCompatibility.Compatible
             : FaceMaterialCompatibility.Incompatible;
     }
