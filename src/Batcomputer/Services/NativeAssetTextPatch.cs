@@ -94,6 +94,73 @@ public static class NativeAssetTextPatch
         return true;
     }
 
+    /// <summary>
+    /// Repoints a soft object property, adding the property when the cooked donor omitted it
+    /// because it held the class default. The fallback export must contain one of the supplied
+    /// sibling properties, which keeps the new value on the same data-asset CDO rather than an
+    /// unrelated export.
+    /// </summary>
+    internal static bool SetOrAddSoftObject(
+        UAsset asset,
+        string propName,
+        string packagePath,
+        string objectName,
+        params string[] siblingPropertyNames)
+    {
+        var normalized = UnrealPathUtil.NormalizePackagePath(packagePath);
+        if (string.IsNullOrWhiteSpace(normalized) || string.IsNullOrWhiteSpace(objectName))
+        {
+            return false;
+        }
+
+        var export = FindExportWithProp(asset, propName);
+        var property = export?.Data.OfType<SoftObjectPropertyData>()
+            .FirstOrDefault(item => item.Name.ToString() == propName);
+        if (export is not null && property is null)
+        {
+            // A same-named property with another serialized type is a schema mismatch, not a
+            // default-omitted soft reference. Never append a duplicate with a conflicting type.
+            return false;
+        }
+        if (property is null)
+        {
+            var siblingNames = siblingPropertyNames
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .ToHashSet(StringComparer.Ordinal);
+            export ??= asset.Exports.OfType<NormalExport>()
+                .FirstOrDefault(candidate => candidate.Data.Any(item =>
+                    siblingNames.Contains(item.Name.ToString())));
+            if (export is null)
+            {
+                return false;
+            }
+
+            // These are unversioned cooked assets. UAssetAPI keys the added value by the class
+            // schema, so appending a default-omitted property is safe as long as the donor class
+            // really owns it (the sibling export selection above establishes that for UIMDs).
+            property = new SoftObjectPropertyData(FName.FromString(asset, propName));
+            export.Data.Add(property);
+        }
+
+        property.Value = new FSoftObjectPath(
+            new FTopLevelAssetPath(
+                FName.FromString(asset, normalized),
+                FName.FromString(asset, objectName)),
+            new FString(string.Empty));
+        return true;
+    }
+
+    /// <summary>Reads a top-level soft reference without changing the asset.</summary>
+    public static (string PackageName, string AssetName)? GetSoftReference(UAsset asset, string propName)
+    {
+        var export = FindExportWithProp(asset, propName);
+        var property = export?.Data.OfType<SoftObjectPropertyData>()
+            .FirstOrDefault(item => item.Name.ToString() == propName);
+        return property is null
+            ? null
+            : (property.Value.AssetPath.PackageName.ToString(), property.Value.AssetPath.AssetName.ToString());
+    }
+
     private static NormalExport? FindExportWithProp(UAsset asset, string propName) =>
         asset.Exports.OfType<NormalExport>()
             .FirstOrDefault(e => e.Data.Any(p => p.Name.ToString() == propName));

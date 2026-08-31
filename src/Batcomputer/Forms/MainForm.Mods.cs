@@ -290,7 +290,7 @@ public sealed partial class MainForm
     {
         var mods = ModService.ListMods().ToList();
         var (activeSummary, activeMod) = ResolveHomeActiveMod(mods);
-        var activeSuitCount = activeMod?.Suits.Count(entry => entry.Enabled) ?? 0;
+        var activeSuitCount = EnabledModSuitCount(activeMod?.Suits);
         var activeContentCount = activeSuitCount;
         var hasActiveMod = activeSummary is not null && activeMod is not null;
         var hasBuild = hasActiveMod && BuildManifestService.FindMissingOrEmptyFiles(
@@ -403,7 +403,9 @@ public sealed partial class MainForm
             });
         }
 
-        foreach (var summary in mods.Take(8))
+        // Keep the build workspace consistent with Home and duplicate detection: every saved mod
+        // remains selectable, including older projects beyond the first screenful.
+        foreach (var summary in ModTileSummaries(mods))
         {
             var captured = summary;
             var isActive = hasActiveMod && string.Equals(captured.Path, activeSummary!.Path, StringComparison.OrdinalIgnoreCase);
@@ -426,6 +428,13 @@ public sealed partial class MainForm
 
         ShowVirtualTiles(tiles, hero: hero);
     }
+
+    internal static IReadOnlyList<ModProjectService.ModSummary> ModTileSummaries(
+        IEnumerable<ModProjectService.ModSummary> mods) =>
+        mods.ToList();
+
+    internal static int EnabledModSuitCount(IEnumerable<ModSuitEntry>? entries) =>
+        entries?.Count(entry => entry.Enabled) ?? 0;
 
     /// <summary>
     /// Creates a new suit as a real saved project and immediately attaches it to

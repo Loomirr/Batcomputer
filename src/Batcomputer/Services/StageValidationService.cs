@@ -2200,6 +2200,7 @@ public sealed class StageValidationService
                 var gliderDonor = role == "playable" ? glider.Playable : glider.Cutscene;
                 CheckAdapterComponent(
                     asset,
+                    project,
                     role,
                     adapter.ResolvedCosmeticComponent ?? "",
                     cosmeticDonor,
@@ -2207,6 +2208,7 @@ public sealed class StageValidationService
                     findings);
                 CheckAdapterComponent(
                     asset,
+                    project,
                     role,
                     adapter.ResolvedGliderComponent ?? "",
                     gliderDonor,
@@ -2727,6 +2729,7 @@ public sealed class StageValidationService
 
     private static void CheckAdapterComponent(
         UAsset asset,
+        NativeSuitProject project,
         string role,
         string componentName,
         SavedPartGraftDonor donor,
@@ -2806,17 +2809,17 @@ public sealed class StageValidationService
         var expectedMaterials = donor.Materials ?? [];
         if (actualMaterials.Count != expectedMaterials.Count ||
             expectedMaterials.Where((expected, slot) =>
-                    expected is null ||
-                    slot >= actualMaterials.Count ||
-                    !ObjectIdentityMatches(
+                    !AdapterMaterialMatches(
                         asset,
-                        actualMaterials[slot].Value,
-                        !string.IsNullOrWhiteSpace(expected.ObjectPath)
-                            ? expected.ObjectPath
-                            : expected.PackagePath + "." + expected.ObjectName))
+                        project,
+                        role,
+                        componentName,
+                        slot,
+                        expected,
+                        slot < actualMaterials.Count ? actualMaterials[slot] : null))
                 .Any())
         {
-            Error("does not retain the donor's complete ordered material object/package set.");
+            Error("does not retain the donor's complete ordered material set after later user material overrides.");
         }
 
         var node = asset.Exports.OfType<NormalExport>().FirstOrDefault(export =>
@@ -2873,6 +2876,58 @@ public sealed class StageValidationService
             Error($"uses parent '{parent}' instead of donor parent '{donor.ParentComponentOrVariableName}'.");
         }
     }
+
+    private static bool AdapterMaterialMatches(
+        UAsset asset,
+        NativeSuitProject project,
+        string role,
+        string componentName,
+        int slot,
+        NativeSuitObjectRef? donorMaterial,
+        ObjectPropertyData? actualMaterial)
+    {
+        if (donorMaterial is null || actualMaterial is null)
+        {
+            return false;
+        }
+
+        var donorPackage = UnrealPathUtil.NormalizePackagePath(
+            !string.IsNullOrWhiteSpace(donorMaterial.PackagePath)
+                ? donorMaterial.PackagePath
+                : donorMaterial.ObjectPath);
+        var finalPackage = UnrealPathUtil.NormalizePackagePath(FinalMaterialPackage(
+            project,
+            role,
+            componentName,
+            slot,
+            donorPackage));
+        if (!ValidExpectedPackage(finalPackage))
+        {
+            return false;
+        }
+
+        // Untouched adapter materials still receive the strict donor object + package check.
+        // A saved material assignment declares only a package path, so an explicit override is
+        // validated against that final package while every structural adapter invariant remains
+        // exact (mesh, AnimClass, tags, material count, ordering, and SCS wiring).
+        if (finalPackage.Equals(donorPackage, StringComparison.OrdinalIgnoreCase))
+        {
+            var donorObjectPath = !string.IsNullOrWhiteSpace(donorMaterial.ObjectPath)
+                ? donorMaterial.ObjectPath
+                : donorMaterial.PackagePath + "." + donorMaterial.ObjectName;
+            return ObjectIdentityMatches(asset, actualMaterial.Value, donorObjectPath);
+        }
+
+        return ObjectPackageMatches(asset, actualMaterial.Value, finalPackage);
+    }
+
+    internal static string FinalMaterialPackageForTest(
+        NativeSuitProject project,
+        string role,
+        string componentName,
+        int slot,
+        string fallback) =>
+        FinalMaterialPackage(project, role, componentName, slot, fallback);
 
     private static ObjectPropertyData? FindObjectProperty(IEnumerable<PropertyData> properties, string name) =>
         properties.OfType<ObjectPropertyData>().FirstOrDefault(property =>

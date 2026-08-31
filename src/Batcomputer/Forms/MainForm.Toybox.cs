@@ -2013,7 +2013,7 @@ public sealed partial class MainForm
                 OnClick = LoadSuit,
             },
         };
-        foreach (var suit in suits.Take(20))
+        foreach (var suit in suits)
         {
             var captured = suit;
             tiles.Add(new VirtualTilePanel.Tile
@@ -2082,7 +2082,7 @@ public sealed partial class MainForm
         var suitService = new SuitProjectService(_projectRootText.Text.Trim());
         var savedSuits = new List<SuitProjectService.ProjectSummary>();
         try { savedSuits = suitService.ListProjects().OrderByDescending(suit => suit.Modified).ToList(); } catch { /* no saved suits yet */ }
-        foreach (var suit in savedSuits.Take(12))
+        foreach (var suit in savedSuits)
         {
             var captured = suit;
             tiles.Add(new VirtualTilePanel.Tile
@@ -2100,9 +2100,9 @@ public sealed partial class MainForm
     }
 
     /// <summary>
-    /// The Home/Mods section follows the release hierarchy: choose a mod, build its suits,
-    /// then build one mod release. Saved suits remain visible when no mod is active,
-    /// but an active workspace only shows the suits that will ship together.
+    /// The Home/Mods section follows the release hierarchy: choose a mod, choose which saved suits
+    /// ship together, then build one mod release. Every saved suit remains visible in the active
+    /// workspace; membership and enabled state are called out on each tile.
     /// </summary>
     private void RefreshHomeTiles()
     {
@@ -2127,16 +2127,19 @@ public sealed partial class MainForm
             return (Entry: entry, Summary: summary);
         }).ToList();
         var hasActiveMod = activeSummary is not null && activeMod is not null;
-        var activeSuitCount = activeEntries.Count;
+        var includedSuitCount = activeEntries.Count;
+        var activeSuitCount = EnabledModSuitCount(activeEntries);
         var activeContentCount = activeSuitCount;
         var currentSlot = _slotIdText.Text.Trim();
-        var currentSuitIsInActiveMod = hasActiveMod && activeEntries.Any(entry =>
+        var currentSuitIsInActiveMod = hasActiveMod && activeEntries.Any(entry => entry.Enabled &&
             string.Equals(entry.SuitId, currentSlot, StringComparison.OrdinalIgnoreCase));
 
         var chips = new List<(string, Color)>
         {
             (hasActiveMod ? "active mod" : "no active mod", hasActiveMod ? Theme.Mods : Theme.Warn),
-            ($"{(hasActiveMod ? activeSuitCount : savedSuits.Count)} suit{((hasActiveMod ? activeSuitCount : savedSuits.Count) == 1 ? "" : "s")}", Theme.Base),
+            (hasActiveMod
+                ? $"{activeSuitCount} enabled · {savedSuits.Count} saved"
+                : $"{savedSuits.Count} saved suit{(savedSuits.Count == 1 ? "" : "s")}", Theme.Base),
             (partCount > 0 ? $"{partCount} parts" : "index not built", partCount > 0 ? Theme.Materials : Theme.OnDarkMuted),
         };
 
@@ -2145,7 +2148,7 @@ public sealed partial class MainForm
             Overline = "MOD WORKSPACE",
             Title = hasActiveMod ? activeSummary!.DisplayName : "Start your first mod",
             Subtitle = hasActiveMod
-                ? $"{activeSuitCount} suit{(activeSuitCount == 1 ? "" : "s")} grouped into one mod release."
+                ? $"{activeSuitCount} enabled of {includedSuitCount} included suit{(includedSuitCount == 1 ? "" : "s")}; all {savedSuits.Count} saved suits are shown below."
                 : "Create or select a mod first, then add the suits that ship together.",
             Badge = "",
             ThumbAccent = hasActiveMod ? Theme.Mods : Theme.Gold,
@@ -2195,7 +2198,10 @@ public sealed partial class MainForm
             OnClick = CreateModFlow,
         });
 
-        foreach (var mod in savedMods.Take(6))
+        // Do not cap this list. Duplicate checks and project discovery both operate on every saved
+        // mod, so hiding older entries makes a valid project look deleted while "New mod" still
+        // reports that its ID already exists. VirtualTilePanel is virtualized and scrollable.
+        foreach (var mod in ModTileSummaries(savedMods))
         {
             var captured = mod;
             var isActive = hasActiveMod && string.Equals(captured.Path, activeSummary!.Path, StringComparison.OrdinalIgnoreCase);
@@ -2222,7 +2228,7 @@ public sealed partial class MainForm
                 Accent = Theme.Base,
                 OnClick = LoadSuit,
             });
-            foreach (var suit in savedSuits.Take(10))
+            foreach (var suit in savedSuits)
             {
                 var captured = suit;
                 tiles.Add(new VirtualTilePanel.Tile
@@ -2268,20 +2274,45 @@ public sealed partial class MainForm
             OnClick = LoadSuit,
         });
 
-        foreach (var (entry, summary) in activeSuits.Take(10))
+        var activeEntryByProjectPath = activeSuits
+            .Where(item => item.Summary is not null)
+            .GroupBy(item => item.Summary!.Path, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First().Entry, StringComparer.OrdinalIgnoreCase);
+        foreach (var summary in ModWorkspaceSuitTileSummaries(
+                     savedSuits,
+                     activeSuits.Select(item => item.Summary)))
         {
-            var capturedEntry = entry;
             var capturedSummary = summary;
-            var title = capturedSummary is null ? capturedEntry.SuitId : TrimMiddle(capturedSummary.DisplayName, 26);
+            var isIncluded = activeEntryByProjectPath.TryGetValue(summary.Path, out var includedEntry);
+            var inclusion = isIncluded
+                ? includedEntry!.Enabled ? "in this mod · enabled" : "in this mod · disabled"
+                : "saved · not in this mod";
             tiles.Add(new VirtualTilePanel.Tile
             {
                 Section = SectionSuits,
-                Title = title,
-                Subtitle = capturedSummary is null ? "missing saved suit" : $"reopen · {capturedSummary.Modified:MMM d}",
-                Accent = Theme.Base,
-                Image = capturedSummary is null ? null : LoadSuitCoverImage(capturedSummary),
-                OnClick = capturedSummary is null ? () => EditModSuits(modPath) : () => OpenRecentProject(capturedSummary.Path),
-                MenuFactory = capturedSummary is null ? null : () => BuildSuitTileMenu(capturedSummary),
+                Title = TrimMiddle(capturedSummary.DisplayName, 26),
+                Subtitle = $"{inclusion} · {capturedSummary.Modified:MMM d}",
+                Accent = isIncluded
+                    ? includedEntry!.Enabled ? Theme.Good : Theme.Warn
+                    : Theme.OnDarkMuted,
+                Image = LoadSuitCoverImage(capturedSummary),
+                OnClick = () => OpenRecentProject(capturedSummary.Path),
+                MenuFactory = () => BuildSuitTileMenu(capturedSummary),
+            });
+        }
+
+        // Keep broken/stale mod entries visible too, even though they have no matching saved suit
+        // to include in the all-suits projection above. Manage suits is the recovery action.
+        foreach (var (entry, _) in activeSuits.Where(item => item.Summary is null))
+        {
+            var capturedEntry = entry;
+            tiles.Add(new VirtualTilePanel.Tile
+            {
+                Section = SectionSuits,
+                Title = capturedEntry.SuitId,
+                Subtitle = "in this mod · missing saved suit",
+                Accent = Theme.Warn,
+                OnClick = () => EditModSuits(modPath),
             });
         }
 
@@ -2337,6 +2368,33 @@ public sealed partial class MainForm
         }
 
         ShowVirtualTiles(tiles, hero: hero);
+    }
+
+    /// <summary>
+    /// Projects every saved suit into the active mod workspace. Included suits stay first in the
+    /// mod's menu order; every other saved suit follows in normal saved-project order.
+    /// </summary>
+    internal static IReadOnlyList<SuitProjectService.ProjectSummary> ModWorkspaceSuitTileSummaries(
+        IEnumerable<SuitProjectService.ProjectSummary> savedSuits,
+        IEnumerable<SuitProjectService.ProjectSummary?> activeSuits)
+    {
+        var results = new List<SuitProjectService.ProjectSummary>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var summary in activeSuits)
+        {
+            if (summary is not null && seen.Add(summary.Path))
+            {
+                results.Add(summary);
+            }
+        }
+        foreach (var summary in savedSuits)
+        {
+            if (summary is not null && seen.Add(summary.Path))
+            {
+                results.Add(summary);
+            }
+        }
+        return results;
     }
 
     /// <summary>Base: "pick, then configure" - a hero showing the chosen base + identity/config tiles

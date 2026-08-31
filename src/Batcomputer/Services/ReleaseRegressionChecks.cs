@@ -106,6 +106,142 @@ internal static class ReleaseRegressionChecks
             failures,
             output);
 
+        var allModTileSummaries = MainForm.ModTileSummaries(
+            Enumerable.Range(1, 9).Select(index => new ModProjectService.ModSummary(
+                "Mod" + index,
+                "Mod " + index,
+                Path.Combine("mods", "Mod" + index + ".native-suit-mod-project.json"),
+                DateTime.UtcNow.AddMinutes(-index),
+                "",
+                index)));
+        Check(
+            allModTileSummaries.Count == 9 &&
+            allModTileSummaries[0].ModId == "Mod1" &&
+            allModTileSummaries[^1].ModId == "Mod9",
+            "Home and Build mod tile projections retain every saved mod instead of hiding older entries",
+            failures,
+            output);
+
+        var allSavedSuitSummaries = Enumerable.Range(1, 14)
+            .Select(index => new SuitProjectService.ProjectSummary(
+                "suit" + index,
+                "Suit " + index,
+                Path.Combine("suits", $"suit{index}.native-suit-project.json"),
+                DateTime.UtcNow.AddMinutes(-index),
+                "",
+                $"/Game/Mods/Suit{index}/BP_Suit{index}_Playable"))
+            .ToList();
+        var projectedModWorkspaceSuits = MainForm.ModWorkspaceSuitTileSummaries(
+            allSavedSuitSummaries,
+            new[] { allSavedSuitSummaries[4], allSavedSuitSummaries[1] });
+        Check(
+            projectedModWorkspaceSuits.Count == 14 &&
+            projectedModWorkspaceSuits[0].SlotId == "suit5" &&
+            projectedModWorkspaceSuits[1].SlotId == "suit2" &&
+            projectedModWorkspaceSuits.Select(summary => summary.SlotId).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 14,
+            "the active mod workspace shows every saved suit while keeping included suits first",
+            failures,
+            output);
+        Check(
+            MainForm.EnabledModSuitCount(
+            [
+                new ModSuitEntry { SuitId = "enabled", Enabled = true },
+                new ModSuitEntry { SuitId = "disabled-one", Enabled = false },
+                new ModSuitEntry { SuitId = "disabled-two", Enabled = false },
+            ]) == 1 &&
+            MainForm.EnabledModSuitCount(
+            [
+                new ModSuitEntry { SuitId = "disabled-only", Enabled = false },
+            ]) == 0,
+            "disabled suits remain visible but do not make an otherwise empty mod buildable",
+            failures,
+            output);
+
+        var iconPropertyTargets = UimdGenService.IconPropertyTargets(new UimdGenService.IconTargets(
+            "/Game/Mods/IconProof/Textures/T_Menu",
+            "/Game/Mods/IconProof/Textures/T_Suit",
+            "/Game/Mods/IconProof/Textures/T_Left",
+            "/Game/Mods/IconProof/Textures/T_Right"));
+        Check(
+            iconPropertyTargets.Count == 4 &&
+            iconPropertyTargets.Any(target => target.Role == "menu" && target.PropertyName == "MenuIcon" && target.TargetPath.EndsWith("T_Menu", StringComparison.Ordinal)) &&
+            iconPropertyTargets.Any(target => target.Role == "suit" && target.PropertyName == "SuitIcon" && target.TargetPath.EndsWith("T_Suit", StringComparison.Ordinal)) &&
+            iconPropertyTargets.Any(target => target.Role == "left" && target.PropertyName == "RightFacing" && target.TargetPath.EndsWith("T_Left", StringComparison.Ordinal)) &&
+            iconPropertyTargets.Any(target => target.Role == "right" && target.PropertyName == "LeftFacing" && target.TargetPath.EndsWith("T_Right", StringComparison.Ordinal)),
+            "generated UIMDs patch every selected icon by property role even when donor icon discovery is unavailable",
+            failures,
+            output);
+
+        var legacyPortrait = new GeneratedTextureEntry
+        {
+            DisplayName = "Legacy portrait",
+            Kind = "UI artwork",
+            CookProfile = "ui-suit-256-bc7",
+            CookWidth = 256,
+            CookHeight = 256,
+            PackagePath = "/Game/Mods/IconProof/Textures/T_LegacyPortrait",
+        };
+        var legacySuitIcon = new GeneratedTextureEntry
+        {
+            DisplayName = "Legacy suit icon",
+            Kind = "UI artwork",
+            CookProfile = "ui-character-512-bc7",
+            CookWidth = 512,
+            CookHeight = 512,
+            PackagePath = "/Game/Mods/IconProof/Textures/T_LegacySuit",
+        };
+        var legacyIconProject = new NativeSuitProject
+        {
+            IconMenu = legacyPortrait.PackagePath,
+            IconSuit = legacySuitIcon.PackagePath,
+            GeneratedTextures = [legacyPortrait, legacySuitIcon],
+        };
+        var portraitReimport = MainForm.GeneratedUimdIconRecipeRequirementForTest(
+            legacyIconProject,
+            legacyPortrait);
+        var suitReimport = MainForm.GeneratedUimdIconRecipeRequirementForTest(
+            legacyIconProject,
+            legacySuitIcon);
+        Check(
+            portraitReimport is { Kind: "Character icon", CookProfile: "ui-character-512-bc7", Size: 512 } &&
+            suitReimport is { Kind: "Suit selector icon", CookProfile: "ui-suit-256-bc7", Size: 256 },
+            "manual icon reimport follows its UIMD role, upgrading portraits to 512px while keeping the suit tile 256px",
+            failures,
+            output);
+
+        var sharedReleaseIcon = "/Game/Mods/IconProof/Textures/T_SharedReleaseIcon";
+        var releaseIconPackages = ModReleaseValidationService.ReleaseGeneratedTexturePackages(
+        [
+            new ModReleaseValidationService.SuitInput(
+                new ModSuitEntry { SuitId = "owner", Enabled = true },
+                "owner.json",
+                new NativeSuitProject
+                {
+                    SlotId = "owner",
+                    GeneratedTextures =
+                    [
+                        new GeneratedTextureEntry { PackagePath = sharedReleaseIcon },
+                    ],
+                }),
+            new ModReleaseValidationService.SuitInput(
+                new ModSuitEntry { SuitId = "disabled-owner", Enabled = false },
+                "disabled.json",
+                new NativeSuitProject
+                {
+                    SlotId = "disabled-owner",
+                    GeneratedTextures =
+                    [
+                        new GeneratedTextureEntry { PackagePath = "/Game/Mods/IconProof/Textures/T_Disabled" },
+                    ],
+                }),
+        ]);
+        Check(
+            releaseIconPackages.Contains(sharedReleaseIcon) &&
+            !releaseIconPackages.Contains("/Game/Mods/IconProof/Textures/T_Disabled"),
+            "icon preflight accepts assets generated by another enabled suit in the same release but not disabled content",
+            failures,
+            output);
+
         var syntheticGamePaks = Path.Combine(
             "C:\\",
             "Games",
@@ -2819,6 +2955,66 @@ internal static class ReleaseRegressionChecks
         Check(
             acceptsExactAuthoredShellPreflight && rejectsNonExactAuthoredShellPreflight,
             "paired-cape preflight requires the donor's exact authored Cape plus Torso fields",
+            failures,
+            output);
+
+        var pairedCapeMaterialOverrideProject = CreateCertifiedNightwingCapeAdapterProject();
+        pairedCapeMaterialOverrideProject.MaterialAssignments =
+        [
+            new SavedMaterialAssignment
+            {
+                Component = "Cape",
+                Slot = 0,
+                Context = "both",
+                MiPackagePath = "/Game/Mods/MaterialProof/Materials/MI_Cape_Custom",
+            },
+            new SavedMaterialAssignment
+            {
+                Component = "Torso",
+                Slot = 0,
+                Context = "playable",
+                MiPackagePath = "/Game/Mods/MaterialProof/Materials/MI_Glider_Gameplay",
+            },
+            new SavedMaterialAssignment
+            {
+                Component = "Torso",
+                Slot = 0,
+                Context = "cutscene",
+                MiPackagePath = "/Game/Mods/MaterialProof/Materials/MI_Glider_Cutscene",
+            },
+        ];
+        Check(
+            StageValidationService.FinalMaterialPackageForTest(
+                pairedCapeMaterialOverrideProject,
+                "playable",
+                "Cape",
+                0,
+                "/Game/Donor/MI_Cape") == "/Game/Mods/MaterialProof/Materials/MI_Cape_Custom" &&
+            StageValidationService.FinalMaterialPackageForTest(
+                pairedCapeMaterialOverrideProject,
+                "cutscene",
+                "Cape",
+                0,
+                "/Game/Donor/MI_Cape") == "/Game/Mods/MaterialProof/Materials/MI_Cape_Custom" &&
+            StageValidationService.FinalMaterialPackageForTest(
+                pairedCapeMaterialOverrideProject,
+                "playable",
+                "Torso",
+                0,
+                "/Game/Donor/MI_Glider") == "/Game/Mods/MaterialProof/Materials/MI_Glider_Gameplay" &&
+            StageValidationService.FinalMaterialPackageForTest(
+                pairedCapeMaterialOverrideProject,
+                "cutscene",
+                "Torso",
+                0,
+                "/Game/Donor/MI_Glider") == "/Game/Mods/MaterialProof/Materials/MI_Glider_Cutscene" &&
+            StageValidationService.FinalMaterialPackageForTest(
+                pairedCapeMaterialOverrideProject,
+                "playable",
+                "Torso",
+                1,
+                "/Game/Donor/MI_Glider_LOD1") == "/Game/Donor/MI_Glider_LOD1",
+            "paired-cape build validation accepts declared Cape/glider materials per runtime role while untouched slots retain donor identity",
             failures,
             output);
 

@@ -1460,16 +1460,24 @@ public sealed partial class MainForm
         AddIconOverride(metadataDonor?.IconPaths.Suit ?? UimdGenService.SrcSuitIcon, project.IconSuit);
         AddIconOverride(metadataDonor?.IconPaths.Left ?? UimdGenService.SrcLeftIcon, project.IconLeft);
         AddIconOverride(metadataDonor?.IconPaths.Right ?? UimdGenService.SrcRightIcon, project.IconRight);
+        var iconTargets = new UimdGenService.IconTargets(
+            project.IconMenu,
+            project.IconSuit,
+            project.IconLeft,
+            project.IconRight);
+        var selectedIconCount = UimdGenService.IconPropertyTargets(iconTargets)
+            .Count(icon => !string.IsNullOrWhiteSpace(icon.TargetPath));
         var uimdResult = new UimdGenService(_projectRootText.Text.Trim()).Generate(
             uimdOutputBase,
             uimdPkg,
             icons.Count > 0 ? icons : null,
             pawnTag: pawnTag,
-            donor: metadataDonor);
+            donor: metadataDonor,
+            iconTargets: iconTargets);
         var uimdSource = metadataDonor is null
             ? "from base Batman metadata"
             : $"from {UnrealPathUtil.AssetName(metadataDonor.UimdPackagePath)}";
-        AppendLog($"UIMD generate: {uimdResult.Status}{(icons.Count > 0 ? $" ({icons.Count} changed icon(s))" : $" ({uimdSource})")}");
+        AppendLog($"UIMD generate: {uimdResult.Status}{(selectedIconCount > 0 ? $" ({selectedIconCount} selected icon(s) verified)" : $" ({uimdSource})")}");
         if (!string.IsNullOrWhiteSpace(uimdResult.Error))
         {
             AppendLog("  " + uimdResult.Error);

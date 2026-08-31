@@ -32,6 +32,33 @@ public sealed class UimdGenService
         public List<string> Repointed { get; } = new();
     }
 
+    /// <summary>
+    /// Explicit UIMD-role targets. These are separate from the legacy source-to-target map so a
+    /// selected icon can still be written when an extracted donor's original icon path is missing
+    /// or uses a name-map layout the catalog reader did not recognize.
+    /// </summary>
+    public sealed record IconTargets(string Menu, string Suit, string Left, string Right);
+
+    internal sealed record IconPropertyTarget(string Role, string PropertyName, string TargetPath);
+
+    internal static IReadOnlyList<IconPropertyTarget> IconPropertyTargets(IconTargets? targets)
+    {
+        if (targets is null)
+        {
+            return [];
+        }
+
+        // Native UIMDs name the portrait by the direction the character faces. The authored
+        // "Left" texture is stored in RightFacing and vice versa; preserve that game convention.
+        return
+        [
+            new("menu", "MenuIcon", targets.Menu),
+            new("suit", "SuitIcon", targets.Suit),
+            new("left", "RightFacing", targets.Left),
+            new("right", "LeftFacing", targets.Right),
+        ];
+    }
+
     public static string ResolveBaseUimdPath()
     {
         var root = AppSettings.Current.EffectiveExtractedContentRoot();
@@ -58,7 +85,8 @@ public sealed class UimdGenService
         string? descriptionTableObjectPath = null,
         string? descriptionKey = null,
         string? lockedDescriptionKey = null,
-        NativeMetadataDonorService.Donor? donor = null)
+        NativeMetadataDonorService.Donor? donor = null,
+        IconTargets? iconTargets = null)
     {
         var result = new GenResult();
         try
@@ -104,7 +132,10 @@ public sealed class UimdGenService
             };
             var cleanPackageTargets = new List<string> { cleanUimdPackagePath };
 
-            if (iconOverrides is not null)
+            // Explicit role targets are property-scoped and therefore safe when a donor reuses one
+            // texture for multiple roles. Retain global name-map replacement only for legacy
+            // callers that have not supplied role targets.
+            if (iconOverrides is not null && iconTargets is null)
             {
                 var sourceIcons = donor is null
                     ? new[] { SrcMenuIcon, SrcLeftIcon, SrcRightIcon, SrcSuitIcon }
@@ -153,6 +184,50 @@ public sealed class UimdGenService
                 cleanPackageTargets,
                 result.Repointed);
 
+            // Name-map substitution is retained for legacy callers, but it cannot be the final
+            // authority: if donor icon discovery returned an empty source path, there is nothing
+            // to substitute and the cloned UIMD silently keeps the base icon. Patch the four known
+            // soft-object properties by role and verify the in-memory result before writing.
+            var explicitIconProperties = IconPropertyTargets(iconTargets)
+                .Where(icon => !string.IsNullOrWhiteSpace(icon.TargetPath))
+                .ToList();
+            foreach (var icon in explicitIconProperties)
+            {
+                var targetPackage = UnrealPathUtil.NormalizePackagePath(icon.TargetPath);
+                var targetObject = ExplicitObjectName(icon.TargetPath) ?? UnrealPathUtil.AssetName(targetPackage);
+                if (!ExtractedPackagePathService.IsContentPackagePath(targetPackage) ||
+                    string.IsNullOrWhiteSpace(targetObject))
+                {
+                    throw new InvalidOperationException(
+                        $"Selected {icon.Role} icon is not a valid game/DLC content object path: '{icon.TargetPath}'.");
+                }
+                if (!NativeAssetTextPatch.SetOrAddSoftObject(
+                        asset,
+                        icon.PropertyName,
+                        targetPackage,
+                        targetObject,
+                        "PawnTag",
+                        "MenuIcon",
+                        "SuitIcon",
+                        "RightFacing",
+                        "LeftFacing"))
+                {
+                    throw new InvalidOperationException(
+                        $"The donor UIMD has no writable metadata export for the selected {icon.Role} icon.");
+                }
+
+                var written = NativeAssetTextPatch.GetSoftReference(asset, icon.PropertyName);
+                if (written is null ||
+                    !UnrealPathUtil.NormalizePackagePath(written.Value.PackageName)
+                        .Equals(targetPackage, StringComparison.OrdinalIgnoreCase) ||
+                    !written.Value.AssetName.Equals(targetObject, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"The selected {icon.Role} icon did not remain linked in the generated UIMD.");
+                }
+                result.Repointed.Add($"{icon.PropertyName} -> {targetPackage}.{targetObject}");
+            }
+
             // Native-suit identity + localization (property-level; see §7.2/§7.3).
             if (!string.IsNullOrWhiteSpace(pawnTag))
             {
@@ -176,6 +251,29 @@ public sealed class UimdGenService
             }
 
             asset.Write(outputBasePath + ".uasset");
+            if (explicitIconProperties.Count > 0)
+            {
+                var writtenAsset = new UAsset(
+                    outputBasePath + ".uasset",
+                    EngineVersion.VER_UE5_6,
+                    LoadMappings(),
+                    CustomSerializationFlags.SkipPreloadDependencyLoading);
+                foreach (var icon in explicitIconProperties)
+                {
+                    var targetPackage = UnrealPathUtil.NormalizePackagePath(icon.TargetPath);
+                    var targetObject = ExplicitObjectName(icon.TargetPath) ?? UnrealPathUtil.AssetName(targetPackage);
+                    var written = NativeAssetTextPatch.GetSoftReference(writtenAsset, icon.PropertyName);
+                    if (written is null ||
+                        !UnrealPathUtil.NormalizePackagePath(written.Value.PackageName)
+                            .Equals(targetPackage, StringComparison.OrdinalIgnoreCase) ||
+                        !written.Value.AssetName.Equals(targetObject, StringComparison.Ordinal))
+                    {
+                        throw new InvalidDataException(
+                            $"The generated UIMD was written, but its {icon.Role} icon still points at the donor asset.");
+                    }
+                }
+                result.Repointed.Add($"verified {explicitIconProperties.Count} icon property link(s) after write");
+            }
             result.OutputUasset = outputBasePath + ".uasset";
             result.Status = "created";
             return result;

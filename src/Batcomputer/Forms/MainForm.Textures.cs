@@ -24,6 +24,14 @@ public sealed partial class MainForm
     private const string NativeRaoCookProfile = "rao-1024-dxt1-native";
     internal const string NativeMmrCookProfile = "mmr-2k-dxt1-native";
 
+    internal sealed record UimdIconRecipeRequirement(
+        string Role,
+        string Path,
+        string Kind,
+        string CookProfile,
+        string TemplateFolder,
+        int Size);
+
     private enum TextureProfileSafety
     {
         Verified,
@@ -414,7 +422,26 @@ public sealed partial class MainForm
             return;
         }
         var preflightFailures = textures
-            .Select(texture => (Texture: texture, Error: GeneratedTextureReimportPreflightError(texture)))
+            .Select(texture =>
+            {
+                if (!TryResolveGeneratedUimdIconRecipe(
+                        _currentProject,
+                        texture,
+                        out var iconRecipe,
+                        out var iconRecipeError))
+                {
+                    return (Texture: texture, Error: iconRecipeError);
+                }
+
+                // A legacy UIMD portrait may still point at an old 256px template that no
+                // longer exists. Its required 512px donor is prepared immediately before
+                // the recook, so do not reject it solely because the obsolete template is gone.
+                return (
+                    Texture: texture,
+                    Error: GeneratedTextureReimportPreflightError(
+                        texture,
+                        requireSavedTemplate: iconRecipe is null));
+            })
             .Where(result => !string.IsNullOrWhiteSpace(result.Error))
             .ToList();
         if (preflightFailures.Count > 0)
@@ -430,7 +457,8 @@ public sealed partial class MainForm
         if (!Dialog.Confirm(
                 this,
                 "Reimport all textures",
-                $"Recook all {textures.Count} saved texture(s) for '{_currentProject.DisplayName}' using their existing profiles?\n\n" +
+                $"Recook all {textures.Count} saved texture(s) for '{_currentProject.DisplayName}' using their saved profiles? " +
+                "Legacy UIMD icons will migrate to the profile required by their assigned slot.\n\n" +
                 "Batcomputer will back up every current package first and roll the batch back if any cook fails.",
                 confirmText: "Reimport all",
                 severity: Dialog.Level.Warn))
@@ -532,7 +560,9 @@ public sealed partial class MainForm
         Dialog.Success(this, "Textures reimported", $"Recooked and verified all {textures.Count} saved texture(s) for this suit.");
     }
 
-    internal static string? GeneratedTextureReimportPreflightError(GeneratedTextureEntry texture)
+    internal static string? GeneratedTextureReimportPreflightError(
+        GeneratedTextureEntry texture,
+        bool requireSavedTemplate = true)
     {
         if (string.IsNullOrWhiteSpace(texture.SourcePng) || !File.Exists(texture.SourcePng))
         {
@@ -546,7 +576,8 @@ public sealed partial class MainForm
         {
             return "Unreal package path is missing from the recipe";
         }
-        if (string.IsNullOrWhiteSpace(texture.TemplateJson) || !File.Exists(texture.TemplateJson))
+        if (requireSavedTemplate &&
+            (string.IsNullOrWhiteSpace(texture.TemplateJson) || !File.Exists(texture.TemplateJson)))
         {
             return "saved donor template is missing";
         }
@@ -558,7 +589,24 @@ public sealed partial class MainForm
         bool confirm,
         bool createBackup)
     {
-        var preflightError = GeneratedTextureReimportPreflightError(texture);
+        UimdIconRecipeRequirement? iconRecipe = null;
+        if (_currentProject is not null &&
+            !TryResolveGeneratedUimdIconRecipe(
+                _currentProject,
+                texture,
+                out iconRecipe,
+                out var iconRecipeError))
+        {
+            if (confirm)
+            {
+                Dialog.Warn(this, "Reimport image", iconRecipeError);
+            }
+            AppendLog($"Texture reimport blocked: {iconRecipeError}");
+            return false;
+        }
+        var preflightError = GeneratedTextureReimportPreflightError(
+            texture,
+            requireSavedTemplate: iconRecipe is null);
         if (!string.IsNullOrWhiteSpace(preflightError))
         {
             if (confirm)
@@ -567,11 +615,34 @@ public sealed partial class MainForm
             }
             return false;
         }
-        if (confirm && !Dialog.Confirm(this, $"Reimport {texture.DisplayName}?", "The current PNG will be cooked again in place using its existing profile.", "Reimport"))
+        var recipeDescription = iconRecipe is null
+            ? "its existing profile"
+            : $"the native {iconRecipe.Size}px {iconRecipe.Kind.ToLowerInvariant()} profile required by its {iconRecipe.Role} icon slot";
+        if (confirm && !Dialog.Confirm(this, $"Reimport {texture.DisplayName}?", $"The current PNG will be cooked again in place using {recipeDescription}.", "Reimport"))
         {
             return false;
         }
 
+        var priorKind = texture.Kind;
+        var priorCookProfile = texture.CookProfile;
+        var priorCookWidth = texture.CookWidth;
+        var priorCookHeight = texture.CookHeight;
+        var priorCookPixelFormat = texture.CookPixelFormat;
+        var priorTemplateJson = texture.TemplateJson;
+
+        void RestorePriorRecipe()
+        {
+            texture.Kind = priorKind;
+            texture.CookProfile = priorCookProfile;
+            texture.CookWidth = priorCookWidth;
+            texture.CookHeight = priorCookHeight;
+            texture.CookPixelFormat = priorCookPixelFormat;
+            texture.TemplateJson = priorTemplateJson;
+        }
+
+        // Back up the still-active cooked package and its original recipe before a legacy icon
+        // is migrated to its role-correct 256/512 profile. This keeps "Restore latest backup"
+        // truthful as well as protecting the immediate recook.
         if (createBackup)
         {
             var hadOutput = GeneratedTextureHasAnyCookedOutput(texture);
@@ -593,6 +664,29 @@ public sealed partial class MainForm
             }
         }
 
+        if (iconRecipe is not null &&
+            !TryNormalizeGeneratedUimdIconRecipeForReimport(texture, iconRecipe, out var normalizationError))
+        {
+            RestorePriorRecipe();
+            if (confirm)
+            {
+                Dialog.Warn(this, "Reimport image", normalizationError);
+            }
+            AppendLog($"Texture reimport blocked: {normalizationError}");
+            return false;
+        }
+
+        preflightError = GeneratedTextureReimportPreflightError(texture);
+        if (!string.IsNullOrWhiteSpace(preflightError))
+        {
+            RestorePriorRecipe();
+            if (confirm)
+            {
+                Dialog.Warn(this, "Reimport image", $"This texture cannot be reimported because its {preflightError}. Import it again instead.");
+            }
+            return false;
+        }
+
         var cookedContentRoot = Path.Combine(texture.OutputRoot, "Cooked", "LEGOBatmanLotDK", "Content");
         if (!EnsureGeneratedTextureCooked(texture, cookedContentRoot, forceRecook: true))
         {
@@ -600,6 +694,7 @@ public sealed partial class MainForm
             {
                 Dialog.Warn(this, "Reimport image", "The texture could not be cooked again. The previous generated files were left in place.");
             }
+            RestorePriorRecipe();
             return false;
         }
 
@@ -1744,6 +1839,105 @@ public sealed partial class MainForm
 
     private static bool UseNearestNeighborMipsForTextureKind(string? textureKind, string? cookProfile = null) => false;
 
+    private static IReadOnlyList<UimdIconRecipeRequirement> UimdIconRecipeRequirements(
+        NativeSuitProject project) =>
+    [
+        new("menu", project.IconMenu, "Character icon", NativeCharacterIconCookProfile, TextureCookTemplateService.NativeCharacterIconTemplateFolder, 512),
+        new("suit selector", project.IconSuit, "Suit selector icon", NativeUimdIconCookProfile, TextureCookTemplateService.NativeSuitIconTemplateFolder, 256),
+        new("left", project.IconLeft, "Character icon", NativeCharacterIconCookProfile, TextureCookTemplateService.NativeCharacterIconTemplateFolder, 512),
+        new("right", project.IconRight, "Character icon", NativeCharacterIconCookProfile, TextureCookTemplateService.NativeCharacterIconTemplateFolder, 512),
+    ];
+
+    private static bool TryResolveGeneratedUimdIconRecipe(
+        NativeSuitProject project,
+        GeneratedTextureEntry texture,
+        out UimdIconRecipeRequirement? requirement,
+        out string error)
+    {
+        requirement = null;
+        error = "";
+        var matches = UimdIconRecipeRequirements(project)
+            .Where(candidate => ReferenceEquals(
+                FindGeneratedTextureByPackage(project, candidate.Path),
+                texture))
+            .ToList();
+        if (matches.Count == 0)
+        {
+            return true;
+        }
+
+        var distinctProfiles = matches
+            .Select(candidate => candidate.CookProfile)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (distinctProfiles.Count > 1)
+        {
+            error =
+                $"'{texture.DisplayName}' is assigned to both the 256px suit selector and a 512px character portrait. " +
+                "Import separate icon textures for those roles before reimporting.";
+            return false;
+        }
+
+        requirement = matches[0];
+        return true;
+    }
+
+    internal static UimdIconRecipeRequirement? GeneratedUimdIconRecipeRequirementForTest(
+        NativeSuitProject project,
+        GeneratedTextureEntry texture) =>
+        TryResolveGeneratedUimdIconRecipe(project, texture, out var requirement, out _)
+            ? requirement
+            : null;
+
+    private bool TryNormalizeGeneratedUimdIconRecipeForReimport(
+        GeneratedTextureEntry texture,
+        UimdIconRecipeRequirement requirement,
+        out string error)
+    {
+        error = "";
+        var projectRoot = _projectRootText.Text.Trim();
+        var templateReady = requirement.CookProfile.Equals(NativeUimdIconCookProfile, StringComparison.OrdinalIgnoreCase)
+            ? TextureCookTemplateService.NormalizeNativeSuitIconTemplate(projectRoot)
+            : TextureCookTemplateService.NormalizeNativeCharacterIconTemplate(projectRoot);
+        if (!templateReady)
+        {
+            error =
+                $"Batcomputer could not prepare the native {requirement.Size}px donor required by the {requirement.Role} icon slot. " +
+                "Run Full refresh, then reimport this image again.";
+            return false;
+        }
+
+        var templateJson = TextureCookTemplateService.TemplateJsonPath(projectRoot, requirement.TemplateFolder);
+        if (!File.Exists(templateJson))
+        {
+            error =
+                $"The native {requirement.Size}px donor recipe required by the {requirement.Role} icon slot is still missing after preparation. " +
+                "Run Full refresh, then reimport this image again.";
+            return false;
+        }
+
+        var changed =
+            !string.Equals(texture.Kind, requirement.Kind, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(texture.CookProfile, requirement.CookProfile, StringComparison.OrdinalIgnoreCase) ||
+            texture.CookWidth != requirement.Size ||
+            texture.CookHeight != requirement.Size ||
+            !string.Equals(texture.CookPixelFormat, "PF_BC7", StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(texture.TemplateJson, templateJson, StringComparison.OrdinalIgnoreCase);
+
+        texture.Kind = requirement.Kind;
+        texture.CookProfile = requirement.CookProfile;
+        texture.CookWidth = requirement.Size;
+        texture.CookHeight = requirement.Size;
+        texture.CookPixelFormat = "PF_BC7";
+        texture.TemplateJson = templateJson;
+        if (changed)
+        {
+            AppendLog(
+                $"UIMD icon reimport normalized: {requirement.Role} '{texture.DisplayName}' -> native {requirement.Size}px BC7 inline-mip layout.");
+        }
+        return true;
+    }
+
     private bool AutoAssignGeneratedUiIconSlots(NativeSuitProject project)
     {
         var uiTextures = project.GeneratedTextures
@@ -1792,13 +1986,7 @@ public sealed partial class MainForm
     /// </summary>
     private bool NormalizeGeneratedUimdIconRecipes(NativeSuitProject project)
     {
-        var slots = new (string Name, string Path, string Kind, string Profile, string Folder, int Size)[]
-        {
-            ("menu", project.IconMenu, "Character icon", NativeCharacterIconCookProfile, TextureCookTemplateService.NativeCharacterIconTemplateFolder, 512),
-            ("suit", project.IconSuit, "Suit selector icon", NativeUimdIconCookProfile, TextureCookTemplateService.NativeSuitIconTemplateFolder, 256),
-            ("left", project.IconLeft, "Character icon", NativeCharacterIconCookProfile, TextureCookTemplateService.NativeCharacterIconTemplateFolder, 512),
-            ("right", project.IconRight, "Character icon", NativeCharacterIconCookProfile, TextureCookTemplateService.NativeCharacterIconTemplateFolder, 512),
-        };
+        var slots = UimdIconRecipeRequirements(project);
         var referenced = slots
             .Select(slot => new { Slot = slot, Texture = FindGeneratedTextureByPackage(project, slot.Path) })
             .Where(item => item.Texture is not null)
@@ -1810,7 +1998,7 @@ public sealed partial class MainForm
 
         var conflicts = referenced
             .GroupBy(item => item.Texture!.PackagePath, StringComparer.OrdinalIgnoreCase)
-            .Where(group => group.Select(item => item.Slot.Profile).Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
+            .Where(group => group.Select(item => item.Slot.CookProfile).Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
             .ToList();
         foreach (var conflict in conflicts)
         {
@@ -1831,8 +2019,8 @@ public sealed partial class MainForm
         }
 
         var projectRoot = _projectRootText.Text.Trim();
-        var needsSuit = targets.Any(item => item.Slot.Profile.Equals(NativeUimdIconCookProfile, StringComparison.OrdinalIgnoreCase));
-        var needsCharacter = targets.Any(item => item.Slot.Profile.Equals(NativeCharacterIconCookProfile, StringComparison.OrdinalIgnoreCase));
+        var needsSuit = targets.Any(item => item.Slot.CookProfile.Equals(NativeUimdIconCookProfile, StringComparison.OrdinalIgnoreCase));
+        var needsCharacter = targets.Any(item => item.Slot.CookProfile.Equals(NativeCharacterIconCookProfile, StringComparison.OrdinalIgnoreCase));
         var suitReady = !needsSuit || TextureCookTemplateService.NormalizeNativeSuitIconTemplate(projectRoot);
         var characterReady = !needsCharacter || TextureCookTemplateService.NormalizeNativeCharacterIconTemplate(projectRoot);
         if (!suitReady || !characterReady)
@@ -1847,10 +2035,10 @@ public sealed partial class MainForm
         {
             var texture = item.Texture!;
             var desiredKind = item.Slot.Kind;
-            var nativeTemplate = TextureCookTemplateService.TemplateJsonPath(projectRoot, item.Slot.Folder);
+            var nativeTemplate = TextureCookTemplateService.TemplateJsonPath(projectRoot, item.Slot.TemplateFolder);
             var recipeChanged =
                 !string.Equals(texture.Kind, desiredKind, StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(texture.CookProfile, item.Slot.Profile, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(texture.CookProfile, item.Slot.CookProfile, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(texture.TemplateJson, nativeTemplate, StringComparison.OrdinalIgnoreCase) ||
                 texture.CookWidth != item.Slot.Size ||
                 texture.CookHeight != item.Slot.Size ||
@@ -1861,12 +2049,12 @@ public sealed partial class MainForm
             }
 
             texture.Kind = desiredKind;
-            texture.CookProfile = item.Slot.Profile;
+            texture.CookProfile = item.Slot.CookProfile;
             texture.CookWidth = item.Slot.Size;
             texture.CookHeight = item.Slot.Size;
             texture.CookPixelFormat = "PF_BC7";
             texture.TemplateJson = nativeTemplate;
-            AppendLog($"UIMD icon recipe normalized: {item.Slot.Name} '{texture.DisplayName}' -> native {item.Slot.Size}px BC7 inline-mip layout.");
+            AppendLog($"UIMD icon recipe normalized: {item.Slot.Role} '{texture.DisplayName}' -> native {item.Slot.Size}px BC7 inline-mip layout.");
             changed = true;
         }
 
