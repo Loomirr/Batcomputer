@@ -2188,6 +2188,7 @@ public sealed partial class MainForm : AdaptiveForm
         {
             AppSettings.Current = AppSettings.Load();
             ExtractedMaterialCatalogService.Invalidate();
+            ExtractedAnimationCatalogService.Invalidate();
             _partIndex = null;
             _projectRootText.Text = AppSettings.Current.EffectiveProjectRoot();
             RefreshHeaderWordmark();
@@ -2249,8 +2250,10 @@ public sealed partial class MainForm : AdaptiveForm
             AppSettings.Current.ExtractedContentRoot = result.ContentRoot;
             AppSettings.Current.Save();
             ExtractedMaterialCatalogService.Invalidate();
+            ExtractedAnimationCatalogService.Invalidate();
             AppendLog($"New extracted Content root selected: {result.ContentRoot}");
             AppendLog($"Active extracted material catalog: {ExtractedMaterialCatalogService.ExtractedForRoot(result.ContentRoot).Count} material instance(s).");
+            AppendLog($"Active extracted animation catalog: {ExtractedAnimationCatalogService.ExtractedForRoot(result.ContentRoot).Count} animation asset(s).");
 
             progressWindow.SetIndeterminate("Preparing texture cook templates…");
             var templates = TextureCookTemplateService.PrepareFromContentRoot(projectRoot, result.ContentRoot);

@@ -5084,6 +5084,10 @@ internal static class ReleaseRegressionChecks
             failures,
             output);
 
+        TextureCookRegressionChecks.Run(failures, output);
+        AnimationImportRegressionChecks.Run(failures, output);
+        CharacterAnimationGraphRegressionChecks.Run(failures, output);
+
         output.WriteLine(failures.Count == 0
             ? "release regressions: PASS"
             : $"release regressions: FAIL ({failures.Count})");

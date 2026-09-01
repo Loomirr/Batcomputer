@@ -112,6 +112,16 @@ Use the normal-map profile for normals and the matching color, mask, or packed-m
 other roles. Batcomputer uses filtered mip generation, preserves transparent UI edges, and
 renormalizes filtered BC5 normals before compression.
 
+For profiles that store RGBA colour, Batcomputer keeps straight-alpha colour data through resize,
+mip generation, and compression. RGB underneath a transparent or partly transparent pixel is not
+replaced with black. This matters for character materials that use alpha to choose between plastic
+and printed surface response as well as for soft UI edges. DXT1 remains opaque and BC5 stores only
+its red/green normal channels; use BGRA8, DXT5, or BC7 when the destination needs alpha.
+
+Textures cooked by an older build keep their old payload until they are cooked again. Use
+**Reimport all** for a suit, or **Change cook profile** on one texture, to rebuild it with the
+current alpha-safe cooker.
+
 Choose **Reimport all** at the start of the Textures list to recook every saved source PNG for the
 current suit. Each texture keeps its own saved profile. Batcomputer checks every recipe first,
 backs up the existing cooked packages, and restores the whole batch if any one texture fails.

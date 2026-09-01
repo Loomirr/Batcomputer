@@ -15,6 +15,7 @@ Batcomputer/
     NativeSuitModProjects/
     NativeSuitModBuilds/
     NativeSuitProjects/
+    AnimationLibrary/
     Preview/
   Runtime/
   Tools/
@@ -27,6 +28,7 @@ Back up:
 - `Batcomputer.settings.json`
 - `Generated/NativeSuitModProjects`
 - `Generated/NativeSuitProjects`
+- `Generated/AnimationLibrary` when you have imported custom animations
 - Source images and OBJ files referenced by those projects
 - Notes stored in the mod project
 

@@ -2468,11 +2468,11 @@ public sealed partial class MainForm
 
     /// <summary>
     /// Runs retoc <c>to-legacy</c> to unpack a zen container directory into loose cooked assets.
-    /// <paramref name="inputDir"/> must contain the mod trio AND the game's global.utoc/.ucas
-    /// (retoc needs the global script objects to resolve /Script imports - a standalone mod trio
-    /// alone fails). Returns retoc's exit code.
+    /// <paramref name="inputDir"/> must contain the imported trio plus the complete base-game
+    /// package store. global.utoc alone resolves /Script imports but cannot resolve Engine/ACL
+    /// package IDs used by cooked AnimSequences. Returns retoc's exit code.
     /// </summary>
-    private async Task<int> RunRetocToLegacyAsync(string inputDir, string outDir)
+    private async Task<int> RunRetocToLegacyAsync(string inputDir, string outDir, string? filter = null)
     {
         var retoc = AppSettings.Current.EffectiveRetocExePath();
         if (!File.Exists(retoc))
@@ -2493,6 +2493,11 @@ public sealed partial class MainForm
         };
         psi.ArgumentList.Add("to-legacy");
         psi.ArgumentList.Add("--no-shaders");
+        if (!string.IsNullOrWhiteSpace(filter))
+        {
+            psi.ArgumentList.Add("--filter");
+            psi.ArgumentList.Add(filter);
+        }
         psi.ArgumentList.Add("--version");
         psi.ArgumentList.Add(GameAssetRefreshService.RetocEngineVersion);
         psi.ArgumentList.Add(inputDir);

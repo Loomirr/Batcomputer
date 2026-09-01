@@ -940,9 +940,11 @@ public sealed class AnimArchetypeGraftService
             }
         }
 
+        var exactSlotOverrides = project.AnimationSlotOverrides ?? [];
         if (foreignMas.Count == 0 && foreignLas.Count == 0 && foreignEd.Count == 0 &&
             foreignAbilitySets.Count == 0 &&
             project.AnimationOverrides.Count == 0 && project.LocomotionOverrides.Count == 0 &&
+            exactSlotOverrides.Count == 0 &&
             !usesPairedCapeAdapter)
         {
             result.Log.Add("no foreign gadgets or animation overrides — archetype left on donor sets");
@@ -973,10 +975,38 @@ public sealed class AnimArchetypeGraftService
             // LAS_Default_Batman → LAS_Default_Catwoman).
             var montageOverrides = project.AnimationOverrides.Where(o => o.Kind.Equals("Montage", StringComparison.OrdinalIgnoreCase)).ToList();
             var layerOverrides = project.AnimationOverrides.Where(o => o.Kind.Equals("Layer", StringComparison.OrdinalIgnoreCase)).ToList();
+            var montageSlotOverrides = exactSlotOverrides
+                .Where(o => o.Kind.Equals("Montage", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            var layerSlotOverrides = exactSlotOverrides
+                .Where(o => o.Kind.Equals("Layer", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            // A locomotion edit builds one suit-owned LAS_Default graph. If another edit has
+            // already replaced or cloned that same parent, the later legacy locomotion pass would
+            // no longer find LAS_Default_<donor> and ReplaceParentSet would append a second default
+            // controller. Two competing defaults are order-dependent and can crash. Fail before
+            // cloning either composite until these edits can be merged into one graph.
+            if (project.LocomotionOverrides.Count > 0)
+            {
+                var compositionConflict = LocomotionCompositionConflict(
+                    donor.Family,
+                    layerOverrides,
+                    layerSlotOverrides);
+                if (!string.IsNullOrWhiteSpace(compositionConflict))
+                {
+                    result.Status = "error";
+                    result.Error = compositionConflict;
+                    return result;
+                }
+            }
 
             // --- Animations: clone MAS/LAS, inject foreign blocks + apply overrides, repoint. ---
-            var needMas = foreignMas.Count > 0 || montageOverrides.Count > 0 || usesPairedCapeAdapter;
-            var needLas = foreignLas.Count > 0 || layerOverrides.Count > 0 || project.LocomotionOverrides.Count > 0 || usesPairedCapeAdapter;
+            var needMas = foreignMas.Count > 0 || montageOverrides.Count > 0 ||
+                          montageSlotOverrides.Count > 0 || usesPairedCapeAdapter;
+            var needLas = foreignLas.Count > 0 || layerOverrides.Count > 0 ||
+                          layerSlotOverrides.Count > 0 || project.LocomotionOverrides.Count > 0 ||
+                          usesPairedCapeAdapter;
             if (needMas || needLas)
             {
                 if (needMas) CloneDonorAsset(extractedRoot, donor.MasCharPackage, donor.MasCharStem, patchedContentRoot, customMasPkg, masStem, mappings, result);
@@ -1059,6 +1089,34 @@ public sealed class AnimArchetypeGraftService
                     result.Log.Add($"LAS override [{o.Category}]: {r.Status} {donorSet}→{o.ReplacementSet}{ErrSuffix(r.Error)}");
                 }
 
+                // Exact action/layer overrides: clone only the affected parent set, patch its
+                // semantic slot, then replace that one parent in the suit-owned character
+                // composite. Context-specific rows remain independent even when they reuse the
+                // same donor montage.
+                if (!ApplyExactSlotOverrides(
+                        montageSlotOverrides,
+                        "TTAnimSet",
+                        customMasPkg,
+                        extractedRoot,
+                        patchedContentRoot,
+                        mod,
+                        mappings,
+                        graft,
+                        result) ||
+                    !ApplyExactSlotOverrides(
+                        layerSlotOverrides,
+                        "TTLayerSet",
+                        customLasPkg,
+                        extractedRoot,
+                        patchedContentRoot,
+                        mod,
+                        mappings,
+                        graft,
+                        result))
+                {
+                    return result;
+                }
+
                 // --- Per-animation locomotion: clone the suit's OWN locomotion graph
                 //     (LAS_Default → ABPs → BlendSpaces), repoint the overridden idle/
                 //     walk/run/sprint AnimSequences, and rewire the clones. Same graph =
@@ -1124,8 +1182,20 @@ public sealed class AnimArchetypeGraftService
                     var lasApplied = ApplyNameMapReplacements(StageUasset(patchedContentRoot, custom[g.LasDefaultPackage]), lasRepoint, mappings);
                     result.Log.Add($"LAS_Default → custom ABPs: {lasApplied} name(s)");
 
-                    var rl = graft.ReplaceParentSet(StageUasset(patchedContentRoot, customLasPkg), "TTLayerSet", UnrealPathUtil.AssetName(g.LasDefaultPackage), custom[g.LasDefaultPackage]);
+                    var rl = graft.ReplaceParentSet(
+                        StageUasset(patchedContentRoot, customLasPkg),
+                        "TTLayerSet",
+                        UnrealPathUtil.AssetName(g.LasDefaultPackage),
+                        custom[g.LasDefaultPackage],
+                        requireExisting: true);
                     result.Log.Add($"LAS_Char → custom LAS_Default: {rl.Status} {string.Join(",", rl.Added)}{ErrSuffix(rl.Error)}");
+                    if (!rl.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
+                    {
+                        result.Status = "error";
+                        result.Error = rl.Error ??
+                                       $"The character layer composite no longer contains '{UnrealPathUtil.AssetName(g.LasDefaultPackage)}'.";
+                        return result;
+                    }
                 }
 
                 var repoint = new Dictionary<string, string>();
@@ -1330,6 +1400,125 @@ public sealed class AnimArchetypeGraftService
         replacements[UnrealPathUtil.AssetName(sourcePackage)] = UnrealPathUtil.AssetName(targetPackage);
     }
 
+    private static bool ApplyExactSlotOverrides(
+        IReadOnlyList<AnimationSlotOverride> overrides,
+        string setClass,
+        string customCompositePackage,
+        string extractedRoot,
+        string patchedRoot,
+        string mod,
+        Usmap? mappings,
+        AnimGraftService graft,
+        Result result)
+    {
+        foreach (var group in overrides
+                     .Where(change => !string.IsNullOrWhiteSpace(change.OwnerSetPackage))
+                     .GroupBy(
+                         change => UnrealPathUtil.NormalizePackagePath(change.OwnerSetPackage),
+                         StringComparer.OrdinalIgnoreCase))
+        {
+            var ownerPackage = group.Key;
+            if (!ownerPackage.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+            {
+                result.Status = "error";
+                result.Error = $"Animation override owner is not a /Game package: {ownerPackage}";
+                return false;
+            }
+
+            var ownerStem = UnrealPathUtil.AssetName(ownerPackage);
+            var hash = Convert.ToHexString(
+                    System.Security.Cryptography.SHA256.HashData(
+                        System.Text.Encoding.UTF8.GetBytes(ownerPackage.ToUpperInvariant())))
+                [..8]
+                .ToLowerInvariant();
+            var clonedStem = $"{ownerStem}_{mod}_{hash}";
+            var clonedPackage = $"/Game/Mods/{mod}/Characters/AnimationSets/{clonedStem}";
+            CloneDonorAsset(
+                extractedRoot,
+                ownerPackage,
+                ownerStem,
+                patchedRoot,
+                clonedPackage,
+                clonedStem,
+                mappings,
+                result);
+
+            var clonedUasset = StageUasset(patchedRoot, clonedPackage);
+            if (!File.Exists(clonedUasset))
+            {
+                result.Status = "error";
+                result.Error = $"The animation set '{ownerPackage}' could not be cloned from the active extract.";
+                return false;
+            }
+
+            foreach (var change in group)
+            {
+                var patched = graft.ReplaceAnimationSlot(clonedUasset, change);
+                result.Log.Add(
+                    $"animation slot [{change.ActionTag}]: {patched.Status} " +
+                    $"{UnrealPathUtil.AssetName(change.DonorPackage)}→{UnrealPathUtil.AssetName(change.ReplacementPackage)}" +
+                    ErrSuffix(patched.Error));
+                if (!patched.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
+                {
+                    result.Status = "error";
+                    result.Error = patched.Error ??
+                                   $"The animation slot '{change.ActionTag}' could not be patched.";
+                    return false;
+                }
+            }
+
+            var repointed = graft.ReplaceParentSet(
+                StageUasset(patchedRoot, customCompositePackage),
+                setClass,
+                ownerStem,
+                clonedPackage,
+                requireExisting: true);
+            result.Log.Add(
+                $"animation parent clone: {repointed.Status} {ownerStem}→{clonedStem}" +
+                ErrSuffix(repointed.Error));
+            if (!repointed.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
+            {
+                result.Status = "error";
+                result.Error = repointed.Error ??
+                               $"The character animation composite no longer contains '{ownerStem}'.";
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    internal static string? LocomotionCompositionConflict(
+        string donorFamily,
+        IReadOnlyList<AnimSetOverride> layerOverrides,
+        IReadOnlyList<AnimationSlotOverride> layerSlotOverrides)
+    {
+        if (string.IsNullOrWhiteSpace(donorFamily))
+        {
+            return null;
+        }
+
+        var defaultSet = "LAS_Default_" + donorFamily;
+        var replacesDefaultSet = layerOverrides.Any(change =>
+            DonorSetForCategory(change.Category, donorFamily)
+                .Equals(defaultSet, StringComparison.OrdinalIgnoreCase));
+        var clonesDefaultSet = layerSlotOverrides.Any(change =>
+            UnrealPathUtil.AssetName(UnrealPathUtil.NormalizePackagePath(change.OwnerSetPackage))
+                .Equals(defaultSet, StringComparison.OrdinalIgnoreCase));
+        if (!replacesDefaultSet && !clonesDefaultSet)
+        {
+            return null;
+        }
+
+        var conflictingEdit = replacesDefaultSet
+            ? "a whole Locomotion layer-set swap"
+            : "an exact animation-layer replacement inside the donor's LAS_Default set";
+        return
+            $"This suit combines individual idle/walk/run overrides with {conflictingEdit}. " +
+            $"Both edits need to own '{defaultSet}', which would create two competing locomotion controllers. " +
+            "Reset either the individual locomotion overrides or the conflicting layer edit, then build again.";
+    }
+
     private static void CloneDonorAsset(string extractedRoot, string donorPackage, string donorStem,
         string patchedRoot, string targetPackage, string targetStem, Usmap? mappings, Result result)
     {
@@ -1347,8 +1536,13 @@ public sealed class AnimArchetypeGraftService
 
         var targetBase = PackageToStageBase(patchedRoot, targetPackage);
         Directory.CreateDirectory(Path.GetDirectoryName(targetBase)!);
-        File.Copy(donorBase + ".uasset", targetBase + ".uasset", overwrite: true);
-        if (File.Exists(donorBase + ".uexp")) File.Copy(donorBase + ".uexp", targetBase + ".uexp", overwrite: true);
+        foreach (var extension in new[] { ".uasset", ".uexp", ".ubulk", ".uptnl" })
+        {
+            if (File.Exists(donorBase + extension))
+            {
+                File.Copy(donorBase + extension, targetBase + extension, overwrite: true);
+            }
+        }
 
         var asset = new UAsset(targetBase + ".uasset", EngineVersion.VER_UE5_6, mappings, NameMapOnly);
         asset.FolderName = new FString(targetPackage);

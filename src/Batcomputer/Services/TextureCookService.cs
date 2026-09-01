@@ -1,6 +1,6 @@
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -21,7 +21,7 @@ namespace Batcomputer;
 /// </summary>
 public sealed class TextureCookService
 {
-    public const int CurrentEncoderVersion = 8;
+    public const int CurrentEncoderVersion = 9;
 
     private const CustomSerializationFlags NameMapOnlyPatchFlags =
         CustomSerializationFlags.SkipParsingExports |
@@ -695,11 +695,43 @@ public sealed class TextureCookService
         string bc7Quality)
     {
         using var source = new Bitmap(sourceImagePath);
+        // Read the PNG once, before any GDI+ draw/copy operation. GDI+ treats
+        // alpha as compositing opacity and converts through premultiplied color
+        // when an image is copied or resized. That silently turns RGB under
+        // alpha=0 black and badly distorts RGB under very small alpha values.
+        // In LEGO character textures alpha is shader data (including the
+        // plastic-vs-print detail selector), so every channel must be sampled
+        // independently as straight RGBA.
+        var sourcePixels = ReadRgba(source);
         var output = new Dictionary<MipTemplate, byte[]>();
+        Rgba[]? previousMip = null;
+        var previousWidth = 0;
+        var previousHeight = 0;
         foreach (var mip in mips)
         {
-            using var resized = ResizeBitmap(source, mip.SizeX, mip.SizeY, nearest);
-            var pixels = ReadRgba(resized);
+            // Build ordinary half-size mip tails from the preceding straight-
+            // RGBA level. If the source was smaller than the template's top
+            // level, prefer the original once the requested mip fits it so an
+            // upsample is never immediately downsampled again.
+            var canContinueMipChain = previousMip is not null &&
+                                      previousWidth == mip.SizeX * 2 &&
+                                      previousHeight == mip.SizeY * 2 &&
+                                      previousWidth <= source.Width &&
+                                      previousHeight <= source.Height;
+            var resizedPixels = canContinueMipChain
+                ? ResizeRgba(previousMip!, previousWidth, previousHeight, mip.SizeX, mip.SizeY, nearest)
+                : ResizeRgba(sourcePixels, source.Width, source.Height, mip.SizeX, mip.SizeY, nearest);
+            previousMip = resizedPixels;
+            previousWidth = mip.SizeX;
+            previousHeight = mip.SizeY;
+
+            // Edge bleed and BC5 normal renormalization intentionally mutate a
+            // level for encoding. Keep the unmodified straight-RGBA level as
+            // the input to the next mip so one format-specific transform cannot
+            // leak into the general resampling path.
+            var pixels = bleedTransparentRgb || pixelFormat.Equals("PF_BC5", StringComparison.OrdinalIgnoreCase)
+                ? resizedPixels.ToArray()
+                : resizedPixels;
             if (bleedTransparentRgb)
             {
                 BleedTransparentRgb(pixels, mip.SizeX, mip.SizeY);
@@ -725,6 +757,48 @@ public sealed class TextureCookService
             output[mip] = encoded;
         }
         return output;
+    }
+
+    /// <summary>
+    /// Focused release-regression hook for the exact straight-RGBA source and
+    /// mip path used by real texture cooks.
+    /// </summary>
+    internal static (byte R, byte G, byte B, byte A)[] ReadStraightRgbaForRegression(
+        string sourceImagePath,
+        int width,
+        int height,
+        bool nearest = false)
+    {
+        using var source = new Bitmap(sourceImagePath);
+        return ResizeRgba(ReadRgba(source), source.Width, source.Height, width, height, nearest)
+            .Select(pixel => (pixel.R, pixel.G, pixel.B, pixel.A))
+            .ToArray();
+    }
+
+    /// <summary>Encodes one regression mip through the same channel paths as a real cook.</summary>
+    internal static byte[] EncodeSourceMipForRegression(
+        string sourceImagePath,
+        int width,
+        int height,
+        string pixelFormat)
+    {
+        using var source = new Bitmap(sourceImagePath);
+        var pixels = ResizeRgba(ReadRgba(source), source.Width, source.Height, width, height, nearest: false);
+        pixelFormat = NormalizePixelFormat(pixelFormat);
+        if (pixelFormat.Equals("PF_BC5", StringComparison.OrdinalIgnoreCase))
+        {
+            RenormalizeNormalMap(pixels);
+        }
+
+        return pixelFormat switch
+        {
+            "PF_DXT1" => Bc1Encode(pixels, width, height),
+            "PF_DXT5" => Bc3Encode(pixels, width, height),
+            "PF_BC5" => Bc5Encode(pixels, width, height),
+            "PF_BC7" => Bc7Encode(pixels, width, height, "rgba", "best"),
+            "PF_B8G8R8A8" => Bgra8Encode(pixels, width, height),
+            _ => throw new InvalidOperationException($"Unsupported regression Texture2D pixel format: {pixelFormat}"),
+        };
     }
 
     private static void RenormalizeNormalMap(Rgba[] pixels)
@@ -916,54 +990,288 @@ public sealed class TextureCookService
         }
     }
 
-    private static Bitmap ResizeBitmap(Bitmap source, int width, int height, bool nearest)
+    private readonly record struct Rgba(byte R, byte G, byte B, byte A);
+
+    private static Rgba[] ResizeRgba(
+        Rgba[] source,
+        int sourceWidth,
+        int sourceHeight,
+        int width,
+        int height,
+        bool nearest)
     {
-        if (source.Width == width && source.Height == height)
+        if (sourceWidth <= 0 || sourceHeight <= 0 ||
+            source.Length != checked(sourceWidth * sourceHeight))
         {
-            return new Bitmap(source);
+            throw new InvalidOperationException("Texture source pixels do not match their declared dimensions.");
+        }
+        if (width <= 0 || height <= 0)
+        {
+            throw new InvalidOperationException($"Texture mip dimensions must be positive. Got {width}x{height}.");
+        }
+        if (sourceWidth == width && sourceHeight == height)
+        {
+            return source.ToArray();
         }
 
-        var bitmap = new Bitmap(width, height, DrawingPixelFormat.Format32bppArgb);
-        using var g = Graphics.FromImage(bitmap);
-        g.CompositingMode = CompositingMode.SourceCopy;
-        g.CompositingQuality = CompositingQuality.HighSpeed;
-        g.InterpolationMode = nearest ? InterpolationMode.NearestNeighbor : InterpolationMode.HighQualityBicubic;
-        g.PixelOffsetMode = nearest ? PixelOffsetMode.Half : PixelOffsetMode.HighQuality;
-        g.SmoothingMode = SmoothingMode.None;
-        g.DrawImage(source, new Rectangle(0, 0, width, height));
-        return bitmap;
+        return nearest
+            ? ResizeRgbaNearest(source, sourceWidth, sourceHeight, width, height)
+            : width <= sourceWidth && height <= sourceHeight
+                ? ResizeRgbaArea(source, sourceWidth, sourceHeight, width, height)
+                : ResizeRgbaBilinear(source, sourceWidth, sourceHeight, width, height);
     }
 
-    private readonly record struct Rgba(byte R, byte G, byte B, byte A);
+    private static Rgba[] ResizeRgbaNearest(
+        Rgba[] source,
+        int sourceWidth,
+        int sourceHeight,
+        int width,
+        int height)
+    {
+        var output = new Rgba[checked(width * height)];
+        for (var y = 0; y < height; y++)
+        {
+            var sourceY = Math.Min((int)(((long)(y * 2 + 1) * sourceHeight) / (height * 2L)), sourceHeight - 1);
+            for (var x = 0; x < width; x++)
+            {
+                var sourceX = Math.Min((int)(((long)(x * 2 + 1) * sourceWidth) / (width * 2L)), sourceWidth - 1);
+                output[y * width + x] = source[sourceY * sourceWidth + sourceX];
+            }
+        }
+        return output;
+    }
+
+    /// <summary>
+    /// Box-filters each straight channel independently. Alpha is not multiplied
+    /// into RGB: these textures use alpha as shader input, not just opacity.
+    /// Fractional source-pixel coverage also handles non-power-of-two imports.
+    /// </summary>
+    private static Rgba[] ResizeRgbaArea(
+        Rgba[] source,
+        int sourceWidth,
+        int sourceHeight,
+        int width,
+        int height)
+    {
+        var output = new Rgba[checked(width * height)];
+        var scaleX = sourceWidth / (double)width;
+        var scaleY = sourceHeight / (double)height;
+        for (var y = 0; y < height; y++)
+        {
+            var top = y * scaleY;
+            var bottom = (y + 1) * scaleY;
+            var firstY = Math.Max(0, (int)Math.Floor(top));
+            var lastY = Math.Min(sourceHeight - 1, (int)Math.Ceiling(bottom) - 1);
+            for (var x = 0; x < width; x++)
+            {
+                var left = x * scaleX;
+                var right = (x + 1) * scaleX;
+                var firstX = Math.Max(0, (int)Math.Floor(left));
+                var lastX = Math.Min(sourceWidth - 1, (int)Math.Ceiling(right) - 1);
+                double red = 0;
+                double green = 0;
+                double blue = 0;
+                double alpha = 0;
+                double totalWeight = 0;
+                for (var sourceY = firstY; sourceY <= lastY; sourceY++)
+                {
+                    var yWeight = Math.Min(bottom, sourceY + 1d) - Math.Max(top, sourceY);
+                    if (yWeight <= 0)
+                    {
+                        continue;
+                    }
+                    for (var sourceX = firstX; sourceX <= lastX; sourceX++)
+                    {
+                        var xWeight = Math.Min(right, sourceX + 1d) - Math.Max(left, sourceX);
+                        var weight = xWeight * yWeight;
+                        if (weight <= 0)
+                        {
+                            continue;
+                        }
+
+                        var pixel = source[sourceY * sourceWidth + sourceX];
+                        red += pixel.R * weight;
+                        green += pixel.G * weight;
+                        blue += pixel.B * weight;
+                        alpha += pixel.A * weight;
+                        totalWeight += weight;
+                    }
+                }
+
+                output[y * width + x] = totalWeight > 0
+                    ? new Rgba(
+                        RoundedByte(red / totalWeight),
+                        RoundedByte(green / totalWeight),
+                        RoundedByte(blue / totalWeight),
+                        RoundedByte(alpha / totalWeight))
+                    : source[Math.Min(firstY, sourceHeight - 1) * sourceWidth + Math.Min(firstX, sourceWidth - 1)];
+            }
+        }
+        return output;
+    }
+
+    private static Rgba[] ResizeRgbaBilinear(
+        Rgba[] source,
+        int sourceWidth,
+        int sourceHeight,
+        int width,
+        int height)
+    {
+        var output = new Rgba[checked(width * height)];
+        var scaleX = sourceWidth / (double)width;
+        var scaleY = sourceHeight / (double)height;
+        for (var y = 0; y < height; y++)
+        {
+            var sampleY = Math.Clamp((y + 0.5d) * scaleY - 0.5d, 0d, sourceHeight - 1d);
+            var y0 = (int)Math.Floor(sampleY);
+            var y1 = Math.Min(y0 + 1, sourceHeight - 1);
+            var fy = sampleY - y0;
+            for (var x = 0; x < width; x++)
+            {
+                var sampleX = Math.Clamp((x + 0.5d) * scaleX - 0.5d, 0d, sourceWidth - 1d);
+                var x0 = (int)Math.Floor(sampleX);
+                var x1 = Math.Min(x0 + 1, sourceWidth - 1);
+                var fx = sampleX - x0;
+                var topLeft = source[y0 * sourceWidth + x0];
+                var topRight = source[y0 * sourceWidth + x1];
+                var bottomLeft = source[y1 * sourceWidth + x0];
+                var bottomRight = source[y1 * sourceWidth + x1];
+                output[y * width + x] = new Rgba(
+                    BilinearChannel(topLeft.R, topRight.R, bottomLeft.R, bottomRight.R, fx, fy),
+                    BilinearChannel(topLeft.G, topRight.G, bottomLeft.G, bottomRight.G, fx, fy),
+                    BilinearChannel(topLeft.B, topRight.B, bottomLeft.B, bottomRight.B, fx, fy),
+                    BilinearChannel(topLeft.A, topRight.A, bottomLeft.A, bottomRight.A, fx, fy));
+            }
+        }
+        return output;
+    }
+
+    private static byte BilinearChannel(byte topLeft, byte topRight, byte bottomLeft, byte bottomRight, double x, double y)
+    {
+        var top = topLeft + (topRight - topLeft) * x;
+        var bottom = bottomLeft + (bottomRight - bottomLeft) * x;
+        return RoundedByte(top + (bottom - top) * y);
+    }
+
+    private static byte RoundedByte(double value) =>
+        (byte)Math.Clamp((int)Math.Round(value, MidpointRounding.AwayFromZero), 0, 255);
 
     private static Rgba[] ReadRgba(Bitmap bitmap)
     {
-        var rect = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
-        using var clone = bitmap.PixelFormat == DrawingPixelFormat.Format32bppArgb
-            ? new Bitmap(bitmap)
-            : bitmap.Clone(rect, DrawingPixelFormat.Format32bppArgb);
-        var data = clone.LockBits(rect, ImageLockMode.ReadOnly, DrawingPixelFormat.Format32bppArgb);
+        // Do not clone before reading. new Bitmap(bitmap) draws through GDI+'s
+        // premultiplied-alpha path, destroying RGB values stored beneath
+        // transparent and nearly-transparent alpha. Read native PNG layouts
+        // directly; the uncommon fallback favors correctness over speed.
         try
         {
-            var stride = data.Stride;
-            var bytes = new byte[Math.Abs(stride) * clone.Height];
-            System.Runtime.InteropServices.Marshal.Copy(data.Scan0, bytes, 0, bytes.Length);
-            var pixels = new Rgba[clone.Width * clone.Height];
-            for (var y = 0; y < clone.Height; y++)
+            return bitmap.PixelFormat switch
             {
-                var row = stride >= 0 ? y * stride : (clone.Height - 1 - y) * -stride;
-                for (var x = 0; x < clone.Width; x++)
+                DrawingPixelFormat.Format32bppArgb => ReadDirectRgba(bitmap, bytesPerPixel: 4, hasAlpha: true),
+                DrawingPixelFormat.Format32bppRgb => ReadDirectRgba(bitmap, bytesPerPixel: 4, hasAlpha: false),
+                DrawingPixelFormat.Format24bppRgb => ReadDirectRgba(bitmap, bytesPerPixel: 3, hasAlpha: false),
+                DrawingPixelFormat.Format8bppIndexed => ReadIndexedRgba(bitmap, bitsPerPixel: 8),
+                DrawingPixelFormat.Format4bppIndexed => ReadIndexedRgba(bitmap, bitsPerPixel: 4),
+                DrawingPixelFormat.Format1bppIndexed => ReadIndexedRgba(bitmap, bitsPerPixel: 1),
+                _ => ReadRgbaWithGetPixel(bitmap),
+            };
+        }
+        catch (ArgumentException)
+        {
+            return ReadRgbaWithGetPixel(bitmap);
+        }
+        catch (ExternalException)
+        {
+            return ReadRgbaWithGetPixel(bitmap);
+        }
+    }
+
+    private static Rgba[] ReadDirectRgba(Bitmap bitmap, int bytesPerPixel, bool hasAlpha)
+    {
+        var rect = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
+        var data = bitmap.LockBits(rect, ImageLockMode.ReadOnly, bitmap.PixelFormat);
+        try
+        {
+            var row = new byte[Math.Abs(data.Stride)];
+            var pixels = new Rgba[bitmap.Width * bitmap.Height];
+            for (var y = 0; y < bitmap.Height; y++)
+            {
+                System.Runtime.InteropServices.Marshal.Copy(
+                    IntPtr.Add(data.Scan0, checked(y * data.Stride)),
+                    row,
+                    0,
+                    row.Length);
+                for (var x = 0; x < bitmap.Width; x++)
                 {
-                    var i = row + x * 4;
-                    pixels[y * clone.Width + x] = new Rgba(bytes[i + 2], bytes[i + 1], bytes[i], bytes[i + 3]);
+                    var offset = x * bytesPerPixel;
+                    pixels[y * bitmap.Width + x] = new Rgba(
+                        row[offset + 2],
+                        row[offset + 1],
+                        row[offset],
+                        hasAlpha ? row[offset + 3] : (byte)255);
                 }
             }
             return pixels;
         }
         finally
         {
-            clone.UnlockBits(data);
+            bitmap.UnlockBits(data);
         }
+    }
+
+    private static Rgba[] ReadIndexedRgba(Bitmap bitmap, int bitsPerPixel)
+    {
+        var rect = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
+        var palette = bitmap.Palette.Entries;
+        var data = bitmap.LockBits(rect, ImageLockMode.ReadOnly, bitmap.PixelFormat);
+        try
+        {
+            var row = new byte[Math.Abs(data.Stride)];
+            var pixels = new Rgba[bitmap.Width * bitmap.Height];
+            for (var y = 0; y < bitmap.Height; y++)
+            {
+                System.Runtime.InteropServices.Marshal.Copy(
+                    IntPtr.Add(data.Scan0, checked(y * data.Stride)),
+                    row,
+                    0,
+                    row.Length);
+                for (var x = 0; x < bitmap.Width; x++)
+                {
+                    var paletteIndex = bitsPerPixel switch
+                    {
+                        8 => row[x],
+                        4 => (row[x >> 1] >> ((x & 1) == 0 ? 4 : 0)) & 0x0F,
+                        1 => (row[x >> 3] >> (7 - (x & 7))) & 0x01,
+                        _ => throw new InvalidOperationException($"Unsupported indexed PNG depth: {bitsPerPixel}."),
+                    };
+                    if (paletteIndex >= palette.Length)
+                    {
+                        throw new InvalidOperationException("Indexed PNG referenced a color outside its palette.");
+                    }
+
+                    var color = palette[paletteIndex];
+                    pixels[y * bitmap.Width + x] = new Rgba(color.R, color.G, color.B, color.A);
+                }
+            }
+            return pixels;
+        }
+        finally
+        {
+            bitmap.UnlockBits(data);
+        }
+    }
+
+    private static Rgba[] ReadRgbaWithGetPixel(Bitmap bitmap)
+    {
+        var pixels = new Rgba[checked(bitmap.Width * bitmap.Height)];
+        for (var y = 0; y < bitmap.Height; y++)
+        {
+            for (var x = 0; x < bitmap.Width; x++)
+            {
+                var color = bitmap.GetPixel(x, y);
+                pixels[y * bitmap.Width + x] = new Rgba(color.R, color.G, color.B, color.A);
+            }
+        }
+        return pixels;
     }
 
     private static byte[] Bc1Encode(Rgba[] pixels, int width, int height)

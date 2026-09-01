@@ -260,6 +260,11 @@ public sealed class NativeSuitProject
     // crash-free alternative to swapping another family's whole AnimBlueprint.
     public List<AnimSequenceOverride> LocomotionOverrides { get; set; } = new();
 
+    // Exact action/layer slots exposed by the character's TTAnimSet/TTLayerSet graph.
+    // These retain the semantic action/context identity as well as the observed indices so a
+    // later game-data refresh can validate the target instead of silently patching another row.
+    public List<AnimationSlotOverride> AnimationSlotOverrides { get; set; } = new();
+
     // Cooked Texture2D imports staged into the suit's IoStore trio.
     public List<GeneratedTextureEntry> GeneratedTextures { get; set; } = new();
 
@@ -419,6 +424,27 @@ public sealed class AnimSequenceOverride
     public string ReplacementPackage { get; set; } = "";   // /Game path of the replacement AnimSequence
 }
 
+/// <summary>
+/// Replaces one exact reference inside a TTAnimSet or TTLayerSet entry. A montage may be reused by
+/// several context rows, so the owner set + action/context key is the identity; the saved indices
+/// are a fast path that must still agree with that semantic key at package time.
+/// </summary>
+public sealed class AnimationSlotOverride
+{
+    public string Kind { get; set; } = "";                 // Montage | Layer
+    public string OwnerSetPackage { get; set; } = "";      // /Game/.../MAS_* or LAS_*
+    public string ActionTag { get; set; } = "";            // Animation.Action.Jump, Animation.Layer.Base, ...
+    public List<string> ContextTags { get; set; } = new();
+    public int EntryIndex { get; set; } = -1;
+    public int VariantIndex { get; set; } = -1;
+    public string ReferenceKind { get; set; } = "";        // AnimFile | LayerAnim
+    public int ReferenceIndex { get; set; } = -1;           // LayerAnimArray index; 0 for AnimFile
+    public string DonorPackage { get; set; } = "";
+    public string DonorClass { get; set; } = "";
+    public string ReplacementPackage { get; set; } = "";
+    public string ReplacementClass { get; set; } = "";
+}
+
 /// <summary>Catalog entry for a cooked animation used by an override.</summary>
 public sealed class AnimLibraryEntry
 {
@@ -438,24 +464,55 @@ public sealed class AnimLibraryEntry
 
     // Best-effort inspection results.
     public string AssetClass { get; set; } = "";     // AnimSequence | AnimMontage | TTLayerSet | TTAnimSet | …
-    public string Skeleton { get; set; } = "";       // referenced USkeleton import path
+    public string Skeleton { get; set; } = "";       // referenced USkeleton package path (legacy records may contain only the object name)
     public bool RootMotion { get; set; }
     public string AdditiveMode { get; set; } = "";   // e.g. AAT_None | AAT_LocalSpaceBase | AAT_RotationOffsetMeshSpace
     public List<string> Dependencies { get; set; } = new(); // /Game import paths the asset pulls in
+    public List<string> UnresolvedImports { get; set; } = new(); // UnknownPackage / UnknownExport markers
     public bool Inspected { get; set; }              // true once inspection actually ran against bytes
 
-    // Imported cooked files relative to the library cache.
+    // Imported cooked files relative to the library cache. This remains the primary
+    // AnimSequence file list so version-1 library records and callers keep working.
     public List<string> CachedFiles { get; set; } = new();
+
+    // Source-container packages required by, or supporting, this animation. Each package keeps
+    // its original /Game identity instead of being flattened beside the primary sequence.
+    public List<AnimLibraryCachedPackage> SupportPackages { get; set; } = new();
+
+    // The service persists health so a picker can exclude unsafe records. StageInto also checks
+    // this independently, protecting callers that have not yet adopted the availability filter.
+    // Current values are healthy, legacy, external, and quarantined.
+    public string HealthStatus { get; set; } = "";
+    public bool IsAvailable { get; set; } = true;
+    public List<string> HealthIssues { get; set; } = new();
 
     public string Notes { get; set; } = "";
     public string AddedUtc { get; set; } = "";
     public string UpdatedUtc { get; set; } = "";
 }
 
-/// <summary>Top-level catalogue persisted as AnimationLibrary/library.json in the project root.</summary>
+/// <summary>
+/// One cooked support package owned by an imported animation entry. CachedFiles are relative to
+/// AnimationLibrary, matching <see cref="AnimLibraryEntry.CachedFiles"/>.
+/// </summary>
+public sealed class AnimLibraryCachedPackage
+{
+    public string PackagePath { get; set; } = "";
+    public string AssetClass { get; set; } = "";
+    public List<string> Dependencies { get; set; } = new();
+    public List<string> UnresolvedImports { get; set; } = new();
+    public bool Inspected { get; set; }
+    public List<string> CachedFiles { get; set; } = new();
+    public string Notes { get; set; } = "";
+}
+
+/// <summary>
+/// Workspace-wide catalogue persisted as Generated/AnimationLibrary/library.json. It is shared by
+/// every suit in the workspace; individual suits store only the overrides they actually use.
+/// </summary>
 public sealed class AnimLibrary
 {
-    public int SchemaVersion { get; set; } = 1;
+    public int SchemaVersion { get; set; } = 2;
     public List<AnimLibraryEntry> Entries { get; set; } = new();
 }
 

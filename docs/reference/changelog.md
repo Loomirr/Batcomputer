@@ -21,6 +21,21 @@
   available only from disabled or omitted content still stop the build.
 - Paired cape/glider checks accept the final declared playable and cutscene material assignments
   while continuing to verify the native pair structure and untouched material slots.
+- **Edit character animations** opens a full tree of exact action/context rows, montages, Animation
+  Blueprint layers, and locomotion sequences inherited from the gameplay donor.
+- One row can use a compatible base-game, installed-DLC, or imported animation without changing
+  the donor package or any other suit. **Reset to donor** removes only that saved suit override.
+- Cooked `AnimSequence` and `AnimMontage` packs can be imported by selecting their `.utoc`, `.ucas`,
+  or `.pak`. The library is shared across the workspace, while support assets ship only with suits
+  that reference them.
+- The Imported picker filter shows the full library and explains why an unavailable or incompatible
+  entry cannot be used instead of silently hiding it.
+- Replacement and reset follow one unique semantic action/context when refreshed animation data
+  moves the raw row. Ambiguous saved matches and two edits competing for `LAS_Default` fail closed.
+- RGBA texture cooks preserve RGB below transparent and partly transparent alpha through resizing
+  and mip generation. **Reimport all** updates older saved recipes.
+- Longer Toybox tile titles and descriptions measure and expand for the current DPI instead of
+  clipping.
 - Portable build and documentation version: **0.9.0-beta.10**.
 
 ## 0.9.0-beta.9 — corrected build

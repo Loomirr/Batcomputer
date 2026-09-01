@@ -431,6 +431,304 @@ public sealed class AnimGraftService
     }
 
     /// <summary>
+    /// Replaces one semantically-identified reference inside a TTAnimSet/TTLayerSet
+    /// <c>AnimSetEntryArray</c>. The saved numeric indices are only a fast path: action tag,
+    /// context tags, reference kind, and original package must still match. If a game update makes
+    /// the target ambiguous or removes it, this fails closed instead of patching another action.
+    /// </summary>
+    public GraftResult ReplaceAnimationSlot(string ownerSetUassetPath, AnimationSlotOverride change)
+    {
+        var result = new GraftResult();
+        try
+        {
+            var mappings = LoadMappings();
+            if (mappings is null)
+            {
+                result.Status = "no-mappings";
+                result.Error = "A .usmap mappings file is required to edit an animation slot.";
+                return result;
+            }
+            if (!File.Exists(ownerSetUassetPath))
+            {
+                result.Status = "missing";
+                result.Error = $"Animation set not found: {ownerSetUassetPath}";
+                return result;
+            }
+
+            var asset = new UAsset(
+                ownerSetUassetPath,
+                EngineVersion.VER_UE5_6,
+                mappings,
+                CustomSerializationFlags.None);
+            var export = asset.Exports.OfType<NormalExport>()
+                .FirstOrDefault(candidate => candidate.Data.OfType<ArrayPropertyData>()
+                    .Any(property => property.Name.ToString().Equals(
+                        "AnimSetEntryArray",
+                        StringComparison.OrdinalIgnoreCase)));
+            var entries = export?.Data.OfType<ArrayPropertyData>()
+                .FirstOrDefault(property => property.Name.ToString().Equals(
+                    "AnimSetEntryArray",
+                    StringComparison.OrdinalIgnoreCase));
+            if (export is null || entries is null)
+            {
+                result.Status = "no-animation-slots";
+                result.Error = "The selected animation set has no readable AnimSetEntryArray.";
+                return result;
+            }
+
+            var matches = FindAnimationSlotReferences(asset, entries, change).ToList();
+            if (matches.Count != 1)
+            {
+                result.Status = matches.Count == 0 ? "slot-not-found" : "ambiguous-slot";
+                result.Error = matches.Count == 0
+                    ? $"The saved target {DescribeAnimationTarget(change)} no longer matches the active extracted set. Reopen Animation Explorer and choose the slot again."
+                    : $"The saved target {DescribeAnimationTarget(change)} matched {matches.Count} references. Batcomputer refused to guess.";
+                return result;
+            }
+
+            var match = matches[0];
+            var replacementPackage = UnrealPathUtil.NormalizePackagePath(change.ReplacementPackage);
+            if (string.IsNullOrWhiteSpace(replacementPackage) ||
+                !replacementPackage.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+            {
+                result.Status = "invalid-replacement";
+                result.Error = "The replacement animation must have a valid /Game package path.";
+                return result;
+            }
+
+            var replacementClass = NormalizeAnimationAssetClass(change.ReplacementClass);
+            if (string.IsNullOrWhiteSpace(replacementClass))
+            {
+                result.Status = "invalid-replacement-class";
+                result.Error = "The replacement animation class was not identified.";
+                return result;
+            }
+            var replacementObject = UnrealPathUtil.AssetName(replacementPackage);
+            if (replacementClass.EndsWith("GeneratedClass", StringComparison.OrdinalIgnoreCase) &&
+                !replacementObject.EndsWith("_C", StringComparison.OrdinalIgnoreCase))
+            {
+                replacementObject += "_C";
+            }
+
+            var newImport = EnsureObjectImport(
+                asset,
+                replacementPackage,
+                replacementObject,
+                "/Script/Engine",
+                replacementClass);
+            match.Replace(newImport);
+
+            // Keep the old dependency because another context row may still use it. The new asset
+            // must be create-before-serialization just like the donor reference.
+            export.CreateBeforeSerializationDependencies ??= new List<FPackageIndex>();
+            if (export.CreateBeforeSerializationDependencies.All(dependency => dependency.Index != newImport.Index))
+            {
+                export.CreateBeforeSerializationDependencies.Add(newImport);
+            }
+
+            asset.Write(ownerSetUassetPath);
+            result.Status = "ok";
+            result.Added.Add(
+                $"{DescribeAnimationTarget(change)}: {UnrealPathUtil.AssetName(change.DonorPackage)}→{replacementObject}");
+            return result;
+        }
+        catch (Exception ex)
+        {
+            result.Status = "error";
+            result.Error = ex.ToString();
+            return result;
+        }
+    }
+
+    private sealed record AnimationSlotReference(
+        int EntryIndex,
+        int VariantIndex,
+        int ReferenceIndex,
+        FPackageIndex Current,
+        Action<FPackageIndex> Replace);
+
+    private static IEnumerable<AnimationSlotReference> FindAnimationSlotReferences(
+        UAsset asset,
+        ArrayPropertyData entries,
+        AnimationSlotOverride target)
+    {
+        var expectedPackage = UnrealPathUtil.NormalizePackagePath(target.DonorPackage);
+        var expectedContexts = NormalizeTags(target.ContextTags);
+        var candidates = new List<AnimationSlotReference>();
+
+        foreach (var (entryProperty, entryIndex) in entries.Value.Select((value, index) => (value, index)))
+        {
+            if (entryProperty is not StructPropertyData entry ||
+                !AnimationEntryMatches(entry, target.ActionTag, expectedContexts))
+            {
+                continue;
+            }
+
+            var variants = entry.Value.OfType<ArrayPropertyData>()
+                .FirstOrDefault(property => property.Name.ToString().Equals(
+                    "AnimAndWeightsArray",
+                    StringComparison.OrdinalIgnoreCase));
+            if (variants is null)
+            {
+                continue;
+            }
+
+            foreach (var (variantProperty, variantIndex) in variants.Value.Select((value, index) => (value, index)))
+            {
+                if (variantProperty is not StructPropertyData variant)
+                {
+                    continue;
+                }
+
+                if (target.ReferenceKind.Equals("AnimFile", StringComparison.OrdinalIgnoreCase))
+                {
+                    var animation = variant.Value.OfType<ObjectPropertyData>()
+                        .FirstOrDefault(property => property.Name.ToString().Equals(
+                            "AnimFile",
+                            StringComparison.OrdinalIgnoreCase));
+                    if (animation is not null &&
+                        ObjectPackage(asset, animation.Value).Equals(expectedPackage, StringComparison.OrdinalIgnoreCase))
+                    {
+                        candidates.Add(new AnimationSlotReference(
+                            entryIndex,
+                            variantIndex,
+                            0,
+                            animation.Value,
+                            replacement => animation.Value = replacement));
+                    }
+                    continue;
+                }
+
+                if (!target.ReferenceKind.Equals("LayerAnim", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                var layers = variant.Value.OfType<ArrayPropertyData>()
+                    .FirstOrDefault(property => property.Name.ToString().Equals(
+                        "LayerAnimArray",
+                        StringComparison.OrdinalIgnoreCase));
+                if (layers is null)
+                {
+                    continue;
+                }
+                foreach (var (layerProperty, referenceIndex) in layers.Value.Select((value, index) => (value, index)))
+                {
+                    if (layerProperty is not ObjectPropertyData layer ||
+                        !ObjectPackage(asset, layer.Value).Equals(expectedPackage, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+                    var capturedIndex = referenceIndex;
+                    candidates.Add(new AnimationSlotReference(
+                        entryIndex,
+                        variantIndex,
+                        capturedIndex,
+                        layer.Value,
+                        replacement =>
+                        {
+                            var values = layers.Value.ToArray();
+                            values[capturedIndex] = new ObjectPropertyData(layer.Name) { Value = replacement };
+                            layers.Value = values;
+                        }));
+                }
+            }
+        }
+
+        // Prefer the exact observed location, but only after the semantic key and donor package
+        // above have been validated. Fall back to one unique semantic match after a data refresh.
+        var exact = candidates.Where(candidate =>
+                candidate.EntryIndex == target.EntryIndex &&
+                candidate.VariantIndex == target.VariantIndex &&
+                candidate.ReferenceIndex == Math.Max(0, target.ReferenceIndex))
+            .ToList();
+        return exact.Count == 1 ? exact : candidates;
+    }
+
+    internal static int ReplaceAnimationSlotReferenceForTest(
+        UAsset asset,
+        ArrayPropertyData entries,
+        AnimationSlotOverride target,
+        FPackageIndex replacement)
+    {
+        var matches = FindAnimationSlotReferences(asset, entries, target).ToList();
+        if (matches.Count == 1)
+        {
+            matches[0].Replace(replacement);
+        }
+        return matches.Count;
+    }
+
+    private static bool AnimationEntryMatches(
+        StructPropertyData entry,
+        string expectedAction,
+        IReadOnlyList<string> expectedContexts)
+    {
+        var action = entry.Value.OfType<StructPropertyData>()
+            .FirstOrDefault(property => property.Name.ToString().Equals(
+                "ActionTag",
+                StringComparison.OrdinalIgnoreCase))?
+            .Value.OfType<NamePropertyData>()
+            .FirstOrDefault(property => property.Name.ToString().Equals(
+                "TagName",
+                StringComparison.OrdinalIgnoreCase))?
+            .Value.ToString() ?? "";
+        if (!action.Equals(expectedAction, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var contexts = entry.Value.OfType<StructPropertyData>()
+            .FirstOrDefault(property => property.Name.ToString().Equals(
+                "ContextTags",
+                StringComparison.OrdinalIgnoreCase))?
+            .Value.OfType<GameplayTagContainerPropertyData>()
+            .FirstOrDefault()?
+            .Value.Select(tag => tag.ToString())
+            .ToList() ?? [];
+        return NormalizeTags(contexts).SequenceEqual(expectedContexts, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static List<string> NormalizeTags(IEnumerable<string>? values) =>
+        (values ?? [])
+        .Where(value => !string.IsNullOrWhiteSpace(value))
+        .Select(value => value.Trim())
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
+    private static string ObjectPackage(UAsset asset, FPackageIndex index)
+    {
+        var seen = new HashSet<int>();
+        while (!index.IsNull() && index.IsImport() && seen.Add(index.Index))
+        {
+            var import = index.ToImport(asset);
+            if (import.ClassName.ToString().Equals("Package", StringComparison.OrdinalIgnoreCase))
+            {
+                return UnrealPathUtil.NormalizePackagePath(import.ObjectName.ToString());
+            }
+            index = import.OuterIndex;
+        }
+        return "";
+    }
+
+    private static string NormalizeAnimationAssetClass(string? value)
+    {
+        var normalized = value?.Trim() ?? "";
+        var slash = normalized.LastIndexOf('/');
+        var dot = normalized.LastIndexOf('.');
+        var split = Math.Max(slash, dot);
+        return split >= 0 && split + 1 < normalized.Length ? normalized[(split + 1)..] : normalized;
+    }
+
+    private static string DescribeAnimationTarget(AnimationSlotOverride target)
+    {
+        var contexts = NormalizeTags(target.ContextTags);
+        return contexts.Count == 0
+            ? $"'{target.ActionTag}'"
+            : $"'{target.ActionTag}' [{string.Join(", ", contexts)}]";
+    }
+
+    /// <summary>
     /// Grants extra gameplay abilities in a TtAbilitySet by appending entries to
     /// GrantedGameplayAbilities. Each entry is an FTtAbilitySet_GameplayAbility
     /// struct {Ability(class), AbilityLevel, InputTag}; we clone an existing

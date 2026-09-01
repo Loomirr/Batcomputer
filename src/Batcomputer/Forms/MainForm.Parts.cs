@@ -3839,8 +3839,9 @@ public sealed partial class MainForm
             var index = await Task.Run(() => service.BuildPartIndex());
             _partIndex = index;
             // The hamburger command is also the explicit same-root catalog refresh. Make the next
-            // Materials/Faces/attachment query rescan extracted MIs before rebuilding the view.
+            // material, part, and animation query rescan the active extracted mounts.
             ExtractedMaterialCatalogService.Invalidate();
+            ExtractedAnimationCatalogService.Invalidate();
             _characterResearchService = null;
             _characterResearchRoot = "";
             AppendLog($"Part index status: {index.Status}");

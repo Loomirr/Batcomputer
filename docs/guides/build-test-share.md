@@ -46,6 +46,7 @@ Test at least:
 | Hover | Stable preview with the expected materials and parts. |
 | Selection | Native swap animation and correct playable pawn. |
 | Gameplay | Movement, equipment, glider, abilities, and animation behavior. |
+| Animation override | Trigger the replaced action, its transitions, and reset-to-donor path on a duplicate test suit. |
 | Persistence | Back out to frontend, reload gameplay, then fully restart the game. |
 | Compatibility | Test beside at least one other custom suit mod using Loomirr's LOTDK UE4SS. |
 

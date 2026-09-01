@@ -46,6 +46,29 @@ Yes. The main window, tools, and dialogs are resizable and capped to one usable 
 is still clipped, lower Windows display scaling temporarily and include the resolution and scaling
 percentage in a bug report.
 
+## Animations
+
+### Does replacing an animation change it for every character?
+
+No. Batcomputer records an exact action/context override in the current suit and patches that
+suit's generated animation composition during packaging. The base-game donor, other characters,
+and other suits remain unchanged. Assign the same replacement separately if another suit should
+use it too.
+
+### Are imported animations available to my other suits?
+
+Yes. The imported animation library is shared across the current Batcomputer workspace. Choose
+**Animations** → **Imported animation library**, or use the **Imported** filter in the replacement
+picker, to see everything you have imported.
+
+### Why is an imported animation visible but disabled?
+
+The Imported filter intentionally shows the complete library. A disabled row cannot satisfy the
+selected target's required asset class, is quarantined/incomplete, or is not held in the managed
+cache. Select it to read the reason, then choose a usable sequence or montage. A complete animation
+on an unverified rig is not silently blocked, but Batcomputer shows a critical experimental warning
+before it can be assigned.
+
 ## Dumps, indexes, and older projects
 
 ### Do I need to rebase every suit after updating Batcomputer?
@@ -187,6 +210,12 @@ not alter the suit.
 The suit-selector tile under `UI/Icons/Suits` is 256px. The UIMD menu, left, and right character
 portraits under `UI/Icons/Characters` are 512px. Import the tile as **Suit selector icon** and the
 other three as **Character icon**; the icon window labels each field with the expected size.
+
+### Why did transparent pixels in my imported texture turn black?
+
+Recook the texture with the current build. RGBA profiles now preserve straight-alpha RGB through
+resize and mip generation, including colour under fully transparent pixels. DXT1 has no alpha and
+BC5 stores only two normal channels, so choose BGRA8, DXT5, or BC7 when the material needs alpha.
 
 ### Can I import a model?
 

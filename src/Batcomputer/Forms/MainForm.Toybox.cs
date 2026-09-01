@@ -1793,14 +1793,14 @@ public sealed partial class MainForm
                     _toyboxTypeCombo.Items.AddRange(new object[] { "Glider presets", "Wingsuit decals" });
                     break;
                 case "Animations":
-                    _toyboxTypeCombo.Items.Add("Overview & setup");
-                    _toyboxTypeCombo.Items.Add("Replace idle/walk/run");
-                    _toyboxTypeCombo.Items.Add("Swap category by family");
-                    _toyboxTypeCombo.Items.Add("Browse: Montage composites");
-                    _toyboxTypeCombo.Items.Add("Browse: Layer blocks");
+                    _toyboxTypeCombo.Items.Add("Character animations");
+                    _toyboxTypeCombo.Items.Add("Imported animation library");
+                    _toyboxTypeCombo.Items.Add("Advanced: whole-set swaps");
+                    _toyboxTypeCombo.Items.Add("Reference: montage sets");
+                    _toyboxTypeCombo.Items.Add("Reference: layer sets");
                     foreach (var c in GameDataService.Instance.AnimCategories("Layer"))
                     {
-                        _toyboxTypeCombo.Items.Add($"Browse: Layer · {c}");
+                        _toyboxTypeCombo.Items.Add($"Reference: layer · {c}");
                     }
                     break;
                 case "Review":
@@ -3133,8 +3133,66 @@ public sealed partial class MainForm
             FlatStyle = FlatStyle.Flat,
             BackColor = Theme.PanelBg,
             Cursor = Cursors.Hand,
-            TabStop = false
+            TabStop = false,
+            // These tiles draw their own text, so expose the same copy to accessibility tools
+            // and to the release UI audit instead of leaving them as unnamed blank buttons.
+            AccessibleName = title,
+            AccessibleDescription = subtitle
         };
+
+        static TextFormatFlags TileTextFlags() =>
+            TextFormatFlags.WordBreak |
+            TextFormatFlags.HorizontalCenter |
+            TextFormatFlags.NoPrefix |
+            TextFormatFlags.NoPadding;
+
+        static int ScaleTileMetric(Control control, int logical) =>
+            Math.Max(1, logical * Math.Max(96, control.DeviceDpi) / 96);
+
+        static int MeasureTileTextHeight(string text, Font font, int width)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return 0;
+            }
+
+            return TextRenderer.MeasureText(
+                text,
+                font,
+                new Size(Math.Max(1, width), int.MaxValue),
+                TileTextFlags()).Height;
+        }
+
+        // The old painter reserved a fixed 32 px for every title. That clipped two-line labels
+        // (and became worse at high DPI). Grow the tile when its current width needs more lines,
+        // then let the painter use the measured title/subtitle heights.
+        var fittingTileText = false;
+        void FitTileText()
+        {
+            if (fittingTileText || b.IsDisposed || b.Width <= 1)
+            {
+                return;
+            }
+
+            var horizontalPadding = ScaleTileMetric(b, 8);
+            var verticalPadding = ScaleTileMetric(b, 8);
+            var gap = string.IsNullOrWhiteSpace(subtitle) ? 0 : ScaleTileMetric(b, 4);
+            var textWidth = Math.Max(1, b.ClientSize.Width - horizontalPadding * 2);
+            var titleHeight = MeasureTileTextHeight(title, Theme.BodyStrong, textWidth);
+            var subtitleHeight = MeasureTileTextHeight(subtitle, Theme.Caption, textWidth);
+            var requiredHeight = verticalPadding * 2 + titleHeight + gap + subtitleHeight;
+            if (b.Height >= requiredHeight)
+            {
+                return;
+            }
+
+            fittingTileText = true;
+            b.Height = requiredHeight;
+            fittingTileText = false;
+        }
+
+        b.Resize += (_, _) => FitTileText();
+        b.HandleCreated += (_, _) => FitTileText();
         b.FlatAppearance.BorderSize = 0;
         b.FlatAppearance.MouseOverBackColor = Theme.PanelBg;
         // 0 = rest, 1 = hovered; eased so the fill/border warm up instead of flicking.
@@ -3166,12 +3224,32 @@ public sealed partial class MainForm
                 if (dashed) pen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
                 g.DrawPath(pen, path);
             }
-            TextRenderer.DrawText(g, title, Theme.BodyStrong, new Rectangle(6, 10, b.Width - 12, 32), accent,
-                TextFormatFlags.WordBreak | TextFormatFlags.HorizontalCenter | TextFormatFlags.EndEllipsis);
+
+            var horizontalPadding = ScaleTileMetric(b, 8);
+            var verticalPadding = ScaleTileMetric(b, 8);
+            var gap = string.IsNullOrWhiteSpace(subtitle) ? 0 : ScaleTileMetric(b, 4);
+            var textWidth = Math.Max(1, b.ClientSize.Width - horizontalPadding * 2);
+            var titleHeight = MeasureTileTextHeight(title, Theme.BodyStrong, textWidth);
+            var subtitleHeight = MeasureTileTextHeight(subtitle, Theme.Caption, textWidth);
+            var contentHeight = titleHeight + gap + subtitleHeight;
+            var top = Math.Max(verticalPadding, (b.ClientSize.Height - contentHeight) / 2);
+
+            TextRenderer.DrawText(
+                g,
+                title,
+                Theme.BodyStrong,
+                new Rectangle(horizontalPadding, top, textWidth, titleHeight),
+                accent,
+                TileTextFlags());
             if (!string.IsNullOrEmpty(subtitle))
             {
-                TextRenderer.DrawText(g, subtitle, Theme.Caption, new Rectangle(6, 46, b.Width - 12, b.Height - 52),
-                    Theme.OnDarkMuted, TextFormatFlags.WordBreak | TextFormatFlags.HorizontalCenter | TextFormatFlags.EndEllipsis);
+                TextRenderer.DrawText(
+                    g,
+                    subtitle,
+                    Theme.Caption,
+                    new Rectangle(horizontalPadding, top + titleHeight + gap, textWidth, subtitleHeight),
+                    Theme.OnDarkMuted,
+                    TileTextFlags());
             }
         };
         b.Click += (_, _) => onClick();
@@ -3271,7 +3349,7 @@ public sealed partial class MainForm
         "Parts" => "Part slot",
         "Materials" => "Material set",
         "Faces" => "Face set",
-        "Animations" => "Animation view",
+        "Animations" => "Animation tool",
         "Equipment" => "Gadget set",
         "Gliders" => "Glider view",
         "Review" => "Change area",
@@ -3340,7 +3418,7 @@ public sealed partial class MainForm
                 _toyboxFilters.SetGroups();
                 break;
             case "Animations":
-                // Only bites on the "Browse:" types; the overview and swap views ignore it.
+                // Only applies to the reference-set views; the editor/library/advanced views ignore it.
                 _toyboxFilters.SetGroups(
                     new FilterGroup("Category", "Any category", AnimCategories()));
                 break;
@@ -4054,6 +4132,7 @@ public sealed partial class MainForm
     {
         var selectedType = _toyboxTypeCombo.SelectedItem?.ToString();
         ExtractedMaterialCatalogService.Invalidate();
+        ExtractedAnimationCatalogService.Invalidate();
         _characterResearchService = null;
         _characterResearchRoot = "";
         var category = _toyboxCategoryCombo.SelectedItem?.ToString();

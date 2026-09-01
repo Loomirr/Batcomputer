@@ -59,7 +59,113 @@ internal static class UiAuditCaptureService
                 Description = "Checks long descriptions, controls, and dialog layout before release.",
                 PawnTag = "Pawns.Playable.Batman.UiAudit",
                 ProgressTag = "GameProgress.Story.TheBatman2025",
+                UseCustomArchetype = true,
+                LocomotionOverrides =
+                [
+                    new AnimSequenceOverride
+                    {
+                        DonorSequence = "A_Idle_Batman",
+                        DonorSequencePackage = "/Game/Animation/LEGOfig/Batman/Movement/A_Idle_Batman",
+                        ReplacementSequence = "A_Idle_UiAudit",
+                        ReplacementPackage = "/Game/Mods/UiAudit/Animations/A_Idle_UiAudit",
+                    },
+                ],
             };
+            var sampleAnimation = new AnimLibraryEntry
+            {
+                Id = "ui-audit-animation",
+                Name = "UI Audit custom idle",
+                SourceMode = "preserve-path",
+                PackagePath = "/Game/Mods/UiAudit/Animations/A_Idle_UiAudit",
+                AssetClass = "/Script/Engine.AnimSequence",
+                Skeleton = "/Game/Mods/UiAudit/Animations/Rig/SKEL_UiAudit",
+                HealthStatus = "healthy",
+                IsAvailable = true,
+                Inspected = true,
+                CachedFiles = ["Cache/ui-audit-animation/A_Idle_UiAudit.uasset"],
+                Dependencies = ["/Game/Animation/Shared/Curves/Curve_LEGOfig"],
+                SupportPackages =
+                [
+                    new AnimLibraryCachedPackage
+                    {
+                        PackagePath = "/Game/Mods/UiAudit/Animations/Rig/SKEL_UiAudit",
+                        AssetClass = "Skeleton",
+                        Inspected = true,
+                        Dependencies = ["/Game/Mods/UiAudit/Animations/Rig/PHYS_UiAudit"],
+                    },
+                    new AnimLibraryCachedPackage
+                    {
+                        PackagePath = "/Game/Mods/UiAudit/Animations/Rig/PHYS_UiAudit",
+                        AssetClass = "PhysicsAsset",
+                        Inspected = true,
+                    },
+                ],
+            };
+            var sampleAnimationLibrary = new AnimLibrary { Entries = [sampleAnimation] };
+            var sampleAnimationTarget = new CharacterAnimationTargetSnapshot(
+                "ui-audit-locomotion-target",
+                CharacterAnimationReferenceKind.LocomotionSequence,
+                "/Game/Animation/LEGOfig/Batman/Movement/ABP_Core_Batman",
+                "AnimBlueprintGeneratedClass",
+                "/Game/Animation/LEGOfig/Batman/Movement/A_Idle_Batman",
+                "/Game/Mods/UiAudit/Animations/A_Idle_UiAudit",
+                "A_Idle_Batman",
+                "A_Idle_UiAudit",
+                "AnimSequence",
+                "AnimSequence",
+                -1,
+                -1,
+                -1,
+                0,
+                true,
+                "sequence");
+            var sampleMontageTarget = new CharacterAnimationTargetSnapshot(
+                "ui-audit-jump-target",
+                CharacterAnimationReferenceKind.AnimFile,
+                "/Game/Animation/MontageAnimSets/Traversal/MAS_Movement_Batman",
+                "TTAnimSet",
+                "/Game/Animation/LEGOfig/Batman/Movement/AM_Jump_Batman",
+                "/Game/Animation/LEGOfig/Batman/Movement/AM_Jump_Batman",
+                "AM_Jump_Batman",
+                "AM_Jump_Batman",
+                "AnimMontage",
+                "AnimMontage",
+                0,
+                0,
+                -1,
+                1,
+                false,
+                "");
+            var sampleAnimationGraph = new CharacterAnimationSnapshot(
+                sampleProject.SlotId,
+                sampleProject.DisplayName,
+                "Batman",
+                "/Game/Animation/MontageAnimSets/Character/MAS_Char_Batman",
+                "/Game/Animation/LayerAnimSets/Character/LAS_Char_Batman",
+                [
+                    new CharacterAnimationSetSnapshot(
+                        "ui-audit-movement-set",
+                        0,
+                        CharacterAnimationSetKind.Montage,
+                        "Movement",
+                        "/Game/Animation/MontageAnimSets/Traversal/MAS_Movement_Batman",
+                        "/Game/Animation/MontageAnimSets/Traversal/MAS_Movement_Batman",
+                        false,
+                        "",
+                        [
+                            new CharacterAnimationSlotSnapshot(
+                                "ui-audit-jump-slot",
+                                "/Game/Animation/MontageAnimSets/Traversal/MAS_Movement_Batman",
+                                CharacterAnimationSetKind.Montage,
+                                0,
+                                "Animation.Action.Jump",
+                                ["Animation.Status.Moving"],
+                                1,
+                                [sampleMontageTarget]),
+                        ]),
+                ],
+                [sampleAnimationTarget],
+                []);
             var sampleMesh = new CustomStaticMeshImport
             {
                 Id = "ui_audit_mesh",
@@ -145,6 +251,15 @@ internal static class UiAuditCaptureService
                 }), 150),
                 ("Asset refresh", () => new AssetRefreshProgressForm(), 150),
                 ("Asset refresh - first run", () => new AssetRefreshProgressForm(firstRun: true), 150),
+                ("Animation import progress", () => new AnimationImportProgressForm("UiAuditAnimations_P"), 150),
+                ("Animation explorer", () => new AnimationExplorerForm(
+                    sampleProject,
+                    sampleAnimationLibrary,
+                    sampleAnimation.PackagePath,
+                    sampleAnimationGraph), 200),
+                ("Animation replacement picker", () => new AnimationReplacementPickerForm(
+                    sampleAnimationTarget,
+                    sampleAnimationLibrary), 200),
                 ("Base character picker", () => new BaseCharacterPicker(), 800),
                 ("Gameplay donor picker", () => new BaseCharacterPicker(playablesOnly: true), 400),
                 ("Manual base wizard", () => new BaseWizard("UI Audit Suit", "UiAudit", "C:\\Audit\\Playable.uasset", "C:\\Audit\\Cutscene.uasset", "C:\\Audit\\DCMD.uasset"), 150),
@@ -471,6 +586,10 @@ internal static class UiAuditCaptureService
                     findings.Add(new AuditFinding(windowName, "WARN", $"Button text may be clipped: '{button.Text}' needs about {measured}px, has {button.ClientSize.Width}px."));
                 }
             }
+            else if (!string.IsNullOrWhiteSpace(button.AccessibleName))
+            {
+                ValidatePaintedTileText(button, windowName, findings);
+            }
         }
 
         foreach (var label in Descendants(form).OfType<Label>().Where(IsActuallyVisible))
@@ -480,6 +599,47 @@ internal static class UiAuditCaptureService
 
         ValidateDialogButton(form, form.AcceptButton, "default", windowName, formClient, findings);
         ValidateDialogButton(form, form.CancelButton, "cancel", windowName, formClient, findings);
+    }
+
+    private static void ValidatePaintedTileText(
+        Button button,
+        string windowName,
+        ICollection<AuditFinding> findings)
+    {
+        var title = button.AccessibleName ?? "";
+        var subtitle = button.AccessibleDescription ?? "";
+        var dpi = Math.Max(96, button.DeviceDpi);
+        int Scale(int logical) => Math.Max(1, logical * dpi / 96);
+        var horizontalPadding = Scale(8);
+        var verticalPadding = Scale(8);
+        var gap = string.IsNullOrWhiteSpace(subtitle) ? 0 : Scale(4);
+        var textWidth = Math.Max(1, button.ClientSize.Width - horizontalPadding * 2);
+        const TextFormatFlags flags =
+            TextFormatFlags.WordBreak |
+            TextFormatFlags.HorizontalCenter |
+            TextFormatFlags.NoPrefix |
+            TextFormatFlags.NoPadding;
+
+        var titleHeight = TextRenderer.MeasureText(
+            title,
+            Theme.BodyStrong,
+            new Size(textWidth, int.MaxValue),
+            flags).Height;
+        var subtitleHeight = string.IsNullOrWhiteSpace(subtitle)
+            ? 0
+            : TextRenderer.MeasureText(
+                subtitle,
+                Theme.Caption,
+                new Size(textWidth, int.MaxValue),
+                flags).Height;
+        var requiredHeight = verticalPadding * 2 + titleHeight + gap + subtitleHeight;
+        if (requiredHeight > button.ClientSize.Height + 2)
+        {
+            findings.Add(new AuditFinding(
+                windowName,
+                "ERROR",
+                $"Tile '{CompactAuditText(title)}' needs {requiredHeight}px for its title and subtitle but has {button.ClientSize.Height}px."));
+        }
     }
 
     private static void ValidateWrappedLabel(

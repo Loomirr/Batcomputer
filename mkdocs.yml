@@ -55,6 +55,7 @@ nav:
       - Create your first suit: guides/first-suit.md
       - Update or repair a suit: guides/update-repair-suit.md
       - Materials, textures, and faces: guides/materials-textures-faces.md
+      - Character animations: guides/animations.md
       - Custom static meshes: guides/custom-meshes.md
       - Build, test, and share: guides/build-test-share.md
   - Reference:

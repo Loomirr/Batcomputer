@@ -14,7 +14,7 @@ or Loomirr's LOTDK UE4SS.
 
 - Starts a suit with a gameplay donor and a playable, cutscene, or supported extracted `_Quest`
   visual base.
-- Adds hair, hats, capes, torsos, accessories, equipment, and compatible animation data.
+- Adds hair, hats, capes, torsos, accessories, equipment, and exact per-suit animation overrides.
 - Selects the exact shipped Minifig or Smallfig root-body geometry without replacing the gameplay
   donor's runtime setup.
 - Adapts verified native cape/glider pairs across compatible gameplay donors without replacing the
@@ -23,6 +23,8 @@ or Loomirr's LOTDK UE4SS.
 - Imports static OBJ attachments with a separate stable slot for each named `usemtl` section.
 - Keeps tool-created materials available to other suits in the same workspace and previews indexed
   native parts with their resolved default materials before applying them.
+- Imports cooked animation packs into a workspace-wide library and lets one exact action, montage,
+  layer, or locomotion row use a compatible base-game, DLC, or imported animation.
 - Creates the PawnTag, DCMD, UIMD, StringTable, and Asset Registry data the game needs.
 - Builds one or more suits into a single mod release.
 - Installs the pak trio, PawnTags configuration, mod manifest, and registry plugin to the correct
@@ -72,10 +74,10 @@ Setup asks for the game Paks folder, mappings, and other local paths. When UE 5.
 setup verifies the bundled Asset Registry writer once. Later mod builds reuse that local writer
 until its source or the configured UE build changes.
 
-Setup can then run the full character extraction. It reads only the game's original top-level Paks
-containers and ignores nested `~mods` folders. The standard all-character extraction includes
-character, animation, localisation, and character-supporting gadget assets and needs about 18 GB
-of free space.
+Setup can then run the full character extraction. It reads the game's original Paks plus installed
+`Content\DLC` and `/Game/AdditionalContent` sources, while ignoring user mods under nested `~mods`
+folders. The standard all-character extraction includes character, animation, localisation, and
+character-supporting gadget assets and needs about 18 GB of free space.
 
 For the complete walkthrough, see the
 [first-time setup guide](https://loomirr.github.io/Batcomputer/getting-started/setup/).
@@ -108,6 +110,7 @@ The documentation includes a full
 [first-suit tutorial](https://loomirr.github.io/Batcomputer/guides/first-suit/),
 [update and repair guide](https://loomirr.github.io/Batcomputer/guides/update-repair-suit/),
 [materials and faces guide](https://loomirr.github.io/Batcomputer/guides/materials-textures-faces/),
+[character animation guide](https://loomirr.github.io/Batcomputer/guides/animations/),
 and [troubleshooting checklist](https://loomirr.github.io/Batcomputer/help/troubleshooting/).
 
 ## Visual base and gameplay donor

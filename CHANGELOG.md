@@ -4,7 +4,7 @@
 
 - No changes yet.
 
-## 0.9.0-beta.10 — 2026-08-31
+## 0.9.0-beta.10 — 2026-09-01
 
 - Adds every used facial region to the 3D viewer's Material editor. Each entry names the face
   feature and its Base, Normal, MMR, Emissive, Eye-spec, Teeth, and Tongue textures, with safe
@@ -22,6 +22,25 @@
   references owned only by omitted content.
 - Paired cape/glider validation now accepts declared user material overrides independently for
   playable and cutscene roles while retaining strict structural and untouched-slot checks.
+- Replaces the old animation setup with a Character Animation Explorer for exact actions, context
+  variants, montages, Animation Blueprint layers, and locomotion sequences inherited from the
+  selected gameplay donor.
+- Lets one exact character-animation row borrow a compatible base-game, installed-DLC, or imported
+  animation. The override belongs only to that suit's generated animation composition; donor
+  packages and other suits are never overwritten.
+- Imports cooked `AnimSequence` and `AnimMontage` assets by choosing any `.utoc`, `.ucas`, or `.pak`
+  from their container, keeps the complete library available across the workspace, and packages
+  required support assets only when a suit uses them.
+- The Imported animation filter now shows the complete tool-wide library. Wrong-class,
+  quarantined, incomplete, or unmanaged entries stay visible with a reason and cannot be selected;
+  a complete animation on an unverified rig requires an explicit experimental warning.
+- Keeps **Replace** and **Reset to donor** attached to the same unique action/context after a refreshed
+  dump moves its raw row. Conflicting saved matches and competing `LAS_Default` locomotion owners
+  now stop before packaging instead of leaving a stale override or duplicate controller.
+- Keeps RGB colour underneath transparent and partly transparent pixels through resize, mip
+  generation, and RGBA compression. Existing textures can use **Reimport all** to receive the fix.
+- Measures Toybox tile labels at the current width and DPI so longer animation actions and
+  descriptions are no longer clipped.
 - Bumps the portable build and documentation to beta 10.
 
 ## 0.9.0-beta.9 — 2026-08-27 (corrected 2026-08-28)

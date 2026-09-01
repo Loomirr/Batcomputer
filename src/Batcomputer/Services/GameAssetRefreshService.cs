@@ -529,7 +529,13 @@ public sealed class GameAssetRefreshService
                 CombinedMountOwnershipMarkerContents);
             wroteOwnershipMarker = true;
 
-            var sources = new[] { paksRoot, dlcRoot };
+            // A DLC folder is optional. The same link farm is also reused by custom-animation
+            // imports because retoc needs the base package store (not only global.utoc) to retain
+            // Engine/ACL import identities while converting a user container.
+            var sources = new[] { paksRoot, dlcRoot }
+                .Where(Directory.Exists)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
             foreach (var sourceRoot in sources)
             {
                 foreach (var source in Directory.EnumerateFiles(sourceRoot, "*", SearchOption.TopDirectoryOnly)

@@ -1271,9 +1271,9 @@ internal static class Program
                     // reflected struct array. Dump it recursively so new
                     // authoring code can mirror a real donor exactly instead
                     // of guessing at enum/tag serialisation.
-                    if (prop.Name.ToString() == "Overrides")
+                    if (prop.Name.ToString() is "Overrides" or "AnimSetEntryArray")
                     {
-                        Console.WriteLine("    --- Overrides expanded ---");
+                        Console.WriteLine($"    --- {prop.Name} expanded ---");
                         foreach (var el in arr.Value)
                         {
                             DumpProperty(el, "    ", 0);
@@ -1318,7 +1318,14 @@ internal static class Program
                 var parts = new List<string>();
                 foreach (var value in values)
                 {
-                    parts.Add(value?.ToString() ?? "<null>");
+                    try
+                    {
+                        parts.Add(value?.ToString() ?? "<null>");
+                    }
+                    catch
+                    {
+                        parts.Add(value?.GetType().Name ?? "<null>");
+                    }
                     if (parts.Count == 24)
                     {
                         parts.Add("...");

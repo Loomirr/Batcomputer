@@ -6,8 +6,8 @@ namespace Batcomputer;
 /// Loads the shipped compatibility DB (gamedata/*.json next to the .exe) at
 /// runtime and answers family/equipment/animation compatibility questions.
 /// Structured compatibility facts remain available without an extraction; the
-/// broad material asset view additionally overlays the user's active extracted
-/// Content tree so a newer or more complete dump is never hidden by this file.
+/// broad material and animation views additionally overlay the user's active extracted
+/// Content tree so a newer or more complete base-game/DLC dump is never hidden by this file.
 /// </summary>
 public sealed class GameDataService
 {
@@ -67,16 +67,24 @@ public sealed class GameDataService
     /// (case-insensitive). Powers pickers/browsers: pass
     /// "MaterialInstanceConstant", "Texture2D", "DinnerCharacterMetaData",
     /// "TtPawnUIMetaData", "StaticMesh", etc.
-    /// Material instances merge the shipped fallback with every MI discovered in the active
-    /// extracted Content tree; other classes currently use the shipped structured catalog.
+    /// Material instances and animation assets merge the shipped fallback with compatible assets
+    /// discovered in the active extracted Content tree; other classes use the shipped catalog.
     /// </summary>
     public IEnumerable<GameDataAsset> AssetsOfClass(string className)
     {
         var shipped = Db.Assets
             .Where(asset => asset.Class.Equals(className, StringComparison.OrdinalIgnoreCase));
-        return className.Equals("MaterialInstanceConstant", StringComparison.OrdinalIgnoreCase)
-            ? ExtractedMaterialCatalogService.MergeWithActiveExtraction(shipped)
-            : shipped;
+        if (className.Equals("MaterialInstanceConstant", StringComparison.OrdinalIgnoreCase))
+        {
+            return ExtractedMaterialCatalogService.MergeWithActiveExtraction(shipped);
+        }
+        if (className.Equals("AnimSequence", StringComparison.OrdinalIgnoreCase) ||
+            className.Equals("AnimMontage", StringComparison.OrdinalIgnoreCase) ||
+            className.Equals("AnimBlueprintGeneratedClass", StringComparison.OrdinalIgnoreCase))
+        {
+            return ExtractedAnimationCatalogService.MergeWithActiveExtraction(shipped, className);
+        }
+        return shipped;
     }
 
     /// <summary>Catalog assets whose /Game path contains <paramref name="term"/>.</summary>

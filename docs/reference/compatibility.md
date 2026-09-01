@@ -14,7 +14,10 @@
 - Game-material templates and face tools.
 - Character, face-detail, CT, RAO, mask, normal/packed, 512px character-icon, and 256px
   suit-selector-icon texture cooking.
-- Supported equipment, glider, and animation-data grafting.
+- Supported equipment and glider grafting, plus exact per-suit sequence, montage, Animation
+  Blueprint layer, and locomotion overrides from compatible base-game or imported animations.
+- Workspace-wide cooked animation imports from a selected `.utoc`, `.ucas`, or `.pak`, with
+  package-collision checks and referenced support-package staging.
 - A separate regular cape plus a replacement glide cape when both come from the same indexed native
   character variant and the preset is marked as a supported **Glide cape**. On a glide-only gameplay
   donor, apply the preset first and its matching regular cape second. Batcomputer keeps normal
