@@ -296,12 +296,29 @@ public sealed partial class MainForm
 
             var g = e.Graphics;
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            const int targetH = 34;
-            var scale = targetH / (float)wordmark.Height;
-            var dw = (int)(wordmark.Width * scale);
-            var dest = new Rectangle(18, (brand.Height - targetH) / 2, dw, targetH);
-                // Soft shadow: collapse RGB to black and keep a fraction of the alpha. Scaling
-                // alpha alone would just ghost the yellow/red logo and fringe the edges.
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+            // Theme wordmarks do not all share the old image's aspect ratio. Fit against both
+            // dimensions so refreshed artwork remains fully visible instead of being clipped by
+            // the fixed-width brand panel.
+            const int leftInset = 18;
+            const int rightInset = 8;
+            const int verticalInset = 10;
+            var availableWidth = Math.Max(1, brand.ClientSize.Width - leftInset - rightInset);
+            var availableHeight = Math.Max(1, brand.ClientSize.Height - (verticalInset * 2));
+            var scale = Math.Min(
+                availableWidth / (float)Math.Max(1, wordmark.Width),
+                availableHeight / (float)Math.Max(1, wordmark.Height));
+            var drawWidth = Math.Max(1, (int)MathF.Floor(wordmark.Width * scale));
+            var drawHeight = Math.Max(1, (int)MathF.Floor(wordmark.Height * scale));
+            var dest = new Rectangle(
+                leftInset,
+                Math.Max(verticalInset, (brand.ClientSize.Height - drawHeight) / 2),
+                drawWidth,
+                drawHeight);
+
+            // Soft shadow: collapse RGB to black and keep a fraction of the alpha. Scaling
+            // alpha alone would just ghost the yellow/red logo and fringe the edges.
             using (var shadow = new ImageAttributes())
             {
                 var black = new ColorMatrix(new[]

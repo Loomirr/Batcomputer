@@ -303,7 +303,7 @@ public sealed partial class MainForm : AdaptiveForm
             return;
         }
 
-        Icon = EmbeddedAssets.LoadIcon("Icon.ico") ?? Icon;
+        RefreshThemeWindowIcon();
         BuildLayout();
         WireEvents();
         SetDefaults();
@@ -521,11 +521,10 @@ public sealed partial class MainForm : AdaptiveForm
 
     private string _headerWordmarkAsset = "";
 
+    private Icon? _themeWindowIcon;
+
     private static string CurrentHeaderWordmarkAsset() =>
-        string.Equals(AppSettings.Current.VisualTheme, "Alternate", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(AppSettings.Current.VisualTheme, "Batcompuper", StringComparison.OrdinalIgnoreCase)
-            ? "header2.png"
-            : "Header.png";
+        Theme.CurrentVisualTheme.HeaderAsset;
 
     private void RefreshHeaderWordmark()
     {
@@ -540,6 +539,26 @@ public sealed partial class MainForm : AdaptiveForm
         _headerWordmark = EmbeddedAssets.Load(asset);
         _headerWordmarkAsset = asset;
         _headerBrand?.Invalidate();
+    }
+
+    private void RefreshThemeWindowIcon()
+    {
+        var next = EmbeddedAssets.LoadIcon(Theme.CurrentVisualTheme.IconAsset);
+        if (next is null)
+        {
+            return;
+        }
+
+        var previous = _themeWindowIcon;
+        _themeWindowIcon = next;
+        Icon = next;
+        previous?.Dispose();
+    }
+
+    private void RefreshThemeBranding()
+    {
+        RefreshHeaderWordmark();
+        RefreshThemeWindowIcon();
     }
 
     /// <summary>Keeps the suit-name field and its pencil lit together on hover/focus.</summary>
@@ -2183,15 +2202,17 @@ public sealed partial class MainForm : AdaptiveForm
 
     private void OpenSettings()
     {
+        var previousTheme = Theme.CurrentVisualTheme;
         using var dlg = new SettingsForm(AppSettings.Current, firstRun: false);
         if (dlg.ShowDialog(this) == DialogResult.OK)
         {
             AppSettings.Current = AppSettings.Load();
+            Theme.RefreshAccentTheme(this, previousTheme);
             ExtractedMaterialCatalogService.Invalidate();
             ExtractedAnimationCatalogService.Invalidate();
             _partIndex = null;
             _projectRootText.Text = AppSettings.Current.EffectiveProjectRoot();
-            RefreshHeaderWordmark();
+            RefreshThemeBranding();
             ApplyResearchToolsVisibility();
             PopulateToyboxSlots(); // picks up a changed "Your Character" panel style immediately
             RescanToyboxCatalogs();

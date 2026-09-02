@@ -5084,6 +5084,7 @@ internal static class ReleaseRegressionChecks
             failures,
             output);
 
+        ThemeRegressionChecks.Run(failures, output);
         TextureCookRegressionChecks.Run(failures, output);
         AnimationImportRegressionChecks.Run(failures, output);
         CharacterAnimationGraphRegressionChecks.Run(failures, output);

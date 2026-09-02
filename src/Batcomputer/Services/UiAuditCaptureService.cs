@@ -51,6 +51,7 @@ internal static class UiAuditCaptureService
 
             var settings = AppSettings.BuiltInDefaults();
             CaptureSettingsTabs(outputRoot, settings, captures, findings, capturedFormTypes);
+            CaptureThemePreviews(outputRoot, captures, findings, capturedFormTypes);
 
             var sampleProject = new NativeSuitProject
             {
@@ -376,6 +377,60 @@ internal static class UiAuditCaptureService
         }
         form.Close();
         Settle(60);
+    }
+
+    private static void CaptureThemePreviews(
+        string outputRoot,
+        List<CaptureResult> captures,
+        List<AuditFinding> findings,
+        ISet<Type> capturedFormTypes)
+    {
+        var previousSettings = AppSettings.Current;
+        try
+        {
+            foreach (var visualTheme in Theme.VisualThemes)
+            {
+                var settings = AppSettings.BuiltInDefaults();
+                settings.VisualTheme = visualTheme.Name;
+                AppSettings.Current = settings;
+
+                using (var main = new MainForm())
+                {
+                    capturedFormTypes.Add(typeof(MainForm));
+                    ShowAndSettle(main, 220);
+                    main.SelectUiAuditSurface("Home - Mods");
+                    Settle(120);
+                    CaptureVisibleForm(
+                        main,
+                        $"Theme - {visualTheme.Name} - Home",
+                        outputRoot,
+                        captures,
+                        findings);
+                    ValidateResizeBehavior(main, $"Theme - {visualTheme.Name} - Home", findings);
+                    main.Close();
+                    Settle(50);
+                }
+
+                using var visual = new SettingsForm(settings, firstRun: false);
+                capturedFormTypes.Add(typeof(SettingsForm));
+                ShowAndSettle(visual, 120);
+                visual.SelectUiAuditTab(2);
+                Settle(80);
+                CaptureVisibleForm(
+                    visual,
+                    $"Theme - {visualTheme.Name} - Settings",
+                    outputRoot,
+                    captures,
+                    findings);
+                ValidateResizeBehavior(visual, $"Theme - {visualTheme.Name} - Settings", findings);
+                visual.Close();
+                Settle(40);
+            }
+        }
+        finally
+        {
+            AppSettings.Current = previousSettings;
+        }
     }
 
     private static void CaptureCase(

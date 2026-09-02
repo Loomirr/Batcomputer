@@ -129,7 +129,8 @@ public sealed partial class SettingsForm : AdaptiveForm
             _settings.AnimationsEnabled = _animationsToggle?.Checked ?? _settings.AnimationsEnabled;
             _settings.KeepPreviousExtracts = _keepExtractsToggle?.Checked ?? _settings.KeepPreviousExtracts;
             _settings.AutoCleanPreviewFiles = _autoCleanPreviewFilesToggle?.Checked ?? _settings.AutoCleanPreviewFiles;
-            _settings.VisualTheme = _themePicker?.SelectedItem?.ToString() ?? _settings.VisualTheme;
+            _settings.VisualTheme = Theme.ResolveVisualTheme(
+                _themePicker?.SelectedItem?.ToString() ?? _settings.VisualTheme).Name;
             // Apply immediately so the change takes effect without a restart.
             Animator.Enabled = _settings.AnimationsEnabled;
             _settings.Save();
@@ -449,27 +450,60 @@ public sealed partial class SettingsForm : AdaptiveForm
         panel.Controls.Add(new Label
         {
             Left = RowLabelX, Top = y + 6, Width = 320, Height = 20,
-            Text = "Header style", ForeColor = Theme.OnDark, Font = Theme.Body,
+            Text = "Theme", ForeColor = Theme.OnDark, Font = Theme.Body,
         });
         _themePicker = new ThemedDropDown
         {
             Left = RowLabelX + 340, Top = y, Width = 260,
             Placeholder = "Choose a theme",
         };
-        _themePicker.Items.Add("Classic");
-        _themePicker.Items.Add("Alternate");
-        _themePicker.SelectedItem = string.Equals(_settings.VisualTheme, "Batcompuper", StringComparison.OrdinalIgnoreCase) ||
-                                    string.Equals(_settings.VisualTheme, "Alternate", StringComparison.OrdinalIgnoreCase)
-            ? "Alternate"
-            : "Classic";
-        panel.Controls.Add(_themePicker);
-        panel.Controls.Add(new Label
+        foreach (var visualTheme in Theme.VisualThemes)
         {
-            Left = RowLabelX, Top = y + 42, Width = RowRightEdge - RowLabelX, Height = 34,
-            Text = "Alternate uses header2.png. All other colors and controls stay the same.",
-            ForeColor = Theme.OnDarkMuted, Font = Theme.Caption,
-        });
-        y += 94;
+            _themePicker.Items.Add(visualTheme.Name);
+        }
+        _themePicker.SelectedItem = Theme.ResolveVisualTheme(_settings.VisualTheme).Name;
+        panel.Controls.Add(_themePicker);
+        var primarySwatch = new RoundedPanel
+        {
+            Left = RowLabelX + 620,
+            Top = y + 6,
+            Width = 22,
+            Height = 22,
+            CornerRadius = 11,
+        };
+        var secondarySwatch = new RoundedPanel
+        {
+            Left = RowLabelX + 652,
+            Top = y + 6,
+            Width = 22,
+            Height = 22,
+            CornerRadius = 11,
+        };
+        panel.Controls.Add(primarySwatch);
+        panel.Controls.Add(secondarySwatch);
+        var themeHint = new Label
+        {
+            Left = RowLabelX, Top = y + 42, Width = RowRightEdge - RowLabelX, Height = 40,
+            Font = Theme.Caption,
+        };
+        void RefreshThemeHint()
+        {
+            var selected = Theme.ResolveVisualTheme(_themePicker.SelectedItem?.ToString());
+            themeHint.Text = selected.Description + " The dark layout and category colors stay the same.";
+            themeHint.ForeColor = selected.Accent;
+            primarySwatch.BackColor = selected.Accent;
+            primarySwatch.BorderColor = selected.AccentDim;
+            secondarySwatch.BackColor = selected.SecondaryAccent;
+            secondarySwatch.BorderColor = Theme.Blend(selected.SecondaryAccent, Theme.SlateDark, 0.65);
+            primarySwatch.Invalidate();
+            secondarySwatch.Invalidate();
+        }
+        _tips.SetToolTip(primarySwatch, "Primary accent");
+        _tips.SetToolTip(secondarySwatch, "Secondary accent");
+        _themePicker.SelectedIndexChanged += (_, _) => RefreshThemeHint();
+        RefreshThemeHint();
+        panel.Controls.Add(themeHint);
+        y += 100;
 
         panel.Controls.Add(SectionDivider("MOTION", y));
         y += 38;

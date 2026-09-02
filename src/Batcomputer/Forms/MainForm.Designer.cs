@@ -89,7 +89,7 @@ partial class MainForm
         _designerTitleLabel.AutoSize = true;
         _designerTitleLabel.Dock = DockStyle.Fill;
         _designerTitleLabel.Font = AppFonts.Condensed(16F, FontStyle.Bold);
-        _designerTitleLabel.ForeColor = Color.FromArgb(240, 194, 48);
+        _designerTitleLabel.ForeColor = Theme.Gold;
         _designerTitleLabel.Location = new Point(21, 18);
         _designerTitleLabel.Name = "_designerTitleLabel";
         _designerTitleLabel.Size = new Size(1226, 38);

@@ -9,9 +9,15 @@ obj/
 artifacts/
 .verification/
 
-# UI artwork. Compiled into the exe as an embedded resource, so it is required to
-# BUILD but is not kept in the repo. See the note in README.md.
-/Assets/
+# Most UI artwork is compiled locally into the exe and is not kept in the repo.
+# The small theme-branding set is versioned so every source build has the headers
+# and window icons referenced by the public theme selector.
+/Assets/*
+!/Assets/Header.png
+!/Assets/header2.png
+!/Assets/HeaderMayhem.png
+!/Assets/Icon.ico
+!/Assets/Mayhem.ico
 
 # Anything the tool generates at runtime, and the per-machine settings file
 # (it stores absolute paths — never publish it).

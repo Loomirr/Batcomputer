@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-- No changes yet.
+- **Settings** → **Visual** now changes the header, window icon, and accent palette. **Classic**
+  keeps the original gold look, **Alternate** uses blue highlights, and **Mayhem Mode** combines its
+  own artwork with purple and lime. The dark layout, category colors, and status colors stay
+  consistent.
+- The GitHub README and documentation site now use the refreshed Batcomputer header and favicon.
 
 ## 0.9.0-beta.10
 

@@ -46,6 +46,14 @@ Yes. The main window, tools, and dialogs are resizable and capped to one usable 
 is still clipped, lower Windows display scaling temporarily and include the resolution and scaling
 percentage in a bug report.
 
+### Can I change Batcomputer's theme?
+
+Yes. Open **Settings** → **Visual** and choose **Classic**, **Alternate**, or **Mayhem Mode**. Each
+theme selects its own header and accent palette. Classic uses gold, Alternate uses blue, and Mayhem
+Mode uses its matching window icon with purple and lime highlights. Save the setting to apply it to
+the current window and every tool you open afterward. The dark layout, category colors, and
+warning/error colors intentionally stay the same.
+
 ## Animations
 
 ### Does replacing an animation change it for every character?

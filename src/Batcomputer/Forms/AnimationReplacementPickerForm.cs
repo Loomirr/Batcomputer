@@ -32,7 +32,7 @@ public sealed class AnimationReplacementPickerForm : AdaptiveForm
         BackColor = Theme.WindowBg;
         ForeColor = Theme.OnDark;
         Font = Theme.Body;
-        Icon = EmbeddedAssets.LoadIcon("Icon.ico") ?? Icon;
+        Icon = EmbeddedAssets.LoadIcon(Theme.CurrentVisualTheme.IconAsset) ?? Icon;
 
         BuildLayout();
         WireEvents();

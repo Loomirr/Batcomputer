@@ -9,7 +9,7 @@ copyright: Batcomputer is an unofficial community tool and is not affiliated wit
 theme:
   name: material
   language: en
-  logo: assets/brand/Header3.png
+  logo: assets/brand/Header.png
   favicon: assets/brand/Icon.ico
   palette:
     scheme: slate

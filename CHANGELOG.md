@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-- No changes yet.
+- Settings → Visual now applies a complete lightweight theme choice: Classic keeps the original
+  header and gold accent, Alternate pairs its header with blue, and Mayhem Mode uses its own header
+  and window icon with purple and lime highlights. The dark layout, category colors, and
+  warning/error colors remain unchanged.
+- Refreshes the header and favicon used by the GitHub README and documentation site.
 
 ## 0.9.0-beta.10 — 2026-09-01
 

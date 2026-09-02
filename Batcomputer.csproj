@@ -53,6 +53,7 @@
     <EmbeddedResource Include="Assets\Font\**\*.otf" />
     <!-- Embed the window and taskbar icon. -->
     <EmbeddedResource Include="Assets\Icon.ico" Condition="Exists('Assets\Icon.ico')" />
+    <EmbeddedResource Include="Assets\Mayhem.ico" Condition="Exists('Assets\Mayhem.ico')" />
     <!-- Offline three.js preview runtime; see licenses/three.js-LICENSE.txt. -->
     <EmbeddedResource Include="Web\preview\*.js" />
     <!-- Shipped game-data catalogs and runtime socket calibration profiles. -->

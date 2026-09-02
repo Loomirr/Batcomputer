@@ -45,7 +45,7 @@ public sealed class PartInspectorForm : AdaptiveForm
         ClientSize = new Size(1120, 740);
         MinimumSize = new Size(860, 580);
         BackColor = Theme.WindowBg;
-        Icon = EmbeddedAssets.LoadIcon("Icon.ico") ?? Icon;
+        Icon = EmbeddedAssets.LoadIcon(Theme.CurrentVisualTheme.IconAsset) ?? Icon;
 
         var root = new TableLayoutPanel
         {

@@ -2,15 +2,81 @@ using System.Drawing.Drawing2D;
 
 namespace Batcomputer;
 
-/// <summary>Batman slate + gold palette with color-coded category accents.</summary>
+/// <summary>Batman slate palette with a selectable header and primary accent.</summary>
 internal static class Theme
 {
+    internal readonly record struct VisualThemeDefinition(
+        string Name,
+        string HeaderAsset,
+        string IconAsset,
+        Color Accent,
+        Color AccentDim,
+        Color AccentHover,
+        Color SecondaryAccent,
+        string Description);
+
+    private static readonly VisualThemeDefinition ClassicTheme = new(
+        "Classic",
+        "Header.png",
+        "Icon.ico",
+        Color.FromArgb(240, 194, 48),
+        Color.FromArgb(199, 154, 30),
+        Color.FromArgb(246, 205, 71),
+        Color.FromArgb(240, 194, 48),
+        "The original header with Batcomputer's gold highlights.");
+
+    private static readonly VisualThemeDefinition AlternateTheme = new(
+        "Alternate",
+        "header2.png",
+        "Icon.ico",
+        Color.FromArgb(74, 174, 242),
+        Color.FromArgb(43, 126, 184),
+        Color.FromArgb(103, 195, 250),
+        Color.FromArgb(74, 174, 242),
+        "The alternate header with cool blue highlights.");
+
+    private static readonly VisualThemeDefinition MayhemTheme = new(
+        "Mayhem Mode",
+        "HeaderMayhem.png",
+        "Mayhem.ico",
+        Color.FromArgb(178, 82, 255),
+        Color.FromArgb(112, 45, 181),
+        Color.FromArgb(211, 255, 99),
+        Color.FromArgb(188, 255, 54),
+        "The Mayhem header and icon with purple and lime highlights.");
+
+    public static IReadOnlyList<VisualThemeDefinition> VisualThemes { get; } =
+        Array.AsReadOnly([ClassicTheme, AlternateTheme, MayhemTheme]);
+
+    public static VisualThemeDefinition ResolveVisualTheme(string? name)
+    {
+        if (string.Equals(name, "Alternate", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(name, "Batcompuper", StringComparison.OrdinalIgnoreCase))
+        {
+            return AlternateTheme;
+        }
+        if (string.Equals(name, "Mayhem Mode", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(name, "Mayhem", StringComparison.OrdinalIgnoreCase))
+        {
+            return MayhemTheme;
+        }
+
+        return ClassicTheme;
+    }
+
+    public static VisualThemeDefinition CurrentVisualTheme =>
+        ResolveVisualTheme(AppSettings.Current.VisualTheme);
+
     public static readonly Color WindowBg = Color.FromArgb(26, 29, 34);
     public static readonly Color SlateDark = Color.FromArgb(30, 33, 39);
     public static readonly Color Slate = Color.FromArgb(43, 47, 54);
     public static readonly Color SlateLight = Color.FromArgb(60, 65, 74);
-    public static readonly Color Gold = Color.FromArgb(240, 194, 48);
-    public static readonly Color GoldDim = Color.FromArgb(199, 154, 30);
+    // Compatibility names used throughout the UI. They now resolve to the active theme's
+    // accent so existing screens participate without changing their category/status colors.
+    public static Color Gold => CurrentVisualTheme.Accent;
+    public static Color GoldDim => CurrentVisualTheme.AccentDim;
+    public static Color GoldHover => CurrentVisualTheme.AccentHover;
+    public static Color SecondaryAccent => CurrentVisualTheme.SecondaryAccent;
     public static readonly Color OnDark = Color.FromArgb(236, 238, 242);
     public static readonly Color OnDarkMuted = Color.FromArgb(158, 166, 178);
 
@@ -62,8 +128,12 @@ internal static class Theme
     {
         using var brush = new LinearGradientBrush(rect, SlateDark, Slate, LinearGradientMode.Horizontal);
         g.FillRectangle(brush, rect);
-        using var pen = new Pen(Gold, 2);
-        g.DrawLine(pen, rect.Left, rect.Bottom - 1, rect.Right, rect.Bottom - 1);
+        using var accent = new LinearGradientBrush(
+            new Rectangle(rect.Left, rect.Bottom - 2, Math.Max(1, rect.Width), 2),
+            Gold,
+            SecondaryAccent,
+            LinearGradientMode.Horizontal);
+        g.FillRectangle(accent, rect.Left, rect.Bottom - 2, rect.Width, 2);
     }
 
     /// <summary>Clips a control to rounded corners (re-applied on resize) - cheap modern buttons.</summary>
@@ -79,12 +149,12 @@ internal static class Theme
         c.Resize += (_, _) => Apply();
     }
 
-    /// <summary>Styles a button as a flat gold primary action (rounded, with hover/press).</summary>
+    /// <summary>Styles a button as a flat primary action using the active accent.</summary>
     public static void StyleGoldButton(Button b)
     {
         b.FlatStyle = FlatStyle.Flat;
         b.FlatAppearance.BorderSize = 0;
-        b.FlatAppearance.MouseOverBackColor = Color.FromArgb(246, 205, 71);
+        b.FlatAppearance.MouseOverBackColor = GoldHover;
         b.FlatAppearance.MouseDownBackColor = GoldDim;
         b.BackColor = Gold;
         b.ForeColor = SlateDark;
@@ -154,6 +224,90 @@ internal static class Theme
         b.ForeColor = OnDark;
         b.Cursor = Cursors.Hand;
     }
+
+    /// <summary>
+    /// Recolors controls which captured the previous primary accent when they were constructed.
+    /// Owner-drawn controls read <see cref="Gold"/> on every paint, so invalidating the tree handles
+    /// those automatically. New dialogs always start directly on the selected palette.
+    /// </summary>
+    public static void RefreshAccentTheme(Control root, VisualThemeDefinition previousTheme)
+    {
+        var currentTheme = CurrentVisualTheme;
+        RefreshAccentTheme(root, previousTheme, currentTheme);
+        root.Invalidate(true);
+    }
+
+    private static void RefreshAccentTheme(
+        Control control,
+        VisualThemeDefinition previousTheme,
+        VisualThemeDefinition currentTheme)
+    {
+        control.BackColor = RemapAccent(control.BackColor, previousTheme, currentTheme);
+        control.ForeColor = RemapAccent(control.ForeColor, previousTheme, currentTheme);
+
+        if (control is Button button)
+        {
+            button.FlatAppearance.BorderColor = RemapAccent(
+                button.FlatAppearance.BorderColor,
+                previousTheme,
+                currentTheme);
+            button.FlatAppearance.MouseOverBackColor = RemapAccent(
+                button.FlatAppearance.MouseOverBackColor,
+                previousTheme,
+                currentTheme);
+            button.FlatAppearance.MouseDownBackColor = RemapAccent(
+                button.FlatAppearance.MouseDownBackColor,
+                previousTheme,
+                currentTheme);
+        }
+
+        if (control is RoundedPanel rounded && rounded.BorderColor is Color border)
+        {
+            rounded.BorderColor = RemapAccent(border, previousTheme, currentTheme);
+        }
+
+        if (control is StatusDot dot)
+        {
+            dot.DotColor = RemapAccent(dot.DotColor, previousTheme, currentTheme);
+        }
+
+        if (control is DataGridView grid)
+        {
+            StyleGrid(grid);
+        }
+
+        foreach (Control child in control.Controls)
+        {
+            RefreshAccentTheme(child, previousTheme, currentTheme);
+        }
+    }
+
+    internal static Color RemapAccent(
+        Color value,
+        VisualThemeDefinition previousTheme,
+        VisualThemeDefinition currentTheme)
+    {
+        if (SameRgb(value, previousTheme.Accent))
+        {
+            return Color.FromArgb(value.A, currentTheme.Accent);
+        }
+        if (SameRgb(value, previousTheme.AccentDim))
+        {
+            return Color.FromArgb(value.A, currentTheme.AccentDim);
+        }
+        if (SameRgb(value, previousTheme.AccentHover))
+        {
+            return Color.FromArgb(value.A, currentTheme.AccentHover);
+        }
+        if (SameRgb(value, previousTheme.SecondaryAccent))
+        {
+            return Color.FromArgb(value.A, currentTheme.SecondaryAccent);
+        }
+        return value;
+    }
+
+    private static bool SameRgb(Color left, Color right) =>
+        left.R == right.R && left.G == right.G && left.B == right.B;
 
     /// <summary>
     /// Applies a readable dark theme to a whole WinForms subtree. This is mainly

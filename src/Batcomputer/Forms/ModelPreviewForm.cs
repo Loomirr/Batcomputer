@@ -29,7 +29,7 @@ public sealed class ModelPreviewForm : AdaptiveForm
         ClientSize = new Size(720, 720);
         MinimumSize = new Size(520, 520);
         BackColor = Theme.WindowBg;
-        Icon = EmbeddedAssets.LoadIcon("Icon.ico") ?? Icon;
+        Icon = EmbeddedAssets.LoadIcon(Theme.CurrentVisualTheme.IconAsset) ?? Icon;
         Controls.Add(_web);
         Load += async (_, _) => await InitAsync();
         FormClosed += (_, _) => QueueUserDataCleanup();
@@ -48,7 +48,7 @@ public sealed class ModelPreviewForm : AdaptiveForm
         ClientSize = new Size(760, 760);
         MinimumSize = new Size(520, 520);
         BackColor = Theme.WindowBg;
-        Icon = EmbeddedAssets.LoadIcon("Icon.ico") ?? Icon;
+        Icon = EmbeddedAssets.LoadIcon(Theme.CurrentVisualTheme.IconAsset) ?? Icon;
         Controls.Add(_web);
         Load += async (_, _) => await InitAsync();
         FormClosed += (_, _) => QueueUserDataCleanup();

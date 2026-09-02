@@ -1,4 +1,4 @@
-[![Batcomputer](docs/assets/brand/Header3.png)](https://loomirr.github.io/Batcomputer/)
+[![Batcomputer](docs/assets/brand/Header.png)](https://loomirr.github.io/Batcomputer/)
 
 Batcomputer is a Windows tool for creating playable suit mods for
 *LEGO Batman: Legacy of the Dark Knight*. It builds suits from character assets in your own copy of
