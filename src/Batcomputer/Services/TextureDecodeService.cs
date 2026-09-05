@@ -674,35 +674,28 @@ internal static class TextureDecodeService
     {
         try
         {
-            var mip = texture.GetFirstMip();
-            if (mip?.BulkData?.Data is not { Length: > 0 } data)
-            {
-                return false;
-            }
-            if (Codec(texture.Format) is not { } codec)
+            var decoded = TryDecode(texture);
+            if (decoded is null)
             {
                 Console.WriteLine($"    unsupported texture format {texture.Format} for {texture.Name}");
                 return false;
             }
 
-            var pixels = new BcDecoder().DecodeRaw(data, mip.SizeX, mip.SizeY, codec);
-            if (pixels.Length < mip.SizeX * mip.SizeY)
-            {
-                return false;
-            }
-
-            using var bmp = new Bitmap(mip.SizeX, mip.SizeY, PixelFormat.Format32bppArgb);
-            var rect = new Rectangle(0, 0, mip.SizeX, mip.SizeY);
+            var pixels = decoded.Pixels;
+            var width = decoded.Width;
+            var height = decoded.Height;
+            using var bmp = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+            var rect = new Rectangle(0, 0, width, height);
             var bits = bmp.LockBits(rect, ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
             try
             {
                 // BCnEncoder gives RGBA; GDI+ 32bppArgb wants BGRA in memory.
-                var row = new byte[mip.SizeX * 4];
-                for (var y = 0; y < mip.SizeY; y++)
+                var row = new byte[width * 4];
+                for (var y = 0; y < height; y++)
                 {
-                    for (var x = 0; x < mip.SizeX; x++)
+                    for (var x = 0; x < width; x++)
                     {
-                        var c = pixels[y * mip.SizeX + x];
+                        var c = pixels[y * width + x];
                         var o = x * 4;
                         var bb = c.b;
                         if (reconstructNormalZ)

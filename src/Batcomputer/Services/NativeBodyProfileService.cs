@@ -42,6 +42,11 @@ public sealed class NativeBodyProfileService
         string[] MissingRegions,
         string[] Warnings);
 
+    private sealed record ProtectedGameplayContract(
+        string ParentClass,
+        string ParentPackage,
+        string RequiredScsComponents);
+
     private static readonly Definition[] Definitions =
     [
         new("minifig-standard", "Minifig", "/Game/Characters/LEGOfig/SK_LEGOfig_Minifig",
@@ -160,6 +165,7 @@ public sealed class NativeBodyProfileService
                     EngineVersion.VER_UE5_6,
                     mappings,
                     CustomSerializationFlags.SkipPreloadDependencyLoading);
+                var gameplayBefore = CaptureProtectedGameplayContract(asset, packagePath);
                 if (role.Equals("cutscene", StringComparison.OrdinalIgnoreCase))
                 {
                     EnsureMinimalSchema(
@@ -187,13 +193,20 @@ public sealed class NativeBodyProfileService
                     mappings,
                     CustomSerializationFlags.SkipPreloadDependencyLoading);
                 var actual = TryReadBodyMeshPackage(written);
-                var success = UnrealPathUtil.NormalizePackagePath(actual)
+                var gameplayAfter = CaptureProtectedGameplayContract(written, packagePath);
+                var bodyMatches = UnrealPathUtil.NormalizePackagePath(actual)
                     .Equals(canonical.MeshPackagePath, StringComparison.OrdinalIgnoreCase);
+                var gameplayPreserved = gameplayBefore == gameplayAfter;
+                var success = bodyMatches && gameplayPreserved;
                 result.Files.Add(new FileResult(
                     role,
                     uassetPath,
                     success,
-                    success ? canonical.MeshPackagePath : $"wrote '{canonical.MeshPackagePath}', read back '{actual}'"));
+                    success
+                        ? canonical.MeshPackagePath
+                        : !bodyMatches
+                            ? $"wrote '{canonical.MeshPackagePath}', read back '{actual}'"
+                            : "the body mesh changed correctly, but the donor parent or protected gameplay SCS nodes changed"));
             }
             catch (Exception ex)
             {
@@ -207,6 +220,62 @@ public sealed class NativeBodyProfileService
         }
 
         return result;
+    }
+
+    private static ProtectedGameplayContract CaptureProtectedGameplayContract(
+        UAsset asset,
+        string generatedPackage)
+    {
+        var parentClass = "";
+        var parentPackage = "";
+        var generatedClassName = UnrealPathUtil.AssetName(generatedPackage) + "_C";
+        var generatedClass = asset.Exports.FirstOrDefault(export =>
+            export.ObjectName.ToString().Equals(generatedClassName, StringComparison.OrdinalIgnoreCase));
+        if (generatedClass?.SuperIndex.IsImport() == true)
+        {
+            var parent = generatedClass.SuperIndex.ToImport(asset);
+            parentClass = parent.ObjectName.ToString();
+            if (parent.OuterIndex.IsImport())
+            {
+                parentPackage = UnrealPathUtil.NormalizePackagePath(
+                    parent.OuterIndex.ToImport(asset).ObjectName.ToString());
+            }
+        }
+
+        var requiredNodes = StageValidationService.LiveScsComponentNames(asset)
+            .Select(GameplayShellComponentPolicy.ComponentName)
+            .Where(GameplayShellComponentPolicy.IsRequired)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(component => component, StringComparer.OrdinalIgnoreCase);
+        return new ProtectedGameplayContract(
+            parentClass,
+            parentPackage,
+            string.Join("\n", requiredNodes));
+    }
+
+    internal static bool ProtectedGameplayContractMatchesForTest(
+        string beforeParentClass,
+        string beforeParentPackage,
+        IEnumerable<string> beforeComponents,
+        string afterParentClass,
+        string afterParentPackage,
+        IEnumerable<string> afterComponents)
+    {
+        static string ComponentSignature(IEnumerable<string> components) => string.Join(
+            "\n",
+            components
+                .Select(GameplayShellComponentPolicy.ComponentName)
+                .Where(GameplayShellComponentPolicy.IsRequired)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(component => component, StringComparer.OrdinalIgnoreCase));
+
+        return beforeParentClass.Equals(afterParentClass, StringComparison.OrdinalIgnoreCase) &&
+               UnrealPathUtil.NormalizePackagePath(beforeParentPackage).Equals(
+                   UnrealPathUtil.NormalizePackagePath(afterParentPackage),
+                   StringComparison.OrdinalIgnoreCase) &&
+               ComponentSignature(beforeComponents).Equals(
+                   ComponentSignature(afterComponents),
+                   StringComparison.OrdinalIgnoreCase);
     }
 
     internal static string? TryReadBodyMeshPackage(UAsset asset)

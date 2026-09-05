@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+
 namespace Batcomputer;
 
 /// <summary>
@@ -10,6 +12,19 @@ internal static class ReleaseRegressionChecks
     public static int Run(TextWriter output)
     {
         var failures = new List<string>();
+        Check(GameAssetRefreshService.AllCharacterFilters.Contains(GameAssetRefreshService.KatanaMeshFilter) &&
+              GameAssetRefreshService.DeveloperResearchFilters.Contains(GameAssetRefreshService.KatanaMeshFilter),
+            "first-time/full and developer extraction include the sword mesh outside Characters", failures, output);
+
+        foreach (var result in CharacterDependencyTraceRegressionChecks.Run())
+        {
+            Check(result.Passed, result.Description, failures, output);
+        }
+
+        foreach (var result in GameplayShellRegressionChecks.Run())
+        {
+            Check(result.Passed, result.Description, failures, output);
+        }
 
         Check(
             GameAssetRefreshService.AllCharacterFilters.Contains(
@@ -44,6 +59,90 @@ internal static class ReleaseRegressionChecks
                     Path.Combine("C:", "Games", "LEGOBatmanLotDK", "Content", "DLC"),
                     StringComparison.OrdinalIgnoreCase),
             "first-time and full refresh mount Content/DLC and extract AdditionalContent plus Game Feature DLC",
+            failures,
+            output);
+
+        var expectedCharacterDependencyFilters = new[]
+        {
+            "Content/Global/AI/Abilities/",
+            "Content/Global/AI/GameplayEffects/",
+            "Content/Global/Collectables/MetaData/RedBrickEffects/GameplayAbilities/Characters/",
+            "Content/Global/Collectables/Pickups/GA_HidePickups",
+            "Content/Global/Conversations/Blueprints/GA_ConversationAbility_",
+            "Content/Global/DinnerActivities/PhotofitChase/GA_PhotofitArrest_Radial",
+            "Content/Global/GameplayCuesShared/GC_AddAimInfluence",
+            "Content/Global/WeatherSystem/GA_LightningElectrocution",
+            "Content/LEGOGameplay/CoreTemplates/Slide/GA_SplineSlide",
+            "Content/LEGOGameplay/GenericProps/GothamCity/SmartObjects/Setup/GA_UseSmartObject",
+            "Content/Minigames/HackingV2/Abilities/",
+            "Content/Minigames/SafeCrack/Abilities/",
+            "Content/RandomCrimes/AnimationAbilities/GA_Crime_PlayPayloadAnimationAbility",
+            "Content/Vehicles/Abilities/",
+        };
+        Check(
+            GameAssetRefreshService.CharacterDependencyAbilityFilters.SequenceEqual(
+                expectedCharacterDependencyFilters,
+                StringComparer.OrdinalIgnoreCase),
+            "the shared character-dependency filter manifest retains its source-derived folder and package boundaries",
+            failures,
+            output);
+
+        var observedCharacterDependencyPackages = new[]
+        {
+            "Content/Global/AI/Abilities/AS_BladeGoon",
+            "Content/Global/AI/Abilities/Bosses/Penguin/GA_PenguinBoss_RocketBarrage",
+            "Content/Global/AI/Abilities/GameplayEffects/RocketLauncher/GE_GTSM_Takehit_RocketLauncher",
+            "Content/Global/AI/GameplayEffects/GE_CharacterLOD_ProcessAlways",
+            "Content/Global/Collectables/MetaData/RedBrickEffects/GameplayAbilities/Characters/Gordon/AS_RedBrickAbilities_GordonDetective_TheBatman",
+            "Content/Global/Collectables/Pickups/GA_HidePickupsForPlayer",
+            "Content/Global/Conversations/Blueprints/GA_ConversationAbility_PartyMoveTo",
+            "Content/Global/Conversations/Blueprints/GA_ConversationAbility_Radial",
+            "Content/Global/DinnerActivities/PhotofitChase/GA_PhotofitArrest_Radial",
+            "Content/Global/GameplayCuesShared/GC_AddAimInfluence",
+            "Content/Global/WeatherSystem/GA_LightningElectrocution",
+            "Content/LEGOGameplay/CoreTemplates/Slide/GA_SplineSlide",
+            "Content/LEGOGameplay/GenericProps/GothamCity/SmartObjects/Setup/GA_UseSmartObject",
+            "Content/Minigames/HackingV2/Abilities/GA_HackingMinigame_InteractionSupport",
+            "Content/Minigames/SafeCrack/Abilities/GA_SafeCrack_Interaction",
+            "Content/RandomCrimes/AnimationAbilities/GA_Crime_PlayPayloadAnimationAbility",
+            "Content/Vehicles/Abilities/Gadgets/Grapple/Targets/GE_VehicleGrappleTargeting",
+            "Content/Vehicles/Abilities/Gadgets/Rockets/GA_VehicleRocketsDummy",
+        };
+        var characterDependencyProfiles = new[]
+        {
+            GameAssetRefreshService.AllCharacterFilters,
+            GameAssetRefreshService.DeveloperResearchFilters,
+        };
+        Check(
+            characterDependencyProfiles.All(filters => observedCharacterDependencyPackages.All(package =>
+                GameAssetRefreshService.FiltersCoverPackage(filters, package))),
+            "first-time and full refresh cover every source-observed out-of-tree character ability dependency",
+            failures,
+            output);
+
+        var prohibitedBroadDependencyFilters = new[]
+        {
+            "Content/Global/",
+            "Content/Global/AI/",
+            "Content/Global/Collectables/",
+            "Content/Global/Conversations/",
+            "Content/Global/DinnerActivities/",
+            "Content/Global/DinnerActivities/PhotofitChase/",
+            "Content/Global/GameplayCuesShared/",
+            "Content/Global/WeatherSystem/",
+            "Content/LEGOGameplay/",
+            "Content/LEGOGameplay/CoreTemplates/Slide/",
+            "Content/LEGOGameplay/GenericProps/",
+            "Content/Minigames/",
+            "Content/RandomCrimes/",
+            "Content/Vehicles/",
+        };
+        Check(
+            characterDependencyProfiles.All(filters => prohibitedBroadDependencyFilters.All(prohibited =>
+                !filters.Any(filter => filter.TrimEnd('/').Equals(
+                    prohibited.TrimEnd('/'),
+                    StringComparison.OrdinalIgnoreCase)))),
+            "character dependency extraction stays on ability families and exact package prefixes instead of broad gameplay folders",
             failures,
             output);
 
@@ -762,6 +861,53 @@ internal static class ReleaseRegressionChecks
             failures,
             output);
 
+        var faceMaterialRecipes = new MaterialTemplateCatalogService().Recipes();
+        var animatedFaceAuthoringRecipe = faceMaterialRecipes.SingleOrDefault(recipe =>
+            recipe.Id.Equals("face.standard.animated-authoring", StringComparison.OrdinalIgnoreCase));
+        var twoEyeFaceAuthoringRecipe = faceMaterialRecipes.SingleOrDefault(recipe =>
+            recipe.Id.Equals("face.standard.two-eye-authoring", StringComparison.OrdinalIgnoreCase));
+        var bruceFaceRecipe = faceMaterialRecipes.SingleOrDefault(recipe =>
+            recipe.Id.Equals("face.standard.regular", StringComparison.OrdinalIgnoreCase));
+        Check(
+            animatedFaceAuthoringRecipe is not null &&
+            animatedFaceAuthoringRecipe.PrimaryOutput.DonorPackagePath.Equals(
+                "/Game/Characters/Attachments/Face/FACE_BeachDummy/MI_FACE_BeachDummy",
+                StringComparison.OrdinalIgnoreCase) &&
+            animatedFaceAuthoringRecipe.CompatibleMeshPackagePaths.SequenceEqual(
+                new[] { "/Game/Characters/Attachments/LEGOface/SK_LEGOface" },
+                StringComparer.OrdinalIgnoreCase) &&
+            animatedFaceAuthoringRecipe.DefaultTextureOverrides.ContainsKey("Eye L BC") &&
+            animatedFaceAuthoringRecipe.DefaultTextureOverrides.ContainsKey("Mouth BC") &&
+            new[] { "04 EyeL", "05 EyeR", "13 Mouth", "14 MouthInside", "alpha" }.All(term =>
+                animatedFaceAuthoringRecipe.Guidance.Contains(term, StringComparison.OrdinalIgnoreCase)) &&
+            animatedFaceAuthoringRecipe.Guidance.Contains(
+                "Eye R BC is inherited",
+                StringComparison.OrdinalIgnoreCase) &&
+            bruceFaceRecipe is not null &&
+            bruceFaceRecipe.Summary.Contains("not the complete editable eye/mouth", StringComparison.OrdinalIgnoreCase) &&
+            bruceFaceRecipe.Guidance.Contains("do not mean", StringComparison.OrdinalIgnoreCase),
+            "the BeachDummy template exposes only its authored left-eye/mouth controls and does not promise an inherited right-eye override",
+            failures,
+            output);
+        Check(
+            twoEyeFaceAuthoringRecipe is not null &&
+            twoEyeFaceAuthoringRecipe.PrimaryOutput.DonorPackagePath.Equals(
+                "/Game/Characters/Attachments/Face/FACE_BurglarFamily_Baby/MI_FACE_BurglarBaby",
+                StringComparison.OrdinalIgnoreCase) &&
+            twoEyeFaceAuthoringRecipe.CompatibleMeshPackagePaths.SequenceEqual(
+                new[] { "/Game/Characters/Attachments/LEGOface/SK_LEGOface" },
+                StringComparer.OrdinalIgnoreCase) &&
+            twoEyeFaceAuthoringRecipe.DefaultTextureOverrides.Count == 2 &&
+            twoEyeFaceAuthoringRecipe.DefaultTextureOverrides.TryGetValue("Eye L BC", out var leftEyeDefault) &&
+            twoEyeFaceAuthoringRecipe.DefaultTextureOverrides.TryGetValue("Eye R BC", out var rightEyeDefault) &&
+            leftEyeDefault.Equals(rightEyeDefault, StringComparison.OrdinalIgnoreCase) &&
+            !twoEyeFaceAuthoringRecipe.DefaultTextureOverrides.ContainsKey("Mouth BC") &&
+            new[] { "04 EyeL", "05 EyeR", "Mouth BC remains inherited", "does not copy parameters" }.All(term =>
+                twoEyeFaceAuthoringRecipe.Guidance.Contains(term, StringComparison.OrdinalIgnoreCase)),
+            "the BurglarBaby standard-face template exposes both authored eye parameters while leaving its absent Mouth BC inherited",
+            failures,
+            output);
+
         Check(
             new[]
             {
@@ -915,6 +1061,61 @@ internal static class ReleaseRegressionChecks
                     "packed-2k-dxt5-legacy",
                     "Roughness/spec mask"),
                 "native MMR is the verified packed-map profile while legacy donor routes stay experimental",
+                failures,
+                output);
+
+            var faceArtJson = TextureCookTemplateService.TemplateJsonPath(
+                textureMipRecipeRoot,
+                TextureCookTemplateService.NativeFaceArtTemplateFolder);
+            var wroteFaceArtRecipe = TextureCookTemplateService.WriteCanonicalTemplateForRegression(
+                TextureCookTemplateService.NativeFaceArtTemplateFolder,
+                faceArtJson);
+            using var faceArtDocument = System.Text.Json.JsonDocument.Parse(File.ReadAllText(faceArtJson));
+            var faceArtRoot = faceArtDocument.RootElement;
+            var faceArtMips = faceArtRoot.GetProperty("Mips").EnumerateArray().ToArray();
+            var faceArtInline = faceArtMips.Skip(3).ToArray();
+            var faceArtLastBulk = faceArtMips[^1].GetProperty("BulkData");
+            const string faceArtFilter =
+                "Content/Characters/Textures/Attachments/LEGOface/T_LEGOface_Mouth_DIST_BC";
+            var faceArtLayoutOk =
+                wroteFaceArtRecipe &&
+                TextureCookTemplateService.RequiredPackageExtensionsForRegression(
+                    TextureCookTemplateService.NativeFaceArtTemplateFolder)
+                    .SequenceEqual(new[] { ".uasset", ".uexp", ".ubulk" }) &&
+                faceArtRoot.GetProperty("Package").GetString() ==
+                    "/Game/Characters/Textures/Attachments/LEGOface/T_LEGOface_Mouth_DIST_BC" &&
+                faceArtRoot.GetProperty("SizeX").GetInt32() == 512 &&
+                faceArtRoot.GetProperty("SizeY").GetInt32() == 512 &&
+                faceArtRoot.GetProperty("PixelFormat").GetString() == "PF_BC7" &&
+                faceArtRoot.GetProperty("InlinePayloadOffsetBias").GetInt32() == 0 &&
+                faceArtMips.Length == 10 &&
+                faceArtMips.Take(3).All(mip => mip.GetProperty("BulkData").GetProperty("BulkDataFlags").GetString()!
+                    .Contains("PayloadInSep", StringComparison.OrdinalIgnoreCase)) &&
+                faceArtInline.All(mip => mip.GetProperty("BulkData").GetProperty("BulkDataFlags").GetString()!
+                    .Contains("ForceInlinePayload", StringComparison.OrdinalIgnoreCase)) &&
+                faceArtMips[0].GetProperty("BulkData").GetProperty("SizeOnDisk").GetInt32() == 262_144 &&
+                faceArtMips[2].GetProperty("BulkData").GetProperty("OffsetInFile").GetInt32() == 327_680 &&
+                faceArtInline[0].GetProperty("BulkData").GetProperty("OffsetInFile").GetInt32() == 166 &&
+                faceArtMips[^1].GetProperty("SizeX").GetInt32() == 1 &&
+                faceArtLastBulk.GetProperty("OffsetInFile").GetInt32() +
+                    faceArtLastBulk.GetProperty("SizeOnDisk").GetInt32() == 5778 - 28 &&
+                TextureCookTemplateService.RetocFilters.Contains(faceArtFilter, StringComparer.OrdinalIgnoreCase) &&
+                GameAssetRefreshService.BatmanFilters.Contains(faceArtFilter, StringComparer.OrdinalIgnoreCase) &&
+                GameAssetRefreshService.AllCharacterFilters.Contains(faceArtFilter, StringComparer.OrdinalIgnoreCase) &&
+                MainForm.TextureProfileIsVerifiedForRegression(
+                    MainForm.NativeFaceArtCookProfile,
+                    "Face detail");
+            for (var i = 1; i < faceArtInline.Length && faceArtLayoutOk; i++)
+            {
+                var priorBulk = faceArtInline[i - 1].GetProperty("BulkData");
+                var currentBulk = faceArtInline[i].GetProperty("BulkData");
+                faceArtLayoutOk = currentBulk.GetProperty("OffsetInFile").GetInt32() ==
+                    priorBulk.GetProperty("OffsetInFile").GetInt32() +
+                    priorBulk.GetProperty("SizeOnDisk").GetInt32() + 0x10;
+            }
+            Check(
+                faceArtLayoutOk,
+                "animated face art uses the verified linear 512px PF_BC7 donor layout and is included in first/full extraction filters",
                 failures,
                 output);
             Check(
@@ -1094,7 +1295,92 @@ internal static class ReleaseRegressionChecks
             var completeCookAccepted =
                 cookResult.Status.Equals("created", StringComparison.OrdinalIgnoreCase) &&
                 uiPayloadLayoutPreserved &&
+                MainForm.TextureCookReportSourceMatchesFile(cookedReport, sourcePng) &&
                 MainForm.TextureCookReportOutputMatchesFiles(cookedReport, cookedBase, uiJson);
+            var immutableBackupRoot = Path.Combine(textureMipRecipeRoot, "ImmutableTextureBackup");
+            Directory.CreateDirectory(immutableBackupRoot);
+            var immutableBackupBase = Path.Combine(immutableBackupRoot, Path.GetFileName(cookedBase));
+            foreach (var extension in new[] { ".uasset", ".uexp", ".ubulk", ".texture-cook-report.json" })
+            {
+                if (File.Exists(cookedBase + extension))
+                {
+                    File.Copy(cookedBase + extension, immutableBackupBase + extension);
+                }
+            }
+            var immutableBackupSource = Path.Combine(immutableBackupRoot, Path.GetFileName(sourcePng));
+            File.Copy(sourcePng, immutableBackupSource);
+            var immutableSourceBytes = File.ReadAllBytes(immutableBackupSource);
+            var immutableSourceHash = Convert.ToHexString(SHA256.HashData(immutableSourceBytes));
+            var restoreSourceDestination = Path.Combine(immutableBackupRoot, "live-source.png");
+            File.WriteAllBytes(restoreSourceDestination, immutableSourceBytes);
+            var unchangedRestoreSourceAccepted = MainForm.TextureBackupSourceIsUnchangedOrMissing(
+                restoreSourceDestination,
+                immutableSourceBytes.LongLength,
+                immutableSourceHash);
+            var editedSourceBytes = immutableSourceBytes.ToArray();
+            editedSourceBytes[^1] ^= 0x01;
+            File.WriteAllBytes(restoreSourceDestination, editedSourceBytes);
+            var editedRestoreSourceRejected = !MainForm.TextureBackupSourceIsUnchangedOrMissing(
+                restoreSourceDestination,
+                immutableSourceBytes.LongLength,
+                immutableSourceHash);
+            File.Delete(restoreSourceDestination);
+            var missingRestoreSourceAccepted = MainForm.TextureBackupSourceIsUnchangedOrMissing(
+                restoreSourceDestination,
+                immutableSourceBytes.LongLength,
+                immutableSourceHash);
+            var coherentRestorePreservesNewerSourceBytes =
+                unchangedRestoreSourceAccepted &&
+                editedRestoreSourceRejected &&
+                missingRestoreSourceAccepted;
+            var unavailableTemplateFolder = uiFolder + ".unavailable";
+            var immutableBackupSurvivesMissingLiveTemplate = false;
+            Directory.Move(uiFolder, unavailableTemplateFolder);
+            try
+            {
+                immutableBackupSurvivesMissingLiveTemplate =
+                    MainForm.TextureCookReportMatchesImmutableSnapshot(
+                        immutableBackupBase + ".texture-cook-report.json",
+                        immutableBackupSource,
+                        immutableBackupBase,
+                        "/Game/UI/Icons/Suits/T_SuitIcon_NULL_BCA",
+                        out _);
+            }
+            finally
+            {
+                Directory.Move(unavailableTemplateFolder, uiFolder);
+            }
+            var retainedCookRecipe = new GeneratedTextureEntry
+            {
+                DisplayName = "Retained batch cook",
+                Kind = "Suit selector icon",
+                CookWidth = 256,
+                CookHeight = 256,
+                CookPixelFormat = "PF_BC7",
+                SourcePng = sourcePng,
+                TemplateJson = uiJson,
+                OutputRoot = textureMipRecipeRoot,
+                PackagePath = "/Game/UI/Icons/Suits/T_SuitIcon_NULL_BCA",
+            };
+            var restoredMismatchedRecipe = new GeneratedTextureEntry
+            {
+                DisplayName = retainedCookRecipe.DisplayName,
+                Kind = "Character icon",
+                CookWidth = 512,
+                CookHeight = 512,
+                CookPixelFormat = "PF_BC7",
+                SourcePng = sourcePng,
+                TemplateJson = characterUiJson,
+                OutputRoot = textureMipRecipeRoot,
+                PackagePath = retainedCookRecipe.PackagePath,
+            };
+            var retainedCookVerifiesOnlyAgainstMutatedRecipe =
+                MainForm.ValidateGeneratedTextureCook(retainedCookRecipe, cookedBase, out _) &&
+                !MainForm.ValidateGeneratedTextureCook(restoredMismatchedRecipe, cookedBase, out _) &&
+                MainForm.TextureBatchRollbackDispositionFor(
+                    MainForm.TexturePackageRollbackDisposition.KeptVerifiedCurrentCook,
+                    verifiesAgainstRestoredRecipe: false) ==
+                    MainForm.TexturePackageRollbackDisposition.PendingNoCoherentSnapshot;
             var tamperedCookRejected = false;
             if (File.Exists(cookedBase + ".uexp"))
             {
@@ -1124,13 +1410,55 @@ internal static class ReleaseRegressionChecks
             bulkRecipe.TemplateJson = Path.Combine(textureMipRecipeRoot, "missing-template.json");
             var missingBulkTemplateRejected =
                 MainForm.GeneratedTextureReimportPreflightError(bulkRecipe)?.Contains("template", StringComparison.OrdinalIgnoreCase) == true;
+            var packageOnlyBackupNeverReplacesVerifiedReimport =
+                MainForm.KeepVerifiedReimportCookInsteadOfPackageOnlyBackup(
+                    backupCanRestoreSource: false,
+                    currentCookVerified: true) &&
+                !MainForm.KeepVerifiedReimportCookInsteadOfPackageOnlyBackup(
+                    backupCanRestoreSource: true,
+                    currentCookVerified: true) &&
+                !MainForm.KeepVerifiedReimportCookInsteadOfPackageOnlyBackup(
+                    backupCanRestoreSource: false,
+                    currentCookVerified: false) &&
+                MainForm.TexturePackageRollbackDispositionFor(
+                    backupCanRestoreSource: true,
+                    currentCookVerified: false) ==
+                    MainForm.TexturePackageRollbackDisposition.RestoredCoherentSnapshot &&
+                MainForm.TexturePackageRollbackDispositionFor(
+                    backupCanRestoreSource: false,
+                    currentCookVerified: true) ==
+                    MainForm.TexturePackageRollbackDisposition.KeptVerifiedCurrentCook &&
+                MainForm.TexturePackageRollbackDispositionFor(
+                    backupCanRestoreSource: false,
+                    currentCookVerified: false) ==
+                    MainForm.TexturePackageRollbackDisposition.PendingNoCoherentSnapshot &&
+                MainForm.TextureBatchRollbackDispositionFor(
+                    MainForm.TexturePackageRollbackDisposition.KeptVerifiedCurrentCook,
+                    verifiesAgainstRestoredRecipe: true) ==
+                    MainForm.TexturePackageRollbackDisposition.KeptVerifiedCurrentCook &&
+                MainForm.TextureBatchRollbackDispositionFor(
+                    MainForm.TexturePackageRollbackDisposition.KeptVerifiedCurrentCook,
+                    verifiesAgainstRestoredRecipe: false) ==
+                    MainForm.TexturePackageRollbackDisposition.PendingNoCoherentSnapshot &&
+                MainForm.TextureBatchRollbackDispositionFor(
+                    MainForm.TexturePackageRollbackDisposition.RestoredCoherentSnapshot,
+                    verifiesAgainstRestoredRecipe: false) ==
+                    MainForm.TexturePackageRollbackDisposition.PendingNoCoherentSnapshot &&
+                MainForm.TextureBatchRollbackDispositionFor(
+                    MainForm.TexturePackageRollbackDisposition.RestoredCoherentSnapshot,
+                    verifiesAgainstRestoredRecipe: true) ==
+                    MainForm.TexturePackageRollbackDisposition.RestoredCoherentSnapshot;
             Check(
                 completeCookAccepted &&
+                immutableBackupSurvivesMissingLiveTemplate &&
+                coherentRestorePreservesNewerSourceBytes &&
                 tamperedCookRejected &&
                 completeBulkRecipeAccepted &&
                 missingBulkSourceRejected &&
-                missingBulkTemplateRejected,
-                "texture cooks write every inline mip atomically, bulk reimport preflights every saved recipe, and staging rejects payloads changed after the cook report",
+                missingBulkTemplateRejected &&
+                packageOnlyBackupNeverReplacesVerifiedReimport &&
+                retainedCookVerifiesOnlyAgainstMutatedRecipe,
+                "texture cooks bind their exact source image, coherent backups validate from immutable copied inputs after a live template disappears without overwriting newer source edits, mixed-batch rollback preserves restored-recipe coherence, and changed payloads stay rejected",
                 failures,
                 output);
         }
@@ -1829,6 +2157,20 @@ internal static class ReleaseRegressionChecks
         Check(
             StaticMeshObjProbeService.MultiMaterialObjRegressionPasses(),
             "custom OBJ usemtl sections keep source-name bindings and emit matching cooked/preview slots",
+            failures,
+            output);
+        Check(
+            PartGraftService.ComponentLooksLikeGlider("Torso", ["TtCharacterAsset.Torso"], "SK_CAPE_Glide") &&
+            PartGraftService.CanRepointExistingComponentForTest(false, false,
+                PartGraftService.ComponentLooksLikeGlider("Torso", ["TtCharacterAsset.Torso"], "SK_CAPE_Glide"), true) &&
+            !PartGraftService.ComponentLooksLikeGlider("Torso", ["TtCharacterAsset.Torso"], "SK_Torso_Armor") &&
+            !PartGraftService.ComponentLooksLikeGlider("Cape", ["Cape"], "SK_CAPE_Spiked_Advanced"),
+            "untagged cutscene glide meshes reuse their native shell without classifying ordinary torso overlays or capes as gliders",
+            failures,
+            output);
+        Check(
+            StaticMeshObjProbeService.PreviewOrientationParityRegressionPasses(),
+            "asymmetric custom OBJ geometry and UVs keep the same left/right orientation in cooked meshes and the 3D viewer",
             failures,
             output);
         Check(
@@ -3522,7 +3864,7 @@ internal static class ReleaseRegressionChecks
             sameStemWrongBehaviorBridgeRejected &&
             retainedAuthoredBehaviorBridgeRejected &&
             equipmentFreeDprd.Equals(gameplayNightwingDprd, StringComparison.OrdinalIgnoreCase) &&
-            nativeEquipmentDprd.Equals(gameplayNightwingDprd, StringComparison.OrdinalIgnoreCase) &&
+            nativeEquipmentDprd.Equals(generatedEquipmentDprd, StringComparison.OrdinalIgnoreCase) &&
             foreignEquipmentDprd.Equals(generatedEquipmentDprd, StringComparison.OrdinalIgnoreCase) &&
             generatedEquipmentBehaviorBridgeAccepted &&
             danglingGameplayDprdRejectedForGeneratedBridge &&
@@ -3530,7 +3872,7 @@ internal static class ReleaseRegressionChecks
             pairedGliderKeepsNativeAbilityLoadout &&
             pairedNoEquipmentKeepsGameplayDprd &&
             nonCascadingCloneIdentity,
-            "exact behavior bridges keep paired native equipment on Nightwing DPRD, switch foreign equipment exclusively to mod-local DPRD, retain ordinary glider AS_Gliding DPRD generation, and emit exact non-cascading mod-local package identities",
+            "exact behavior bridges fail closed when donor equipment cannot be inspected, switch changed equipment exclusively to mod-local DPRD, retain ordinary glider AS_Gliding DPRD generation, and emit exact non-cascading mod-local package identities",
             failures,
             output);
 
@@ -4787,6 +5129,7 @@ internal static class ReleaseRegressionChecks
         var conflictingDuplicateOwnerRejected = false;
         var missingRequiredBulkRejected = false;
         var tamperedCookReportRejected = false;
+        var changedSourceImageRejected = false;
         try
         {
             var generatedRoot = Path.Combine(generatedDependencyRoot, "Generated");
@@ -4831,6 +5174,19 @@ internal static class ReleaseRegressionChecks
                 tamperedReportOutput,
                 tamperedReportPackage);
             File.AppendAllText(tamperedReportBase + ".uasset", "-changed-after-report");
+            var sourceDriftOutput = Path.Combine(generatedRoot, "TextureImports", "steve", "T_Steve_SourceDrift_00005");
+            const string sourceDriftPackage = "/Game/Mods/Steve/Textures/T_Steve_SourceDrift";
+            var sourceDriftTexture = CreateGeneratedTextureCookFixture(
+                sourceDriftOutput,
+                templateRoot,
+                sourceDriftPackage,
+                "source-drift",
+                externalMips: false);
+            File.AppendAllText(sourceDriftTexture.SourcePng, "-edited-after-cook");
+            var sourceDriftBase = GeneratedTextureFixturePackageBase(sourceDriftOutput, sourceDriftPackage);
+            changedSourceImageRejected =
+                !MainForm.ValidateGeneratedTextureCook(sourceDriftTexture, sourceDriftBase, out var sourceDriftReason) &&
+                sourceDriftReason.Contains("source image", StringComparison.OrdinalIgnoreCase);
 
             var outsideTextureOutput = Path.Combine(
                 generatedDependencyRoot,
@@ -4860,6 +5216,12 @@ internal static class ReleaseRegressionChecks
                 "TextureImports",
                 "steve",
                 "T_Steve_Moved_00002");
+            var staleMovedSource = Path.Combine(
+                generatedDependencyRoot,
+                "RetiredSource",
+                Path.GetFileName(movedTexture.SourcePng));
+            Directory.CreateDirectory(Path.GetDirectoryName(staleMovedSource)!);
+            File.WriteAllText(staleMovedSource, "stale-source-that-does-not-match-the-current-cook");
             var dependencyProject = new NativeSuitProject
             {
                 SlotId = "steve_dependency_fixture",
@@ -4874,6 +5236,10 @@ internal static class ReleaseRegressionChecks
                         CookWidth = movedTexture.CookWidth,
                         CookHeight = movedTexture.CookHeight,
                         CookPixelFormat = movedTexture.CookPixelFormat,
+                        // Keep an existing but divergent historical source path while the complete
+                        // TextureImports subtree lives under the current workspace. Validation
+                        // must prefer the source beside the candidate rebased cooked output.
+                        SourcePng = staleMovedSource,
                         PackagePath = movedTexture.PackagePath,
                         ObjectPath = movedTexture.ObjectPath,
                         TemplateJson = movedTexture.TemplateJson,
@@ -5025,8 +5391,9 @@ internal static class ReleaseRegressionChecks
             outsideWorkspaceOutputRejected &&
             conflictingDuplicateOwnerRejected &&
             missingRequiredBulkRejected &&
-            tamperedCookReportRejected,
-            "material dependencies prefer verified fresh workspace cooks, reject stale fallback, missing external mips, tampered cook reports, outside roots and conflicting owners, and remove stale bulk data",
+            tamperedCookReportRejected &&
+            changedSourceImageRejected,
+            "material dependencies prefer verified fresh workspace cooks, reject stale fallback, missing external mips, changed source images, tampered cook reports, outside roots and conflicting owners, and remove stale bulk data",
             failures,
             output);
 
@@ -5088,6 +5455,10 @@ internal static class ReleaseRegressionChecks
         TextureCookRegressionChecks.Run(failures, output);
         AnimationImportRegressionChecks.Run(failures, output);
         CharacterAnimationGraphRegressionChecks.Run(failures, output);
+        DcmdReferenceRegressionChecks.Run(failures, output);
+        ProjectPersistenceRegressionChecks.Run(failures, output);
+        AbilityLoadoutRegressionChecks.Run(failures, output);
+        AbilityAssetRegressionChecks.Run(failures, output);
 
         output.WriteLine(failures.Count == 0
             ? "release regressions: PASS"
@@ -5537,6 +5908,10 @@ internal static class ReleaseRegressionChecks
 
         var packageBase = GeneratedTextureFixturePackageBase(outputRoot, packagePath);
         Directory.CreateDirectory(Path.GetDirectoryName(packageBase)!);
+        var sourceRoot = Path.Combine(outputRoot, "Source");
+        Directory.CreateDirectory(sourceRoot);
+        var sourceImage = Path.Combine(sourceRoot, marker + ".png");
+        File.WriteAllText(sourceImage, marker + "-source-image");
         File.WriteAllText(packageBase + ".uasset", marker + "-uasset");
         File.WriteAllText(packageBase + ".uexp", marker + "-uexp");
         if (externalMips || includeUnexpectedBulk)
@@ -5552,6 +5927,7 @@ internal static class ReleaseRegressionChecks
             CookWidth = 4,
             CookHeight = 4,
             CookPixelFormat = "PF_DXT1",
+            SourcePng = sourceImage,
             PackagePath = packagePath,
             ObjectPath = packagePath + "." + UnrealPathUtil.AssetName(packagePath),
             TemplateJson = templateJson,
@@ -5585,6 +5961,7 @@ internal static class ReleaseRegressionChecks
         var (ubulkBytes, ubulkSha256) = externalMips
             ? GeneratedTextureFixtureIntegrity(packageBase + ".ubulk")
             : (0L, "");
+        var (sourceImageBytes, sourceImageSha256) = GeneratedTextureFixtureIntegrity(texture.SourcePng);
         File.WriteAllText(
             packageBase + ".texture-cook-report.json",
             System.Text.Json.JsonSerializer.Serialize(new
@@ -5599,6 +5976,8 @@ internal static class ReleaseRegressionChecks
                 ExternalMipCount = externalMips ? 1 : 0,
                 InlineMipCount = externalMips ? 0 : 1,
                 RecipeFingerprint = TextureCookService.RecipeFingerprintFor(texture.TemplateJson),
+                SourceImageBytes = sourceImageBytes,
+                SourceImageSha256 = sourceImageSha256,
                 OutputUassetBytes = uassetBytes,
                 OutputUassetSha256 = uassetSha256,
                 OutputUexpBytes = uexpBytes,

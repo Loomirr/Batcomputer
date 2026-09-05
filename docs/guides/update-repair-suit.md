@@ -73,7 +73,12 @@ does not:
   materials** and choose **Repair materials**. This recovers the existing material closure and
   reapplies the saved assignments without changing their authored values.
 - To refresh every generated texture from its saved PNG in one pass, open **Textures** and choose
-  **Reimport all**. The batch is backed up and rolled back together if one cook fails.
+  **Reimport all**. The batch snapshots every package first. On failure, only backups that include
+  their matching source bytes are restored; verified new cooks are kept and any other edited-source
+  texture remains pending for a retry instead of receiving a stale package-only rollback.
+- To refresh one texture after editing its saved image, right-click it and choose **Reimport
+  image**. Choose **Replace image…** to select a different image while keeping the same package
+  path and cook profile.
 - For a custom mesh, confirm its project-owned OBJ source still exists.
 - If both base templates are missing, return to the base picker and select the visual and gameplay
   donors again.

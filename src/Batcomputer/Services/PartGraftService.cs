@@ -592,10 +592,14 @@ public sealed class PartGraftService
                 .Select(tag => tag.Value.ToString())
                 .ToArray()
                 ?? Array.Empty<string>();
+            var meshIndex = FindPropertyLive<ObjectPropertyData>(comp.Data, compIsStatic ? "StaticMesh" : "SkeletalMesh")?.Value;
+            var meshName = meshIndex is not null && meshIndex.IsImport()
+                ? meshIndex.ToImport(asset).ObjectName.ToString()
+                : "";
             return CanRepointExistingComponentForTest(
                 compIsStatic,
                 wantStatic,
-                ComponentLooksLikeGlider(slot, componentTags),
+                ComponentLooksLikeGlider(slot, componentTags, meshName),
                 GliderService.IsNativeGliderPart(part));
         }
         catch
@@ -611,7 +615,7 @@ public sealed class PartGraftService
         bool incomingIsGlider) =>
         existingIsStatic == incomingIsStatic && existingIsGlider == incomingIsGlider;
 
-    private static bool ComponentLooksLikeGlider(string slot, IEnumerable<string> tags)
+    internal static bool ComponentLooksLikeGlider(string slot, IEnumerable<string> tags, string meshName = "")
     {
         if (tags.Any(tag =>
                 tag.Equals("Glider", StringComparison.OrdinalIgnoreCase) ||
@@ -620,7 +624,11 @@ public sealed class PartGraftService
             return true;
         }
 
-        return slot.Contains("Glide", StringComparison.OrdinalIgnoreCase) ||
+        // Cutscene counterparts can omit the playable's Glider tag. Recognize their
+        // actual native mesh too, otherwise an identical glide cape becomes Torso_2.
+        // Do not use the owning character/package name to classify unrelated parts.
+        return GliderService.IsNativeGliderPart(new NativeSuitPartRecord { MeshObjectName = meshName }) ||
+               slot.Contains("Glide", StringComparison.OrdinalIgnoreCase) ||
                slot.Contains("Glider", StringComparison.OrdinalIgnoreCase) ||
                slot.Contains("Wingsuit", StringComparison.OrdinalIgnoreCase);
     }

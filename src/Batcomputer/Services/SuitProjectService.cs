@@ -1,9 +1,64 @@
+using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace Batcomputer;
 
 public sealed class SuitProjectService
 {
+    public sealed record ProjectSaveSnapshot(
+        string Path,
+        string SlotId,
+        string Json,
+        long Sequence);
+
+    public sealed record ProjectSaveCommitResult(
+        string Path,
+        bool Written,
+        bool Superseded,
+        bool RejectedByContext);
+
+    public sealed record ProjectSaveGenerationSnapshot(
+        string Path,
+        string SlotId,
+        long LastCommittedSequence,
+        long LastCapturedSequence);
+
+    public sealed record ProjectSaveCaptureResult(
+        ProjectSaveSnapshot? Snapshot,
+        bool Superseded,
+        bool RejectedByContext);
+
+    public sealed record ProjectFileRollbackSnapshot(
+        string Path,
+        string SlotId,
+        bool Existed,
+        string? Contents,
+        string Fingerprint,
+        long LastCommittedSequence,
+        long LastCapturedSequence);
+
+    public sealed record ProjectFileRestoreResult(
+        string Path,
+        bool Restored,
+        bool Superseded,
+        bool RejectedByContext,
+        long CapturedOwnershipSequence = 0,
+        long CommittedOwnershipSequence = 0,
+        string RestoredFingerprint = "");
+
+    private sealed class ProjectSaveState
+    {
+        public object Gate { get; } = new();
+        public long LastCommittedSequence { get; set; }
+        public long LastCapturedSequence { get; set; }
+    }
+
+    private static readonly ConcurrentDictionary<string, ProjectSaveState> ProjectSaveStates =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static long _nextProjectSaveSequence;
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -98,22 +153,21 @@ public sealed class SuitProjectService
         }
 
         var project = JsonSerializer.Deserialize<NativeSuitProject>(File.ReadAllText(path), JsonOptions);
-        if (project is not null && RefreshSavedTemplateSources(
-                project,
-                AppSettings.Current.EffectiveExtractedContentRoot()))
+        if (project is not null)
         {
+            project.ProgressTag = NativeMetadataDonorService.CanonicalProgressTag(project.ProgressTag);
+            HeldItemService.Migrate(project.AbilityLoadout);
+            // Early body/visual-base builds could mistake gameplay SCS nodes for cosmetic parts.
+            // Repair only declarations carrying the tool's exact legacy auto-hide provenance;
+            // explicit hand-authored removals remain visible for validation to reject.
+            GameplayShellComponentPolicy.RemoveLegacyAutomaticRemovals(project);
+
             // Absolute extract paths are local cache details, not part of a suit's identity. When
             // an old dump has been replaced, keep the same /Game packages and migrate only their
-            // disk locations so opening the suit does not require a manual JSON repair.
-            try
-            {
-                AtomicFileUtil.WriteAllText(path, JsonSerializer.Serialize(project, JsonOptions));
-            }
-            catch
-            {
-                // The in-memory project is already repaired for this session. A read-only folder
-                // or brief file lock should not turn that successful migration into a load error.
-            }
+            // disk locations in memory. Loading is deliberately read-only: an asynchronously loaded
+            // stale object must never overwrite a newer editor save. The next explicit project save
+            // persists the repaired local paths together with the user's current recipe.
+            RefreshSavedTemplateSources(project, AppSettings.Current.EffectiveExtractedContentRoot());
         }
         return project;
     }
@@ -128,10 +182,430 @@ public sealed class SuitProjectService
 
     public string SaveProject(NativeSuitProject project)
     {
+        var snapshot = CaptureProjectSave(project);
+        var result = CommitProjectSave(snapshot);
+        if (!result.Written)
+        {
+            throw new InvalidOperationException(
+                "The suit project was not saved because a newer captured save already owns this path.");
+        }
+        return result.Path;
+    }
+
+    /// <summary>
+    /// Captures an immutable project document on the calling thread. Async callers must do this
+    /// before yielding so a later UI edit or suit selection cannot change what their queued save
+    /// eventually serializes.
+    /// </summary>
+    public ProjectSaveSnapshot CaptureProjectSave(NativeSuitProject project)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        project.ProgressTag = NativeMetadataDonorService.CanonicalProgressTag(project.ProgressTag);
+        HeldItemService.Migrate(project.AbilityLoadout);
+        // Persist the load-time migration even when a caller constructed or retained an older
+        // project object without loading it through LoadProject. These exact auto-hide rules were
+        // emitted by Batcomputer itself; explicit/manual protected removals remain for validation
+        // to reject instead of being erased silently.
+        GameplayShellComponentPolicy.RemoveLegacyAutomaticRemovals(project);
         Directory.CreateDirectory(GuiOutputRoot);
-        var path = ProjectPathForSlot(project.SlotId);
-        AtomicFileUtil.WriteAllText(path, JsonSerializer.Serialize(project, JsonOptions));
-        return path;
+        var path = Path.GetFullPath(ProjectPathForSlot(project.SlotId));
+        var json = JsonSerializer.Serialize(project, JsonOptions);
+        var sequence = Interlocked.Increment(ref _nextProjectSaveSequence);
+        var state = ProjectSaveStates.GetOrAdd(path, static _ => new ProjectSaveState());
+        lock (state.Gate)
+        {
+            // Sequence allocation and state publication are deliberately separate. Math.Max keeps
+            // a temporarily-paused older capture from replacing the newest announced intent.
+            state.LastCapturedSequence = Math.Max(state.LastCapturedSequence, sequence);
+        }
+        return new ProjectSaveSnapshot(path, project.SlotId, json, sequence);
+    }
+
+    public ProjectSaveGenerationSnapshot CaptureProjectSaveGeneration(string slotId)
+    {
+        var path = Path.GetFullPath(ProjectPathForSlot(slotId));
+        var state = ProjectSaveStates.GetOrAdd(path, static _ => new ProjectSaveState());
+        lock (state.Gate)
+        {
+            return new ProjectSaveGenerationSnapshot(
+                path,
+                slotId,
+                state.LastCommittedSequence,
+                state.LastCapturedSequence);
+        }
+    }
+
+    /// <summary>
+    /// Captures and publishes an immutable save only while the project path still has the same save
+    /// generations observed when the editor operation began. This closes the gap between an older
+    /// UI continuation checking its selection and announcing a sequence over a newer direct save.
+    /// </summary>
+    public ProjectSaveCaptureResult CaptureProjectSaveIfCurrent(
+        NativeSuitProject project,
+        ProjectSaveGenerationSnapshot expectedGeneration,
+        Func<bool>? contextIsCurrent = null)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        ArgumentNullException.ThrowIfNull(expectedGeneration);
+        GameplayShellComponentPolicy.RemoveLegacyAutomaticRemovals(project);
+        Directory.CreateDirectory(GuiOutputRoot);
+        var path = Path.GetFullPath(ProjectPathForSlot(project.SlotId));
+        if (!path.Equals(Path.GetFullPath(expectedGeneration.Path), StringComparison.OrdinalIgnoreCase) ||
+            !project.SlotId.Equals(expectedGeneration.SlotId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "Refused to capture a suit project through a different workspace or slot path.");
+        }
+
+        // Freeze the document before it can be handed to background I/O. Publication remains under
+        // the per-path gate below, after both the UI context and starting generations are checked.
+        var json = JsonSerializer.Serialize(project, JsonOptions);
+        var state = ProjectSaveStates.GetOrAdd(path, static _ => new ProjectSaveState());
+        lock (state.Gate)
+        {
+            if (contextIsCurrent is not null && !contextIsCurrent())
+            {
+                return new ProjectSaveCaptureResult(null, Superseded: false, RejectedByContext: true);
+            }
+            if (state.LastCapturedSequence != expectedGeneration.LastCapturedSequence ||
+                state.LastCommittedSequence != expectedGeneration.LastCommittedSequence)
+            {
+                return new ProjectSaveCaptureResult(null, Superseded: true, RejectedByContext: false);
+            }
+
+            var sequence = Interlocked.Increment(ref _nextProjectSaveSequence);
+            state.LastCapturedSequence = sequence;
+            return new ProjectSaveCaptureResult(
+                new ProjectSaveSnapshot(path, project.SlotId, json, sequence),
+                Superseded: false,
+                RejectedByContext: false);
+        }
+    }
+
+    /// <summary>
+    /// Materializes the immutable document captured for a save. Derived artifacts such as patch
+    /// plans must use this copy rather than retaining the live editor object across an await.
+    /// </summary>
+    public NativeSuitProject MaterializeProjectSaveSnapshot(ProjectSaveSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var path = Path.GetFullPath(snapshot.Path);
+        var expectedPath = Path.GetFullPath(ProjectPathForSlot(snapshot.SlotId));
+        if (!path.Equals(expectedPath, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Refused to materialize a captured suit project through a different workspace or slot path.");
+        }
+
+        return JsonSerializer.Deserialize<NativeSuitProject>(snapshot.Json, JsonOptions)
+               ?? throw new InvalidOperationException("The captured suit project document was empty.");
+    }
+
+    /// <summary>
+    /// Commits a previously captured document under a process-wide per-path gate. A delayed older
+    /// snapshot cannot replace a newer snapshot that has already committed. The optional context
+    /// predicate lets the editor reject a save after the user selected another suit or workspace.
+    /// </summary>
+    public ProjectSaveCommitResult CommitProjectSave(
+        ProjectSaveSnapshot snapshot,
+        Func<bool>? contextIsCurrent = null)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var path = Path.GetFullPath(snapshot.Path);
+        var expectedPath = Path.GetFullPath(ProjectPathForSlot(snapshot.SlotId));
+        if (!path.Equals(expectedPath, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Refused to commit a captured suit project through a different workspace or slot path.");
+        }
+        var state = ProjectSaveStates.GetOrAdd(path, static _ => new ProjectSaveState());
+        lock (state.Gate)
+        {
+            if (contextIsCurrent is not null && !contextIsCurrent())
+            {
+                return new ProjectSaveCommitResult(path, Written: false, Superseded: false, RejectedByContext: true);
+            }
+
+            if (snapshot.Sequence < state.LastCapturedSequence ||
+                snapshot.Sequence <= state.LastCommittedSequence)
+            {
+                return new ProjectSaveCommitResult(path, Written: false, Superseded: true, RejectedByContext: false);
+            }
+
+            AtomicFileUtil.WriteAllText(path, snapshot.Json);
+            state.LastCommittedSequence = snapshot.Sequence;
+            return new ProjectSaveCommitResult(path, Written: true, Superseded: false, RejectedByContext: false);
+        }
+    }
+
+    /// <summary>
+    /// Captures the project file and its coordinated save generations. Stage transactions use this
+    /// instead of copying raw JSON so rollback can prove that no newer editor save owns the path.
+    /// </summary>
+    public ProjectFileRollbackSnapshot CaptureProjectFileRollback(string slotId)
+    {
+        var path = Path.GetFullPath(ProjectPathForSlot(slotId));
+        var state = ProjectSaveStates.GetOrAdd(path, static _ => new ProjectSaveState());
+        lock (state.Gate)
+        {
+            var existed = File.Exists(path);
+            var contents = existed ? File.ReadAllText(path) : null;
+            return new ProjectFileRollbackSnapshot(
+                path,
+                slotId,
+                existed,
+                contents,
+                ProjectFileFingerprint(existed, contents),
+                state.LastCommittedSequence,
+                state.LastCapturedSequence);
+        }
+    }
+
+    /// <summary>
+    /// Restores a stage transaction's original project file only while that transaction still owns
+    /// both the latest captured intent and the last committed document. A newer pending capture is
+    /// enough to reject rollback, preventing an older failure from erasing a save that is waiting on
+    /// a file lock. The current-file fingerprint also detects writes made outside this service.
+    /// </summary>
+    public ProjectFileRestoreResult TryRestoreProjectFile(
+        ProjectFileRollbackSnapshot rollback,
+        ProjectSaveSnapshot? latestOwnedSave = null,
+        bool ownedSaveWasCommitted = false,
+        Func<bool>? contextIsCurrent = null)
+    {
+        ArgumentNullException.ThrowIfNull(rollback);
+        if (ownedSaveWasCommitted && latestOwnedSave is null)
+        {
+            throw new ArgumentException(
+                "A committed rollback owner must include its captured project save.",
+                nameof(latestOwnedSave));
+        }
+
+        var path = Path.GetFullPath(rollback.Path);
+        var expectedPath = Path.GetFullPath(ProjectPathForSlot(rollback.SlotId));
+        if (!path.Equals(expectedPath, StringComparison.OrdinalIgnoreCase) ||
+            (latestOwnedSave is not null &&
+             (!Path.GetFullPath(latestOwnedSave.Path).Equals(path, StringComparison.OrdinalIgnoreCase) ||
+              !latestOwnedSave.SlotId.Equals(rollback.SlotId, StringComparison.Ordinal))))
+        {
+            throw new InvalidOperationException(
+                "Refused to restore a captured suit project through a different workspace or slot path.");
+        }
+
+        var state = ProjectSaveStates.GetOrAdd(path, static _ => new ProjectSaveState());
+        lock (state.Gate)
+        {
+            if (contextIsCurrent is not null && !contextIsCurrent())
+            {
+                return new ProjectFileRestoreResult(path, Restored: false, Superseded: false, RejectedByContext: true);
+            }
+
+            var expectedCapturedSequence = latestOwnedSave?.Sequence ?? rollback.LastCapturedSequence;
+            var expectedCommittedSequence = ownedSaveWasCommitted
+                ? latestOwnedSave!.Sequence
+                : rollback.LastCommittedSequence;
+            var currentExists = File.Exists(path);
+            var currentContents = currentExists ? File.ReadAllText(path) : null;
+            var expectedFingerprint = ownedSaveWasCommitted
+                ? ProjectFileFingerprint(existed: true, latestOwnedSave!.Json)
+                : rollback.Fingerprint;
+            if (state.LastCapturedSequence != expectedCapturedSequence ||
+                state.LastCommittedSequence != expectedCommittedSequence ||
+                !ProjectFileFingerprint(currentExists, currentContents)
+                    .Equals(expectedFingerprint, StringComparison.Ordinal))
+            {
+                return new ProjectFileRestoreResult(path, Restored: false, Superseded: true, RejectedByContext: false);
+            }
+
+            if (latestOwnedSave is null)
+            {
+                // The transaction never announced or committed a project edit. The fingerprint
+                // above proves the original document is already present, so leave generations
+                // untouched. This lets nested stage-only snapshots compose with their outer
+                // transaction instead of manufacturing a conflicting project save.
+                return new ProjectFileRestoreResult(
+                    path,
+                    Restored: true,
+                    Superseded: false,
+                    RejectedByContext: false,
+                    state.LastCapturedSequence,
+                    state.LastCommittedSequence,
+                    rollback.Fingerprint);
+            }
+
+            if (rollback.Existed)
+            {
+                AtomicFileUtil.WriteAllText(path, rollback.Contents ?? string.Empty);
+            }
+            else
+            {
+                File.Delete(path);
+            }
+
+            // A successful rollback is itself a new authoritative generation. Advancing both
+            // counters prevents any already-queued pre-rollback capture from committing later.
+            var rollbackSequence = Interlocked.Increment(ref _nextProjectSaveSequence);
+            state.LastCapturedSequence = rollbackSequence;
+            state.LastCommittedSequence = rollbackSequence;
+            return new ProjectFileRestoreResult(
+                path,
+                Restored: true,
+                Superseded: false,
+                RejectedByContext: false,
+                rollbackSequence,
+                rollbackSequence,
+                rollback.Fingerprint);
+        }
+    }
+
+    /// <summary>
+    /// Confirms that a successful rollback still owns the project path. Call this immediately before
+    /// re-certifying a restored stage; a manual save made during directory restoration invalidates
+    /// the certification even though it correctly remains the authoritative project document.
+    /// </summary>
+    public bool ProjectFileRestoreStillCurrent(ProjectFileRestoreResult restore)
+    {
+        ArgumentNullException.ThrowIfNull(restore);
+        if (!restore.Restored)
+        {
+            return false;
+        }
+
+        var path = Path.GetFullPath(restore.Path);
+        var state = ProjectSaveStates.GetOrAdd(path, static _ => new ProjectSaveState());
+        lock (state.Gate)
+        {
+            var exists = File.Exists(path);
+            var contents = exists ? File.ReadAllText(path) : null;
+            return state.LastCapturedSequence == restore.CapturedOwnershipSequence &&
+                   state.LastCommittedSequence == restore.CommittedOwnershipSequence &&
+                   ProjectFileFingerprint(exists, contents)
+                       .Equals(restore.RestoredFingerprint, StringComparison.Ordinal);
+        }
+    }
+
+    public bool RunIfProjectFileRestoreStillCurrent(
+        ProjectFileRestoreResult restore,
+        Action action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        ArgumentNullException.ThrowIfNull(restore);
+        if (!restore.Restored)
+        {
+            return false;
+        }
+
+        var path = Path.GetFullPath(restore.Path);
+        var state = ProjectSaveStates.GetOrAdd(path, static _ => new ProjectSaveState());
+        lock (state.Gate)
+        {
+            var exists = File.Exists(path);
+            var contents = exists ? File.ReadAllText(path) : null;
+            if (state.LastCapturedSequence != restore.CapturedOwnershipSequence ||
+                state.LastCommittedSequence != restore.CommittedOwnershipSequence ||
+                !ProjectFileFingerprint(exists, contents)
+                    .Equals(restore.RestoredFingerprint, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            // Keep stage certification and project-save ownership indivisible. A save captured or
+            // committed after this callback starts waits until the restored marker is in place.
+            action();
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Runs stage certification only while the exact immutable save that produced the stage is
+    /// still the newest captured and committed document for this project path. Holding the same
+    /// per-path gate across the callback prevents another in-process save from landing between the
+    /// ownership check and removal of the fail-closed stage marker.
+    /// </summary>
+    public bool RunIfProjectSaveStillCurrent(
+        ProjectSaveSnapshot snapshot,
+        Action action)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(action);
+        var path = Path.GetFullPath(snapshot.Path);
+        var expectedPath = Path.GetFullPath(ProjectPathForSlot(snapshot.SlotId));
+        if (!path.Equals(expectedPath, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Refused to certify a generated stage through a different workspace or slot path.");
+        }
+
+        var state = ProjectSaveStates.GetOrAdd(path, static _ => new ProjectSaveState());
+        lock (state.Gate)
+        {
+            var exists = File.Exists(path);
+            var contents = exists ? File.ReadAllText(path) : null;
+            if (state.LastCapturedSequence != snapshot.Sequence ||
+                state.LastCommittedSequence != snapshot.Sequence ||
+                !ProjectFileFingerprint(exists, contents)
+                    .Equals(ProjectFileFingerprint(existed: true, snapshot.Json), StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            action();
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Runs stage certification only while an unchanged on-disk project snapshot still owns the
+    /// path. Loaded-project replay uses this read-only guard so it cannot certify an older loaded
+    /// object after another save has changed (or merely announced a change to) the same project.
+    /// </summary>
+    public bool RunIfProjectFileSnapshotStillCurrent(
+        ProjectFileRollbackSnapshot snapshot,
+        Action action,
+        Func<bool>? contextIsCurrent = null)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(action);
+        var path = Path.GetFullPath(snapshot.Path);
+        var expectedPath = Path.GetFullPath(ProjectPathForSlot(snapshot.SlotId));
+        if (!path.Equals(expectedPath, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Refused to certify a generated stage through a different workspace or slot path.");
+        }
+
+        var state = ProjectSaveStates.GetOrAdd(path, static _ => new ProjectSaveState());
+        lock (state.Gate)
+        {
+            if (contextIsCurrent is not null && !contextIsCurrent())
+            {
+                return false;
+            }
+
+            var exists = File.Exists(path);
+            var contents = exists ? File.ReadAllText(path) : null;
+            if (state.LastCapturedSequence != snapshot.LastCapturedSequence ||
+                state.LastCommittedSequence != snapshot.LastCommittedSequence ||
+                !ProjectFileFingerprint(exists, contents)
+                    .Equals(snapshot.Fingerprint, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            action();
+            return true;
+        }
+    }
+
+    private static string ProjectFileFingerprint(bool existed, string? contents)
+    {
+        if (!existed)
+        {
+            return "missing";
+        }
+
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(contents ?? string.Empty));
+        return "sha256:" + Convert.ToHexString(bytes);
     }
 
     public string ProjectPathForSlot(string slotId) =>

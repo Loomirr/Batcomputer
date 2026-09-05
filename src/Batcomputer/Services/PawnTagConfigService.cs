@@ -19,6 +19,8 @@ namespace Batcomputer;
 /// </summary>
 public sealed class PawnTagConfigService
 {
+    private const string PlayablePrefix = "Pawns.Playable.";
+
     public sealed record TagRow(string PawnTag, string DevComment);
 
     public sealed class GenResult
@@ -32,6 +34,64 @@ public sealed class PawnTagConfigService
     /// <summary>Loose-file install location under the merge-ready game folder.</summary>
     public static string RelativeConfigPath(string modOrSuitId) =>
         $"LEGOBatmanLotDK/Config/Tags/{modOrSuitId}Tags.ini";
+
+    /// <summary>
+    /// Returns the native runtime's per-character owner for a full pawn identity, preserving the
+    /// exact spelling/casing serialized by the game. For example, the shipped Catwoman owner is
+    /// <c>Pawns.Playable.CatWoman</c>, not a folder-name-derived approximation.
+    /// </summary>
+    public static string CharacterScopeForPawnTag(string? pawnTag)
+    {
+        var normalized = pawnTag?.Trim() ?? "";
+        if (!normalized.StartsWith(PlayablePrefix, StringComparison.OrdinalIgnoreCase) ||
+            normalized.Length <= PlayablePrefix.Length)
+        {
+            return "";
+        }
+
+        var characterEnd = normalized.IndexOf('.', PlayablePrefix.Length);
+        return characterEnd < 0 ? normalized : normalized[..characterEnd];
+    }
+
+    /// <summary>
+    /// Repairs only the character-owner casing of a custom PawnTag when it names the same owner as
+    /// the selected donor. This lets saved projects created from folder-derived family names adopt
+    /// the donor DCMD's authoritative spelling without changing their unique leaf or moving a suit
+    /// to a different character family.
+    /// </summary>
+    public static string CanonicalizeCharacterOwner(string? pawnTag, string? donorPawnTag)
+    {
+        var normalized = pawnTag?.Trim() ?? "";
+        var currentScope = CharacterScopeForPawnTag(normalized);
+        var donorScope = CharacterScopeForPawnTag(donorPawnTag);
+        if (currentScope.Length == 0 || donorScope.Length == 0 ||
+            !currentScope.Equals(donorScope, StringComparison.OrdinalIgnoreCase))
+        {
+            return normalized;
+        }
+
+        return donorScope + normalized[currentScope.Length..];
+    }
+
+    /// <summary>
+    /// Returns a release-blocking explanation when a custom PawnTag belongs to a genuinely
+    /// different playable-character owner than the selected gameplay donor. Casing-only
+    /// differences are valid here and are repaired separately by <see cref="CanonicalizeCharacterOwner"/>.
+    /// Empty or malformed tags remain the responsibility of the normal PawnTag validation.
+    /// </summary>
+    public static string? CharacterOwnerMismatchError(string? pawnTag, string? donorPawnTag)
+    {
+        var currentScope = CharacterScopeForPawnTag(pawnTag);
+        var donorScope = CharacterScopeForPawnTag(donorPawnTag);
+        if (currentScope.Length == 0 || donorScope.Length == 0 ||
+            currentScope.Equals(donorScope, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return $"PawnTag owner '{currentScope}' does not match the selected gameplay donor owner '{donorScope}'. " +
+               "Choose a PawnTag under the donor's character owner before packaging.";
+    }
 
     /// <summary>
     /// Renders the ini text deterministically: rows sorted by tag, duplicates rejected.

@@ -116,7 +116,8 @@ public sealed class UimdGenService
             CopyIfExists(baseNoExt + ".uasset", outputBasePath + ".uasset");
             CopyIfExists(baseNoExt + ".uexp", outputBasePath + ".uexp");
 
-            var asset = new UAsset(outputBasePath + ".uasset", EngineVersion.VER_UE5_6, LoadMappings(), CustomSerializationFlags.SkipPreloadDependencyLoading);
+            var mappings = LoadMappings();
+            var asset = new UAsset(outputBasePath + ".uasset", EngineVersion.VER_UE5_6, mappings, CustomSerializationFlags.SkipPreloadDependencyLoading);
             var cleanUimdPackagePath = UnrealPathUtil.NormalizePackagePath(uimdPackagePath);
             asset.FolderName = new FString(cleanUimdPackagePath);
 
@@ -231,10 +232,12 @@ public sealed class UimdGenService
             // Native-suit identity + localization (property-level; see §7.2/§7.3).
             if (!string.IsNullOrWhiteSpace(pawnTag))
             {
-                if (NativeAssetTextPatch.SetGameplayTag(asset, "PawnTag", pawnTag!.Trim()))
+                if (!NativeAssetTextPatch.SetGameplayTag(asset, "PawnTag", pawnTag!.Trim()))
                 {
-                    result.Repointed.Add($"PawnTag -> {pawnTag!.Trim()}");
+                    throw new InvalidDataException(
+                        "The donor UIMD has no writable PawnTag. Batcomputer refused to emit UI metadata for a different native identity.");
                 }
+                result.Repointed.Add($"PawnTag -> {pawnTag!.Trim()}");
             }
             if (!string.IsNullOrWhiteSpace(descriptionTableObjectPath))
             {
@@ -251,13 +254,17 @@ public sealed class UimdGenService
             }
 
             asset.Write(outputBasePath + ".uasset");
-            if (explicitIconProperties.Count > 0)
+            if (explicitIconProperties.Count > 0 || !string.IsNullOrWhiteSpace(pawnTag))
             {
                 var writtenAsset = new UAsset(
                     outputBasePath + ".uasset",
                     EngineVersion.VER_UE5_6,
-                    LoadMappings(),
+                    mappings,
                     CustomSerializationFlags.SkipPreloadDependencyLoading);
+                if (!string.IsNullOrWhiteSpace(pawnTag))
+                {
+                    RequirePersistedPawnTag(writtenAsset, pawnTag);
+                }
                 foreach (var icon in explicitIconProperties)
                 {
                     var targetPackage = UnrealPathUtil.NormalizePackagePath(icon.TargetPath);
@@ -283,6 +290,18 @@ public sealed class UimdGenService
             result.Status = "error";
             result.Error = ex.ToString();
             return result;
+        }
+    }
+
+    internal static void RequirePersistedPawnTag(UAsset persistedAsset, string pawnTag)
+    {
+        if (!string.Equals(
+                NativeAssetTextPatch.GetGameplayTag(persistedAsset, "PawnTag"),
+                pawnTag.Trim(),
+                StringComparison.Ordinal))
+        {
+            throw new InvalidDataException(
+                $"The generated UIMD was written, but its PawnTag is not '{pawnTag.Trim()}'.");
         }
     }
 

@@ -21,7 +21,8 @@ namespace Batcomputer;
 /// </summary>
 public sealed class TextureCookService
 {
-    public const int CurrentEncoderVersion = 9;
+    // Version 10 adds a mandatory source-image size/hash to the cook report.
+    public const int CurrentEncoderVersion = 10;
 
     private const CustomSerializationFlags NameMapOnlyPatchFlags =
         CustomSerializationFlags.SkipParsingExports |
@@ -58,6 +59,12 @@ public sealed class TextureCookService
         public int InlineMipCount { get; set; }
         public int InlinePayloadOffsetBias { get; set; }
         public string RecipeFingerprint { get; set; } = "";
+        // Bind the cooked payload to the exact source image bytes used for this
+        // attempt.  Output hashes prove the package is internally complete; the
+        // source hash additionally proves that an edited saved image has actually
+        // been recooked rather than being hidden behind an otherwise-valid report.
+        public long SourceImageBytes { get; set; }
+        public string SourceImageSha256 { get; set; } = "";
         public long OutputUassetBytes { get; set; }
         public string OutputUassetSha256 { get; set; } = "";
         public long OutputUexpBytes { get; set; }
@@ -192,6 +199,8 @@ public sealed class TextureCookService
             }
             result.OutputPackagePath = outputPackagePath;
 
+            var sourceIntegrityBefore = FileIntegrity(request.SourceImagePath);
+
             var outputBase = PackagePathToBasePath(request.OutputContentRoot, outputPackagePath);
             Directory.CreateDirectory(Path.GetDirectoryName(outputBase)!);
             attemptBase = outputBase + ".texture-cook-attempt-" + Guid.NewGuid().ToString("N");
@@ -214,6 +223,14 @@ public sealed class TextureCookService
                 template.PixelFormat,
                 request.Bc7InputLayout,
                 request.Bc7Quality);
+            var sourceIntegrityAfter = FileIntegrity(request.SourceImagePath);
+            if (sourceIntegrityAfter != sourceIntegrityBefore)
+            {
+                throw new IOException(
+                    "The source image changed while it was being cooked. No generated texture files were replaced; save the image and retry.");
+            }
+            (result.SourceImageBytes, result.SourceImageSha256) = sourceIntegrityAfter;
+            result.Log.Add($"source image SHA-256: {result.SourceImageSha256}");
             if (template.PixelFormat.Equals("PF_BC7", StringComparison.OrdinalIgnoreCase))
             {
                 result.Log.Add($"BC7 input layout: {NormalizeBc7InputLayout(request.Bc7InputLayout)} quality={NormalizeBc7Quality(request.Bc7Quality)}");

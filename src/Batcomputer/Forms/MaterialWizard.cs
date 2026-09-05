@@ -246,6 +246,7 @@ public sealed partial class MaterialWizard : AdaptiveForm
             AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill
         });
         _grid.CellDoubleClick += (_, e) => ChooseColourForRow(e.RowIndex);
+        _grid.CellMouseDown += OnParameterGridCellMouseDown;
         _grid.CellEndEdit += (_, e) =>
         {
             if (e.RowIndex >= 0 && e.RowIndex < _grid.Rows.Count)
@@ -430,7 +431,8 @@ public sealed partial class MaterialWizard : AdaptiveForm
         _faceHelperAuthoredRows.Clear();
         foreach (var parameter in info.TextureParams)
         {
-            _grid.Rows.Add("Texture", parameter.Name, parameter.CurrentTexturePath, "");
+            var rowIndex = _grid.Rows.Add("Texture", parameter.Name, parameter.CurrentTexturePath, "");
+            _grid.Rows[rowIndex].Tag = parameter;
         }
         foreach (var parameter in info.ColorParams)
         {
@@ -733,6 +735,151 @@ public sealed partial class MaterialWizard : AdaptiveForm
             string.Equals(UnrealPathUtil.NormalizePackagePath(texture.ObjectPath), normalized, StringComparison.OrdinalIgnoreCase));
     }
 
+    private void OnParameterGridCellMouseDown(object? sender, DataGridViewCellMouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Right || e.RowIndex < 0 || e.RowIndex >= _grid.Rows.Count)
+        {
+            return;
+        }
+
+        var row = _grid.Rows[e.RowIndex];
+        if (!string.Equals(row.Cells["Kind"].Value?.ToString(), "Texture", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _grid.ClearSelection();
+        row.Selected = true;
+        if (e.ColumnIndex >= 0)
+        {
+            _grid.CurrentCell = row.Cells[e.ColumnIndex];
+        }
+
+        var currentPath = CurrentTextureObjectPath(row);
+        var overridePath = OverrideTextureObjectPath(row);
+        var menu = new ContextMenuStrip();
+        var clickedOverride = e.ColumnIndex >= 0 &&
+                              string.Equals(_grid.Columns[e.ColumnIndex].Name, "Override", StringComparison.OrdinalIgnoreCase);
+
+        void AddExtractItem(string label, string path)
+        {
+            var item = menu.Items.Add(label);
+            item.Enabled = !string.IsNullOrWhiteSpace(path);
+            item.Click += (_, _) => _ = ExtractTextureAsync(path);
+        }
+
+        if (clickedOverride && !string.IsNullOrWhiteSpace(overridePath))
+        {
+            AddExtractItem("Extract texture…", overridePath);
+            if (!string.IsNullOrWhiteSpace(currentPath))
+            {
+                AddExtractItem("Extract inherited texture…", currentPath);
+            }
+        }
+        else
+        {
+            AddExtractItem("Extract texture…", currentPath);
+            if (!string.IsNullOrWhiteSpace(overridePath))
+            {
+                AddExtractItem("Extract override texture…", overridePath);
+            }
+        }
+
+        var copyPath = clickedOverride && !string.IsNullOrWhiteSpace(overridePath) ? overridePath : currentPath;
+        var copy = menu.Items.Add("Copy texture path");
+        copy.Enabled = !string.IsNullOrWhiteSpace(copyPath);
+        copy.Click += (_, _) =>
+        {
+            if (!string.IsNullOrWhiteSpace(copyPath))
+            {
+                Clipboard.SetText(copyPath);
+                _status.Text = $"Copied texture path: {copyPath}";
+            }
+        };
+
+        menu.Show(_grid, _grid.PointToClient(Cursor.Position));
+    }
+
+    private static string CurrentTextureObjectPath(DataGridViewRow row)
+    {
+        if (row.Tag is MaterialGenService.TextureParam parameter &&
+            !string.IsNullOrWhiteSpace(parameter.ObjectPath))
+        {
+            return parameter.ObjectPath;
+        }
+
+        var current = row.Cells["Current"].Value?.ToString()?.Trim() ?? "";
+        return current.Contains('/') ? current : "";
+    }
+
+    private static string OverrideTextureObjectPath(DataGridViewRow row)
+    {
+        var value = row.Cells["Override"].Value?.ToString()?.Trim() ?? "";
+        return string.IsNullOrWhiteSpace(value) || IsClearTextureOverride(value) ? "" : value;
+    }
+
+    private async Task ExtractTextureAsync(string texturePath)
+    {
+        var packagePath = UnrealPathUtil.NormalizePackagePath(texturePath);
+        var assetName = UnrealPathUtil.AssetName(packagePath);
+        if (string.IsNullOrWhiteSpace(packagePath) || string.IsNullOrWhiteSpace(assetName))
+        {
+            Dialog.Warn(this, "Texture cannot be extracted", "That texture reference does not contain a usable Unreal asset path.");
+            return;
+        }
+
+        using var picker = new SaveFileDialog
+        {
+            Title = "Extract texture as PNG",
+            Filter = "PNG image (*.png)|*.png",
+            DefaultExt = "png",
+            AddExtension = true,
+            FileName = UnrealPathUtil.SanitizeIdentifier(assetName, "Texture") + ".png",
+            OverwritePrompt = true,
+            RestoreDirectory = true,
+        };
+        if (picker.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        _status.Text = $"Extracting {assetName}…";
+        UseWaitCursor = true;
+        try
+        {
+            var roots = TextureExtractionContentRoots().ToArray();
+            var result = await Task.Run(() => TextureExtractionService.ExportPng(texturePath, picker.FileName, roots));
+            if (!result.Success)
+            {
+                _status.Text = $"Could not extract {assetName}.";
+                Dialog.Warn(this, "Texture could not be extracted", result.Detail);
+                return;
+            }
+
+            _status.Text = $"Extracted {assetName} ({result.Width} × {result.Height}, {result.PixelFormat}).";
+            Dialog.Info(this, "Texture extracted",
+                $"Saved {assetName} as a PNG.\n\n{picker.FileName}\n\n{result.Width} × {result.Height} · {result.PixelFormat}");
+        }
+        finally
+        {
+            UseWaitCursor = false;
+        }
+    }
+
+    private IEnumerable<string> TextureExtractionContentRoots()
+    {
+        // Do not overlay the active FModel/retoc extraction here. Those files are useful clone
+        // sources, but a loose UTexture2D can load without reconstructed platform data and then
+        // shadow the complete copy already mounted from the game's containers as PF_Unknown.
+        // Workspace output roots below contain genuinely tool-cooked textures and are safe.
+        yield return AppSettings.Current.EffectiveExportContentRoot();
+        foreach (var texture in _generatedTextures.Where(texture => !string.IsNullOrWhiteSpace(texture.OutputRoot)))
+        {
+            yield return Path.Combine(texture.OutputRoot, "Cooked", "LEGOBatmanLotDK", "Content");
+            yield return Path.Combine(texture.OutputRoot, "IoStore", "Stage", "LEGOBatmanLotDK", "Content");
+        }
+    }
+
     private static TextureAssignmentWarning? DescribeTextureAssignment(string parameter, GeneratedTextureEntry texture)
     {
         var role = TextureRoleForParameter(parameter);
@@ -1029,7 +1176,8 @@ public sealed partial class MaterialWizard : AdaptiveForm
 
         foreach (var parameter in info.TextureParams)
         {
-            _grid.Rows.Add("Texture", parameter.Name, parameter.CurrentTexturePath, "");
+            var rowIndex = _grid.Rows.Add("Texture", parameter.Name, parameter.CurrentTexturePath, "");
+            _grid.Rows[rowIndex].Tag = parameter;
         }
         foreach (var parameter in info.ColorParams)
         {

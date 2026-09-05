@@ -33,6 +33,21 @@ public sealed class ComponentRemoveService
     /// deterministically find all "Cape"/"Cape_2"/… duplicates for cleanup.
     /// </summary>
     public List<string> ListScsComponentNames(string slotId, string packagePath, string prefix)
+        => ListScsComponentNamesCore(slotId, packagePath, prefix, requireVisualMesh: false);
+
+    /// <summary>
+    /// Lists only SCS nodes whose component template owns a non-null static or skeletal mesh.
+    /// Visual-base cleanup must use this view: dialogue, character-asset, and other gameplay
+    /// components are SCS nodes too, but they are not removable appearance parts.
+    /// </summary>
+    public List<string> ListScsVisualComponentNames(string slotId, string packagePath, string prefix)
+        => ListScsComponentNamesCore(slotId, packagePath, prefix, requireVisualMesh: true);
+
+    private List<string> ListScsComponentNamesCore(
+        string slotId,
+        string packagePath,
+        string prefix,
+        bool requireVisualMesh)
     {
         var names = new List<string>();
         try
@@ -63,10 +78,29 @@ public sealed class ComponentRemoveService
                     continue;
                 }
                 var iv = FindPropertyLive<NamePropertyData>(normal.Data, "InternalVariableName")?.Value.ToString();
-                if (!string.IsNullOrEmpty(iv) && iv.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                if (string.IsNullOrEmpty(iv) || !iv.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                 {
-                    names.Add(iv);
+                    continue;
                 }
+
+                if (requireVisualMesh)
+                {
+                    var template = FindPropertyLive<ObjectPropertyData>(normal.Data, "ComponentTemplate")?.Value ??
+                                   FPackageIndex.FromRawIndex(0);
+                    if (!template.IsExport())
+                    {
+                        continue;
+                    }
+                    var templateIndex = template.Index - 1;
+                    if (templateIndex < 0 || templateIndex >= asset.Exports.Count ||
+                        asset.Exports[templateIndex] is not NormalExport componentTemplate ||
+                        !ComponentTemplateHasVisualMesh(componentTemplate))
+                    {
+                        continue;
+                    }
+                }
+
+                names.Add(iv);
             }
         }
         catch
@@ -74,6 +108,19 @@ public sealed class ComponentRemoveService
             // best effort - return whatever we found
         }
         return names.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static bool ComponentTemplateHasVisualMesh(NormalExport componentTemplate)
+    {
+        foreach (var propertyName in new[] { "StaticMesh", "SkeletalMesh", "SkinnedAsset" })
+        {
+            var property = FindPropertyLive<ObjectPropertyData>(componentTemplate.Data, propertyName);
+            if (property is not null && !property.Value.IsNull())
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     /// <summary>

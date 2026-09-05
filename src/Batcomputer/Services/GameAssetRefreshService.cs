@@ -22,6 +22,16 @@ public sealed class GameAssetRefreshService
 
     public const string RetocEngineVersion = "UE5_6";
     public const string CharacterGadgetFilter = "Content/Models/Gadgets/";
+    public const string KatanaMeshFilter = "Content/Models/Props/SM_Katana";
+    public const string KatanaMaterialFilter = "Content/Models/Props/Materials/Mi_LEGO_Bake_Katana";
+    public const string KatanaTextureFilter = "Content/Models/Props/Textures/T_Katana_";
+    public static IReadOnlyList<string> HeldItemFilters { get; } = [
+        "Content/Models/Props/SM_BaseBallBat", "Content/Models/Props/SM_StunBaton",
+        "Content/Models/Props/SM_BaseBall", "Content/Models/Props/SM_SmokeBomb", "Content/Models/Props/SM_UmbrellaClosed",
+        "Content/Global/Materials/LEGO_Material_Library/Project/LEGO_Models/Material_Instances/Mi_LEGO_MD_Solid_DynamicTPage_LCS",
+        "Content/Global/Materials/LEGO_Material_Library/Project/LEGO_Models/Material_Instances/Mi_LEGO_MD_Transp_DynamicTPage_LCS",
+        "Content/Global/Materials/LEGO_Material_Library/Project/Tech_Design/Material_Instances/Mi_LEGO_TD_GlowTransp"
+    ];
     public const string CharacterMaterialsFilter = "Content/Characters/Materials/";
     // DLC packages mount their content below this normal /Game folder. This is
     // intentionally a package filter, not a physical Content directory: the
@@ -32,6 +42,72 @@ public sealed class GameAssetRefreshService
     public const string GameFeatureContentFilter = "Plugins/GameFeatures/";
     public const string CapeTransparentMaterialFilter =
         "Content/Art/TechnicalArt/Optimisation/M_Cape_Transparent";
+
+    // Serialized character AbilitySets and equipment definitions also point at a small number of
+    // shared gameplay packages outside the character-adjacent trees below. Keep these filters
+    // source-derived and deliberately narrow: the two AI and vehicle families are real shared
+    // ability roots, while one-off references use their exact package stem (or a constrained name
+    // prefix where the source contains a family). In particular, do not replace these with broad
+    // Content/Global, Content/LEGOGameplay, or Content/Minigames filters.
+    public const string GlobalAiAbilitiesFilter = "Content/Global/AI/Abilities/";
+    public const string GlobalAiGameplayEffectsFilter = "Content/Global/AI/GameplayEffects/";
+    public const string CharacterRedBrickAbilitiesFilter =
+        "Content/Global/Collectables/MetaData/RedBrickEffects/GameplayAbilities/Characters/";
+    public const string HidePickupsAbilityFilter =
+        "Content/Global/Collectables/Pickups/GA_HidePickups";
+    public const string ConversationAbilityFilter =
+        "Content/Global/Conversations/Blueprints/GA_ConversationAbility_";
+    public const string PhotofitArrestAbilityFilter =
+        "Content/Global/DinnerActivities/PhotofitChase/GA_PhotofitArrest_Radial";
+    public const string AddAimInfluenceCueFilter =
+        "Content/Global/GameplayCuesShared/GC_AddAimInfluence";
+    public const string LightningElectrocutionAbilityFilter =
+        "Content/Global/WeatherSystem/GA_LightningElectrocution";
+    public const string SplineSlideAbilityFilter =
+        "Content/LEGOGameplay/CoreTemplates/Slide/GA_SplineSlide";
+    public const string UseSmartObjectAbilityFilter =
+        "Content/LEGOGameplay/GenericProps/GothamCity/SmartObjects/Setup/GA_UseSmartObject";
+    public const string HackingV2AbilitiesFilter = "Content/Minigames/HackingV2/Abilities/";
+    public const string SafeCrackAbilitiesFilter = "Content/Minigames/SafeCrack/Abilities/";
+    public const string CrimePayloadAnimationAbilityFilter =
+        "Content/RandomCrimes/AnimationAbilities/GA_Crime_PlayPayloadAnimationAbility";
+    public const string VehicleAbilitiesFilter = "Content/Vehicles/Abilities/";
+
+    public static IReadOnlyList<string> CharacterDependencyAbilityFilters { get; } = new[]
+    {
+        GlobalAiAbilitiesFilter,
+        GlobalAiGameplayEffectsFilter,
+        CharacterRedBrickAbilitiesFilter,
+        HidePickupsAbilityFilter,
+        ConversationAbilityFilter,
+        PhotofitArrestAbilityFilter,
+        AddAimInfluenceCueFilter,
+        LightningElectrocutionAbilityFilter,
+        SplineSlideAbilityFilter,
+        UseSmartObjectAbilityFilter,
+        HackingV2AbilitiesFilter,
+        SafeCrackAbilitiesFilter,
+        CrimePayloadAnimationAbilityFilter,
+        VehicleAbilitiesFilter,
+    };
+
+    private static IReadOnlyList<string> CharacterDependencyAbilitySentinelPackages { get; } = new[]
+    {
+        "Global/AI/Abilities/AS_BladeGoon",
+        "Global/AI/GameplayEffects/GE_CharacterLOD_ProcessAlways",
+        "Global/Collectables/MetaData/RedBrickEffects/GameplayAbilities/Characters/GA_RedBrickAbility_CharacterCombat",
+        "Global/Collectables/Pickups/GA_HidePickupsForPlayer",
+        "Global/Conversations/Blueprints/GA_ConversationAbility_Radial",
+        "Global/DinnerActivities/PhotofitChase/GA_PhotofitArrest_Radial",
+        "Global/GameplayCuesShared/GC_AddAimInfluence",
+        "Global/WeatherSystem/GA_LightningElectrocution",
+        "LEGOGameplay/CoreTemplates/Slide/GA_SplineSlide",
+        "LEGOGameplay/GenericProps/GothamCity/SmartObjects/Setup/GA_UseSmartObject",
+        "Minigames/HackingV2/Abilities/GA_HackingMinigame_InteractionSupport",
+        "Minigames/SafeCrack/Abilities/GA_SafeCrack_Interaction",
+        "RandomCrimes/AnimationAbilities/GA_Crime_PlayPayloadAnimationAbility",
+        "Vehicles/Abilities/Core/GE_VehicleMountTargeting",
+    };
 
     public enum RefreshProfile
     {
@@ -82,6 +158,9 @@ public sealed class GameAssetRefreshService
         "Content/Localization/StringTables/",
         "Content/Animation/",
         CharacterGadgetFilter,
+        KatanaMeshFilter,
+        KatanaMaterialFilter,
+        KatanaTextureFilter,
         // Shipped character DLC is authored below /Game/AdditionalContent rather
         // than /Game/Characters. Include the whole package tree so its visual
         // bases, materials, attachments, meshes and supporting metadata stay
@@ -94,8 +173,10 @@ public sealed class GameAssetRefreshService
         // Keep the clean-install viewer self-sufficient without broadening this into
         // a Red Brick authoring or collectables extraction profile.
         ViewerBaseGameRedBrickPaletteService.RetocFilter,
-    }.Concat(TextureCookTemplateService.RetocFilters.Where(filter =>
-        !filter.StartsWith(CharacterGadgetFilter, StringComparison.OrdinalIgnoreCase))).ToArray();
+    }.Concat(HeldItemFilters).Concat(HeldItemEffectService.ExtractionFilters).Concat(CharacterDependencyAbilityFilters)
+        .Concat(TextureCookTemplateService.RetocFilters.Where(filter =>
+            !filter.StartsWith(CharacterGadgetFilter, StringComparison.OrdinalIgnoreCase)))
+        .ToArray();
 
     // Developer-only research profile. This is broader than the normal builder
     // refresh and may take substantially longer and consume more disk space. It
@@ -109,13 +190,16 @@ public sealed class GameAssetRefreshService
         "Content/Abilities/",
         "Content/Gameplay/",
         CharacterGadgetFilter,
+        KatanaMeshFilter,
+        KatanaMaterialFilter,
+        KatanaTextureFilter,
         AdditionalContentFilter,
         CapeTransparentMaterialFilter,
         "Content/UI/",
         "Content/Localization/StringTables/",
         GameFeatureContentFilter,
         ViewerBaseGameRedBrickPaletteService.RetocFilter,
-    };
+    }.Concat(HeldItemFilters).Concat(HeldItemEffectService.ExtractionFilters).Concat(CharacterDependencyAbilityFilters).ToArray();
 
     private readonly string _projectRoot;
 
@@ -714,6 +798,17 @@ public sealed class GameAssetRefreshService
             required.StartsWith(NormalizeFolder(filter), StringComparison.OrdinalIgnoreCase));
     }
 
+    internal static bool FiltersCoverPackage(
+        IEnumerable<string> filters,
+        string requiredPackage)
+    {
+        static string Normalize(string path) => path.Replace('\\', '/').TrimStart('/');
+
+        var required = Normalize(requiredPackage);
+        return filters.Any(filter =>
+            required.StartsWith(Normalize(filter), StringComparison.OrdinalIgnoreCase));
+    }
+
     private static async Task<ProcessResult> RunRetocAsync(
         string retoc,
         string paksRoot,
@@ -892,6 +987,23 @@ public sealed class GameAssetRefreshService
                 "Supporting gadget assets were extracted, but MI_DECAL_Wingsuit_Nightwing was not found. " +
                 "The installed game build may not match Batcomputer's material catalog.");
         }
+
+        var missingDependencyPackages = CharacterDependencyAbilitySentinelPackages
+            .Where(package => !File.Exists(Path.Combine(
+                contentRoot,
+                package.Replace('/', Path.DirectorySeparatorChar) + ".uasset")))
+            .ToList();
+        if (missingDependencyPackages.Count > 0)
+        {
+            throw new InvalidDataException(
+                $"retoc completed, but {missingDependencyPackages.Count} serialized character-dependency " +
+                "ability package(s) were not extracted: " +
+                string.Join(", ", missingDependencyPackages.Select(package => "/Game/" + package)) + ". " +
+                "The previous extracted dump remains active. Verify the original game Content\\Paks folder and retry the refresh.");
+        }
+
+        result.Logs.Add(
+            $"Character-dependency ability package sentinels={CharacterDependencyAbilitySentinelPackages.Count}");
     }
 
     private static string? FindContentRoot(string outputRoot, bool requireCharacters = true)

@@ -155,7 +155,7 @@ public sealed class CustomStaticMeshImportDialog : AdaptiveForm
         AddNumberRow(fields, 5, "Offset Y", _offsetY, "Local Unreal-centimetre offset. Small changes are easiest to judge in the 3D viewer.");
         AddNumberRow(fields, 6, "Offset Z", _offsetZ, "Local Unreal-centimetre offset, saved with this custom mesh.");
         AddNumberRow(fields, 7, "Rotation pitch", _rotationPitch, "Unreal pitch in degrees, baked into both the game mesh and 3D preview.");
-        AddNumberRow(fields, 8, "Rotation yaw", _rotationYaw, "Unreal yaw in degrees. Use this to turn an imported head attachment left or right.");
+        AddNumberRow(fields, 8, "Rotation yaw", _rotationYaw, "Unreal yaw in degrees. If an asymmetric print looks mirrored, the OBJ is usually facing away and is being seen from its back: add 180 degrees here instead of flipping its texture.");
         AddNumberRow(fields, 9, "Rotation roll", _rotationRoll, "Unreal roll in degrees, baked into both the game mesh and 3D preview.");
 
         _hideBaseHead.Text = "Hide the base Head component";
@@ -168,7 +168,7 @@ public sealed class CustomStaticMeshImportDialog : AdaptiveForm
 
         var note = new Label
         {
-            Text = "Static OBJ only for now. Export triangles and UVs; each distinct material named by usemtl becomes a numbered slot. After import, assign each slot from Components or the 3D inspector. Scale, XYZ placement, and rotation stay saved with the mesh.",
+            Text = "Static OBJ only. Export triangles and UVs; each usemtl name becomes a slot. Preview and game share one transform. A mirrored print usually means the back is facing forward—add 180° to Yaw.",
             Dock = DockStyle.Fill,
             Font = Theme.Caption,
             ForeColor = Theme.OnDarkMuted,

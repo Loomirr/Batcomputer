@@ -467,7 +467,18 @@ public sealed partial class MainForm
         // Persist the pak name used for this export so it's the default next time.
         _currentProject.PackageBaseName = packageBaseName;
         _lastAutoPackageBaseName = packageBaseName;
-        try { (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(_currentProject); } catch { /* best effort */ }
+        try
+        {
+            _projectService = ResolveProjectServiceForRoot(_projectService, projectRoot);
+            _projectService.SaveProject(_currentProject);
+        }
+        catch (Exception ex)
+        {
+            var message = "The suit project could not be saved before packaging, so Batcomputer stopped instead of building from state that would be lost when the tool closes. " + ex.Message;
+            AppendLog("IoStore package aborted: " + message);
+            Dialog.Error(this, "Suit was not saved", message);
+            return PackageBuildResult.Failed(message);
+        }
         var script = Path.Combine(projectRoot, "tools", "Build-NativeSuitGuiPatchedIoStore.ps1");
 
         if (!File.Exists(script))
@@ -492,6 +503,21 @@ public sealed partial class MainForm
         try
         {
             packageProject = CloneProjectForPackagePreparation(_currentProject);
+            var packageMetadataDonor = NativeMetadataDonorService.TryRead(
+                packageProject.DcmdTemplate,
+                packageProject.PlayableTemplate,
+                packageProject.CutsceneTemplate);
+            if (CanonicalizeProjectPawnTagOwner(packageProject, packageMetadataDonor))
+            {
+                AppendLog($"Package preparation canonicalized the PawnTag character owner from its donor: {packageProject.PawnTag}");
+            }
+            var ownerMismatch = PawnTagConfigService.CharacterOwnerMismatchError(
+                packageProject.PawnTag,
+                packageMetadataDonor?.PawnTag);
+            if (!string.IsNullOrWhiteSpace(ownerMismatch))
+            {
+                throw new InvalidDataException(ownerMismatch);
+            }
             preparationStage = await CreatePackagePreparationStageAsync(packageProject, projectRoot);
         }
         catch (Exception ex)
@@ -538,6 +564,7 @@ public sealed partial class MainForm
             var removalReplay = await ApplySavedComponentRemovals(
                 packageProject,
                 logNoRemovals: false,
+                projectRoot: projectRoot,
                 stageContentRootOverride: contentRootToPackage);
             if (!removalReplay.Success)
             {
@@ -587,7 +614,7 @@ public sealed partial class MainForm
         // cutscene + anim/equipment/visual graft) to the ACTUAL packaged root - the
         // grafted-parts stage diverges from the name-map stage, so this must run here
         // or archetype suits with grafted parts package without their animations.
-        if (packageProject.UseCustomArchetype)
+        if (AnimArchetypeGraftService.RequiresCustomArchetype(packageProject))
         {
             _packageProgress?.Report("Applying custom archetype + animation pipeline…");
             var archAnim = new AnimArchetypeGraftService().ApplyToPackagedRoot(packageProject, contentRootToPackage);
@@ -611,6 +638,7 @@ public sealed partial class MainForm
         var materialReplay = await ApplySavedMaterials(
             packageProject,
             logIfNone: false,
+            projectRoot: projectRoot,
             stageContentRootOverride: contentRootToPackage);
         if (!materialReplay.Success)
         {
@@ -879,7 +907,7 @@ public sealed partial class MainForm
         project.PartGrafts is { Count: > 0 } ||
         project.CustomStaticMeshes is { Count: > 0 } ||
         project.MaterialAssignments is { Count: > 0 } ||
-        project.UseCustomArchetype ||
+        AnimArchetypeGraftService.RequiresCustomArchetype(project) ||
         project.EquipmentSlots is { Count: > 0 } ||
         project.GliderGrafted ||
         !string.IsNullOrWhiteSpace(project.GliderType) ||
@@ -1451,7 +1479,30 @@ public sealed partial class MainForm
             project.CutsceneTemplate);
         if (metadataDonor is null)
         {
+            if (requireSuccess && project.DcmdTemplate is not null)
+            {
+                throw new InvalidOperationException(
+                    "The selected native metadata donor could not be read from the active extraction. " +
+                    "Batcomputer refused to substitute Batman metadata into this release; run a full refresh and rebuild.");
+            }
             AppendLog("Native metadata donor could not be read; generating the required DCMD/UIMD from the base Batman metadata.");
+        }
+        else if (CanonicalizeProjectPawnTagOwner(project, metadataDonor))
+        {
+            AppendLog($"Canonicalized the staged PawnTag character owner from the donor DCMD: {project.PawnTag}");
+        }
+
+        var ownerMismatch = PawnTagConfigService.CharacterOwnerMismatchError(
+            project.PawnTag,
+            metadataDonor?.PawnTag);
+        if (!string.IsNullOrWhiteSpace(ownerMismatch))
+        {
+            AppendLog("DCMD generation blocked: " + ownerMismatch);
+            if (requireSuccess)
+            {
+                throw new InvalidDataException(ownerMismatch);
+            }
+            return;
         }
 
         var pawnTag = DerivePawnTag(project);

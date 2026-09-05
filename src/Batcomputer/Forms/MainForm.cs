@@ -870,8 +870,25 @@ public sealed partial class MainForm : AdaptiveForm
         _suitNameText.Text = _currentProject.DisplayName;
         _descriptionText.Text = _currentProject.Description;
 
-        try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject); } catch { /* best effort */ }
-        AppendLog($"Native identity saved. PawnTag = {_currentProject.PawnTag}. Rebuild the mod to regenerate its PawnTags.ini + StringTable.");
+        var identitySaved = false;
+        try
+        {
+            _projectService = ResolveProjectServiceForRoot(_projectService, _projectRootText.Text.Trim());
+            _projectService.SaveProject(_currentProject);
+            identitySaved = true;
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Native identity save failed: {ex.Message}");
+            Dialog.Error(
+                this,
+                "Native identity was not saved",
+                "The identity remains open in this session, but Batcomputer could not write it to the suit project. Retry Save suit before closing the tool.\n\n" + ex.Message);
+        }
+        if (identitySaved)
+        {
+            AppendLog($"Native identity saved. PawnTag = {_currentProject.PawnTag}. Rebuild the mod to regenerate its PawnTags.ini + StringTable.");
+        }
         RefreshToyboxTiles();
         RefreshInspector();
     }
@@ -1054,7 +1071,11 @@ public sealed partial class MainForm : AdaptiveForm
         return string.IsNullOrWhiteSpace(picker.SelectedPlayablePackage) ? null : picker.SelectedPlayablePackage;
     }
 
-    /// <summary>Finds the _Cutscene sibling of a playable package on disk (same folder).</summary>
+    /// <summary>
+    /// Finds the cinematic actor paired with a playable. Prefer the playable's DCMD link over
+    /// filename matching because several families (notably RobinDickGrayson) use different stems
+    /// for their playable and cutscene Blueprints.
+    /// </summary>
     private static string? ResolveCutsceneSibling(string playablePackage)
     {
         var extracted = AppSettings.Current.EffectiveExtractedContentRoot();
@@ -1068,6 +1089,16 @@ public sealed partial class MainForm : AdaptiveForm
         {
             return null;
         }
+        var dcmdDisk = FindDcmdSiblingForPlayable(playableDisk);
+        var linkedPackage = NativeMetadataDonorService.TryReadCinematicsActorPackage(dcmdDisk);
+        var linkedDisk = string.IsNullOrWhiteSpace(linkedPackage)
+            ? null
+            : ExtractedPackagePathService.ResolvePackageUasset(extracted, linkedPackage);
+        if (!string.IsNullOrWhiteSpace(linkedDisk) && File.Exists(linkedDisk))
+        {
+            return linkedDisk;
+        }
+
         var baseStem = UnrealPathUtil.AssetName(playablePackage);
         if (baseStem.EndsWith("_Playable", StringComparison.OrdinalIgnoreCase))
         {
@@ -1240,8 +1271,13 @@ public sealed partial class MainForm : AdaptiveForm
 
     private void SetSuitCoverImage(SuitProjectService.ProjectSummary summary)
     {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Changing the suit cover"))
+        {
+            return;
+        }
+
         var svc = new SuitProjectService(_projectRootText.Text.Trim());
-        var project = svc.LoadProject(summary.Path);
+        var project = CurrentProjectForSummary(svc, summary) ?? svc.LoadProject(summary.Path);
         if (project is null)
         {
             AppendLog($"Cover image skipped: could not load {summary.Path}");
@@ -1305,8 +1341,13 @@ public sealed partial class MainForm : AdaptiveForm
 
     private void ClearSuitCoverImage(SuitProjectService.ProjectSummary summary)
     {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Changing the suit cover"))
+        {
+            return;
+        }
+
         var svc = new SuitProjectService(_projectRootText.Text.Trim());
-        var project = svc.LoadProject(summary.Path);
+        var project = CurrentProjectForSummary(svc, summary) ?? svc.LoadProject(summary.Path);
         if (project is null)
         {
             return;
@@ -1321,6 +1362,19 @@ public sealed partial class MainForm : AdaptiveForm
         svc.SaveProject(project);
         AppendLog($"Cleared cover image for '{project.DisplayName}'.");
         RefreshToyboxTiles();
+    }
+
+    private NativeSuitProject? CurrentProjectForSummary(
+        SuitProjectService service,
+        SuitProjectService.ProjectSummary summary)
+    {
+        if (_currentProject is null)
+        {
+            return null;
+        }
+
+        var currentPath = service.ProjectPathForSlot(_currentProject.SlotId);
+        return PathsEqual(currentPath, summary.Path) ? _currentProject : null;
     }
 
     private bool DeleteSavedSuit(
@@ -1503,6 +1557,11 @@ public sealed partial class MainForm : AdaptiveForm
 
     private void OpenRecentProject(string path)
     {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Opening another suit"))
+        {
+            return;
+        }
+
         try
         {
             var svc = new SuitProjectService(_projectRootText.Text.Trim());
@@ -2202,6 +2261,11 @@ public sealed partial class MainForm : AdaptiveForm
 
     private void OpenSettings()
     {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Changing tool paths"))
+        {
+            return;
+        }
+
         var previousTheme = Theme.CurrentVisualTheme;
         using var dlg = new SettingsForm(AppSettings.Current, firstRun: false);
         if (dlg.ShowDialog(this) == DialogResult.OK)
@@ -2212,6 +2276,9 @@ public sealed partial class MainForm : AdaptiveForm
             ExtractedAnimationCatalogService.Invalidate();
             _partIndex = null;
             _projectRootText.Text = AppSettings.Current.EffectiveProjectRoot();
+            // Every subsequent editor save must follow the newly selected workspace. Retaining a
+            // non-null service here made the many `??=` save paths keep writing to the old root.
+            _projectService = new SuitProjectService(_projectRootText.Text.Trim());
             RefreshThemeBranding();
             ApplyResearchToolsVisibility();
             PopulateToyboxSlots(); // picks up a changed "Your Character" panel style immediately
@@ -2493,13 +2560,23 @@ public sealed partial class MainForm : AdaptiveForm
             return;
         }
 
-        ReadFieldsIntoProject(_currentProject);
-        var project = _currentProject;
-        var projectService = _projectService;
-        var path = await RunWithFileLockRetryAsync(
-            () => projectService.SaveProject(project),
-            "save the project");
-        AppendLog($"Saved project: {path}");
+        try
+        {
+            ReadFieldsIntoProject(_currentProject);
+            var project = _currentProject;
+            var saved = await SaveCurrentProjectSnapshotAsync(project, "save the project");
+            RequireCurrentProjectSaveCommitted(saved, "save the project");
+            AppendLog($"Saved project: {saved.Path}");
+        }
+        catch (CurrentProjectSaveSupersededException ex)
+        {
+            AppendLog("Save project stopped: " + ex.Message);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Save project failed: {ex.Message}");
+            Dialog.Error(this, "Save project failed", ex.Message);
+        }
     }
 
     /// <summary>Saves the open suit from the visible builder command bar.</summary>
@@ -2518,12 +2595,14 @@ public sealed partial class MainForm : AdaptiveForm
         try
         {
             ReadFieldsIntoProject(_currentProject);
-            var projectService = _projectService ??= new SuitProjectService(_projectRootText.Text.Trim());
             var project = _currentProject;
-            var path = await RunWithFileLockRetryAsync(
-                () => projectService.SaveProject(project),
-                "save the current suit");
-            AppendLog($"Saved suit: {path}");
+            var saved = await SaveCurrentProjectSnapshotAsync(project, "save the current suit");
+            RequireCurrentProjectSaveCommitted(saved, "save the current suit");
+            AppendLog($"Saved suit: {saved.Path}");
+        }
+        catch (CurrentProjectSaveSupersededException ex)
+        {
+            AppendLog("Save suit stopped: " + ex.Message);
         }
         catch (Exception ex)
         {
@@ -2545,19 +2624,55 @@ public sealed partial class MainForm : AdaptiveForm
             return;
         }
 
-        ReadFieldsIntoProject(_currentProject);
-        var project = _currentProject;
-        var projectService = _projectService;
-        var plan = PatchPlanService.CreatePatchPlan(project);
-        var paths = await RunWithFileLockRetryAsync(
-            () => (
-                Project: projectService.SaveProject(project),
-                Plan: projectService.SavePatchPlan(plan)),
-            "save the patch plan");
-        var projectPath = paths.Project;
-        var planPath = paths.Plan;
-        AppendLog($"Saved project: {projectPath}");
-        AppendLog($"Saved patch plan: {planPath}");
+        try
+        {
+            ReadFieldsIntoProject(_currentProject);
+            var project = _currentProject;
+            var editContext = CaptureCurrentProjectEditContext(project);
+            var projectService = editContext.Service;
+            var projectCapture = CaptureCurrentProjectSave(editContext, "save the project for the patch plan");
+            // Build the plan from the exact immutable JSON that will be committed below. The plan
+            // must not retain the live editor project while file-lock retries yield to the UI.
+            var frozenProject = projectService.MaterializeProjectSaveSnapshot(projectCapture.Snapshot);
+            var plan = PatchPlanService.CreatePatchPlan(frozenProject);
+            var projectSave = await CommitCurrentProjectSaveCaptureAsync(projectCapture);
+            RequireCurrentProjectSaveCommitted(projectSave, "save the project for the patch plan");
+            if (!CurrentProjectEditContextMatches(editContext))
+            {
+                throw new CurrentProjectSaveSupersededException(
+                    "The patch plan stopped because another suit or workspace was selected.");
+            }
+            var planPath = "";
+            var planStillOwned = await RunWithFileLockRetryAsync(
+                () => projectService.RunIfProjectSaveStillCurrent(
+                    projectCapture.Snapshot,
+                    () =>
+                    {
+                        if (!CurrentProjectEditContextMatches(editContext))
+                        {
+                            throw new CurrentProjectSaveSupersededException(
+                                "The patch plan stopped because another suit or workspace was selected.");
+                        }
+                        planPath = projectService.SavePatchPlan(plan);
+                    }),
+                "save the patch plan against its exact suit project");
+            if (!planStillOwned)
+            {
+                throw new CurrentProjectSaveSupersededException(
+                    "The patch plan stopped because a newer project save superseded its source snapshot.");
+            }
+            AppendLog($"Saved project: {projectSave.Path}");
+            AppendLog($"Saved patch plan: {planPath}");
+        }
+        catch (CurrentProjectSaveSupersededException ex)
+        {
+            AppendLog("Create patch plan stopped: " + ex.Message);
+        }
+        catch (Exception ex)
+        {
+            AppendLog("Create patch plan failed: " + ex.Message);
+            Dialog.Error(this, "Create patch plan failed", ex.Message);
+        }
     }
 
     private async Task<bool> PatchNameMapsWithUAssetApiAsync(
@@ -2997,17 +3112,28 @@ public sealed partial class MainForm : AdaptiveForm
     /// suggestion - the author still has to accept it, and uniqueness is enforced at package time.
     /// </summary>
     // Test hooks for pure tag helpers.
-    internal static string SuggestPawnTagForTest(NativeSuitProject project) => SuggestPawnTag(project);
+    internal static string SuggestPawnTagForTest(NativeSuitProject project, string? donorPawnTag = null) =>
+        SuggestPawnTag(project, donorPawnTag);
     internal static string ToGameplayTagLeafForTest(string value) => ToGameplayTagLeaf(value);
 
     /// <summary>Donor defaults are not valid seeds for a unique pawn tag.</summary>
     private static readonly string[] DonorDefaultNames = { "Thomas Wayne", "batman_thomas", "ThomasWayne" };
 
-    private static string SuggestPawnTag(NativeSuitProject project)
+    private static string SuggestPawnTag(NativeSuitProject project, string? serializedDonorPawnTag = null)
     {
         var seed = Seed(project.DisplayName) ?? Seed(project.SlotId);
         var leaf = ToGameplayTagLeaf(seed ?? "");
-        var family = TargetFamilyNameForProject(project);
+        if (serializedDonorPawnTag is null)
+        {
+            serializedDonorPawnTag = NativeMetadataDonorService.TryRead(
+                project.DcmdTemplate,
+                project.PlayableTemplate,
+                project.CutsceneTemplate)?.PawnTag;
+        }
+        var donorScope = PawnTagConfigService.CharacterScopeForPawnTag(serializedDonorPawnTag);
+        var family = donorScope.Length > 0
+            ? donorScope[(donorScope.LastIndexOf('.') + 1)..]
+            : TargetFamilyNameForProject(project);
         return string.IsNullOrWhiteSpace(leaf) ? "" : $"Pawns.Playable.{family}.{leaf}";
 
         static string? Seed(string? value) =>
@@ -3020,6 +3146,28 @@ public sealed partial class MainForm : AdaptiveForm
     private static string DerivePawnTag(NativeSuitProject project)
     {
         return project.PawnTag.Trim();
+    }
+
+    /// <summary>
+    /// Uses the donor DCMD's serialized PawnTag as the authority for character-owner casing. The
+    /// unique suit leaf is preserved and a genuinely different owner is never rewritten.
+    /// </summary>
+    private static bool CanonicalizeProjectPawnTagOwner(
+        NativeSuitProject project,
+        NativeMetadataDonorService.Donor? donor = null)
+    {
+        donor ??= NativeMetadataDonorService.TryRead(
+            project.DcmdTemplate,
+            project.PlayableTemplate,
+            project.CutsceneTemplate);
+        var canonical = PawnTagConfigService.CanonicalizeCharacterOwner(project.PawnTag, donor?.PawnTag);
+        if (canonical.Equals(project.PawnTag?.Trim() ?? "", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        project.PawnTag = canonical;
+        return true;
     }
 
     private static string TargetFamilyNameForProject(NativeSuitProject? project)
@@ -3080,14 +3228,7 @@ public sealed partial class MainForm : AdaptiveForm
     private void EnsureProject()
     {
         var projectRoot = _projectRootText.Text.Trim();
-        if (_projectService is null ||
-            !string.Equals(
-                Path.GetFullPath(_projectService.ProjectRoot).TrimEnd(Path.DirectorySeparatorChar),
-                Path.GetFullPath(projectRoot).TrimEnd(Path.DirectorySeparatorChar),
-                StringComparison.OrdinalIgnoreCase))
-        {
-            _projectService = new SuitProjectService(projectRoot);
-        }
+        _projectService = ResolveProjectServiceForRoot(_projectService, projectRoot);
 
         if (_currentProject is not null)
         {
@@ -3120,10 +3261,14 @@ public sealed partial class MainForm : AdaptiveForm
         _targetPlayableText.Text = project.TargetPackages.Playable;
         _targetCutsceneText.Text = project.TargetPackages.Cutscene;
         _targetDcmdText.Text = project.TargetPackages.Dcmd;
-        _packageBaseNameText.Text = string.IsNullOrWhiteSpace(project.PackageBaseName)
-            ? MakeSafePackageBaseName($"{project.SlotId}_P")
-            : project.PackageBaseName;
-        _lastAutoPackageBaseName = _packageBaseNameText.Text.Trim();
+        var hasSavedPackageName = !string.IsNullOrWhiteSpace(project.PackageBaseName);
+        _packageBaseNameText.Text = hasSavedPackageName
+            ? project.PackageBaseName
+            : MakeSafePackageBaseName($"{project.SlotId}_P");
+        if (!hasSavedPackageName)
+        {
+            _lastAutoPackageBaseName = _packageBaseNameText.Text.Trim();
+        }
         _matOutputText.Text = SuggestedMaterialOutputPackage(project.TargetPackages.Playable);
         _lastAutoMaterialOutputPackage = _matOutputText.Text.Trim();
     }

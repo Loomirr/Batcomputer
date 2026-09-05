@@ -238,9 +238,9 @@ public sealed class StaticMeshObjProbeService
 
         try
         {
-            if (request.Scale is < 1f or > 1000f)
+            if (!float.IsFinite(request.Scale) || request.Scale is < 0.001f or > 1000f)
             {
-                throw new ArgumentOutOfRangeException(nameof(request.Scale), "OBJ scale must be between 1 and 1000.");
+                throw new ArgumentOutOfRangeException(nameof(request.Scale), "OBJ scale must be between 0.001 and 1000.");
             }
             if (!float.IsFinite(request.OffsetX) || !float.IsFinite(request.OffsetY) || !float.IsFinite(request.OffsetZ) ||
                 MathF.Abs(request.OffsetX) > 100000f || MathF.Abs(request.OffsetY) > 100000f || MathF.Abs(request.OffsetZ) > 100000f)
@@ -1529,6 +1529,133 @@ public sealed class StaticMeshObjProbeService
             catch
             {
                 // Regression cleanup is best effort; the unique directory cannot affect later runs.
+            }
+        }
+    }
+
+    /// <summary>
+    /// Guards the authored left/right direction of an asymmetric OBJ across the two consumers of
+    /// <see cref="ParseObj"/>. The cooked StaticMesh stores Unreal-space positions/UVs, while the
+    /// viewer converts those exact values to glTF. A camera or texture "fix" must not reflect U or
+    /// one geometry axis: doing so would make the preview disagree with the mesh written to game.
+    /// </summary>
+    internal static bool PreviewOrientationParityRegressionPasses()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "batcomputer-obj-orientation-regression-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(tempRoot);
+            var objPath = Path.Combine(tempRoot, "asymmetric.obj");
+            var glbPath = Path.Combine(tempRoot, "asymmetric.glb");
+            File.WriteAllLines(objPath,
+            [
+                // Deliberately asymmetric positions and U coordinates make a reflection observable.
+                "v -3 0 0",
+                "v 2 0 1",
+                "v 0 4 -2",
+                "vt 0.125 0.2",
+                "vt 0.875 0.25",
+                "vt 0.3 0.9",
+                "vn 0 0 1",
+                "usemtl Directional",
+                "f 1/1/1 2/2/1 3/3/1",
+            ]);
+
+            // WritePreviewGlb converts its public Unreal-centimetre scale to meters. A scale of 100
+            // therefore exercises the exact same parsed geometry as ParseObj(..., scale: 1).
+            // Include all three rotations and a nonzero grip offset: weapon alignment
+            // must use the same centered transform in the viewer and cooked payload.
+            var cooked = ParseObj(objPath, 1f, new Vector3(2, -3, 7), 20, 35, 10);
+            WritePreviewGlb(objPath, glbPath, 100f, 200f, -300f, 700f, 20, 35, 10);
+            if (cooked.Vertices.Count != 3)
+            {
+                return false;
+            }
+
+            using var cookedPositionBytes = new MemoryStream();
+            WritePositions(cookedPositionBytes, cooked.Vertices);
+            using var cookedUvBytes = new MemoryStream();
+            WriteUvs(cookedUvBytes, cooked.Vertices);
+            var positionPayload = cookedPositionBytes.ToArray();
+            var uvPayload = cookedUvBytes.ToArray();
+
+            var glb = File.ReadAllBytes(glbPath);
+            if (glb.Length < 28 || BinaryPrimitives.ReadInt32LittleEndian(glb) != 0x46546C67)
+            {
+                return false;
+            }
+            var jsonLength = BinaryPrimitives.ReadInt32LittleEndian(glb.AsSpan(12, sizeof(int)));
+            using var document = JsonDocument.Parse(glb.AsMemory(20, jsonLength));
+            var root = document.RootElement;
+            var views = root.GetProperty("bufferViews");
+            var accessors = root.GetProperty("accessors");
+            var binaryStart = 20 + jsonLength + 8;
+
+            static int AccessorStart(JsonElement accessor, JsonElement views, int binaryStart)
+            {
+                var view = views[accessor.GetProperty("bufferView").GetInt32()];
+                return binaryStart
+                       + (view.TryGetProperty("byteOffset", out var viewOffset) ? viewOffset.GetInt32() : 0)
+                       + (accessor.TryGetProperty("byteOffset", out var accessorOffset) ? accessorOffset.GetInt32() : 0);
+            }
+
+            var previewPositionStart = AccessorStart(accessors[0], views, binaryStart);
+            var previewUvStart = AccessorStart(accessors[2], views, binaryStart);
+            const float tolerance = 0.00001f;
+            for (var index = 0; index < cooked.Vertices.Count; index++)
+            {
+                var cookedPosition = new Vector3(
+                    BinaryPrimitives.ReadSingleLittleEndian(positionPayload.AsSpan(index * 12, 4)),
+                    BinaryPrimitives.ReadSingleLittleEndian(positionPayload.AsSpan(index * 12 + 4, 4)),
+                    BinaryPrimitives.ReadSingleLittleEndian(positionPayload.AsSpan(index * 12 + 8, 4)));
+                var expectedPreview = UeToGltf(cookedPosition);
+                var previewPosition = new Vector3(
+                    BinaryPrimitives.ReadSingleLittleEndian(glb.AsSpan(previewPositionStart + index * 12, 4)),
+                    BinaryPrimitives.ReadSingleLittleEndian(glb.AsSpan(previewPositionStart + index * 12 + 4, 4)),
+                    BinaryPrimitives.ReadSingleLittleEndian(glb.AsSpan(previewPositionStart + index * 12 + 8, 4)));
+                if (LengthSquared(expectedPreview - previewPosition) > tolerance * tolerance)
+                {
+                    return false;
+                }
+
+                var cookedU = (float)BitConverter.UInt16BitsToHalf(
+                    BinaryPrimitives.ReadUInt16LittleEndian(uvPayload.AsSpan(index * 4, 2)));
+                var cookedV = (float)BitConverter.UInt16BitsToHalf(
+                    BinaryPrimitives.ReadUInt16LittleEndian(uvPayload.AsSpan(index * 4 + 2, 2)));
+                var previewU = BinaryPrimitives.ReadSingleLittleEndian(glb.AsSpan(previewUvStart + index * 8, 4));
+                var previewV = BinaryPrimitives.ReadSingleLittleEndian(glb.AsSpan(previewUvStart + index * 8 + 4, 4));
+                if (MathF.Abs(cookedU - previewU) > 0.001f || MathF.Abs(cookedV - previewV) > 0.001f)
+                {
+                    return false;
+                }
+            }
+
+            // Vertex zero is authored left of vertex one and has the lower U. Both relationships
+            // must survive. In the front camera, glTF -Z is screen-right and corresponds to UE +Y.
+            var firstPreviewX = BinaryPrimitives.ReadSingleLittleEndian(glb.AsSpan(previewPositionStart, 4));
+            var secondPreviewX = BinaryPrimitives.ReadSingleLittleEndian(glb.AsSpan(previewPositionStart + 12, 4));
+            var firstPreviewU = BinaryPrimitives.ReadSingleLittleEndian(glb.AsSpan(previewUvStart, 4));
+            var secondPreviewU = BinaryPrimitives.ReadSingleLittleEndian(glb.AsSpan(previewUvStart + 8, 4));
+            return firstPreviewX < secondPreviewX &&
+                   firstPreviewU < secondPreviewU &&
+                   UeToGltf(new Vector3(0f, 1f, 0f)).Z < 0f;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(tempRoot))
+                {
+                    Directory.Delete(tempRoot, recursive: true);
+                }
+            }
+            catch
+            {
+                // A locked scratch folder is harmless and will be removed with the temp tree.
             }
         }
     }

@@ -122,7 +122,8 @@ public sealed class UAssetPatchService
             UnrealPathUtil.NormalizePackagePath(project.TargetPackages.Cutscene),
             UnrealPathUtil.NormalizePackagePath(project.TargetPackages.Dcmd),
             UnrealPathUtil.NormalizePackagePath(project.BaseProfile?.GameplayDonorPackage ?? project.PlayableTemplate?.PackagePath ?? ""),
-            project.UseCustomArchetype ? "custom-archetype" : "native-archetype",
+            AnimArchetypeGraftService.RequiresCustomArchetype(project) ? "custom-archetype" : "native-archetype",
+            AbilityLoadoutService.ConfigurationFingerprint(project.AbilityLoadout),
         });
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
     }
@@ -134,7 +135,7 @@ public sealed class UAssetPatchService
     /// <summary>The mod-local archetype clone package path for a project (or null if not using one).</summary>
     public static string? CustomArchetypePackage(NativeSuitProject project)
     {
-        if (!project.UseCustomArchetype)
+        if (!AnimArchetypeGraftService.RequiresCustomArchetype(project))
         {
             return null;
         }

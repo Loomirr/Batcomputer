@@ -52,9 +52,15 @@ public sealed partial class MainForm
         });
         try
         {
-            (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(project);
+            _projectService = ResolveProjectServiceForRoot(_projectService, _projectRootText.Text.Trim());
+            _projectService.SaveProject(project);
         }
-        catch { /* best effort — a save failure shouldn't break the edit */ }
+        catch (Exception ex)
+        {
+            // Keep the in-memory edit usable, but never tell the author it was durable when the
+            // project file remained unchanged.
+            AppendLog($"Change recorded in memory, but the suit project could not be saved: {ex.Message}");
+        }
         _session.RaiseChanged();
     }
 
@@ -372,6 +378,7 @@ public sealed partial class MainForm
                         requiredReport.Components.Any(requiredComponent =>
                             requiredComponent.IsScsCreated &&
                             requiredComponent.Name.Equals(comp.Name, StringComparison.OrdinalIgnoreCase)));
+                    var gameplayShellComponent = GameplayShellComponentPolicy.IsRequired(comp.Name);
 
                     rows.Add(new InspectorControl.ComponentRow
                     {
@@ -384,8 +391,10 @@ public sealed partial class MainForm
                         // offer an action that is known up-front to succeed in only the viewed role.
                         // Project-owned custom meshes remain removable even from a damaged stage so
                         // the declarative cleanup path can recover the suit.
-                        CanRemove = customMesh is not null || removableInBothRoles,
-                        RemoveDisabledText = comp.IsScsCreated
+                        CanRemove = !gameplayShellComponent && (customMesh is not null || removableInBothRoles),
+                        RemoveDisabledText = gameplayShellComponent
+                            ? "Required gameplay component — cannot remove"
+                            : comp.IsScsCreated
                             ? "Not removable — matching playable/cutscene component is missing"
                             : "Inherited body — choose a replacement instead",
                         Slots = comp.Slots.OrderBy(s => s.Slot).Select(s => new InspectorControl.SlotRow

@@ -25,6 +25,13 @@ or Loomirr's LOTDK UE4SS.
   native parts with their resolved default materials before applying them.
 - Imports cooked animation packs into a workspace-wide library and lets one exact action, montage,
   layer, or locomotion row use a compatible base-game, DLC, or imported animation.
+- Edits each suit's ordered AbilitySet loadout and individual gameplay-ability grants through
+  mod-local clones, with protected core entries and required equipment/glider dependencies.
+- Applies coordinated native fighting-style bundles and sword/bat/baton player adapters while keeping exactly
+  one melee style active and validating the matching effects, held items, equipment, upgrades, and
+  animation parents before packaging.
+- Adds independently customizable held items, cosmetic VFX placement with approximate previews,
+  and opt-in experimental stun/smoke hit statuses for the player melee adapters.
 - Creates the PawnTag, DCMD, UIMD, StringTable, and Asset Registry data the game needs.
 - Builds one or more suits into a single mod release.
 - Installs the pak trio, PawnTags configuration, mod manifest, and registry plugin to the correct
@@ -111,6 +118,7 @@ The documentation includes a full
 [update and repair guide](https://loomirr.github.io/Batcomputer/guides/update-repair-suit/),
 [materials and faces guide](https://loomirr.github.io/Batcomputer/guides/materials-textures-faces/),
 [character animation guide](https://loomirr.github.io/Batcomputer/guides/animations/),
+[suit abilities guide](https://loomirr.github.io/Batcomputer/guides/abilities/),
 and [troubleshooting checklist](https://loomirr.github.io/Batcomputer/help/troubleshooting/).
 
 ## Visual base and gameplay donor

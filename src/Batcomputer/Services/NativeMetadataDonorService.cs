@@ -57,21 +57,68 @@ public static class NativeMetadataDonorService
 
             var uimdUasset = PackageToUasset(uimdPackage);
             var icons = File.Exists(uimdUasset) ? ReadIcons(Load(uimdUasset)) : Icons.Empty;
+            // The DCMD is authoritative for its actor pair. Several shipped families do not use
+            // predictable sibling names (for example RobinDickGrayson playables point at
+            // BP_Robin_* or BP_DickGrayson_* cinematic actors). Using the picker-derived template
+            // path here meant the generated DCMD could retain the donor CinematicsActor and the
+            // game would silently fall back to the native/default suit in a cold cutscene.
+            var serializedPlayable = ReadActorPackage(dcmd, "Pawn");
+            var serializedCutscene = ReadActorPackage(dcmd, "CinematicsActor");
             return new Donor(
                 UnrealPathUtil.NormalizePackagePath(dcmdTemplate.PackagePath),
                 dcmdUasset,
-                UnrealPathUtil.NormalizePackagePath(playableTemplate?.PackagePath ?? ""),
-                UnrealPathUtil.NormalizePackagePath(cutsceneTemplate?.PackagePath ?? ""),
+                PreferSerializedActorPackage(serializedPlayable, playableTemplate?.PackagePath),
+                PreferSerializedActorPackage(serializedCutscene, cutsceneTemplate?.PackagePath),
                 uimdPackage,
                 uimdUasset,
                 ReadGameplayTag(dcmd, "PawnTag"),
-                ReadGameplayTag(dcmd, "ProgressTag"),
+                CanonicalProgressTag(ReadGameplayTag(dcmd, "ProgressTag")),
                 icons);
         }
         catch
         {
             return null;
         }
+    }
+
+    internal static string CanonicalProgressTag(string? tag)
+    {
+        // DA_DCMD_Batman_Batman_Playable is a retired donor with the same localized
+        // title/icons as TheBatman2025. PROG_Characters and the Batman_Unlock rule
+        // define only the latter progression entry. Do not infer aliases by title.
+        return string.Equals(tag, "GameProgress.Definitions.Characters.Batman.Batman", StringComparison.OrdinalIgnoreCase)
+            ? "GameProgress.Definitions.Characters.Batman.TheBatman2025"
+            : tag ?? "";
+    }
+
+    /// <summary>
+    /// Reads the exact cinematic Blueprint package authored on a native DCMD. This is used by the
+    /// base picker before its filename heuristic because some character families deliberately use
+    /// different playable and cutscene stems.
+    /// </summary>
+    internal static string TryReadCinematicsActorPackage(string? dcmdUasset)
+    {
+        if (string.IsNullOrWhiteSpace(dcmdUasset) || !File.Exists(dcmdUasset))
+        {
+            return "";
+        }
+
+        try
+        {
+            return ReadActorPackage(Load(dcmdUasset), "CinematicsActor");
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
+    internal static string PreferSerializedActorPackage(string? serializedPackage, string? templatePackage)
+    {
+        var serialized = UnrealPathUtil.NormalizePackagePath(serializedPackage ?? "");
+        return !string.IsNullOrWhiteSpace(serialized)
+            ? serialized
+            : UnrealPathUtil.NormalizePackagePath(templatePackage ?? "");
     }
 
     private static string ResolveTemplateUasset(TemplateRecord template)
@@ -134,6 +181,12 @@ public static class NativeMetadataDonorService
             .FirstOrDefault(candidate => candidate.Name.ToString() == propertyName);
         return property?.Value.OfType<NamePropertyData>()
             .FirstOrDefault(candidate => candidate.Name.ToString() == "TagName")?.Value.ToString() ?? "";
+    }
+
+    private static string ReadActorPackage(UAsset asset, string propertyName)
+    {
+        var reference = NativeAssetTextPatch.GetSoftReference(asset, propertyName);
+        return UnrealPathUtil.NormalizePackagePath(reference?.PackageName ?? "");
     }
 
     private static string PackageToUasset(string packagePath)

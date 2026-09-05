@@ -90,6 +90,7 @@ internal static class Theme
     public static readonly Color Materials = Color.FromArgb(42, 206, 152); // teal
     public static readonly Color Parts = Color.FromArgb(158, 144, 250);    // purple
     public static readonly Color Equipment = Color.FromArgb(244, 176, 62); // amber
+    public static readonly Color Abilities = Color.FromArgb(224, 105, 238); // magenta
     public static readonly Color Animations = Color.FromArgb(236, 110, 173); // pink
     public static readonly Color Faces = Color.FromArgb(240, 138, 96);     // coral
     public static readonly Color Gliders = Color.FromArgb(96, 200, 226);   // sky
@@ -115,6 +116,7 @@ internal static class Theme
         "Materials" => Materials,
         "Parts" => Parts,
         "Equipment" => Equipment,
+        "Abilities" => Abilities,
         "Animations" => Animations,
         "Faces" => Faces,
         "Gliders" => Gliders,

@@ -28,6 +28,285 @@ public sealed class AnimGraftService
         public List<string> Skipped { get; } = new();
     }
 
+    public sealed class ParentSetInspection
+    {
+        public bool Success { get; init; }
+        public string Status { get; init; } = "";
+        public string? Error { get; init; }
+        public List<string> PackagePaths { get; init; } = new();
+        public int AuthoredNullEntries { get; init; }
+    }
+
+    /// <summary>
+    /// Turns a private clone of a shipped TTLayerSet into a context-only layer. This is used by
+    /// fighting-style presets that need a held-item pose without replacing the gameplay donor's
+    /// complete LAS_Default controller. The action lookup map and linked rows are rebuilt after
+    /// filtering, then reloaded and verified before success is reported.
+    /// </summary>
+    public GraftResult KeepOnlyLayerEntriesMatchingContexts(
+        string layerSetUassetPath,
+        IReadOnlyCollection<string> requiredContextTags,
+        IReadOnlyCollection<string>? additionalContextTags = null)
+    {
+        var result = new GraftResult();
+        try
+        {
+            var mappings = LoadMappings();
+            if (mappings is null)
+            {
+                result.Status = "no-mappings";
+                result.Error = "A .usmap mappings file is required to filter a layer set.";
+                return result;
+            }
+            if (!File.Exists(layerSetUassetPath))
+            {
+                result.Status = "missing";
+                result.Error = $"Layer set not found: {layerSetUassetPath}";
+                return result;
+            }
+
+            var required = NormalizeTags(requiredContextTags);
+            if (required.Count == 0)
+            {
+                result.Status = "invalid-context";
+                result.Error = "At least one required animation context tag must be supplied.";
+                return result;
+            }
+
+            var asset = new UAsset(
+                layerSetUassetPath,
+                EngineVersion.VER_UE5_6,
+                mappings,
+                CustomSerializationFlags.None);
+            if (!TryGetLayerEntryStorage(asset, out var export, out var entries, out var actionMap, out var storageError))
+            {
+                result.Status = "invalid-layer-set";
+                result.Error = storageError;
+                return result;
+            }
+
+            var retained = entries.Value.OfType<StructPropertyData>()
+                .Where(entry => required.All(requiredTag =>
+                    ReadEntryContextTags(entry).Contains(requiredTag, StringComparer.OrdinalIgnoreCase)))
+                .ToList();
+            if (retained.Count == 0)
+            {
+                result.Status = "context-not-found";
+                result.Error =
+                    $"The source layer set has no rows carrying every required context: {string.Join(", ", required)}.";
+                return result;
+            }
+
+            // Robin's baton pose rows are authored only with Alert/Stealth conditions. A foreign
+            // donor must also be holding batons before those rows can override its ordinary pose.
+            var additional = NormalizeTags(additionalContextTags);
+            foreach (var entry in retained.Where(_ => additional.Count > 0))
+            {
+                var container = entry.Value.OfType<StructPropertyData>()
+                    .FirstOrDefault(property => property.Name.ToString().Equals("ContextTags", StringComparison.OrdinalIgnoreCase))?
+                    .Value.OfType<GameplayTagContainerPropertyData>().FirstOrDefault();
+                if (container is null)
+                {
+                    result.Status = "invalid-context";
+                    result.Error = "A retained layer row has no editable context-tag container.";
+                    return result;
+                }
+                container.Value = NormalizeTags(ReadEntryContextTags(entry).Concat(additional))
+                    .Select(tag => MakeName(asset, tag)).ToArray();
+            }
+
+            var retainedActions = retained.Select(ReadEntryActionTag).ToList();
+            if (retainedActions.Any(string.IsNullOrWhiteSpace))
+            {
+                result.Status = "invalid-layer-set";
+                result.Error = "A retained animation row has no readable ActionTag.";
+                return result;
+            }
+
+            var originalActionMap = new Dictionary<string, (PropertyData Key, PropertyData Value)>(
+                StringComparer.OrdinalIgnoreCase);
+            foreach (var pair in actionMap.Value)
+            {
+                if (pair.Key is not StructPropertyData key || pair.Value is not IntPropertyData)
+                {
+                    result.Status = "invalid-layer-set";
+                    result.Error = "ActionTagToIndexMap contains an unsupported key or value.";
+                    return result;
+                }
+                var action = ReadGameplayTag(key);
+                if (string.IsNullOrWhiteSpace(action) || !originalActionMap.TryAdd(action, (pair.Key, pair.Value)))
+                {
+                    result.Status = "invalid-layer-set";
+                    result.Error = "ActionTagToIndexMap contains a missing or duplicate action tag.";
+                    return result;
+                }
+            }
+
+            var firstIndexByAction = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (var index = 0; index < retained.Count; index++)
+            {
+                retained[index].Name = MakeName(asset, index.ToString());
+                firstIndexByAction.TryAdd(retainedActions[index], index);
+            }
+            foreach (var actionGroup in retainedActions
+                         .Select((action, index) => (action, index))
+                         .GroupBy(item => item.action, StringComparer.OrdinalIgnoreCase))
+            {
+                var indexes = actionGroup.Select(item => item.index).ToList();
+                for (var offset = 0; offset < indexes.Count; offset++)
+                {
+                    var link = retained[indexes[offset]].Value.OfType<IntPropertyData>()
+                        .FirstOrDefault(property => property.Name.ToString().Equals(
+                            "ActionLink",
+                            StringComparison.OrdinalIgnoreCase));
+                    if (link is null)
+                    {
+                        result.Status = "invalid-layer-set";
+                        result.Error = $"Animation row {indexes[offset]} has no ActionLink.";
+                        return result;
+                    }
+                    link.Value = offset + 1 < indexes.Count ? indexes[offset + 1] : -1;
+                }
+            }
+
+            actionMap.Value.Clear();
+            foreach (var pair in firstIndexByAction.OrderBy(pair => pair.Value))
+            {
+                if (!originalActionMap.TryGetValue(pair.Key, out var original) ||
+                    original.Value is not IntPropertyData mapIndex)
+                {
+                    result.Status = "invalid-layer-set";
+                    result.Error = $"ActionTagToIndexMap has no source key for '{pair.Key}'.";
+                    return result;
+                }
+                mapIndex.Value = pair.Value;
+                actionMap.Value.Add(original.Key, original.Value);
+            }
+            entries.Value = retained.Cast<PropertyData>().ToArray();
+
+            // A context slice must not inherit create-before-serialization requirements for
+            // removed movement/perch rows. Keep only object imports still referenced by retained
+            // entries; class/default-object dependencies live in the other dependency lists.
+            var referencedImports = new HashSet<int>();
+            foreach (var entry in retained)
+            {
+                CollectObjectImports(entry, referencedImports);
+            }
+            if (export.CreateBeforeSerializationDependencies is { } dependencies)
+            {
+                dependencies.RemoveAll(dependency =>
+                    dependency.IsImport() && !referencedImports.Contains(dependency.Index));
+            }
+
+            asset.Write(layerSetUassetPath);
+            if (!VerifyContextFilteredLayerSet(
+                    layerSetUassetPath,
+                    mappings,
+                    NormalizeTags(required.Concat(additional)),
+                    retained.Count,
+                    out var verifyError))
+            {
+                result.Status = "verification-failed";
+                result.Error = verifyError;
+                return result;
+            }
+
+            result.Status = "ok";
+            result.Added.AddRange(retained.Select((entry, index) =>
+                $"row {index}: {ReadEntryActionTag(entry)} [{string.Join(", ", ReadEntryContextTags(entry))}]"));
+            return result;
+        }
+        catch (Exception ex)
+        {
+            result.Status = "error";
+            result.Error = ex.ToString();
+            return result;
+        }
+    }
+
+    /// <summary>Reads the exact ordered packages serialized in ParentSetsArray.</summary>
+    public ParentSetInspection InspectParentSets(string charSetUassetPath)
+    {
+        try
+        {
+            var mappings = LoadMappings();
+            if (mappings is null)
+            {
+                return new ParentSetInspection { Status = "no-mappings", Error = "usmap required." };
+            }
+            if (!File.Exists(charSetUassetPath))
+            {
+                return new ParentSetInspection { Status = "missing", Error = $"Anim set not found: {charSetUassetPath}" };
+            }
+            var asset = new UAsset(
+                charSetUassetPath,
+                EngineVersion.VER_UE5_6,
+                mappings,
+                CustomSerializationFlags.None);
+            var array = asset.Exports.OfType<NormalExport>()
+                .SelectMany(export => export.Data)
+                .OfType<ArrayPropertyData>()
+                .FirstOrDefault(property => property.Name.ToString().Equals(
+                    "ParentSetsArray",
+                    StringComparison.OrdinalIgnoreCase));
+            if (array is null)
+            {
+                return new ParentSetInspection { Status = "no-parentsets", Error = "Anim set has no ParentSetsArray property." };
+            }
+            var packages = new List<string>();
+            var authoredNullEntries = 0;
+            for (var index = 0; index < array.Value.Length; index++)
+            {
+                if (array.Value[index] is not ObjectPropertyData reference)
+                {
+                    return new ParentSetInspection
+                    {
+                        Status = "invalid-parentset",
+                        Error = $"ParentSetsArray[{index}] is not an object reference.",
+                    };
+                }
+                // Shipped composites may deliberately retain empty positional entries. They do
+                // not name a dependency and therefore cannot satisfy a required parent, but they
+                // are valid authored state and must survive a clone/graft unchanged. Continue to
+                // reject every non-null export/invalid index so malformed dependencies fail closed.
+                if (reference.Value.IsNull())
+                {
+                    authoredNullEntries++;
+                    continue;
+                }
+                if (!reference.Value.IsImport())
+                {
+                    return new ParentSetInspection
+                    {
+                        Status = "invalid-parentset",
+                        Error = $"ParentSetsArray[{index}] is a non-null reference that is not an imported parent set.",
+                    };
+                }
+                var package = ObjectPackage(asset, reference.Value);
+                if (string.IsNullOrWhiteSpace(package))
+                {
+                    return new ParentSetInspection
+                    {
+                        Status = "invalid-parentset",
+                        Error = $"ParentSetsArray[{index}] could not be resolved to an exact package.",
+                    };
+                }
+                packages.Add(package);
+            }
+            return new ParentSetInspection
+            {
+                Success = true,
+                Status = "ok",
+                PackagePaths = packages,
+                AuthoredNullEntries = authoredNullEntries,
+            };
+        }
+        catch (Exception ex)
+        {
+            return new ParentSetInspection { Status = "error", Error = ex.ToString() };
+        }
+    }
+
     /// <summary>
     /// Appends parent anim-set references to <paramref name="charSetUassetPath"/>'s
     /// ParentSetsArray. <paramref name="className"/> is "TTLayerSet" for LAS sets or
@@ -117,6 +396,110 @@ public sealed class AnimGraftService
 
                 array.Value = items.ToArray();
                 asset.Write(charSetUassetPath);
+            }
+            result.Status = "ok";
+            return result;
+        }
+        catch (Exception ex)
+        {
+            result.Status = "error";
+            result.Error = ex.ToString();
+            return result;
+        }
+    }
+
+    /// <summary>Removes exact parent-set packages and verifies that none remain referenced.</summary>
+    public GraftResult RemoveParentSets(
+        string charSetUassetPath,
+        IReadOnlyCollection<string> parentSetPackages)
+    {
+        var result = new GraftResult();
+        try
+        {
+            var mappings = LoadMappings();
+            if (mappings is null)
+            {
+                result.Status = "no-mappings";
+                result.Error = "A .usmap mappings file is required to edit ParentSetsArray.";
+                return result;
+            }
+            if (!File.Exists(charSetUassetPath))
+            {
+                result.Status = "missing";
+                result.Error = $"Anim set not found: {charSetUassetPath}";
+                return result;
+            }
+            var targets = parentSetPackages.Select(UnrealPathUtil.NormalizePackagePath)
+                .Where(package => !string.IsNullOrWhiteSpace(package))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (targets.Count == 0)
+            {
+                result.Status = "ok";
+                return result;
+            }
+
+            var asset = new UAsset(
+                charSetUassetPath,
+                EngineVersion.VER_UE5_6,
+                mappings,
+                CustomSerializationFlags.None);
+            var export = asset.Exports.OfType<NormalExport>()
+                .FirstOrDefault(candidate => candidate.Data.Any(property =>
+                    property.Name.ToString().Equals("ParentSetsArray", StringComparison.OrdinalIgnoreCase)));
+            if (export is null)
+            {
+                result.Status = "no-parentsets";
+                result.Error = "Anim set has no ParentSetsArray property.";
+                return result;
+            }
+            var array = export.Data.OfType<ArrayPropertyData>()
+                .First(property => property.Name.ToString().Equals(
+                    "ParentSetsArray",
+                    StringComparison.OrdinalIgnoreCase));
+            var items = array.Value.ToList();
+            for (var index = items.Count - 1; index >= 0; index--)
+            {
+                if (items[index] is not ObjectPropertyData reference ||
+                    reference.Value.IsNull() ||
+                    !reference.Value.IsImport())
+                {
+                    continue;
+                }
+                var package = ObjectPackage(asset, reference.Value);
+                if (!targets.Contains(package)) continue;
+                items.RemoveAt(index);
+                result.Added.Add(UnrealPathUtil.AssetName(package));
+            }
+            for (var index = 0; index < items.Count; index++)
+            {
+                items[index].Name = MakeName(asset, index.ToString());
+            }
+            array.Value = items.ToArray();
+            asset.Write(charSetUassetPath);
+
+            var verify = new UAsset(
+                charSetUassetPath,
+                EngineVersion.VER_UE5_6,
+                mappings,
+                CustomSerializationFlags.None);
+            var remaining = verify.Exports.OfType<NormalExport>()
+                .SelectMany(candidate => candidate.Data)
+                .OfType<ArrayPropertyData>()
+                .Where(property => property.Name.ToString().Equals(
+                    "ParentSetsArray",
+                    StringComparison.OrdinalIgnoreCase))
+                .SelectMany(property => property.Value)
+                .OfType<ObjectPropertyData>()
+                .Where(reference => !reference.Value.IsNull() && reference.Value.IsImport())
+                .Select(reference => ObjectPackage(verify, reference.Value))
+                .Where(targets.Contains)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (remaining.Count > 0)
+            {
+                result.Status = "verification-failed";
+                result.Error = "Parent set removal did not persist: " + string.Join(", ", remaining);
+                return result;
             }
             result.Status = "ok";
             return result;
@@ -236,6 +619,12 @@ public sealed class AnimGraftService
             EnsureObjectImport(asset, pkg, "Default__" + edClass, pkg, edClass);
 
             var items = array.Value.ToList();
+            if (slot < 0 || slot > items.Count)
+            {
+                result.Status = "invalid-slot";
+                result.Error = $"Equipment slot {slot + 1} is sparse or negative for a {items.Count}-slot DPRD loadout.";
+                return result;
+            }
 
             // Capture the class the old slot pointed at so we can also update the
             // export's preload-dependency list (which references the ED class by
@@ -280,6 +669,18 @@ public sealed class AnimGraftService
             }
 
             asset.Write(dprdUassetPath);
+            var verify = new AbilityAssetMutationService().InspectDprdEquipment(dprdUassetPath);
+            var written = verify.Equipment.FirstOrDefault(reference => reference.Index == slot);
+            if (!verify.Success || written is null || written.IsNull ||
+                !UnrealPathUtil.NormalizePackagePath(written.PackagePath).Equals(
+                    pkg,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                result.Status = "verification-failed";
+                result.Error = verify.Error ??
+                               $"Equipment[{slot}] did not reload as the exact package '{pkg}'.";
+                return result;
+            }
             result.Added.Add($"{edClass}@slot{slot}");
             result.Status = "ok";
             return result;
@@ -419,6 +820,216 @@ public sealed class AnimGraftService
             array.Value = items.ToArray();
             asset.Write(charSetUassetPath);
             result.Added.Add($"{donorSetName}→{newName}");
+            result.Status = "ok";
+            return result;
+        }
+        catch (Exception ex)
+        {
+            result.Status = "error";
+            result.Error = ex.ToString();
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// Replaces every parent in one exclusive category (for example LAS_Default_* or
+    /// MAS_Combat_Flurry_*) with exactly one selected package and verifies the invariant.
+    /// </summary>
+    public GraftResult SetExclusiveParentSet(
+        string charSetUassetPath,
+        string className,
+        string objectNamePrefix,
+        string replacementPackage,
+        bool requireExisting)
+    {
+        var result = new GraftResult();
+        try
+        {
+            var mappings = LoadMappings();
+            if (mappings is null)
+            {
+                result.Status = "no-mappings";
+                result.Error = "A .usmap mappings file is required to edit ParentSetsArray.";
+                return result;
+            }
+            if (!File.Exists(charSetUassetPath))
+            {
+                result.Status = "missing";
+                result.Error = $"Set not found: {charSetUassetPath}";
+                return result;
+            }
+            var asset = new UAsset(
+                charSetUassetPath,
+                EngineVersion.VER_UE5_6,
+                mappings,
+                CustomSerializationFlags.None);
+            var export = asset.Exports.OfType<NormalExport>()
+                .FirstOrDefault(candidate => candidate.Data.Any(property =>
+                    property.Name.ToString().Equals("ParentSetsArray", StringComparison.OrdinalIgnoreCase)));
+            if (export is null)
+            {
+                result.Status = "no-parentsets";
+                result.Error = "No ParentSetsArray.";
+                return result;
+            }
+            var array = export.Data.OfType<ArrayPropertyData>()
+                .First(property => property.Name.ToString().Equals(
+                    "ParentSetsArray",
+                    StringComparison.OrdinalIgnoreCase));
+            var items = array.Value.ToList();
+            var matching = items.Select((item, index) => (item, index))
+                .Where(pair => pair.item is ObjectPropertyData reference &&
+                               !reference.Value.IsNull() &&
+                               reference.Value.IsImport() &&
+                               reference.Value.ToImport(asset).ObjectName.ToString()
+                                   .StartsWith(objectNamePrefix, StringComparison.OrdinalIgnoreCase))
+                .Select(pair => pair.index)
+                .ToList();
+            if (matching.Count == 0 && requireExisting)
+            {
+                result.Status = "missing-donor-parent";
+                result.Error = $"Required parent category '{objectNamePrefix}*' is absent; no replacement was written.";
+                return result;
+            }
+
+            var insertion = matching.Count > 0 ? matching[0] : items.Count;
+            for (var index = matching.Count - 1; index >= 0; index--)
+            {
+                items.RemoveAt(matching[index]);
+            }
+            var package = UnrealPathUtil.NormalizePackagePath(replacementPackage);
+            var objectName = UnrealPathUtil.AssetName(package);
+            var import = EnsureObjectImport(asset, package, objectName, AnimClassPackage, className);
+            items.Insert(Math.Clamp(insertion, 0, items.Count), new ObjectPropertyData(MakeName(asset, "0"))
+            {
+                Value = import,
+            });
+            for (var index = 0; index < items.Count; index++)
+            {
+                items[index].Name = MakeName(asset, index.ToString());
+            }
+            array.Value = items.ToArray();
+            asset.Write(charSetUassetPath);
+
+            var verify = new UAsset(
+                charSetUassetPath,
+                EngineVersion.VER_UE5_6,
+                mappings,
+                CustomSerializationFlags.None);
+            var category = verify.Exports.OfType<NormalExport>()
+                .SelectMany(candidate => candidate.Data)
+                .OfType<ArrayPropertyData>()
+                .Where(property => property.Name.ToString().Equals(
+                    "ParentSetsArray",
+                    StringComparison.OrdinalIgnoreCase))
+                .SelectMany(property => property.Value)
+                .OfType<ObjectPropertyData>()
+                .Where(reference => !reference.Value.IsNull() && reference.Value.IsImport())
+                .Where(reference => reference.Value.ToImport(verify).ObjectName.ToString()
+                    .StartsWith(objectNamePrefix, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (category.Count != 1 ||
+                !ObjectPackage(verify, category[0].Value).Equals(package, StringComparison.OrdinalIgnoreCase))
+            {
+                result.Status = "verification-failed";
+                result.Error = $"Expected exactly one {objectNamePrefix}* parent ({package}); found {category.Count}.";
+                return result;
+            }
+            result.Added.Add($"{objectNamePrefix}*→{objectName}");
+            result.Status = "ok";
+            return result;
+        }
+        catch (Exception ex)
+        {
+            result.Status = "error";
+            result.Error = ex.ToString();
+            return result;
+        }
+    }
+
+    /// <summary>Removes and verifies every parent whose object name belongs to one category.</summary>
+    public GraftResult RemoveParentSetsByPrefix(
+        string charSetUassetPath,
+        string objectNamePrefix)
+    {
+        var result = new GraftResult();
+        try
+        {
+            var mappings = LoadMappings();
+            if (mappings is null)
+            {
+                result.Status = "no-mappings";
+                result.Error = "A .usmap mappings file is required to edit ParentSetsArray.";
+                return result;
+            }
+            if (!File.Exists(charSetUassetPath))
+            {
+                result.Status = "missing";
+                result.Error = $"Set not found: {charSetUassetPath}";
+                return result;
+            }
+            var asset = new UAsset(
+                charSetUassetPath,
+                EngineVersion.VER_UE5_6,
+                mappings,
+                CustomSerializationFlags.None);
+            var export = asset.Exports.OfType<NormalExport>()
+                .FirstOrDefault(candidate => candidate.Data.Any(property =>
+                    property.Name.ToString().Equals("ParentSetsArray", StringComparison.OrdinalIgnoreCase)));
+            if (export is null)
+            {
+                result.Status = "no-parentsets";
+                result.Error = "No ParentSetsArray.";
+                return result;
+            }
+            var array = export.Data.OfType<ArrayPropertyData>()
+                .First(property => property.Name.ToString().Equals(
+                    "ParentSetsArray",
+                    StringComparison.OrdinalIgnoreCase));
+            var items = array.Value.ToList();
+            for (var index = items.Count - 1; index >= 0; index--)
+            {
+                if (items[index] is not ObjectPropertyData reference ||
+                    reference.Value.IsNull() ||
+                    !reference.Value.IsImport() ||
+                    !reference.Value.ToImport(asset).ObjectName.ToString()
+                        .StartsWith(objectNamePrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                result.Added.Add(reference.Value.ToImport(asset).ObjectName.ToString());
+                items.RemoveAt(index);
+            }
+            for (var index = 0; index < items.Count; index++)
+            {
+                items[index].Name = MakeName(asset, index.ToString());
+            }
+            array.Value = items.ToArray();
+            asset.Write(charSetUassetPath);
+
+            var verify = new UAsset(
+                charSetUassetPath,
+                EngineVersion.VER_UE5_6,
+                mappings,
+                CustomSerializationFlags.None);
+            var remains = verify.Exports.OfType<NormalExport>()
+                .SelectMany(candidate => candidate.Data)
+                .OfType<ArrayPropertyData>()
+                .Where(property => property.Name.ToString().Equals(
+                    "ParentSetsArray",
+                    StringComparison.OrdinalIgnoreCase))
+                .SelectMany(property => property.Value)
+                .OfType<ObjectPropertyData>()
+                .Any(reference => !reference.Value.IsNull() &&
+                                  reference.Value.IsImport() &&
+                                  reference.Value.ToImport(verify).ObjectName.ToString()
+                                      .StartsWith(objectNamePrefix, StringComparison.OrdinalIgnoreCase));
+            if (remains)
+            {
+                result.Status = "verification-failed";
+                result.Error = $"A {objectNamePrefix}* parent remains after removal.";
+                return result;
+            }
             result.Status = "ok";
             return result;
         }
@@ -663,29 +1274,176 @@ public sealed class AnimGraftService
         string expectedAction,
         IReadOnlyList<string> expectedContexts)
     {
-        var action = entry.Value.OfType<StructPropertyData>()
-            .FirstOrDefault(property => property.Name.ToString().Equals(
-                "ActionTag",
-                StringComparison.OrdinalIgnoreCase))?
-            .Value.OfType<NamePropertyData>()
-            .FirstOrDefault(property => property.Name.ToString().Equals(
-                "TagName",
-                StringComparison.OrdinalIgnoreCase))?
-            .Value.ToString() ?? "";
+        var action = ReadEntryActionTag(entry);
         if (!action.Equals(expectedAction, StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
 
-        var contexts = entry.Value.OfType<StructPropertyData>()
+        return ReadEntryContextTags(entry).SequenceEqual(expectedContexts, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string ReadEntryActionTag(StructPropertyData entry)
+    {
+        var action = entry.Value.OfType<StructPropertyData>()
+            .FirstOrDefault(property => property.Name.ToString().Equals(
+                "ActionTag",
+                StringComparison.OrdinalIgnoreCase));
+        return action is null ? "" : ReadGameplayTag(action);
+    }
+
+    private static string ReadGameplayTag(StructPropertyData tag) =>
+        tag.Value.OfType<NamePropertyData>()
+            .FirstOrDefault(property => property.Name.ToString().Equals(
+                "TagName",
+                StringComparison.OrdinalIgnoreCase))?
+            .Value.ToString() ?? "";
+
+    private static List<string> ReadEntryContextTags(StructPropertyData entry) =>
+        NormalizeTags(entry.Value.OfType<StructPropertyData>()
             .FirstOrDefault(property => property.Name.ToString().Equals(
                 "ContextTags",
                 StringComparison.OrdinalIgnoreCase))?
             .Value.OfType<GameplayTagContainerPropertyData>()
             .FirstOrDefault()?
-            .Value.Select(tag => tag.ToString())
-            .ToList() ?? [];
-        return NormalizeTags(contexts).SequenceEqual(expectedContexts, StringComparer.OrdinalIgnoreCase);
+            .Value.Select(tag => tag.ToString()));
+
+    private static bool TryGetLayerEntryStorage(
+        UAsset asset,
+        out NormalExport export,
+        out ArrayPropertyData entries,
+        out MapPropertyData actionMap,
+        out string error)
+    {
+        export = asset.Exports.OfType<NormalExport>()
+            .FirstOrDefault(candidate => candidate.Data.OfType<ArrayPropertyData>().Any(property =>
+                property.Name.ToString().Equals("AnimSetEntryArray", StringComparison.OrdinalIgnoreCase)))!;
+        entries = export?.Data.OfType<ArrayPropertyData>()
+            .FirstOrDefault(property => property.Name.ToString().Equals(
+                "AnimSetEntryArray",
+                StringComparison.OrdinalIgnoreCase))!;
+        actionMap = export?.Data.OfType<MapPropertyData>()
+            .FirstOrDefault(property => property.Name.ToString().Equals(
+                "ActionTagToIndexMap",
+                StringComparison.OrdinalIgnoreCase))!;
+        if (export is null || entries is null || actionMap is null)
+        {
+            error = "The selected TTLayerSet has no readable AnimSetEntryArray/ActionTagToIndexMap pair.";
+            return false;
+        }
+        if (entries.Value.Any(property => property is not StructPropertyData))
+        {
+            error = "AnimSetEntryArray contains a row that is not a reflected struct.";
+            return false;
+        }
+        error = "";
+        return true;
+    }
+
+    private static void CollectObjectImports(PropertyData property, ISet<int> imports)
+    {
+        switch (property)
+        {
+            case ObjectPropertyData reference when reference.Value.IsImport():
+                imports.Add(reference.Value.Index);
+                break;
+            case StructPropertyData structure:
+                foreach (var child in structure.Value)
+                {
+                    CollectObjectImports(child, imports);
+                }
+                break;
+            case ArrayPropertyData array:
+                foreach (var child in array.Value)
+                {
+                    CollectObjectImports(child, imports);
+                }
+                break;
+        }
+    }
+
+    private static bool VerifyContextFilteredLayerSet(
+        string layerSetUassetPath,
+        Usmap mappings,
+        IReadOnlyList<string> requiredContexts,
+        int expectedRows,
+        out string error)
+    {
+        var asset = new UAsset(
+            layerSetUassetPath,
+            EngineVersion.VER_UE5_6,
+            mappings,
+            CustomSerializationFlags.None);
+        if (!TryGetLayerEntryStorage(asset, out var export, out var entries, out var actionMap, out error))
+        {
+            return false;
+        }
+        var rows = entries.Value.OfType<StructPropertyData>().ToList();
+        if (rows.Count != expectedRows || rows.Any(row => requiredContexts.Any(required =>
+                !ReadEntryContextTags(row).Contains(required, StringComparer.OrdinalIgnoreCase))))
+        {
+            error = $"The filtered layer reload contained {rows.Count} row(s), including a row outside the required contexts.";
+            return false;
+        }
+
+        var actions = rows.Select(ReadEntryActionTag).ToList();
+        var expectedFirst = actions.Select((action, index) => (action, index))
+            .GroupBy(item => item.action, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First().index, StringComparer.OrdinalIgnoreCase);
+        var actualFirst = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in actionMap.Value)
+        {
+            if (pair.Key is not StructPropertyData key || pair.Value is not IntPropertyData index ||
+                string.IsNullOrWhiteSpace(ReadGameplayTag(key)) ||
+                !actualFirst.TryAdd(ReadGameplayTag(key), index.Value))
+            {
+                error = "The filtered layer's ActionTagToIndexMap is malformed.";
+                return false;
+            }
+        }
+        if (actualFirst.Count != expectedFirst.Count || expectedFirst.Any(pair =>
+                !actualFirst.TryGetValue(pair.Key, out var actual) || actual != pair.Value))
+        {
+            error = "The filtered layer's action lookup map does not point at the retained rows.";
+            return false;
+        }
+
+        foreach (var actionGroup in actions.Select((action, index) => (action, index))
+                     .GroupBy(item => item.action, StringComparer.OrdinalIgnoreCase))
+        {
+            var indexes = actionGroup.Select(item => item.index).ToList();
+            for (var offset = 0; offset < indexes.Count; offset++)
+            {
+                var link = rows[indexes[offset]].Value.OfType<IntPropertyData>()
+                    .FirstOrDefault(property => property.Name.ToString().Equals(
+                        "ActionLink",
+                        StringComparison.OrdinalIgnoreCase));
+                var expectedLink = offset + 1 < indexes.Count ? indexes[offset + 1] : -1;
+                if (link is null || link.Value != expectedLink)
+                {
+                    error = $"The filtered layer's ActionLink chain is invalid at row {indexes[offset]}.";
+                    return false;
+                }
+            }
+        }
+
+        var referencedImports = new HashSet<int>();
+        foreach (var row in rows)
+        {
+            CollectObjectImports(row, referencedImports);
+        }
+        var dependencyImports = (export.CreateBeforeSerializationDependencies ?? [])
+            .Where(dependency => dependency.IsImport())
+            .Select(dependency => dependency.Index)
+            .ToHashSet();
+        if (!dependencyImports.SetEquals(referencedImports))
+        {
+            error = "The filtered layer still carries non-context animation dependencies or is missing a retained one.";
+            return false;
+        }
+
+        error = "";
+        return true;
     }
 
     private static List<string> NormalizeTags(IEnumerable<string>? values) =>

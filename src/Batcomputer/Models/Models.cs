@@ -199,6 +199,11 @@ public sealed class NativeSuitProject
     // DCMD equipment replacements, indexed from zero.
     public List<EquipmentSlotChange> EquipmentSlots { get; set; } = new();
 
+    // Per-suit DPRD AbilitySets composition and suit-local gameplay-ability grants. Null keeps the
+    // selected gameplay donor's runtime loadout byte-for-byte; edited profiles are applied only to
+    // generated mod-local DPRD / AbilitySet clones.
+    public AbilityLoadoutProfile? AbilityLoadout { get; set; }
+
     // Glider visual: empty, cape, wingsuit, or glider.
     public string GliderType { get; set; } = "";
 

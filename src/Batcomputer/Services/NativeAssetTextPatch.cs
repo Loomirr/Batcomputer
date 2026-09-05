@@ -161,6 +161,43 @@ public static class NativeAssetTextPatch
             : (property.Value.AssetPath.PackageName.ToString(), property.Value.AssetPath.AssetName.ToString());
     }
 
+    /// <summary>Reads a top-level hard object import such as a DCMD's UIMetaData.</summary>
+    public static (string PackageName, string AssetName)? GetObjectReference(UAsset asset, string propName)
+    {
+        var export = FindExportWithProp(asset, propName);
+        var property = export?.Data.OfType<ObjectPropertyData>()
+            .FirstOrDefault(item => item.Name.ToString() == propName);
+        if (property is null || !property.Value.IsImport())
+        {
+            return null;
+        }
+
+        var importIndex = -property.Value.Index - 1;
+        if (importIndex < 0 || importIndex >= asset.Imports.Count)
+        {
+            return null;
+        }
+        var objectImport = asset.Imports[importIndex];
+        var assetName = objectImport.ObjectName.ToString();
+        var outer = objectImport.OuterIndex;
+        while (outer.IsImport())
+        {
+            var outerIndex = -outer.Index - 1;
+            if (outerIndex < 0 || outerIndex >= asset.Imports.Count)
+            {
+                return null;
+            }
+            var outerImport = asset.Imports[outerIndex];
+            if (outerImport.ClassName.ToString().Equals("Package", StringComparison.Ordinal))
+            {
+                return (outerImport.ObjectName.ToString(), assetName);
+            }
+            outer = outerImport.OuterIndex;
+        }
+
+        return null;
+    }
+
     private static NormalExport? FindExportWithProp(UAsset asset, string propName) =>
         asset.Exports.OfType<NormalExport>()
             .FirstOrDefault(e => e.Data.Any(p => p.Name.ToString() == propName));

@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+- Adds independent held items with fourteen native examples, custom OBJ models, left/right hand selection and four visibility modes, separate from sword/bat/baton player-adapter combat.
+- Adds twelve cosmetic item-effect presets with placement markers and approximate animated previews. Up to three effects per item can be positioned, rotated and scaled; first-time/full extraction includes the donors. Native systems remain shared and unchanged.
+- Adds experimental, opt-in timed stun interruption and smoke distraction to player-adapter melee hits. Effects apply to eligible goon targets through suit-local damage clones, not to the wielder; existing damage remains. New configurable VFX/status combinations still require in-game testing.
+- Adds a per-suit Ability Explorer for preserving and reordering the gameplay donor's exact
+  AbilitySets, adding or removing individual gameplay-ability grants, and resetting the complete
+  loadout without changing base-game assets or other suits. Protected core edits require an
+  explicit unsafe unlock, while equipment/glider-required controller sets remain retained.
+- Adds atomic Batman martial-arts, Catwoman agile/claw, and Nightwing dual-stick style bundles.
+  Exactly one melee style may be active; traversal and utility stay additive, and switching styles
+  removes the outgoing style's combat effect, held item, support sets, and animation parents. A
+  cross-family style copies only its traced combat layers instead of replacing the character's
+  locomotion, traversal, glide, or default animation family.
+- Keeps equipment, matching upgrades, required abilities, and animation dependencies synchronized
+  across the generated DPRD and DCMD. Builds stop when the exact runtime slot or a required staged
+  dependency cannot be verified, and ED-owned controller sets are never duplicated into the DPRD.
+- Traces every discovered base-game, AdditionalContent, and installed-DLC playable through its
+  serialized DCMD, DPRD, AbilitySets, equipment, upgrades, and direct animation dependencies. The
+  cached report is invalidated when its schema or extracted assets change, and unresolved nested
+  evidence remains explicitly uncertified.
+- Fixes non-Batman custom suits falling back to their default appearance when a cold cutscene loads
+  the character before gameplay. Generated playable and cinematic classes are rooted lazily from
+  that character's exact manifest entry without changing party, save, or identity state.
+- Adds an explicit 180-degree custom-mesh preview correction and preserves that authored yaw in the
+  cooked result, so asymmetric OBJ imports can be aligned without a preview-only mirror.
+- Adds safe standard-face authoring choices for an animated mouth plus authored left eye, or two
+  independently authored eyes. The editor identifies inherited eye/mouth parameters instead of
+  presenting them as editable, and includes a verified 512px linear BC7 animated-face art profile.
+- Generated textures now have **Reimport image** and **Replace image…** actions. Reimport rereads the
+  saved source image and force-recooks it; Replace caches a selected PNG, BMP, or JPEG while keeping
+  the Unreal package identity, material references, texture use, and cook profile. Cook reports bind
+  the result to exact source and output hashes, and incomplete rollbacks cannot publish a stale
+  package over a newer edited image.
 - Settings → Visual now applies a complete lightweight theme choice: Classic keeps the original
   header and gold accent, Alternate pairs its header with blue, and Mayhem Mode uses its own header
   and window icon with purple and lime highlights. The dark layout, category colors, and

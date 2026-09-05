@@ -917,13 +917,11 @@ public sealed partial class MainForm
     private async Task<DeclarativeReplayOutcome> RestoreProtectedGliderComponent(
         NativeSuitProject project,
         string glideComponent,
-        string? projectRootOverride = null,
+        string projectRoot,
         string? stageContentRootOverride = null)
     {
         var outcome = new DeclarativeReplayOutcome();
-        var projectRoot = string.IsNullOrWhiteSpace(projectRootOverride)
-            ? _projectRootText.Text.Trim()
-            : projectRootOverride;
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
         var service = new ComponentRemoveService(projectRoot);
         var result = await RunWithStructuredFileLockRetryAsync(
             () => string.IsNullOrWhiteSpace(stageContentRootOverride)
@@ -1596,9 +1594,20 @@ public sealed partial class MainForm
         }
 
         ReadFieldsIntoProject(_currentProject);
-
-        var removingPairedCapeMember = PairedCapeAdapterTargetsComponent(_currentProject, component);
-        var protectedGliderComponent = ActiveGliderVisualComponent(_currentProject);
+        var project = _currentProject;
+        var projectRoot = _projectRootText.Text.Trim();
+        var editContext = CaptureCurrentProjectEditContext(project, projectRoot);
+        if (GameplayShellComponentPolicy.IsRequired(component))
+        {
+            Dialog.Warn(
+                this,
+                "Gameplay component is protected",
+                $"'{GameplayShellComponentPolicy.ComponentName(component)}' belongs to the selected gameplay donor's runtime shell, not its appearance. Removing it can disable dialogue or playable character/suit flows.");
+            AppendLog($"Remove blocked: '{component}' is required gameplay infrastructure from the selected donor.");
+            return;
+        }
+        var removingPairedCapeMember = PairedCapeAdapterTargetsComponent(project, component);
+        var protectedGliderComponent = ActiveGliderVisualComponent(project);
         if (!string.IsNullOrWhiteSpace(protectedGliderComponent) &&
             protectedGliderComponent.Equals(component, StringComparison.OrdinalIgnoreCase) &&
             !removingPairedCapeMember)
@@ -1614,7 +1623,7 @@ public sealed partial class MainForm
         try
         {
             previousProjectSnapshot = JsonSerializer.Deserialize<NativeSuitProject>(
-                JsonSerializer.Serialize(_currentProject))
+                JsonSerializer.Serialize(project))
                 ?? throw new InvalidOperationException("Could not snapshot the suit before removing the part.");
         }
         catch (Exception ex)
@@ -1623,16 +1632,37 @@ public sealed partial class MainForm
             return;
         }
 
+        using var rebuildLease = await EnterRebuildTransactionAsync();
+        if (!CurrentProjectEditContextMatches(editContext))
+        {
+            AppendLog("Remove/hide stopped because another suit or workspace was selected while it was waiting to stage.");
+            return;
+        }
+
+        BaseStageFilesystemSnapshot stageSnapshot;
+        try
+        {
+            stageSnapshot = await CaptureBaseStageFilesystemAsync(
+                projectRoot,
+                project.SlotId,
+                new[] { "UnpatchedStage", "PatchedNameMapStage", "GraftedPartStage" });
+        }
+        catch (Exception ex)
+        {
+            AppendLog("Remove/hide failed before staging: " + ex.Message);
+            return;
+        }
+
         var key = ToyboxSlotKey(component, slot);
-        _currentProject.Requirements.RemoveAll(requirement =>
+        project.Requirements.RemoveAll(requirement =>
             requirement.Kind.Equals("remove-component", StringComparison.OrdinalIgnoreCase) &&
             requirement.TargetComponent.Equals(key, StringComparison.OrdinalIgnoreCase));
 
-        _currentProject.Requirements.Add(new NativeSuitRequirement
+        project.Requirements.Add(new NativeSuitRequirement
         {
             Id = $"remove-{component}-{slot}".Replace(' ', '-').ToLowerInvariant(),
             Kind = "remove-component",
-            SourcePackage = _targetPlayableText.Text.Trim(),
+            SourcePackage = project.TargetPackages.Playable,
             TargetComponent = key,
             Notes = $"Removed or visually hidden declaratively in both staged character roles for {label} ({component} slot {slot})."
         });
@@ -1645,16 +1675,20 @@ public sealed partial class MainForm
         var removedGrafts = 0;
         if (removingPairedCapeMember)
         {
-            var before = _currentProject.PartGrafts.Count;
+            var before = project.PartGrafts.Count;
             try
             {
-                atomicallyRemovedComponents = RemovePairedCapeAdapterAtomically(_currentProject);
+                atomicallyRemovedComponents = RemovePairedCapeAdapterAtomically(project);
             }
             catch (InvalidOperationException ex)
             {
-                _currentProject = previousProjectSnapshot;
-                ApplyProjectToFields(_currentProject);
-                UpdateSelectedLabels();
+                await DiscardBaseStageFilesystemBackupAsync(stageSnapshot, logFailure: true);
+                if (CurrentProjectEditContextMatches(editContext))
+                {
+                    _currentProject = previousProjectSnapshot;
+                    ApplyProjectToFields(_currentProject);
+                    UpdateSelectedLabels();
+                }
                 AppendLog("Remove/hide stopped before staging: " + ex.Message);
                 Dialog.Error(
                     this,
@@ -1666,12 +1700,12 @@ public sealed partial class MainForm
                 RefreshToyboxTiles();
                 return;
             }
-            removedGrafts = before - _currentProject.PartGrafts.Count;
+            removedGrafts = before - project.PartGrafts.Count;
             AppendLog("  removed the authored paired-cape adapter atomically; its cosmetic Cape and Torso glider cannot be replayed independently on a glide-only base.");
         }
         else
         {
-            removedGraftComponents = _currentProject.PartGrafts
+            removedGraftComponents = project.PartGrafts
                 .Where(pg => GraftTargetsComponent(pg, component))
                 .Select(pg => !string.IsNullOrWhiteSpace(pg.ResolvedComponent)
                     ? pg.ResolvedComponent
@@ -1679,7 +1713,7 @@ public sealed partial class MainForm
                 .Where(target => !string.IsNullOrWhiteSpace(target))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
-            removedGrafts = _currentProject.PartGrafts.RemoveAll(pg =>
+            removedGrafts = project.PartGrafts.RemoveAll(pg =>
                 GraftTargetsComponent(pg, component));
         }
         if (removedGrafts > 0 || removingPairedCapeMember)
@@ -1691,19 +1725,19 @@ public sealed partial class MainForm
                 // carried onto the restored gameplay Blueprint.
                 foreach (var removedComponent in atomicallyRemovedComponents)
                 {
-                    RemoveSavedRemovalForComponent(_currentProject, removedComponent);
+                    RemoveSavedRemovalForComponent(project, removedComponent);
                 }
             }
             // The part no longer exists declaratively, so the remove-component rule we just added
             // is redundant (nothing will graft that component to remove) - drop it too.
-            _currentProject.Requirements.RemoveAll(r =>
+            project.Requirements.RemoveAll(r =>
                 r.Kind.Equals("remove-component", StringComparison.OrdinalIgnoreCase) &&
                 r.TargetComponent.Equals(key, StringComparison.OrdinalIgnoreCase));
             AppendLog($"  cleared the declarative part graft for '{component}' — it won't be re-added on rebuild.");
         }
 
         var clearedMaterialComponents = ClearMaterialAssignmentsForComponents(
-            _currentProject,
+            project,
             new[] { component }
                 .Concat(removedGraftComponents)
                 .Concat(atomicallyRemovedComponents));
@@ -1713,62 +1747,73 @@ public sealed partial class MainForm
                       string.Join(", ", clearedMaterialComponents));
         }
 
-        try
-        {
-            // Rebuild from the clean patched base instead of editing the current stage in place.
-            // The completion marker is written only after BOTH playable and cutscene replays pass,
-            // so a locked role can never leave a packageable half-removal behind.
-            await RebuildGraftStageFromDeclarativeAsync(persistProject: false);
-        }
-        catch (Exception ex)
-        {
-            _currentProject = previousProjectSnapshot;
-            ApplyProjectToFields(_currentProject);
-            UpdateSelectedLabels();
-            AppendLog("Remove/hide failed; the saved project was left unchanged:");
-            AppendLog(ex.ToString());
-            _session.RaiseChanged();
-            RefreshInspector();
-            RefreshToyboxTiles();
-            return;
-        }
-
+        CurrentProjectSaveCapture? saveCapture = null;
         var projectSaved = false;
         try
         {
-            await RunWithFileLockRetryAsync(
-                () => (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim()))
-                    .SaveProject(_currentProject),
-                "save the completed part removal");
+            // Rebuild from the clean patched base instead of editing the current stage in place.
+            // This method owns RebuildGate, so use the core directly and keep the outer filesystem
+            // snapshot until project save and certification have both committed.
+            await RebuildGraftStageCoreAsync(project, projectRoot, persistProject: false);
+            saveCapture = CaptureCurrentProjectSave(editContext, "save the completed part removal");
+            var saveResult = await CommitCurrentProjectSaveCaptureAsync(saveCapture);
+            RequireCurrentProjectSaveCommitted(saveResult, "save the completed part removal");
             projectSaved = true;
-            await FinalizeDeclarativeGraftStageAsync(_currentProject, _projectRootText.Text.Trim());
+            await FinalizeDeclarativeGraftStageAsync(
+                project,
+                projectRoot,
+                saveCapture.Snapshot);
+            await DiscardBaseStageFilesystemBackupAsync(stageSnapshot, logFailure: true);
         }
         catch (Exception ex)
         {
-            if (!projectSaved)
+            Exception reportedFailure = ex;
+            var superseded = ContainsCurrentProjectSaveSuperseded(ex);
+            try
             {
-                _currentProject = previousProjectSnapshot;
-                ApplyProjectToFields(_currentProject);
-                UpdateSelectedLabels();
+                await RestoreBaseStageFilesystemAsync(
+                    stageSnapshot,
+                    latestOwnedProjectSave: saveCapture?.Snapshot,
+                    ownedProjectSaveWasCommitted: projectSaved,
+                    rollbackContextIsCurrent: () => CurrentProjectEditContextMatches(editContext));
             }
-            AppendLog(projectSaved
-                ? "The part removal was saved, but its completed stage could not be certified:"
-                : "The part was removed from both temporary staged roles, but the suit project could not be saved:");
-            AppendLog(ex.ToString());
+            catch (Exception restoreFailure)
+            {
+                superseded |= ContainsCurrentProjectSaveSuperseded(restoreFailure);
+                reportedFailure = new AggregateException(
+                    "The part removal failed and its previous project/stage could not be fully restored.",
+                    ex,
+                    restoreFailure);
+            }
+
+            if (superseded || !CurrentProjectEditContextMatches(editContext))
+            {
+                AppendLog("Remove/hide stopped after a newer suit edit or workspace operation superseded it; the current editor was left unchanged and the generated stage remains blocked until rebuilt.");
+                return;
+            }
+
+            _currentProject = previousProjectSnapshot;
+            ApplyProjectToFields(_currentProject);
+            UpdateSelectedLabels();
+            AppendLog("Remove/hide failed; Batcomputer restored the prior project and generated stage where possible:");
+            AppendLog(reportedFailure.ToString());
             Dialog.Error(
                 this,
-                projectSaved ? "Part saved; stage incomplete" : "Part removed but not saved",
-                (projectSaved
-                    ? "The project was saved, but Batcomputer could not certify its generated stage. Packaging remains blocked until the declarative stage rebuild succeeds."
-                    : "The playable and cutscene temporary stages were updated, but the suit project file could not be saved. The prior saved project remains active and packaging stays blocked until the edit is rebuilt.") +
-                "\n\n" + ex.Message);
+                "Part was not removed",
+                "Batcomputer could not rebuild, save, and certify the complete removal. It restored the prior project and generated stage where possible.\n\n" +
+                reportedFailure.Message);
             _session.RaiseChanged();
             RefreshInspector();
             RefreshToyboxTiles();
             return;
         }
 
-        RecordChange("Parts", $"{component} slot {slot}", $"removed or hidden part {label}");
+        if (!CurrentProjectEditContextMatches(editContext))
+        {
+            return;
+        }
+
+        RecordChange(project, "Parts", $"{component} slot {slot}", $"removed or hidden part {label}");
         AppendLog($"Removed or hidden {label} in both staged character roles. Package the current stage to test it in-game.");
         _session.RaiseChanged();
         RefreshToyboxTiles();
@@ -1777,9 +1822,28 @@ public sealed partial class MainForm
     private async Task<DeclarativeReplayOutcome> ApplySavedComponentRemovals(
         NativeSuitProject project,
         bool logNoRemovals,
+        string projectRoot,
         string? stageContentRootOverride = null)
     {
         var outcome = new DeclarativeReplayOutcome();
+        var repairedGameplayComponents = GameplayShellComponentPolicy.RemoveLegacyAutomaticRemovals(project);
+        if (repairedGameplayComponents.Count > 0)
+        {
+            AppendLog(
+                "Repaired legacy visual-base cleanup rule(s) that targeted required gameplay components: " +
+                string.Join(", ", repairedGameplayComponents) + ".");
+        }
+
+        var explicitGameplayRemoval = project.Requirements.FirstOrDefault(requirement =>
+            requirement.Kind.Equals("remove-component", StringComparison.OrdinalIgnoreCase) &&
+            GameplayShellComponentPolicy.IsRequired(requirement.TargetComponent));
+        if (explicitGameplayRemoval is not null)
+        {
+            outcome.Failures.Add(
+                $"{explicitGameplayRemoval.TargetComponent}: required gameplay infrastructure cannot be removed");
+            return outcome;
+        }
+
         var removals = project.Requirements
             .Where(requirement => requirement.Kind.Equals("remove-component", StringComparison.OrdinalIgnoreCase))
             .Select(requirement => requirement.TargetComponent)
@@ -1840,7 +1904,10 @@ public sealed partial class MainForm
             var preserveAuthoredShellNode =
                 authoredPairedCapeShellComponents?.Contains(component) == true;
 
-            var service = new ComponentRemoveService(_projectRootText.Text.Trim());
+            // Rebuild/package callers capture their workspace before yielding. Keep every replay
+            // service bound to that root so switching the visible workspace cannot redirect an
+            // older in-flight suit operation into the newly selected workspace.
+            var service = new ComponentRemoveService(projectRoot);
             var result = await RunWithStructuredFileLockRetryAsync(
                 () => preserveAuthoredShellNode
                     ? string.IsNullOrWhiteSpace(stageContentRootOverride)
@@ -2180,7 +2247,8 @@ public sealed partial class MainForm
         }
 
         var projectRoot = _projectRootText.Text.Trim();
-        var projectService = _projectService ??= new SuitProjectService(projectRoot);
+        var editContext = CaptureCurrentProjectEditContext(project, projectRoot);
+        var projectService = editContext.Service;
         NativeSuitProject previousProjectSnapshot;
         try
         {
@@ -2216,6 +2284,27 @@ public sealed partial class MainForm
             }
         }
 
+        using var rebuildLease = await EnterRebuildTransactionAsync();
+        if (!CurrentProjectEditContextMatches(editContext))
+        {
+            AppendLog("Custom mesh removal stopped because another suit or workspace was selected while it was waiting to stage.");
+            return;
+        }
+
+        BaseStageFilesystemSnapshot stageSnapshot;
+        try
+        {
+            stageSnapshot = await CaptureBaseStageFilesystemAsync(
+                projectRoot,
+                project.SlotId,
+                new[] { "UnpatchedStage", "PatchedNameMapStage", "GraftedPartStage" });
+        }
+        catch (Exception ex)
+        {
+            AppendLog("Custom mesh removal stopped before staging: " + ex.Message);
+            return;
+        }
+
         project.CustomStaticMeshes.Remove(mesh);
         var componentName = CustomStaticMeshImportService.ComponentNameFor(mesh);
         if (!string.IsNullOrWhiteSpace(componentName))
@@ -2227,38 +2316,61 @@ public sealed partial class MainForm
         }
         SyncCustomStaticMeshHeadRemoval(project);
 
+        CurrentProjectSaveCapture? saveCapture = null;
         var projectSaved = false;
         try
         {
             // Keep the OBJ and saved recipe intact until both generated roles rebuild cleanly.
             // This makes inspector/tile removal transactional instead of deleting the only source
             // copy before a package lock or replay failure can be reported.
-            await RebuildGraftStageFromDeclarativeAsync(persistProject: false);
-            await RunWithFileLockRetryAsync(
-                () => projectService.SaveProject(project),
-                "save the completed custom-mesh removal");
+            await RebuildGraftStageCoreAsync(project, projectRoot, persistProject: false);
+            saveCapture = CaptureCurrentProjectSave(editContext, "save the completed custom-mesh removal");
+            var saveResult = await CommitCurrentProjectSaveCaptureAsync(saveCapture);
+            RequireCurrentProjectSaveCommitted(saveResult, "save the completed custom-mesh removal");
             projectSaved = true;
-            await FinalizeDeclarativeGraftStageAsync(project, projectRoot);
+            await FinalizeDeclarativeGraftStageAsync(
+                project,
+                projectRoot,
+                saveCapture.Snapshot);
+            await DiscardBaseStageFilesystemBackupAsync(stageSnapshot, logFailure: true);
         }
         catch (Exception ex)
         {
-            if (!projectSaved)
+            Exception reportedFailure = ex;
+            var superseded = ContainsCurrentProjectSaveSuperseded(ex);
+            try
             {
-                _currentProject = previousProjectSnapshot;
-                ApplyProjectToFields(_currentProject);
-                UpdateSelectedLabels();
+                await RestoreBaseStageFilesystemAsync(
+                    stageSnapshot,
+                    latestOwnedProjectSave: saveCapture?.Snapshot,
+                    ownedProjectSaveWasCommitted: projectSaved,
+                    rollbackContextIsCurrent: () => CurrentProjectEditContextMatches(editContext));
             }
-            AppendLog(projectSaved
-                ? "Custom mesh removal was saved, but its completed stage could not be certified:"
-                : "Custom mesh removal failed; the prior saved recipe and OBJ remain active:");
-            AppendLog(ex.ToString());
+            catch (Exception restoreFailure)
+            {
+                superseded |= ContainsCurrentProjectSaveSuperseded(restoreFailure);
+                reportedFailure = new AggregateException(
+                    "The custom mesh removal failed and its previous project/stage could not be fully restored.",
+                    ex,
+                    restoreFailure);
+            }
+
+            if (superseded || !CurrentProjectEditContextMatches(editContext))
+            {
+                AppendLog("Custom mesh removal stopped after a newer suit edit or workspace operation superseded it; the current editor and project-owned OBJ were left unchanged, and the generated stage remains blocked until rebuilt.");
+                return;
+            }
+
+            _currentProject = previousProjectSnapshot;
+            ApplyProjectToFields(_currentProject);
+            UpdateSelectedLabels();
+            AppendLog("Custom mesh removal failed; Batcomputer restored the prior project and generated stage where possible:");
+            AppendLog(reportedFailure.ToString());
             Dialog.Error(
                 this,
-                projectSaved ? "Custom mesh saved; stage incomplete" : "Custom mesh was not removed",
-                (projectSaved
-                    ? "The project was saved without this mesh, but packaging remains blocked until its declarative stage rebuild can be certified."
-                    : "Batcomputer restored the prior suit recipe. The project-owned OBJ was not deleted.") +
-                "\n\n" + ex.Message,
+                "Custom mesh was not removed",
+                "Batcomputer could not rebuild, save, and certify the custom-mesh removal. It restored the prior project and generated stage where possible. The project-owned OBJ was not deleted.\n\n" +
+                reportedFailure.Message,
                 windowTitle: "Parts");
             _session.RaiseChanged();
             RefreshToyboxTiles();
@@ -2440,14 +2552,15 @@ public sealed partial class MainForm
         RefreshToyboxTiles();
     }
 
-    private async Task StageCustomStaticMeshesAsync(NativeSuitProject project)
+    private async Task StageCustomStaticMeshesAsync(
+        NativeSuitProject project,
+        string projectRoot)
     {
         if (project.CustomStaticMeshes is not { Count: > 0 })
         {
             return;
         }
 
-        var projectRoot = _projectRootText.Text.Trim();
         var service = new CustomStaticMeshImportService();
         var errors = new List<string>();
         foreach (var mesh in project.CustomStaticMeshes)
@@ -3098,12 +3211,14 @@ public sealed partial class MainForm
         }
 
         var projectRoot = _projectRootText.Text.Trim();
+        var editContext = CaptureCurrentProjectEditContext(project, projectRoot);
         BaseStageFilesystemSnapshot? stageFilesystemSnapshot = null;
-        var saveAttempted = false;
+        CurrentProjectSaveCapture? saveCapture = null;
+        var projectSaveWritten = false;
         await RebuildGate.WaitAsync();
         try
         {
-            if (!ReferenceEquals(_currentProject, project))
+            if (!CurrentProjectEditContextMatches(editContext))
             {
                 AppendLog("Clear glider stopped because the active suit changed while it was waiting to stage.");
                 return;
@@ -3141,11 +3256,14 @@ public sealed partial class MainForm
 
             RecordChange("Gliders", "Glide visual", "restored gameplay donor default", status: "staged");
             await RebuildGraftStageCoreAsync(project, projectRoot, persistProject: false);
-            saveAttempted = true;
-            await RunWithFileLockRetryAsync(
-                () => (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(project),
-                "save the cleared glider");
-            await FinalizeDeclarativeGraftStageAsync(project, projectRoot);
+            saveCapture = CaptureCurrentProjectSave(editContext, "save the cleared glider");
+            var saveResult = await CommitCurrentProjectSaveCaptureAsync(saveCapture);
+            RequireCurrentProjectSaveCommitted(saveResult, "save the cleared glider");
+            projectSaveWritten = true;
+            await FinalizeDeclarativeGraftStageAsync(
+                project,
+                projectRoot,
+                saveCapture.Snapshot);
             await DiscardBaseStageFilesystemBackupAsync(stageFilesystemSnapshot, logFailure: true);
             stageFilesystemSnapshot = null;
 
@@ -3158,36 +3276,43 @@ public sealed partial class MainForm
         catch (Exception ex)
         {
             Exception reportedFailure = ex;
+            var superseded = ContainsCurrentProjectSaveSuperseded(ex);
             try
             {
-                if (saveAttempted)
-                {
-                    await RunWithFileLockRetryAsync(
-                        () => (_projectService ??= new SuitProjectService(projectRoot))
-                            .SaveProject(previousProjectSnapshot),
-                        "restore the prior project after a failed glider clear");
-                }
-                _currentProject = previousProjectSnapshot;
-                ApplyProjectToFields(_currentProject);
-                UpdateSelectedLabels();
                 if (stageFilesystemSnapshot is not null)
                 {
                     await RestoreBaseStageFilesystemAsync(
                         stageFilesystemSnapshot,
-                        discardBackup: false);
+                        discardBackup: false,
+                        latestOwnedProjectSave: saveCapture?.Snapshot,
+                        ownedProjectSaveWasCommitted: projectSaveWritten,
+                        rollbackContextIsCurrent: () => CurrentProjectEditContextMatches(editContext));
                     await DiscardBaseStageFilesystemBackupAsync(stageFilesystemSnapshot, logFailure: true);
                     stageFilesystemSnapshot = null;
+                }
+                if (CurrentProjectEditContextMatches(editContext))
+                {
+                    _currentProject = previousProjectSnapshot;
+                    ApplyProjectToFields(_currentProject);
+                    UpdateSelectedLabels();
                 }
             }
             catch (Exception restoreFailure)
             {
+                superseded |= ContainsCurrentProjectSaveSuperseded(restoreFailure);
                 reportedFailure = new AggregateException(
                     "Clearing the glider failed and the previous project/stage could not be fully restored.",
                     ex,
                     restoreFailure);
             }
 
-            AppendLog("Clear glider failed; the prior project and generated stages were restored: " + reportedFailure.Message);
+            if (superseded || !CurrentProjectEditContextMatches(editContext))
+            {
+                AppendLog("Clear glider stopped after a newer suit edit or workspace operation superseded it; the current editor was left unchanged and the generated stage remains blocked until rebuilt.");
+                return;
+            }
+
+            AppendLog("Clear glider failed; the prior project and generated stages were restored where possible: " + reportedFailure.Message);
             Dialog.Error(
                 this,
                 "Glider was not cleared",
@@ -3267,13 +3392,20 @@ public sealed partial class MainForm
     }
 
     /// <summary>
-    /// Asks which 0-based equipment slot to replace, showing the current occupant
-    /// of each slot (read from the base donor DCMD, or the standard Batarang/BatClaw
-    /// loadout as a fallback). Returns -1 if cancelled.
+    /// Asks which 0-based equipment slot to replace, showing the current occupant from the donor
+    /// DPRD's authoritative runtime Equipment array. Returns -1 if cancelled.
     /// </summary>
     private int AskEquipmentSlot(GameDataEquipment eq)
     {
         var current = CurrentEquipmentSlotNames();
+        if (current.Count == 0)
+        {
+            Dialog.Warn(this,
+                "Runtime equipment unavailable",
+                "Batcomputer could not prove an existing equipment slot in this character's DPRD. " +
+                "It will not guess from the DCMD menu list or create an uncertified sparse slot.");
+            return -1;
+        }
 
         using var dlg = new AdaptiveDialogForm
         {
@@ -3293,7 +3425,7 @@ public sealed partial class MainForm
         var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, Padding = new Padding(12, 8, 12, 12), WrapContents = false, AutoScroll = true };
 
         int chosen = -1;
-        for (var i = 0; i < Math.Max(2, current.Count); i++)
+        for (var i = 0; i < current.Count; i++)
         {
             var slotIndex = i;
             var occupant = i < current.Count ? current[i] : "(empty)";
@@ -3319,41 +3451,29 @@ public sealed partial class MainForm
         return dlg.ShowDialog(this) == DialogResult.OK ? chosen : -1;
     }
 
-    /// <summary>Current gadget names per slot, from the base donor DCMD if readable.</summary>
+    /// <summary>Current gadget names per slot, from the base donor DPRD runtime loadout.</summary>
     private List<string> CurrentEquipmentSlotNames()
     {
         try
         {
-            var donorDcmd = _currentProject?.DcmdTemplate?.Uasset;
-            if (string.IsNullOrWhiteSpace(donorDcmd) || !File.Exists(donorDcmd))
+            if (_currentProject is not null &&
+                AbilityDependencyService.TryReadDonorRuntimeEquipmentSlots(
+                    _currentProject,
+                    GameDataService.Instance.Db.Equipment,
+                    out var slots))
             {
-                donorDcmd = PackageToExtractedUasset(
-                    _currentProject?.DcmdTemplate?.PackagePath ?? "",
-                    AppSettings.Current.EffectiveExtractedContentRoot());
-            }
-            if (string.IsNullOrWhiteSpace(donorDcmd) || !File.Exists(donorDcmd))
-            {
-                var playable = _currentProject?.PlayableTemplate?.Uasset;
-                if (string.IsNullOrWhiteSpace(playable) || !File.Exists(playable))
+                var count = slots.Count == 0 ? 0 : slots.Keys.Max() + 1;
+                var names = new List<string>(count);
+                for (var index = 0; index < count; index++)
                 {
-                    playable = PackageToExtractedUasset(
-                        _currentProject?.PlayableTemplate?.PackagePath ?? "",
-                        AppSettings.Current.EffectiveExtractedContentRoot());
+                    names.Add(slots.GetValueOrDefault(index, ""));
                 }
-                donorDcmd = string.IsNullOrWhiteSpace(playable) ? null : FindDcmdSiblingForPlayable(playable);
-            }
-
-            donorDcmd ??= DcmdGenService.ResolveBaseDcmdPath();
-            var names = new DcmdGenService(_projectRootText.Text.Trim()).ReadEquipmentSlots(donorDcmd);
-            if (names.Count > 0)
-            {
-                // Strip DA_ETA_ prefix for readability.
-                return names.Select(n => n.StartsWith("DA_ETA_", StringComparison.OrdinalIgnoreCase) ? n["DA_ETA_".Length..] : n).ToList();
+                return names;
             }
         }
-        catch { /* fall through to default loadout */ }
+        catch { /* fail closed below */ }
 
-        return new List<string> { "Batarang", "Batclaw" };
+        return new List<string>();
     }
 
     private static bool MatchesPartSearch(NativeSuitPartRecord part, string search)
@@ -3724,39 +3844,56 @@ public sealed partial class MainForm
         var projectRoot = string.IsNullOrWhiteSpace(projectRootOverride)
             ? _projectRootText.Text.Trim()
             : projectRootOverride.Trim();
+        var index = await LoadPartIndexForRootAsync(projectRoot);
+
+        // The shared field belongs only to the workspace currently displayed by the editor. An
+        // older async load may still finish after the user has selected another root; publishing
+        // it here would make the new workspace resolve donors from the old workspace's cache.
+        if (!PathsEqual(projectRoot, _projectRootText.Text.Trim()))
+        {
+            AppendLog("Part index load completed for the previous workspace; its cache was not applied to the newly selected workspace.");
+            return false;
+        }
+
+        _partIndex = index;
+        return index is { Parts.Count: > 0 };
+    }
+
+    private async Task<NativeSuitPartIndex?> LoadPartIndexForRootAsync(string projectRoot)
+    {
         await PartIndexGate.WaitAsync();
         try
         {
             var service = new PartIndexService(projectRoot);
+            NativeSuitPartIndex? index;
             try
             {
-                // Always reload the cache for this project root. Viewer/acceptance builds can use a
-                // disposable root while the main window still has another workspace index in memory.
-                _partIndex = service.LoadPartIndex();
+                // Always reload the cache for this project root. Keep it local until the caller
+                // proves that this is still the workspace shown by the editor.
+                index = service.LoadPartIndex();
             }
             catch (Exception ex)
             {
-                _partIndex = null;
+                index = null;
                 AppendLog($"Part index cache could not be read and will be rebuilt: {ex.Message}");
             }
 
-            if (_partIndex is { Parts.Count: > 0 })
+            if (index is { Parts.Count: > 0 })
             {
-                return true;
+                return index;
             }
 
             AppendLog("Part index is missing, stale, empty, or unreadable; rebuilding it from the extracted character assets…");
             try
             {
-                _partIndex = await Task.Run(() => service.BuildPartIndex());
-                AppendLog($"Part index status: {_partIndex.Status}; parts indexed: {_partIndex.Parts.Count}");
-                return _partIndex.Parts.Count > 0;
+                index = await Task.Run(() => service.BuildPartIndex());
+                AppendLog($"Part index status: {index.Status}; parts indexed: {index.Parts.Count}");
+                return index.Parts.Count > 0 ? index : null;
             }
             catch (Exception ex)
             {
-                _partIndex = null;
                 AppendLog($"Part index build failed: {ex.Message}");
-                return false;
+                return null;
             }
         }
         finally
@@ -4067,13 +4204,28 @@ public sealed partial class MainForm
             return;
         }
 
-        ReadFieldsIntoProject(_currentProject);
+        var project = _currentProject;
+        ReadFieldsIntoProject(project);
+        var projectRoot = _projectRootText.Text.Trim();
+        var editContext = CaptureCurrentProjectEditContext(project, projectRoot);
         AppendLog("Creating experimental Thomas + Absolute Torso2 graft stage…");
         _graftTorso2Button.Enabled = false;
         try
         {
-            var projectRoot = _projectRootText.Text.Trim();
-            var result = await Task.Run(() => new PartGraftService(projectRoot).CreateTorso2GraftedStage(_currentProject));
+            using var rebuildLease = await EnterRebuildTransactionAsync();
+            if (!CurrentProjectEditContextMatches(editContext))
+            {
+                AppendLog("Torso2 graft stopped because another suit or workspace was selected while it was waiting to stage.");
+                return;
+            }
+
+            var result = await Task.Run(() =>
+                new PartGraftService(projectRoot).CreateTorso2GraftedStage(project));
+            if (!CurrentProjectEditContextMatches(editContext))
+            {
+                AppendLog("Torso2 graft completed for the original suit after another suit or workspace was selected; its result was not applied to the current editor.");
+                return;
+            }
             AppendLog($"Torso2 graft status: {result.Status}");
             AppendLog($"Grafted content root: {result.GraftedContentRoot}");
             AppendLog($"Graft report: {result.ReportPath}");
@@ -4384,7 +4536,9 @@ public sealed partial class MainForm
         }
         _graftSelectedPartButton.Enabled = false;
         var projectRoot = _projectRootText.Text.Trim();
+        var editContext = CaptureCurrentProjectEditContext(transactionProject, projectRoot);
         var projectSaved = false;
+        CurrentProjectSaveCapture? saveCapture = null;
         var gateHeld = false;
         BaseStageFilesystemSnapshot? stageFilesystemSnapshot = null;
         try
@@ -4393,7 +4547,7 @@ public sealed partial class MainForm
             // captured before RestoreProtectedGliderComponent or any declarative field mutation.
             await RebuildGate.WaitAsync();
             gateHeld = true;
-            if (!ReferenceEquals(_currentProject, transactionProject))
+            if (!CurrentProjectEditContextMatches(editContext))
             {
                 AppendLog("Selected-part graft stopped because the active suit changed while it was waiting to stage.");
                 return false;
@@ -4455,7 +4609,10 @@ public sealed partial class MainForm
                         AppendLog($"Glider part: removed stale remove-component rule for native glide component '{glideComp}'.");
                     }
 
-                    await RestoreProtectedGliderComponent(transactionProject, glideComp);
+                    await RestoreProtectedGliderComponent(
+                        transactionProject,
+                        glideComp,
+                        projectRoot);
 
                     // The glider owns the glide component's materials (its own decal + solid).
                     // Drop any saved material override so replay cannot paint over the glider.
@@ -4558,12 +4715,14 @@ public sealed partial class MainForm
                 transactionProject,
                 projectRoot,
                 persistProject: false);
-            await RunWithFileLockRetryAsync(
-                () => (_projectService ??= new SuitProjectService(projectRoot))
-                    .SaveProject(transactionProject),
-                "save the completed selected-part graft");
+            saveCapture = CaptureCurrentProjectSave(editContext, "save the completed selected-part graft");
+            var saveResult = await CommitCurrentProjectSaveCaptureAsync(saveCapture);
+            RequireCurrentProjectSaveCommitted(saveResult, "save the completed selected-part graft");
             projectSaved = true;
-            await FinalizeDeclarativeGraftStageAsync(transactionProject, projectRoot);
+            await FinalizeDeclarativeGraftStageAsync(
+                transactionProject,
+                projectRoot,
+                saveCapture.Snapshot);
             await DiscardBaseStageFilesystemBackupAsync(stageFilesystemSnapshot, logFailure: true);
             stageFilesystemSnapshot = null;
             RefreshToyboxTiles();
@@ -4572,17 +4731,24 @@ public sealed partial class MainForm
         catch (Exception ex)
         {
             Exception reportedFailure = ex;
-            if (!projectSaved && stageFilesystemSnapshot is not null)
+            var superseded = ContainsCurrentProjectSaveSuperseded(ex);
+            if (stageFilesystemSnapshot is not null)
             {
                 var recoveryBackupRoot = stageFilesystemSnapshot.BackupRoot;
                 try
                 {
-                    await RestoreBaseStageFilesystemAsync(stageFilesystemSnapshot);
+                    await RestoreBaseStageFilesystemAsync(
+                        stageFilesystemSnapshot,
+                        latestOwnedProjectSave: saveCapture?.Snapshot,
+                        ownedProjectSaveWasCommitted: projectSaved,
+                        rollbackContextIsCurrent: () => CurrentProjectEditContextMatches(editContext));
                     AppendLog("  restored the previous generated part stage after the failed graft.");
                     stageFilesystemSnapshot = null;
+                    projectSaved = false;
                 }
                 catch (Exception restoreFailure)
                 {
+                    superseded |= ContainsCurrentProjectSaveSuperseded(restoreFailure);
                     reportedFailure = new AggregateException(
                         "The selected-part graft failed and its previous generated stage could not be fully restored. " +
                         $"Recovery backup: {recoveryBackupRoot}",
@@ -4590,18 +4756,17 @@ public sealed partial class MainForm
                         restoreFailure);
                 }
             }
+            if (superseded || !CurrentProjectEditContextMatches(editContext))
+            {
+                AppendLog("Selected-part graft stopped after a newer suit edit or workspace operation superseded it; the current editor was left unchanged and the generated stage remains blocked until rebuilt.");
+                return false;
+            }
+
             if (!projectSaved)
             {
-                if (ReferenceEquals(_currentProject, transactionProject))
-                {
-                    _currentProject = previousProjectSnapshot;
-                    ApplyProjectToFields(_currentProject);
-                    UpdateSelectedLabels();
-                }
-                else
-                {
-                    AppendLog("  the active suit changed, so its UI state was not overwritten during rollback.");
-                }
+                _currentProject = previousProjectSnapshot;
+                ApplyProjectToFields(_currentProject);
+                UpdateSelectedLabels();
             }
             AppendLog(projectSaved
                 ? "Selected-part graft was saved, but its completed stage could not be certified:"
@@ -4766,13 +4931,18 @@ public sealed partial class MainForm
     /// part index, matching on source package + mesh (the fields that uniquely identify a part on
     /// a slot). Returns null if the index can't supply it (e.g. the part index hasn't been built).
     /// </summary>
-    private NativeSuitPartRecord? ResolveLivePart(SavedPartGraftDonor? donor)
+    private NativeSuitPartRecord? ResolveLivePart(SavedPartGraftDonor? donor) =>
+        ResolveLivePart(donor, _partIndex);
+
+    private static NativeSuitPartRecord? ResolveLivePart(
+        SavedPartGraftDonor? donor,
+        NativeSuitPartIndex? partIndex)
     {
-        if (donor is null || _partIndex is null)
+        if (donor is null || partIndex is null)
         {
             return null;
         }
-        var match = _partIndex.Parts.FirstOrDefault(p =>
+        var match = partIndex.Parts.FirstOrDefault(p =>
             p.SourcePackagePath.Equals(donor.SourcePackagePath, StringComparison.OrdinalIgnoreCase) &&
             p.MeshObjectPath.Equals(donor.MeshObjectPath, StringComparison.OrdinalIgnoreCase) &&
             (string.IsNullOrWhiteSpace(donor.Context) || p.Context.Equals(donor.Context, StringComparison.OrdinalIgnoreCase)));
@@ -4780,11 +4950,11 @@ public sealed partial class MainForm
         // Catalog parts are synthesized from mesh paths, so their SourcePackagePath is
         // the mesh package rather than a character BP. Re-resolve those by exact mesh
         // identity and recover the native component recipe from the extracted BP index.
-        match ??= _partIndex.Parts.FirstOrDefault(p =>
+        match ??= partIndex.Parts.FirstOrDefault(p =>
             !string.IsNullOrWhiteSpace(donor.MeshObjectPath) &&
             p.MeshObjectPath.Equals(donor.MeshObjectPath, StringComparison.OrdinalIgnoreCase) &&
             (string.IsNullOrWhiteSpace(donor.Context) || p.Context.Equals(donor.Context, StringComparison.OrdinalIgnoreCase)));
-        match ??= _partIndex.Parts.FirstOrDefault(p =>
+        match ??= partIndex.Parts.FirstOrDefault(p =>
             p.SourcePackagePath.Equals(donor.SourcePackagePath, StringComparison.OrdinalIgnoreCase) &&
             (string.IsNullOrWhiteSpace(donor.Context) || p.Context.Equals(donor.Context, StringComparison.OrdinalIgnoreCase)));
 
@@ -4815,10 +4985,15 @@ public sealed partial class MainForm
     /// Adapter certification uses this stricter path so migration can never borrow component-shell
     /// metadata from another character that happens to share a cape mesh.
     /// </summary>
-    private NativeSuitPartRecord? ResolveExactLivePart(SavedPartGraftDonor? donor)
+    private NativeSuitPartRecord? ResolveExactLivePart(SavedPartGraftDonor? donor) =>
+        ResolveExactLivePart(donor, _partIndex);
+
+    private static NativeSuitPartRecord? ResolveExactLivePart(
+        SavedPartGraftDonor? donor,
+        NativeSuitPartIndex? partIndex)
     {
         if (donor is null ||
-            _partIndex is null ||
+            partIndex is null ||
             string.IsNullOrWhiteSpace(donor.SourcePackagePath) ||
             string.IsNullOrWhiteSpace(donor.MeshObjectPath) ||
             string.IsNullOrWhiteSpace(donor.Context))
@@ -4826,7 +5001,7 @@ public sealed partial class MainForm
             return null;
         }
 
-        var matches = _partIndex.Parts
+        var matches = partIndex.Parts
             .Where(part =>
                 part.SourcePackagePath.Equals(donor.SourcePackagePath, StringComparison.OrdinalIgnoreCase) &&
                 part.MeshObjectPath.Equals(donor.MeshObjectPath, StringComparison.OrdinalIgnoreCase) &&
@@ -4905,7 +5080,9 @@ public sealed partial class MainForm
         NativeSuitProject? projectOverride = null,
         string? projectRootOverride = null,
         bool persistProject = true,
-        bool loadedProjectRestore = false)
+        bool loadedProjectRestore = false,
+        SuitProjectService.ProjectFileRollbackSnapshot? unchangedProjectFileForCertification = null,
+        Func<bool>? certificationContextIsCurrent = null)
     {
         var project = projectOverride ?? _currentProject;
         if (project is null)
@@ -4924,11 +5101,31 @@ public sealed partial class MainForm
         var projectRoot = string.IsNullOrWhiteSpace(projectRootOverride)
             ? _projectRootText.Text.Trim()
             : projectRootOverride.Trim();
+        if (loadedProjectRestore != (unchangedProjectFileForCertification is not null))
+        {
+            throw new InvalidOperationException(
+                "Loaded-project replay must carry exactly one unchanged project-file certification snapshot.");
+        }
+        if (unchangedProjectFileForCertification is not null)
+        {
+            var expectedCertificationPath = Path.GetFullPath(
+                new SuitProjectService(projectRoot).ProjectPathForSlot(project.SlotId));
+            if (!Path.GetFullPath(unchangedProjectFileForCertification.Path)
+                    .Equals(expectedCertificationPath, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "Loaded-project replay received a certification snapshot for another workspace or suit slot.");
+            }
+        }
+        var editContext = requiresCurrentProjectIdentity
+            ? CaptureCurrentProjectEditContext(project, projectRoot)
+            : null;
         await RebuildGate.WaitAsync();
         BaseStageFilesystemSnapshot? stageFilesystemSnapshot = null;
+        var saveOwnership = new ProjectSaveRollbackOwnership();
         try
         {
-            if (requiresCurrentProjectIdentity && !ReferenceEquals(project, _currentProject))
+            if (editContext is not null && !CurrentProjectEditContextMatches(editContext))
             {
                 throw new InvalidOperationException(
                     "The generated-stage rebuild was cancelled because another suit was selected while it was waiting to stage.");
@@ -4941,7 +5138,18 @@ public sealed partial class MainForm
                 projectRoot,
                 project.SlotId,
                 new[] { "UnpatchedStage", "PatchedNameMapStage", "GraftedPartStage" });
-            await RebuildGraftStageCoreAsync(project, projectRoot, persistProject);
+            await RebuildGraftStageCoreAsync(
+                project,
+                projectRoot,
+                persistProject,
+                certifyWithoutPersist: loadedProjectRestore && !persistProject,
+                saveOwnership: saveOwnership,
+                saveContextIsCurrent: editContext is null
+                    ? null
+                    : () => CurrentProjectEditContextMatches(editContext),
+                saveGenerationAtStart: editContext?.StartingSaveGeneration,
+                unchangedProjectFileForCertification: unchangedProjectFileForCertification,
+                certificationContextIsCurrent: certificationContextIsCurrent);
             await DiscardBaseStageFilesystemBackupAsync(stageFilesystemSnapshot, logFailure: true);
             stageFilesystemSnapshot = null;
         }
@@ -4954,7 +5162,12 @@ public sealed partial class MainForm
                 {
                     await RestoreBaseStageFilesystemAsync(
                         stageFilesystemSnapshot,
-                        discardBackup: false);
+                        discardBackup: false,
+                        latestOwnedProjectSave: saveOwnership.LatestSave,
+                        ownedProjectSaveWasCommitted: saveOwnership.SaveWasCommitted,
+                        rollbackContextIsCurrent: editContext is null
+                            ? null
+                            : () => CurrentProjectEditContextMatches(editContext));
 
                     if (persistProject)
                     {
@@ -4993,18 +5206,23 @@ public sealed partial class MainForm
     // The actual rebuild work. MUST be called while holding RebuildGate (via the public wrapper
     // above, or by UseAsBase which holds it across its whole staging pass).
     private async Task RebuildGraftStageCoreAsync(
-        NativeSuitProject? projectOverride = null,
-        string? projectRootOverride = null,
-        bool persistProject = true)
+        NativeSuitProject project,
+        string projectRoot,
+        bool persistProject = true,
+        bool certifyWithoutPersist = false,
+        ProjectSaveRollbackOwnership? saveOwnership = null,
+        Func<bool>? saveContextIsCurrent = null,
+        SuitProjectService.ProjectSaveGenerationSnapshot? saveGenerationAtStart = null,
+        SuitProjectService.ProjectFileRollbackSnapshot? unchangedProjectFileForCertification = null,
+        Func<bool>? certificationContextIsCurrent = null)
     {
-        var project = projectOverride ?? _currentProject;
-        if (project is null)
+        ArgumentNullException.ThrowIfNull(project);
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+        if (certifyWithoutPersist != (unchangedProjectFileForCertification is not null))
         {
-            return;
+            throw new InvalidOperationException(
+                "Stage-only certification must carry exactly one unchanged project-file owner.");
         }
-        var projectRoot = string.IsNullOrWhiteSpace(projectRootOverride)
-            ? _projectRootText.Text.Trim()
-            : projectRootOverride;
 
         // Delete the grafted stage so the graft service re-copies it fresh from the clean
         // PatchedNameMapStage (its first graft call copies patched→grafted only when absent).
@@ -5046,14 +5264,18 @@ public sealed partial class MainForm
         // Adapter migration and visual-overlay replay both require exact live recipes. Load the
         // index before migrating an older certificate so a saved schema-2 project cannot silently
         // fall back to its Batman scaffold when the selected base's visual overlay is unavailable.
-        if ((project.PairedCapeAdapter is not null ||
-             project.PartGrafts.Any(graft => graft.Playable is not null || graft.Cutscene is not null)) &&
-            !await EnsurePartIndexAsync(projectRoot))
+        NativeSuitPartIndex? replayPartIndex = null;
+        if (project.PairedCapeAdapter is not null ||
+            project.PartGrafts.Any(graft => graft.Playable is not null || graft.Cutscene is not null))
         {
-            throw new InvalidOperationException(
-                "The native part index could not be loaded or rebuilt from the extracted character assets. " +
-                "Refresh game assets, then rebuild the part index and retry. The previous generated payload was left in place, " +
-                "but packaging remains blocked until the saved edits can be replayed.");
+            replayPartIndex = await LoadPartIndexForRootAsync(projectRoot);
+            if (replayPartIndex is null)
+            {
+                throw new InvalidOperationException(
+                    "The native part index could not be loaded or rebuilt from the extracted character assets. " +
+                    "Refresh game assets, then rebuild the part index and retry. The previous generated payload was left in place, " +
+                    "but packaging remains blocked until the saved edits can be replayed.");
+            }
         }
 
         if (project.PairedCapeAdapter is not null &&
@@ -5077,8 +5299,8 @@ public sealed partial class MainForm
             var exactHydration = boundGrafts.Select(graft => new
             {
                 Graft = graft,
-                Playable = ResolveExactLivePart(graft.Playable),
-                Cutscene = ResolveExactLivePart(graft.Cutscene),
+                Playable = ResolveExactLivePart(graft.Playable, replayPartIndex),
+                Cutscene = ResolveExactLivePart(graft.Cutscene, replayPartIndex),
             }).ToList();
             if (boundGrafts.Count != 2 || exactHydration.Any(item =>
                     item.Graft.Playable is null || item.Graft.Cutscene is null ||
@@ -5104,7 +5326,7 @@ public sealed partial class MainForm
                      contract,
                      nativeGlider,
                      out var migrationDetail,
-                     _partIndex))
+                     replayPartIndex))
             {
                 throw new InvalidOperationException(
                     "This suit contains a retired paired-cape adapter certificate that could not be migrated to the " +
@@ -5142,11 +5364,11 @@ public sealed partial class MainForm
             var automaticVisualOverlay = visualOverlayGrafts.Contains(graft);
             var adapterBound = automaticVisualOverlay || IsAdapterBoundGraft(project, graft);
             var playable = adapterBound
-                ? ResolveExactLivePart(graft.Playable)
-                : ResolveLivePart(graft.Playable);
+                ? ResolveExactLivePart(graft.Playable, replayPartIndex)
+                : ResolveLivePart(graft.Playable, replayPartIndex);
             var cutscene = adapterBound
-                ? ResolveExactLivePart(graft.Cutscene)
-                : ResolveLivePart(graft.Cutscene);
+                ? ResolveExactLivePart(graft.Cutscene, replayPartIndex)
+                : ResolveLivePart(graft.Cutscene, replayPartIndex);
             BackfillSavedDonorRecipe(graft.Playable, playable);
             BackfillSavedDonorRecipe(graft.Cutscene, cutscene);
             var missingPlayable = graft.Playable is not null && playable is null;
@@ -5397,19 +5619,70 @@ public sealed partial class MainForm
         }
 
         SyncCustomStaticMeshHeadRemoval(project);
-        await StageCustomStaticMeshesAsync(project);
+        await StageCustomStaticMeshesAsync(project, projectRoot);
 
         // Re-apply the rest of the suit's declarative edits onto the freshly grafted stage.
-        var removalReplay = await ApplySavedComponentRemovals(project, logNoRemovals: false);
+        var removalReplay = await ApplySavedComponentRemovals(
+            project,
+            logNoRemovals: false,
+            projectRoot: projectRoot);
         RequireCompleteDeclarativeReplay(removalReplay, "Saved component removal replay");
-        var materialReplay = await ApplySavedMaterials(project, logIfNone: false);
+        var materialReplay = await ApplySavedMaterials(
+            project,
+            logIfNone: false,
+            projectRoot: projectRoot);
         RequireCompleteDeclarativeReplay(materialReplay, "Saved material replay");
+        SuitProjectService.ProjectSaveSnapshot? committedProjectSave = null;
         if (persistProject)
         {
-            await RunWithFileLockRetryAsync(
-                () => new SuitProjectService(projectRoot).SaveProject(project),
+            var projectService = new SuitProjectService(projectRoot);
+            SuitProjectService.ProjectSaveSnapshot saveSnapshot;
+            if (saveGenerationAtStart is not null)
+            {
+                var captureResult = projectService.CaptureProjectSaveIfCurrent(
+                    project,
+                    saveGenerationAtStart,
+                    saveContextIsCurrent);
+                if (captureResult.Snapshot is null)
+                {
+                    throw new CurrentProjectSaveSupersededException(
+                        captureResult.RejectedByContext
+                            ? "The declarative-stage save was not captured because another suit or workspace is now active."
+                            : "The declarative-stage save was not captured because a newer save already owns this suit project.");
+                }
+                saveSnapshot = captureResult.Snapshot;
+            }
+            else
+            {
+                if (saveContextIsCurrent is not null && !saveContextIsCurrent())
+                {
+                    throw new CurrentProjectSaveSupersededException(
+                        "The declarative-stage save was not captured because another suit or workspace is now active.");
+                }
+                saveSnapshot = projectService.CaptureProjectSave(project);
+            }
+            if (saveOwnership is not null)
+            {
+                saveOwnership.LatestSave = saveSnapshot;
+            }
+            var saveResult = await RunWithFileLockRetryAsync(
+                () => projectService.CommitProjectSave(saveSnapshot, saveContextIsCurrent),
                 "save the completed declarative stage");
-            await FinalizeDeclarativeGraftStageAsync(project, projectRoot);
+            RequireCurrentProjectSaveCommitted(saveResult, "save the completed declarative stage");
+            committedProjectSave = saveSnapshot;
+            if (saveOwnership is not null)
+            {
+                saveOwnership.SaveWasCommitted = true;
+            }
+        }
+        if (persistProject || certifyWithoutPersist)
+        {
+            await FinalizeDeclarativeGraftStageAsync(
+                project,
+                projectRoot,
+                committedProjectSave,
+                unchangedProjectFileForCertification,
+                certificationContextIsCurrent);
         }
         _session.RaiseChanged();
     }
@@ -5501,7 +5774,10 @@ public sealed partial class MainForm
 
     private async Task FinalizeDeclarativeGraftStageAsync(
         NativeSuitProject project,
-        string projectRoot)
+        string projectRoot,
+        SuitProjectService.ProjectSaveSnapshot? committedProjectSave = null,
+        SuitProjectService.ProjectFileRollbackSnapshot? unchangedProjectFile = null,
+        Func<bool>? certificationContextIsCurrent = null)
     {
         var projectStageRoot = Path.Combine(
             AppSettings.GeneratedRootFor(projectRoot),
@@ -5510,28 +5786,69 @@ public sealed partial class MainForm
         var graftStage = Path.Combine(projectStageRoot, "GraftedPartStage");
         var incompleteMarker = Path.Combine(projectStageRoot, IncompleteDeclarativeStageMarkerName);
 
-        if (Directory.Exists(graftStage))
+        void CertifyStage()
         {
-            await RunWithFileLockRetryAsync(
-                () =>
-                {
-                    File.WriteAllText(
-                        Path.Combine(graftStage, CompletedGraftStageMarkerName),
-                        DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
-                    return true;
-                },
-                "mark generated graft stage complete");
+            if (Directory.Exists(graftStage))
+            {
+                File.WriteAllText(
+                    Path.Combine(graftStage, CompletedGraftStageMarkerName),
+                    DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+            }
+
+            // Delete the fail-closed sentinel last. If this step is interrupted, packaging remains
+            // blocked even when a completion marker was already written.
+            File.Delete(incompleteMarker);
         }
 
-        // Delete the fail-closed sentinel last. If this step is interrupted, packaging remains
-        // blocked even when a completion marker was already written.
-        await RunWithFileLockRetryAsync(
-            () =>
+        if (committedProjectSave is not null)
+        {
+            if (unchangedProjectFile is not null)
             {
-                File.Delete(incompleteMarker);
-                return true;
-            },
-            "certify the completed declarative stage");
+                throw new InvalidOperationException(
+                    "A generated stage cannot be certified by both a committed save and an unchanged-file snapshot.");
+            }
+            if (!committedProjectSave.SlotId.Equals(project.SlotId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "Refused to certify a generated stage with a save captured for another suit slot.");
+            }
+
+            var projectService = new SuitProjectService(projectRoot);
+            var certified = await RunWithFileLockRetryAsync(
+                () => projectService.RunIfProjectSaveStillCurrent(
+                    committedProjectSave,
+                    CertifyStage),
+                "certify the completed declarative stage against its exact suit save");
+            if (!certified)
+            {
+                throw new CurrentProjectSaveSupersededException(
+                    "The generated stage was left incomplete because a newer suit save superseded it before certification.");
+            }
+            return;
+        }
+
+        if (unchangedProjectFile is null ||
+            !unchangedProjectFile.SlotId.Equals(project.SlotId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "Refused to certify a generated stage without an exact committed-save or unchanged-project-file owner.");
+        }
+
+        // Saved-project load/replay does not rewrite JSON. Bind its completion marker to the exact
+        // file generations and fingerprint captured before replay, and to the still-active load
+        // selection, so an older loaded object cannot certify after another save or selection.
+        var unchangedProjectService = new SuitProjectService(projectRoot);
+        var unchangedProjectCertified = await RunWithFileLockRetryAsync(
+            () => unchangedProjectService.RunIfProjectFileSnapshotStillCurrent(
+                unchangedProjectFile,
+                CertifyStage,
+                certificationContextIsCurrent),
+            "certify the loaded declarative stage against its unchanged suit project");
+        if (!unchangedProjectCertified)
+        {
+            throw new CurrentProjectSaveSupersededException(
+                "The loaded generated stage was left incomplete because the suit project or active selection changed before certification.");
+        }
     }
 
     private async Task MarkDeclarativeStageIncompleteAsync(

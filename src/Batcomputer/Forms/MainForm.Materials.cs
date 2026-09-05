@@ -233,10 +233,25 @@ public sealed partial class MainForm
     {
         try
         {
+            var projectService = new SuitProjectService(projectRoot);
+            var certificationProjectFile = projectService.CaptureProjectFileRollback(project.SlotId);
+            if (!certificationProjectFile.Existed)
+            {
+                throw new InvalidOperationException(
+                    "The saved suit project disappeared before its generated stage could be restored.");
+            }
+
+            // Loading is a stage replay, not a new authoring commit. The rebuild certifies the
+            // resulting stage but must not write this potentially stale loaded object back over a
+            // newer cover/editor save.
             await RebuildGraftStageFromDeclarativeAsync(
                 project,
                 projectRoot,
-                loadedProjectRestore: true);
+                persistProject: false,
+                loadedProjectRestore: true,
+                unchangedProjectFileForCertification: certificationProjectFile,
+                certificationContextIsCurrent: () =>
+                    IsCurrentLoadedProjectStageRestore(project, loadGeneration));
         }
         catch (Exception ex)
         {
@@ -361,6 +376,12 @@ public sealed partial class MainForm
             try
             {
                 await RenameGeneratedMaterialAsync(miGamePath, wiz.ResultMiPackagePath);
+            }
+            catch (CurrentProjectSaveSupersededException)
+            {
+                // The user moved to another suit/workspace while the rename transaction was
+                // waiting. Do not register this material against the newly selected project.
+                return;
             }
             catch (Exception ex)
             {
@@ -546,6 +567,7 @@ public sealed partial class MainForm
     private async Task<DeclarativeReplayOutcome> ApplySavedMaterials(
         NativeSuitProject project,
         bool logIfNone,
+        string projectRoot,
         string? stageContentRootOverride = null)
     {
         var outcome = new DeclarativeReplayOutcome();
@@ -558,7 +580,9 @@ public sealed partial class MainForm
         var slotId = project.SlotId;
         var playablePkg = project.TargetPackages.Playable;
         var cutscenePkg = project.TargetPackages.Cutscene;
-        var service = new MaterialReplaceService(_projectRootText.Text.Trim());
+        // A rebuild may outlive the workspace currently shown in the UI. Use the root captured by
+        // the caller so a suit from the prior workspace can never write into the new one.
+        var service = new MaterialReplaceService(projectRoot);
         var reapplied = 0;
         foreach (var m in project.MaterialAssignments)
         {
@@ -916,7 +940,7 @@ public sealed partial class MainForm
         var repairProject = _currentProject;
         var projectRoot = _projectRootText.Text.Trim();
         var repairSlotId = repairProject.SlotId;
-        var repairProjectService = new SuitProjectService(projectRoot);
+        var editContext = CaptureCurrentProjectEditContext(repairProject, projectRoot);
         var packages = AssignedModMaterialPackagesForRelease(repairProject);
         if (packages.Count == 0)
         {
@@ -943,9 +967,11 @@ public sealed partial class MainForm
         Exception? reportedFailure = null;
         var closurePackages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var completedPackages = 0;
+        CurrentProjectSaveCapture? saveCapture = null;
+        var projectSaveWritten = false;
 
         bool RepairContextIsStillActive() =>
-            ReferenceEquals(_currentProject, repairProject) &&
+            CurrentProjectEditContextMatches(editContext) &&
             string.Equals(_projectRootText.Text.Trim(), projectRoot, StringComparison.OrdinalIgnoreCase) &&
             string.Equals(repairProject.SlotId, repairSlotId, StringComparison.OrdinalIgnoreCase);
 
@@ -958,6 +984,7 @@ public sealed partial class MainForm
             }
         }
 
+        using var rebuildLease = await EnterRebuildTransactionAsync();
         using (var progress = new ProgressDialog(this, "Repairing suit materials", packages.Count + 2))
         {
             try
@@ -1002,20 +1029,24 @@ public sealed partial class MainForm
                 progress.SetStep("Reapplying saved assignments");
                 progress.Report("Rebuilding the clean declarative stage…");
                 RequireRepairContext();
-                await RebuildGraftStageFromDeclarativeAsync(
+                await RebuildGraftStageCoreAsync(
                     repairProject,
                     projectRoot,
                     persistProject: false);
                 RequireRepairContext();
                 progress.Advance(packages.Count + 1, "Saving the repaired suit recipe…");
-                await RunWithFileLockRetryAsync(
-                    () => repairProjectService.SaveProject(repairProject),
-                    "save the repaired suit materials");
+                saveCapture = CaptureCurrentProjectSave(editContext, "save the repaired suit materials");
+                var saveResult = await CommitCurrentProjectSaveCaptureAsync(saveCapture);
+                RequireCurrentProjectSaveCommitted(saveResult, "save the repaired suit materials");
+                projectSaveWritten = true;
                 RequireRepairContext();
 
                 progress.SetStep("Certifying repaired stages");
                 progress.Report("Finalizing the declarative material stage…");
-                await FinalizeDeclarativeGraftStageAsync(repairProject, projectRoot);
+                await FinalizeDeclarativeGraftStageAsync(
+                    repairProject,
+                    projectRoot,
+                    saveCapture.Snapshot);
                 RequireRepairContext();
                 libraryRepair.Commit();
                 libraryRepair = null;
@@ -1047,8 +1078,11 @@ public sealed partial class MainForm
                     {
                         progress.SetStep("Restoring the previous suit stage");
                         progress.Report(repairProject.DisplayName);
-                        await RestoreBaseStageFilesystemAsync(stageSnapshot);
-                        repairProjectService.SaveProject(priorProject);
+                        await RestoreBaseStageFilesystemAsync(
+                            stageSnapshot,
+                            latestOwnedProjectSave: saveCapture?.Snapshot,
+                            ownedProjectSaveWasCommitted: projectSaveWritten,
+                            rollbackContextIsCurrent: () => CurrentProjectEditContextMatches(editContext));
                     }
                     catch (Exception restoreFailure)
                     {
@@ -1079,6 +1113,22 @@ public sealed partial class MainForm
                 this,
                 "Materials repaired",
                 $"Recovered and reapplied {packages.Count} material(s). The clean suit stage now carries {closurePackages.Count} live material/texture package(s).");
+            return;
+        }
+
+        var repairWasSuperseded = ContainsCurrentProjectSaveSuperseded(reportedFailure) ||
+                                  !RepairContextIsStillActive();
+        if (repairWasSuperseded)
+        {
+            AppendLog(
+                "Material repair stopped after a newer suit edit or workspace selection superseded it; the current editor and newer project save were left unchanged.");
+            if (RepairContextIsStillActive())
+            {
+                Dialog.Warn(
+                    this,
+                    "Material repair superseded",
+                    "A newer save completed before the repaired stage could be finalized. Batcomputer kept that newer save and left this generated stage blocked until it is rebuilt again.");
+            }
             return;
         }
 
@@ -1285,16 +1335,32 @@ public sealed partial class MainForm
         if (_currentProject is not null)
         {
             var projectRoot = _projectRootText.Text.Trim();
+            var project = _currentProject;
+            var editContext = CaptureCurrentProjectEditContext(project, projectRoot);
             var priorProject = JsonSerializer.Deserialize<NativeSuitProject>(
-                JsonSerializer.Serialize(_currentProject))
+                JsonSerializer.Serialize(project))
                 ?? throw new InvalidOperationException("Could not snapshot the suit before renaming its material.");
+            using var rebuildLease = await EnterRebuildTransactionAsync();
+            if (!CurrentProjectEditContextMatches(editContext))
+            {
+                throw new CurrentProjectSaveSupersededException(
+                    "The material rename stopped because another suit or workspace was selected.");
+            }
             var stageSnapshot = await CaptureBaseStageFilesystemAsync(
                 projectRoot,
-                _currentProject.SlotId,
+                project.SlotId,
                 new[] { "UnpatchedStage", "PatchedNameMapStage", "GraftedPartStage" });
+            if (!CurrentProjectEditContextMatches(editContext))
+            {
+                await DiscardBaseStageFilesystemBackupAsync(stageSnapshot, logFailure: true);
+                throw new CurrentProjectSaveSupersededException(
+                    "The material rename stopped because another suit or workspace was selected.");
+            }
+            CurrentProjectSaveCapture? saveCapture = null;
+            var projectSaveWritten = false;
             try
             {
-                foreach (var generated in _currentProject.GeneratedMaterials ?? Enumerable.Empty<GeneratedMaterialEntry>())
+                foreach (var generated in project.GeneratedMaterials ?? Enumerable.Empty<GeneratedMaterialEntry>())
                 {
                     if (!UnrealPathUtil.NormalizePackagePath(generated.PackagePath)
                             .Equals(oldPackage, StringComparison.OrdinalIgnoreCase))
@@ -1307,7 +1373,7 @@ public sealed partial class MainForm
                     registryUpdated++;
                 }
 
-                foreach (var assignment in _currentProject.MaterialAssignments)
+                foreach (var assignment in project.MaterialAssignments)
                 {
                     if (!UnrealPathUtil.NormalizePackagePath(assignment.MiPackagePath)
                             .Equals(oldPackage, StringComparison.OrdinalIgnoreCase))
@@ -1320,7 +1386,7 @@ public sealed partial class MainForm
                 }
 
                 customMeshesUpdated = ReplaceCustomStaticMeshMaterialReferences(
-                    _currentProject,
+                    project,
                     oldPackage,
                     newPackage);
 
@@ -1329,37 +1395,73 @@ public sealed partial class MainForm
                     // Rebuild transactionally before the new JSON becomes authoritative. The
                     // outer snapshot below can restore both project and stages if saving or final
                     // certification fails after the generated payload succeeds.
-                    await RebuildGraftStageFromDeclarativeAsync(persistProject: false);
+                    await RebuildGraftStageCoreAsync(project, projectRoot, persistProject: false);
                 }
                 if (reassigned > 0 || registryUpdated > 0 || customMeshesUpdated > 0)
                 {
-                    await RunWithFileLockRetryAsync(
-                        () => (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(_currentProject),
-                        "save the renamed generated material");
+                    // Rebuild can legitimately hydrate donor recipes and reconcile resolved
+                    // component names. Capture only afterward so the committed JSON is the exact
+                    // recipe represented by the stage that is about to be certified.
+                    saveCapture = CaptureCurrentProjectSave(editContext, "save the renamed generated material");
+                    var saveResult = await CommitCurrentProjectSaveCaptureAsync(saveCapture);
+                    RequireCurrentProjectSaveCommitted(saveResult, "save the renamed generated material");
+                    projectSaveWritten = true;
                 }
                 if (reassigned > 0 || customMeshesUpdated > 0)
                 {
-                    await FinalizeDeclarativeGraftStageAsync(_currentProject, projectRoot);
+                    await FinalizeDeclarativeGraftStageAsync(
+                        project,
+                        projectRoot,
+                        saveCapture!.Snapshot);
                 }
                 await DiscardBaseStageFilesystemBackupAsync(stageSnapshot, logFailure: true);
             }
             catch (Exception renameFailure)
             {
-                _currentProject = priorProject;
+                var superseded = ContainsCurrentProjectSaveSuperseded(renameFailure) ||
+                                 !CurrentProjectEditContextMatches(editContext);
                 try
                 {
-                    await RestoreBaseStageFilesystemAsync(stageSnapshot);
-                    ApplyProjectToFields(priorProject);
-                    _session.RaiseChanged();
+                    await RestoreBaseStageFilesystemAsync(
+                        stageSnapshot,
+                        latestOwnedProjectSave: saveCapture?.Snapshot,
+                        ownedProjectSaveWasCommitted: projectSaveWritten,
+                        rollbackContextIsCurrent: () => CurrentProjectEditContextMatches(editContext));
+                    superseded |= !CurrentProjectEditContextMatches(editContext);
+                    if (!superseded)
+                    {
+                        _currentProject = priorProject;
+                        ApplyProjectToFields(priorProject);
+                        _session.RaiseChanged();
+                    }
                 }
                 catch (Exception restoreFailure)
                 {
+                    superseded |= ContainsCurrentProjectSaveSuperseded(restoreFailure) ||
+                                  !CurrentProjectEditContextMatches(editContext);
+                    if (superseded)
+                    {
+                        AppendLog("Material rename rollback warning after the editor context changed: " + restoreFailure.Message);
+                        throw new CurrentProjectSaveSupersededException(
+                            "The material rename stopped after another suit or workspace was selected, and its stage backup could not be fully restored.");
+                    }
                     throw new AggregateException(
                         "The material rename failed and the previous suit stages could not be fully restored. Packaging remains blocked.",
                         renameFailure,
                         restoreFailure);
                 }
+                if (superseded)
+                {
+                    throw new CurrentProjectSaveSupersededException(
+                        "The material rename stopped because another suit or workspace operation superseded it.");
+                }
                 throw;
+            }
+
+            if (!CurrentProjectEditContextMatches(editContext))
+            {
+                throw new CurrentProjectSaveSupersededException(
+                    "The material rename completed for the original suit after another suit or workspace was selected.");
             }
         }
 
@@ -1477,29 +1579,45 @@ public sealed partial class MainForm
         if (_currentProject is not null)
         {
             var projectRoot = _projectRootText.Text.Trim();
+            var project = _currentProject;
+            var editContext = CaptureCurrentProjectEditContext(project, projectRoot);
             NativeSuitProject? priorProject = null;
             BaseStageFilesystemSnapshot? stageSnapshot = null;
+            CurrentProjectSaveCapture? saveCapture = null;
+            var projectSaveWritten = false;
+            using var rebuildLease = await EnterRebuildTransactionAsync();
             try
             {
+                if (!CurrentProjectEditContextMatches(editContext))
+                {
+                    throw new CurrentProjectSaveSupersededException(
+                        "The material deletion stopped because another suit or workspace was selected.");
+                }
                 priorProject = JsonSerializer.Deserialize<NativeSuitProject>(
-                    JsonSerializer.Serialize(_currentProject))
+                    JsonSerializer.Serialize(project))
                     ?? throw new InvalidOperationException("Could not snapshot the suit before deleting its material.");
                 stageSnapshot = await CaptureBaseStageFilesystemAsync(
                     projectRoot,
-                    _currentProject.SlotId,
+                    project.SlotId,
                     new[] { "UnpatchedStage", "PatchedNameMapStage", "GraftedPartStage" });
+                if (!CurrentProjectEditContextMatches(editContext))
+                {
+                    await DiscardBaseStageFilesystemBackupAsync(stageSnapshot, logFailure: true);
+                    AppendLog("Material delete stopped because another suit or workspace was selected.");
+                    return;
+                }
 
                 if (assignments.Count > 0)
                 {
-                    removedAssignments = _currentProject.MaterialAssignments.RemoveAll(assignment =>
+                    removedAssignments = project.MaterialAssignments.RemoveAll(assignment =>
                         UnrealPathUtil.NormalizePackagePath(assignment.MiPackagePath)
                             .Equals(package, StringComparison.OrdinalIgnoreCase));
                 }
-                removedRegistryEntries = (_currentProject.GeneratedMaterials ?? new List<GeneratedMaterialEntry>())
+                removedRegistryEntries = (project.GeneratedMaterials ?? new List<GeneratedMaterialEntry>())
                     .RemoveAll(material => UnrealPathUtil.NormalizePackagePath(material.PackagePath)
                         .Equals(package, StringComparison.OrdinalIgnoreCase));
                 resetCustomMeshMaterials = ReplaceCustomStaticMeshMaterialReferences(
-                    _currentProject,
+                    project,
                     package,
                     CustomStaticMeshImportService.DefaultMaterialPackagePath);
 
@@ -1508,39 +1626,62 @@ public sealed partial class MainForm
                     // Keep the working stage and project file recoverable until the replacement
                     // recipe has rebuilt in both runtime roles. Generated material files are
                     // deliberately deleted only after this transaction is certified.
-                    await RebuildGraftStageFromDeclarativeAsync(persistProject: false);
+                    await RebuildGraftStageCoreAsync(project, projectRoot, persistProject: false);
                 }
                 if (removedAssignments > 0 || removedRegistryEntries > 0 || resetCustomMeshMaterials > 0)
                 {
-                    await RunWithFileLockRetryAsync(
-                        () => (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(_currentProject),
-                        "save the generated material deletion");
+                    // The rebuild may update persisted donor/component resolution metadata. Freeze
+                    // the authoritative recipe only after that work has completed successfully.
+                    saveCapture = CaptureCurrentProjectSave(editContext, "save the generated material deletion");
+                    var saveResult = await CommitCurrentProjectSaveCaptureAsync(saveCapture);
+                    RequireCurrentProjectSaveCommitted(saveResult, "save the generated material deletion");
+                    projectSaveWritten = true;
                 }
                 if (removedAssignments > 0 || resetCustomMeshMaterials > 0)
                 {
-                    await FinalizeDeclarativeGraftStageAsync(_currentProject, projectRoot);
+                    await FinalizeDeclarativeGraftStageAsync(
+                        project,
+                        projectRoot,
+                        saveCapture!.Snapshot);
                 }
                 await DiscardBaseStageFilesystemBackupAsync(stageSnapshot, logFailure: true);
             }
             catch (Exception deleteFailure)
             {
                 var reportedFailure = deleteFailure;
+                var superseded = ContainsCurrentProjectSaveSuperseded(deleteFailure);
                 if (priorProject is not null && stageSnapshot is not null)
                 {
-                    _currentProject = priorProject;
                     try
                     {
-                        await RestoreBaseStageFilesystemAsync(stageSnapshot);
-                        ApplyProjectToFields(priorProject);
-                        _session.RaiseChanged();
+                        await RestoreBaseStageFilesystemAsync(
+                            stageSnapshot,
+                            latestOwnedProjectSave: saveCapture?.Snapshot,
+                            ownedProjectSaveWasCommitted: projectSaveWritten,
+                            rollbackContextIsCurrent: () => CurrentProjectEditContextMatches(editContext));
+                        superseded |= !CurrentProjectEditContextMatches(editContext);
+                        if (!superseded)
+                        {
+                            _currentProject = priorProject;
+                            ApplyProjectToFields(priorProject);
+                            _session.RaiseChanged();
+                        }
                     }
                     catch (Exception restoreFailure)
                     {
+                        superseded |= ContainsCurrentProjectSaveSuperseded(restoreFailure) ||
+                                      !CurrentProjectEditContextMatches(editContext);
                         reportedFailure = new AggregateException(
                             "The material deletion failed and the previous suit stages could not be fully restored. Packaging remains blocked.",
                             deleteFailure,
                             restoreFailure);
                     }
+                }
+
+                if (superseded || !CurrentProjectEditContextMatches(editContext))
+                {
+                    AppendLog("Material delete stopped after the original suit transaction was restored; the current editor was left unchanged.");
+                    return;
                 }
 
                 AppendLog("Material delete stopped; the prior material and suit were kept: " + reportedFailure.Message);
@@ -1549,6 +1690,12 @@ public sealed partial class MainForm
                     "Material delete failed",
                     "Batcomputer could not rebuild the suit without this material, so it kept the prior project, generated stages, and material files.\n\n" +
                     reportedFailure.Message);
+                return;
+            }
+
+            if (!CurrentProjectEditContextMatches(editContext))
+            {
+                AppendLog("Material deletion completed for the original suit after another suit or workspace was selected; current UI cleanup was skipped.");
                 return;
             }
         }
@@ -1982,7 +2129,11 @@ public sealed partial class MainForm
             return;
         }
 
-        if (FindCustomStaticMeshForComponent(_currentProject, component) is { } declaredCustomMesh &&
+        var project = _currentProject;
+        var projectRoot = _projectRootText.Text.Trim();
+        var editContext = CaptureCurrentProjectEditContext(project, projectRoot);
+
+        if (FindCustomStaticMeshForComponent(project, component) is { } declaredCustomMesh &&
             !StaticMeshObjProbeService.EffectiveMaterialSlots(declaredCustomMesh)
                 .Any(materialSlot => materialSlot.Slot == slot))
         {
@@ -1995,8 +2146,8 @@ public sealed partial class MainForm
             return;
         }
 
-        var materialLibrary = new ToolMaterialLibraryService(_projectRootText.Text.Trim());
-        var knownMaterials = (_currentProject.GeneratedMaterials ?? new List<GeneratedMaterialEntry>())
+        var materialLibrary = new ToolMaterialLibraryService(projectRoot);
+        var knownMaterials = (project.GeneratedMaterials ?? new List<GeneratedMaterialEntry>())
             .Concat(materialLibrary.LoadAvailable())
             .ToList();
         var roleResolution = ResolveTemplateMaterialAssignments(knownMaterials, mi, context);
@@ -2011,7 +2162,6 @@ public sealed partial class MainForm
             AppendLog("Apply material warning: " + roleResolution.Warning);
         }
 
-        var projectRoot = _projectRootText.Text.Trim();
         var patchedContentRoot = Path.Combine(
             AppSettings.GeneratedRootFor(projectRoot),
             "NativeSuitGuiProjects",
@@ -2036,7 +2186,7 @@ public sealed partial class MainForm
         try
         {
             previousProjectSnapshot = JsonSerializer.Deserialize<NativeSuitProject>(
-                JsonSerializer.Serialize(_currentProject))
+                JsonSerializer.Serialize(project))
                 ?? throw new InvalidOperationException("Could not snapshot the suit before applying the material.");
         }
         catch (Exception ex)
@@ -2045,16 +2195,36 @@ public sealed partial class MainForm
             return;
         }
 
+        using var rebuildLease = await EnterRebuildTransactionAsync();
+        if (!CurrentProjectEditContextMatches(editContext))
+        {
+            AppendLog("Apply material stopped because another suit or workspace was selected.");
+            return;
+        }
+        BaseStageFilesystemSnapshot stageSnapshot;
+        try
+        {
+            stageSnapshot = await CaptureBaseStageFilesystemAsync(
+                projectRoot,
+                project.SlotId,
+                new[] { "UnpatchedStage", "PatchedNameMapStage", "GraftedPartStage" });
+        }
+        catch (Exception ex)
+        {
+            AppendLog("Apply material stopped before staging: " + ex.Message);
+            return;
+        }
+
         var replacesBothRuntimeContexts = context.Equals("both", StringComparison.OrdinalIgnoreCase);
-        _currentProject.MaterialAssignments.RemoveAll(assignment =>
+        project.MaterialAssignments.RemoveAll(assignment =>
             assignment.Component.Equals(component, StringComparison.OrdinalIgnoreCase) &&
             assignment.Slot == slot &&
             (replacesBothRuntimeContexts ||
              assignment.Context.Equals(context, StringComparison.OrdinalIgnoreCase)));
         foreach (var resolved in roleResolution.Assignments)
         {
-            materialLibrary.ImportIntoProject(_currentProject, resolved.PackagePath);
-            _currentProject.MaterialAssignments.Add(new SavedMaterialAssignment
+            materialLibrary.ImportIntoProject(project, resolved.PackagePath);
+            project.MaterialAssignments.Add(new SavedMaterialAssignment
             {
                 Component = component,
                 Slot = slot,
@@ -2066,7 +2236,7 @@ public sealed partial class MainForm
         // source of truth aligned with a normal "both" assignment so rebuilding the mesh cannot
         // silently restore a donor/default material after the user already changed it.
         if (context.Equals("both", StringComparison.OrdinalIgnoreCase) &&
-            FindCustomStaticMeshForComponent(_currentProject, component) is { } customMesh)
+            FindCustomStaticMeshForComponent(project, component) is { } customMesh)
         {
             var resolvedMaterial = string.IsNullOrWhiteSpace(roleResolution.GameplayBaselinePackage)
                 ? mi
@@ -2089,37 +2259,64 @@ public sealed partial class MainForm
             }
         }
 
+        CurrentProjectSaveCapture? saveCapture = null;
         var projectSaved = false;
         try
         {
-            await RebuildGraftStageFromDeclarativeAsync(persistProject: false);
-            await RunWithFileLockRetryAsync(
-                () => (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(_currentProject),
-                "save the completed material assignment");
+            await RebuildGraftStageCoreAsync(project, projectRoot, persistProject: false);
+            saveCapture = CaptureCurrentProjectSave(editContext, "save the completed material assignment");
+            var saveResult = await CommitCurrentProjectSaveCaptureAsync(saveCapture);
+            RequireCurrentProjectSaveCommitted(saveResult, "save the completed material assignment");
             projectSaved = true;
-            await FinalizeDeclarativeGraftStageAsync(_currentProject, projectRoot);
+            await FinalizeDeclarativeGraftStageAsync(
+                project,
+                projectRoot,
+                saveCapture.Snapshot);
+            await DiscardBaseStageFilesystemBackupAsync(stageSnapshot, logFailure: true);
         }
         catch (Exception ex)
         {
-            if (!projectSaved)
+            Exception reportedFailure = ex;
+            var superseded = ContainsCurrentProjectSaveSuperseded(ex);
+            try
             {
-                _currentProject = previousProjectSnapshot;
-                ApplyProjectToFields(_currentProject);
-                UpdateSelectedLabels();
+                await RestoreBaseStageFilesystemAsync(
+                    stageSnapshot,
+                    latestOwnedProjectSave: saveCapture?.Snapshot,
+                    ownedProjectSaveWasCommitted: projectSaved,
+                    rollbackContextIsCurrent: () => CurrentProjectEditContextMatches(editContext));
             }
-            AppendLog(projectSaved
-                ? "The material assignment was saved, but its generated stage could not be certified: " + ex.Message
-                : "Apply material failed; the prior saved project was kept: " + ex.Message);
+            catch (Exception restoreFailure)
+            {
+                superseded |= ContainsCurrentProjectSaveSuperseded(restoreFailure);
+                reportedFailure = new AggregateException(
+                    "The material assignment failed and its previous project/stage could not be fully restored.",
+                    ex,
+                    restoreFailure);
+            }
+            if (superseded || !CurrentProjectEditContextMatches(editContext))
+            {
+                AppendLog("Material assignment stopped after a newer suit edit or workspace operation superseded it; the current editor was left unchanged and the generated stage remains blocked until rebuilt.");
+                return;
+            }
+
+            _currentProject = previousProjectSnapshot;
+            ApplyProjectToFields(_currentProject);
+            UpdateSelectedLabels();
+            AppendLog("Apply material failed; the prior saved project and generated stage were kept where possible: " + reportedFailure.Message);
             Dialog.Error(
                 this,
-                projectSaved ? "Material saved; stage incomplete" : "Material apply failed",
-                (projectSaved
-                    ? "The assignment was saved, but packaging remains blocked until its declarative stage rebuild can be certified."
-                    : "The material could not be applied to every required character package. The prior saved project remains active.") +
-                "\n\n" + ex.Message);
+                "Material apply failed",
+                "The material could not be applied to every required character package. Batcomputer restored the prior project and stage where possible.\n\n" +
+                reportedFailure.Message);
             _session.RaiseChanged();
             RefreshInspector();
             PopulateToyboxSlots();
+            return;
+        }
+
+        if (!CurrentProjectEditContextMatches(editContext))
+        {
             return;
         }
 

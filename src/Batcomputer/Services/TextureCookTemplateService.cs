@@ -20,6 +20,7 @@ internal static class TextureCookTemplateService
     public const string NativeCharacterIconTemplateFolder = "TextureStandaloneTemplate_CharacterIconUI_BC7";
     public const string NativeMmrTemplateFolder = "TextureStandaloneTemplate_EoMMMR_DXT1";
     public const string NativeFaceDetailColorTemplateFolder = "TextureStandaloneTemplate_FaceDetail256x128_BC7";
+    public const string NativeFaceArtTemplateFolder = "TextureStandaloneTemplate_FaceArt512_BC7";
     public const string NativeFaceDetailNormalTemplateFolder = "TextureStandaloneTemplate_FaceDetail128_BC5";
     public const string NativeFaceDetailFullColorTemplateFolder = "TextureStandaloneTemplate_FaceDetail2048_BC7";
     public const string NativeFaceDetailFullNormalTemplateFolder = "TextureStandaloneTemplate_FaceDetail512_BC5";
@@ -178,6 +179,21 @@ internal static class TextureCookTemplateService
             "81F6D5CD5459F337D917AF756603D04D12FE74B5196728F22624E47117C95F2C",
             "BB25F966D2BB23090592D127CDDC2B22B7A66429D0868BD61C68404D0B028F80",
             "55D3B5A7241A1CAD2B4A22AB3E15B1DADADA99052B997900F3C06D59474B34F9"),
+        // The standard animated LEGOface eye/mouth sheets are linear alpha
+        // stencils, not ordinary sRGB face prints. This exact shipped donor is
+        // 512px PF_BC7, sRGB=false, with three external mips and a complete
+        // inline tail. Keeping it separate prevents an opaque or sRGB colour
+        // profile from destroying the stencil RGB/alpha relationship.
+        new(
+            NativeFaceArtTemplateFolder,
+            "T_LEGOface_Mouth_DIST_BC.json",
+            "Characters/Textures/Attachments/LEGOface/T_LEGOface_Mouth_DIST_BC",
+            "/Game/Characters/Textures/Attachments/LEGOface/T_LEGOface_Mouth_DIST_BC",
+            512, 512, "PF_BC7", 1, 10, 3, 166, 0,
+            1245, 5778, 344064,
+            "01F6DF2F9D4B28BDD0B7107C5D7ACA5BCE4DE9C3E40A67879288E6696FEBEAB4",
+            "7BF3C1FD93893A7998529DEA497A1552D6B480830D0ACB6A64ED0D048956E4B0",
+            "B27159E1A5562B5F9B5F922A99663752061FAAEB22A415CE3A924352DE89F7D0"),
         new(
             NativeFaceDetailNormalTemplateFolder,
             "T_EyeSpec_WaylonJones_DIST_DNRM.json",
@@ -681,6 +697,7 @@ internal static class TextureCookTemplateService
     private static bool IsOptionalProfileDefinition(Definition definition) =>
         IsNativeUiIconDefinition(definition) ||
         definition.Folder.Equals(NativeFaceDetailColorTemplateFolder, StringComparison.Ordinal) ||
+        definition.Folder.Equals(NativeFaceArtTemplateFolder, StringComparison.Ordinal) ||
         definition.Folder.Equals(NativeFaceDetailNormalTemplateFolder, StringComparison.Ordinal) ||
         definition.Folder.Equals(NativeFaceDetailFullColorTemplateFolder, StringComparison.Ordinal) ||
         definition.Folder.Equals(NativeFaceDetailFullNormalTemplateFolder, StringComparison.Ordinal) ||

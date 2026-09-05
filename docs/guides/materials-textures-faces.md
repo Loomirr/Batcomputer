@@ -37,6 +37,11 @@ stops instead of trying to invent the lost values.
 A blank override inherits the donor value. **Set None** writes an intentional null/disabled value
 where the template supports it; it is different from leaving the override blank.
 
+While copying or editing a material, right-click one of its texture parameter rows and choose
+**Extract texture…** to save the referenced cooked texture as a PNG. Right-clicking the override
+column extracts the override first and also keeps the inherited donor texture available as a
+separate action. The export preserves the decoded RGBA channels and does not change the material.
+
 ![Material template browser](../assets/screenshots/material-template-picker.jpg){ .bc-doc-shot loading=lazy }
 
 ## Material families
@@ -56,6 +61,32 @@ LEGOface recipe onto SuperheroFace, or the reverse, simply because both assets a
 
 The face mesh and material topology must agree. Face helpers group hard-to-read parameters into
 eyes, brows, lids, lashes, mouth/lower-face, and related regions.
+
+There are several related layers, and they are not interchangeable:
+
+- A character's **TPAGE/body print** can supply the neutral head artwork. It is not automatically
+  the animated face material.
+- The standard **`SK_LEGOface` animated shell** is a separate mesh/material system whose cooked
+  zone switches decide which brows, eyes, mouth, and inner-mouth layers exist.
+- Animated eye and mouth BC sheets use **alpha as the visible-print stencil**. Preserve all RGBA
+  channels; an opaque or black-filled alpha channel changes what the face can draw.
+- Standard, Superhero, Joker89, Mr. Freeze, and FaceTex are distinct **rig/UV families**. A material
+  from one family is not made compatible by giving it the same texture names.
+
+For a standard animated mouth, start from **Animated mouth + left-eye donor**. Its shipped
+`FACE_BeachDummy` material explicitly enables EyeL, EyeR, Mouth, and MouthInside and directly
+exposes **Eye L BC** plus **Mouth BC**. **Eye R BC is inherited**, so changing Eye L BC alone is not
+a verified way to replace both eyes. Batcomputer keeps the donor's cooked zone switches; it does
+not inject inherited parameters or compile new zones.
+
+For separate control of both eyes, choose **Editable two-eye face**. Its `FACE_BurglarBaby` donor
+directly binds **Eye L BC** and **Eye R BC** and has both eye zones enabled. Replace both rows, even
+when they point to the same custom sheet. **Mouth BC remains inherited** in this donor and cannot be
+customized from it. No shipped standard-face donor was found that directly authors both eye BC
+parameters and Mouth BC together, so Batcomputer does not pretend these two safe templates are one.
+
+**Bruce face print layers** remains useful for Bruce's brow and under-print artwork, but it is not a
+complete editable eye/mouth base.
 
 For a Batman cowl that should use the Joker '89 lower-face print without visible eyes:
 
@@ -122,9 +153,29 @@ Textures cooked by an older build keep their old payload until they are cooked a
 **Reimport all** for a suit, or **Change cook profile** on one texture, to rebuild it with the
 current alpha-safe cooker.
 
+Right-click one generated texture and choose **Reimport image** after editing its saved source
+image. Batcomputer rereads that exact file, recooks every mip in place with the texture's saved
+profile, and verifies the source-image hash against the new cook report. Choose **Replace image…**
+to pick a different PNG, BMP, or JPEG instead. The replacement is copied into the suit workspace;
+the texture's package/object path, material references, texture use, and native cook profile stay
+unchanged. Both actions back up the existing cooked package. **Replace image…** also retains the
+old source image, so it can roll the complete source/package pair back if cooking or saving fails.
+Recoverable backups keep immutable cook-report evidence and a private copy of the donor template
+recipe and sidecars when they are available, so a later template refresh cannot silently change
+what the backup means. Legacy UIMD backups can still validate their copied source/package evidence
+when their retired live template is already unavailable.
+When you deliberately edit the saved source image in place, the old source bytes are no longer
+available: if **Reimport image** finishes a verified cook but the later project-metadata save fails,
+Batcomputer keeps that verified new cook instead of restoring an old package that no longer matches
+the edited image, and tells you to retry after clearing the save problem. If that recook itself
+fails and the old matching source bytes are unavailable, Batcomputer leaves the texture explicitly
+pending for another reimport; it never publishes the package-only snapshot as a recovered texture.
+
 Choose **Reimport all** at the start of the Textures list to recook every saved source PNG for the
 current suit. Each texture keeps its own saved profile. Batcomputer checks every recipe first,
-backs up the existing cooked packages, and restores the whole batch if any one texture fails.
+snapshots the existing cooked packages, and handles each rollback according to its source bytes if
+one cook fails: coherent source/package snapshots are restored, verified new cooks are retained,
+and edited-source textures without either are left pending rather than paired with a stale package.
 
 ### Face detail textures
 
@@ -132,6 +183,8 @@ Use **Face detail** for colour artwork that belongs to the face material rather 
 
 - **Native 256×128 BC7 facial detail** for compact brows, face-print strips, and similar non-square
   maps.
+- **Native 512px BC7 animated face art** for the standard LEGOface eye and mouth alpha-stencil
+  sheets. This is a linear profile; keep the source RGBA channels intact.
 - **Native 2K BC7 full face detail** for full-face prints, wraps, masks, and decals.
 
 Use **Face detail normal** for the matching normal-map families:

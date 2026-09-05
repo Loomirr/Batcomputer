@@ -321,9 +321,44 @@ internal sealed class MaterialTemplateCatalogService
                 Outputs = new[] { One("/Game/Characters/Attachments/Cape/OneHole_Rubber/MI_CAPE_Rubber_Black", "gameplay only") },
             },
 
-            Face("face.standard.regular", "Regular expressive face", "Standard faces",
-                "Full ordinary LEGO face topology with brows, eyes, print layers, and mouth support.",
-                "/Game/Characters/Attachments/Face/FACE_BruceAdult/MI_FACE_BruceAdult", StandardFaceMesh),
+            new()
+            {
+                Id = "face.standard.animated-authoring",
+                DisplayName = "Animated mouth + left-eye donor",
+                Category = "Standard faces",
+                Summary = "Standard SK_LEGOface donor with directly authored Eye L BC and animated Mouth BC controls; both eye and mouth zones are enabled.",
+                Guidance = "FACE_BeachDummy explicitly enables zones 04 EyeL, 05 EyeR, 13 Mouth, and 14 MouthInside. It directly exposes Eye L BC and Mouth BC, but Eye R BC is inherited; changing Eye L BC alone is not verified to change the right eye. Preserve RGBA because alpha is the print stencil. This template keeps the donor's cooked switches and does not invent absent parameters or zones.",
+                IsFace = true,
+                AllowedTargetKinds = Kinds(TargetKinds.Face),
+                CompatibleMeshPackagePaths = Meshes(StandardFaceMesh),
+                Outputs = new[] { One("/Game/Characters/Attachments/Face/FACE_BeachDummy/MI_FACE_BeachDummy") },
+                DefaultTextureOverrides = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Eye L BC"] = "/Game/Characters/Textures/Attachments/LEGOface/T_LEGOface_Eye_BC.T_LEGOface_Eye_BC",
+                    ["Mouth BC"] = "/Game/Characters/Textures/Attachments/LEGOface/T_LEGOface_Mouth_DIST_BC.T_LEGOface_Mouth_DIST_BC",
+                },
+            },
+            new()
+            {
+                Id = "face.standard.two-eye-authoring",
+                DisplayName = "Editable two-eye face",
+                Category = "Standard faces",
+                Summary = "Standard SK_LEGOface donor with separate, directly authored Eye L BC and Eye R BC controls.",
+                Guidance = "FACE_BurglarBaby explicitly enables zones 04 EyeL, 05 EyeR, 13 Mouth, and 14 MouthInside. It directly exposes both Eye L BC and Eye R BC, so replace each eye parameter explicitly and preserve RGBA alpha. Mouth BC remains inherited and cannot be customized from this donor; use Animated mouth + left-eye donor for a direct Mouth BC control. Batcomputer does not copy parameters between materials or invent absent overrides.",
+                IsFace = true,
+                AllowedTargetKinds = Kinds(TargetKinds.Face),
+                CompatibleMeshPackagePaths = Meshes(StandardFaceMesh),
+                Outputs = new[] { One("/Game/Characters/Attachments/Face/FACE_BurglarFamily_Baby/MI_FACE_BurglarBaby") },
+                DefaultTextureOverrides = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Eye L BC"] = "/Game/Characters/Textures/Attachments/LEGOface/T_LEGOface_Eye_BC.T_LEGOface_Eye_BC",
+                    ["Eye R BC"] = "/Game/Characters/Textures/Attachments/LEGOface/T_LEGOface_Eye_BC.T_LEGOface_Eye_BC",
+                },
+            },
+            Face("face.standard.regular", "Bruce face print layers", "Standard faces",
+                "Bruce Adult donor for its authored brow and under-print layers; it is not the complete editable eye/mouth authoring base.",
+                "/Game/Characters/Attachments/Face/FACE_BruceAdult/MI_FACE_BruceAdult", StandardFaceMesh,
+                guidance: "Use Animated mouth + left-eye donor when you need a direct Mouth BC or Eye L BC control. Shared mouth resources appearing in this package do not mean Bruce Adult authors the Mouth zone switch or texture parameter."),
             Face("face.standard.simple", "Simple regular face", "Standard faces",
                 "A simpler regular face with fewer editable layers.",
                 "/Game/Characters/Attachments/Face/FACE_GenericMale/MI_FACE_GenericMale", StandardFaceMesh),

@@ -542,6 +542,67 @@ internal static class Program
             return ProbeMaterial(args[1]);
         }
 
+        if (args.Length >= 1 && args[0].Equals("--trace-character-dependencies", StringComparison.OrdinalIgnoreCase))
+        {
+            // --trace-character-dependencies [extractedContentRoot] [report.json] [--usmap path] [--force]
+            var positional = new List<string>();
+            var mappingsPath = AppSettings.Current.EffectiveUsmapPath() ?? "";
+            for (var index = 1; index < args.Length; index++)
+            {
+                if (args[index].Equals("--force", StringComparison.OrdinalIgnoreCase)) continue;
+                if (args[index].Equals("--usmap", StringComparison.OrdinalIgnoreCase) && index + 1 < args.Length)
+                {
+                    mappingsPath = args[++index];
+                    continue;
+                }
+                positional.Add(args[index]);
+            }
+            var extractedRoot = positional.Count >= 1
+                ? positional[0]
+                : AppSettings.Current.EffectiveExtractedContentRoot();
+            var reportPath = positional.Count >= 2 ? positional[1] : "";
+            var force = args.Skip(1).Any(argument =>
+                argument.Equals("--force", StringComparison.OrdinalIgnoreCase));
+            try
+            {
+                var trace = CharacterDependencyTraceService.Instance.Load(
+                    extractedRoot,
+                    mappingsPath,
+                    force);
+                Console.WriteLine($"sourceFingerprint={trace.SourceFingerprint}");
+                Console.WriteLine($"mounts={trace.Mounts.Count}");
+                Console.WriteLine($"dcmds={trace.Dcmds.Count} playableCharacterDcmds={trace.PlayableDcmds.Count}");
+                Console.WriteLine($"humanoidPlayables={trace.HumanoidPlayableCount} closureComplete={trace.PlayableVariants.Count(variant => variant.IsHumanoid && variant.IsDependencyClosureComplete)} certified={trace.CertifiedHumanoidPlayableCount}");
+                Console.WriteLine($"playerProfiles={trace.PlayerProfileCount} closureComplete={trace.GameplayProfiles.Count(profile => profile.IsPlayerProfile && profile.IsDependencyClosureComplete)} certified={trace.CertifiedPlayerProfileCount}");
+                Console.WriteLine($"abilitySets={trace.AbilitySets.Count} equipmentTypes={trace.EquipmentTypes.Count} equipmentDefinitions={trace.EquipmentDefinitions.Count}");
+                foreach (var group in trace.PlayableVariants
+                             .Where(variant => !variant.SourceMount.Equals("/Game", StringComparison.OrdinalIgnoreCase))
+                             .GroupBy(variant => variant.SourceMount, StringComparer.OrdinalIgnoreCase)
+                             .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine($"dlc[{group.Key}]={group.Count()}");
+                }
+                if (!string.IsNullOrWhiteSpace(reportPath))
+                {
+                    CharacterDependencyTraceService.Instance.WriteReport(trace, reportPath);
+                    Console.WriteLine($"report={Path.GetFullPath(reportPath)}");
+                }
+                Console.WriteLine($"cache={CharacterDependencyTraceService.CachePath}");
+                if (!CharacterDependencyTraceService.IsCatalogUsableForCli(trace))
+                {
+                    Console.Error.WriteLine(
+                        "Character dependency trace is incomplete; inspect unresolved targets and diagnostics in the report.");
+                    return 2;
+                }
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("Character dependency trace failed: " + ex.Message);
+                return 1;
+            }
+        }
+
         if (args.Length >= 1 && args[0].Equals("--verify-material-templates", StringComparison.OrdinalIgnoreCase))
         {
             return VerifyMaterialTemplates(

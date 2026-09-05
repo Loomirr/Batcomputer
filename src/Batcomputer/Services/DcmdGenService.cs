@@ -82,7 +82,8 @@ public sealed class DcmdGenService
             CopyIfExists(baseNoExt + ".uasset", outputBasePath + ".uasset");
             CopyIfExists(baseNoExt + ".uexp", outputBasePath + ".uexp");
 
-            var asset = new UAsset(outputBasePath + ".uasset", EngineVersion.VER_UE5_6, LoadMappings(), CustomSerializationFlags.SkipPreloadDependencyLoading);
+            var mappings = LoadMappings();
+            var asset = new UAsset(outputBasePath + ".uasset", EngineVersion.VER_UE5_6, mappings, CustomSerializationFlags.SkipPreloadDependencyLoading);
             dcmdPackagePath = UnrealPathUtil.NormalizePackagePath(dcmdPackagePath);
             playablePackagePath = UnrealPathUtil.NormalizePackagePath(playablePackagePath);
             cutscenePackagePath = UnrealPathUtil.NormalizePackagePath(cutscenePackagePath);
@@ -161,9 +162,22 @@ public sealed class DcmdGenService
                 new[] { dcmdPackagePath, playablePackagePath, cutscenePackagePath, uimdPackagePath ?? "" },
                 result.Repointed);
 
-            if (!string.IsNullOrWhiteSpace(targetPawnTag) &&
-                NativeAssetTextPatch.SetGameplayTag(asset, "PawnTag", targetPawnTag.Trim()))
+            // These three soft references define which actors the game can instantiate when the
+            // character is not already resident. Do not rely only on source-name replacement:
+            // shipped DCMDs such as RobinDickGrayson's point at cutscene assets with unrelated
+            // stems, and a stale CinematicsActor makes gameplay work while cold cutscenes silently
+            // use the base/default suit.
+            RepointActor("Pawn", playablePackagePath);
+            RepointActor("MenuActor", playablePackagePath);
+            RepointActor("CinematicsActor", cutscenePackagePath);
+
+            if (!string.IsNullOrWhiteSpace(targetPawnTag))
             {
+                if (!NativeAssetTextPatch.SetGameplayTag(asset, "PawnTag", targetPawnTag.Trim()))
+                {
+                    throw new InvalidDataException(
+                        "The donor DCMD has no writable PawnTag. Batcomputer refused to emit mismatched native identity metadata.");
+                }
                 result.Repointed.Add($"PawnTag -> {targetPawnTag.Trim()}");
             }
             if (!string.IsNullOrWhiteSpace(progressTag) &&
@@ -182,10 +196,57 @@ public sealed class DcmdGenService
                 result.Repointed.Add($"DisplayName -> {displayNameTableObjectPath}:{displayNameKey}");
             }
 
+            RequirePersistedIdentityLinks(
+                asset,
+                playablePackagePath,
+                cutscenePackagePath,
+                uimdPackagePath,
+                targetPawnTag);
             asset.Write(outputBasePath + ".uasset");
+            var persisted = new UAsset(
+                outputBasePath + ".uasset",
+                EngineVersion.VER_UE5_6,
+                mappings,
+                CustomSerializationFlags.SkipPreloadDependencyLoading);
+            RequirePersistedIdentityLinks(
+                persisted,
+                playablePackagePath,
+                cutscenePackagePath,
+                uimdPackagePath,
+                targetPawnTag);
             result.OutputUasset = outputBasePath + ".uasset";
             result.Status = "created";
             return result;
+
+            void RepointActor(string propertyName, string packagePath)
+            {
+                var className = UnrealPathUtil.AssetName(packagePath) + "_C";
+                if (NativeAssetTextPatch.SetOrAddSoftObject(
+                        asset,
+                        propertyName,
+                        packagePath,
+                        className,
+                        "Pawn",
+                        "MenuActor",
+                        "CinematicsActor"))
+                {
+                    var written = NativeAssetTextPatch.GetSoftReference(asset, propertyName);
+                    if (written is null ||
+                        !written.Value.PackageName.Equals(packagePath, StringComparison.OrdinalIgnoreCase) ||
+                        !written.Value.AssetName.Equals(className, StringComparison.Ordinal))
+                    {
+                        throw new InvalidDataException(
+                            $"Generated DCMD did not retain {propertyName} -> {packagePath}.{className}.");
+                    }
+                    result.Repointed.Add($"{propertyName} -> {packagePath}.{className}");
+                    return;
+                }
+
+                throw new InvalidDataException(
+                    $"The donor DCMD has no writable {propertyName} soft-class field. " +
+                    "Batcomputer refused to emit metadata that could fall back to the base suit.");
+            }
+
         }
         catch (Exception ex)
         {
@@ -209,9 +270,10 @@ public sealed class DcmdGenService
     /// <summary>
     /// Replaces gadgets at specific 0-based slots in a generated DCMD's
     /// EquipmentList, and swaps the matching UpgradeDataAssets entry to that
-    /// gadget's upgrade set (removing it when the new gadget has no upgrades, or
-    /// appending when the slot had none). Slots at or beyond the current count are
-    /// appended. Requires .usmap mappings so the DataAsset properties deserialize.
+    /// gadget's upgrade set. UpgradeDataAssets stays exactly parallel with EquipmentList: a gadget
+    /// without upgrades writes a null soft reference rather than removing an element and shifting
+    /// every later slot. Only the exact next slot may be appended; sparse writes are rejected.
+    /// Requires .usmap mappings so the DataAsset properties deserialize.
     /// </summary>
     public AddEquipmentResult ReplaceEquipment(string dcmdUassetPath, IReadOnlyList<EquipmentSlotRef> gadgets)
     {
@@ -253,14 +315,21 @@ public sealed class DcmdGenService
                 var etaPkg = UnrealPathUtil.NormalizePackagePath(gadget.EtaPackage);
                 var etaName = UnrealPathUtil.AssetName(etaPkg);
 
-                // EquipmentList: replace at slot, or append if slot is out of range.
+                // EquipmentList: replace at slot, or append the exact next slot. Never collapse a
+                // sparse runtime slot request into a different array index.
                 if (gadget.Slot >= 0 && gadget.Slot < equip.Count)
                 {
                     equip[gadget.Slot] = MakeSoft(asset, equipmentList.Name, etaPkg, etaName);
                 }
-                else
+                else if (gadget.Slot == equip.Count)
                 {
                     equip.Add(MakeSoft(asset, equipmentList.Name, etaPkg, etaName));
+                }
+                else
+                {
+                    result.Status = "invalid-slot";
+                    result.Error = $"Equipment slot {gadget.Slot + 1} is sparse or negative for a {equip.Count}-slot DCMD list.";
+                    return result;
                 }
 
                 // UpgradeDataAssets: keep it parallel to the equipment slot.
@@ -276,15 +345,29 @@ public sealed class DcmdGenService
                         {
                             upgrades[gadget.Slot] = entry;
                         }
+                        else if (gadget.Slot == upgrades.Count)
+                        {
+                            upgrades.Add(entry);
+                        }
                         else
                         {
+                            while (upgrades.Count < gadget.Slot)
+                            {
+                                upgrades.Add(MakeNullSoft(asset, upgradeList.Name));
+                            }
                             upgrades.Add(entry);
                         }
                     }
                     else if (gadget.Slot >= 0 && gadget.Slot < upgrades.Count)
                     {
-                        // New gadget has no upgrade tree - drop the slot's old one.
-                        upgrades.RemoveAt(gadget.Slot);
+                        upgrades[gadget.Slot] = MakeNullSoft(asset, upgradeList.Name);
+                    }
+                    else
+                    {
+                        while (upgrades.Count <= gadget.Slot)
+                        {
+                            upgrades.Add(MakeNullSoft(asset, upgradeList.Name));
+                        }
                     }
                 }
 
@@ -294,10 +377,39 @@ public sealed class DcmdGenService
             equipmentList.Value = equip.ToArray();
             if (upgradeList is not null)
             {
+                while (upgrades.Count < equip.Count)
+                {
+                    upgrades.Add(MakeNullSoft(asset, upgradeList.Name));
+                }
+                if (upgrades.Count > equip.Count)
+                {
+                    upgrades.RemoveRange(equip.Count, upgrades.Count - equip.Count);
+                }
                 upgradeList.Value = upgrades.ToArray();
             }
 
             asset.Write(dcmdUassetPath);
+            var verify = new UAsset(
+                dcmdUassetPath,
+                EngineVersion.VER_UE5_6,
+                mappings,
+                CustomSerializationFlags.None);
+            var verifyExport = verify.Exports.OfType<NormalExport>()
+                .FirstOrDefault(e => e.Data.Any(p => p.Name.ToString() == "EquipmentList"));
+            var verifyEquipment = verifyExport?.Data.OfType<ArrayPropertyData>()
+                .FirstOrDefault(p => p.Name.ToString() == "EquipmentList");
+            var verifyUpgrades = verifyExport?.Data.OfType<ArrayPropertyData>()
+                .FirstOrDefault(p => p.Name.ToString() == "UpgradeDataAssets");
+            if (verifyEquipment is null ||
+                !SoftPaths(verifyEquipment.Value).SequenceEqual(SoftPaths(equip), StringComparer.OrdinalIgnoreCase) ||
+                (upgradeList is not null &&
+                 (verifyUpgrades is null ||
+                  !SoftPaths(verifyUpgrades.Value).SequenceEqual(SoftPaths(upgrades), StringComparer.OrdinalIgnoreCase))))
+            {
+                result.Status = "verification-failed";
+                result.Error = "The staged DCMD did not reload with the exact requested equipment and parallel upgrade slot arrays.";
+                return result;
+            }
             result.Status = "ok";
             return result;
         }
@@ -345,6 +457,82 @@ public sealed class DcmdGenService
             new FTopLevelAssetPath(FName.FromString(asset, packagePath), FName.FromString(asset, assetName)),
             new FString(string.Empty)),
     };
+
+    private static SoftObjectPropertyData MakeNullSoft(UAsset asset, FName listName) => new(listName)
+    {
+        Value = new FSoftObjectPath(
+            new FTopLevelAssetPath(FName.FromString(asset, "None"), FName.FromString(asset, "None")),
+            new FString(string.Empty)),
+    };
+
+    private static IEnumerable<string> SoftPaths(IEnumerable<PropertyData> entries) =>
+        entries.Select(entry => entry is SoftObjectPropertyData soft
+            ? NormalizeSoftPath(soft.Value.AssetPath.PackageName.ToString(), soft.Value.AssetPath.AssetName.ToString())
+            : "<invalid>");
+
+    private static string NormalizeSoftPath(string package, string asset)
+    {
+        if (string.IsNullOrWhiteSpace(package) || package.Equals("None", StringComparison.OrdinalIgnoreCase))
+        {
+            return "";
+        }
+        return UnrealPathUtil.NormalizePackagePath(package) + "." + asset;
+    }
+
+    /// <summary>
+    /// Fails unless a freshly reloaded DCMD retains the complete native identity graph used by
+    /// gameplay, menus, and cold cinematic spawning.
+    /// </summary>
+    internal static void RequirePersistedIdentityLinks(
+        UAsset persistedAsset,
+        string playablePackagePath,
+        string cutscenePackagePath,
+        string? uimdPackagePath,
+        string? pawnTag)
+    {
+        VerifySoft("Pawn", playablePackagePath, UnrealPathUtil.AssetName(playablePackagePath) + "_C");
+        VerifySoft("MenuActor", playablePackagePath, UnrealPathUtil.AssetName(playablePackagePath) + "_C");
+        VerifySoft("CinematicsActor", cutscenePackagePath, UnrealPathUtil.AssetName(cutscenePackagePath) + "_C");
+        if (!string.IsNullOrWhiteSpace(uimdPackagePath))
+        {
+            VerifyObject("UIMetaData", uimdPackagePath!, UnrealPathUtil.AssetName(uimdPackagePath!));
+        }
+        if (!string.IsNullOrWhiteSpace(pawnTag) &&
+            !string.Equals(
+                NativeAssetTextPatch.GetGameplayTag(persistedAsset, "PawnTag"),
+                pawnTag.Trim(),
+                StringComparison.Ordinal))
+        {
+            throw new InvalidDataException(
+                $"Generated DCMD did not reload from disk with PawnTag '{pawnTag.Trim()}'.");
+        }
+
+        void VerifySoft(string propertyName, string packagePath, string assetName)
+        {
+            var written = NativeAssetTextPatch.GetSoftReference(persistedAsset, propertyName);
+            if (written is null ||
+                !UnrealPathUtil.NormalizePackagePath(written.Value.PackageName)
+                    .Equals(UnrealPathUtil.NormalizePackagePath(packagePath), StringComparison.OrdinalIgnoreCase) ||
+                !written.Value.AssetName.Equals(assetName, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException(
+                    $"Generated DCMD did not reload from disk with {propertyName} -> {packagePath}.{assetName}.");
+            }
+        }
+
+        void VerifyObject(string propertyName, string packagePath, string assetName)
+        {
+            var written = NativeAssetTextPatch.GetObjectReference(persistedAsset, propertyName);
+            if (written is null ||
+                !UnrealPathUtil.NormalizePackagePath(written.Value.PackageName)
+                    .Equals(UnrealPathUtil.NormalizePackagePath(packagePath), StringComparison.OrdinalIgnoreCase) ||
+                !written.Value.AssetName.Equals(assetName, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException(
+                    $"Generated DCMD did not reload from disk with {propertyName} -> {packagePath}.{assetName}.");
+            }
+        }
+    }
 
     private Usmap? LoadMappings()
     {

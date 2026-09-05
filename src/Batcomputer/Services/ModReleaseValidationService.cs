@@ -167,6 +167,16 @@ public sealed class ModReleaseValidationService
         {
             result.AddWarning("PawnTag", $"'{tag}' is outside the Pawns.Playable namespace.", suitId);
         }
+
+        var donor = NativeMetadataDonorService.TryRead(
+            suit.DcmdTemplate,
+            suit.PlayableTemplate,
+            suit.CutsceneTemplate);
+        var ownerMismatch = PawnTagConfigService.CharacterOwnerMismatchError(tag, donor?.PawnTag);
+        if (!string.IsNullOrWhiteSpace(ownerMismatch))
+        {
+            result.AddError("PawnTag", ownerMismatch, suitId);
+        }
         AddUnique(pawnTags, tag, suitId, "PawnTag", result, suitId);
     }
 

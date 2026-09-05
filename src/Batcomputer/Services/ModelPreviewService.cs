@@ -4641,6 +4641,8 @@ function buildCustomMeshMover(){
     row.appendChild(input);panel.appendChild(row);inputs[key]=input;
   });
   const actions=document.createElement('div');actions.className='actions';
+  const turn=document.createElement('button');turn.type='button';turn.textContent='Turn around 180°';
+  turn.title='Fix a mirrored-looking print by turning the OBJ front toward the character camera. This changes saved Yaw, so preview and game stay identical.';
   const save=document.createElement('button');save.type='button';save.className='save';save.textContent='Bake to game';
   save.disabled=!window.PREVIEW_CAN_SAVE_PLACEMENTS||!window.PREVIEW_LAYOUT_KEY;
   save.title='Rebuild the game mesh using these saved values. Preview changes are saved automatically.';
@@ -4652,7 +4654,12 @@ function buildCustomMeshMover(){
   save.onclick=()=>{const state=partStates.get(select.value);if(!state||!state.authored)return;
     postTransform('save-custom-mesh',state);
     save.textContent='Saving...';save.disabled=true;};
-  actions.appendChild(save);panel.appendChild(actions);
+  turn.onclick=()=>{
+    const yaw=Number(inputs.yaw.value)||0;
+    inputs.yaw.value=String(((yaw+180+540)%360)-180);
+    inputs.yaw.dispatchEvent(new Event('input',{bubbles:true}));
+  };
+  actions.appendChild(turn);actions.appendChild(save);panel.appendChild(actions);
   function sync(){const state=partStates.get(select.value);if(!state||!state.authored)return;
     const transform=state.liveTransform||state.authored;
     inputs.scale.value=Number(transform.scale||1).toFixed(3);

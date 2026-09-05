@@ -56,6 +56,7 @@ nav:
       - Update or repair a suit: guides/update-repair-suit.md
       - Materials, textures, and faces: guides/materials-textures-faces.md
       - Character animations: guides/animations.md
+      - Suit abilities: guides/abilities.md
       - Custom static meshes: guides/custom-meshes.md
       - Build, test, and share: guides/build-test-share.md
   - Reference:

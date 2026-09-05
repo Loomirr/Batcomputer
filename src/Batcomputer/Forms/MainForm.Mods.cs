@@ -1620,6 +1620,11 @@ public sealed partial class MainForm
             var suit = svc.LoadProject(abs);
             if (suit is null) { AppendLog($"  skip (unreadable): {abs}"); continue; }
 
+            if (CanonicalizeProjectPawnTagOwner(suit))
+            {
+                AppendLog($"  canonicalized '{suit.DisplayName}' PawnTag owner from its donor: {suit.PawnTag}");
+            }
+
             if (string.IsNullOrWhiteSpace(suit.PawnTag))
             {
                 AppendLog($"Build mod ABORTED: suit '{suit.DisplayName}' ({suit.SlotId}) has no PawnTag. Set one before building.");
@@ -1632,6 +1637,7 @@ public sealed partial class MainForm
             var lockKey = $"Suit.{suitId}.LockedDescription";
 
             tagRows.Add(new PawnTagConfigService.TagRow(suit.PawnTag.Trim(), $"{mod.ModId}: {suit.DisplayName}"));
+            tagRows.AddRange(HeldItemService.TagRows(suit));
             stEntries[nameKey] = suit.DisplayName ?? "";
             stEntries[descKey] = suit.Description ?? "";
             stEntries[lockKey] = suit.LockedDescription ?? "";
@@ -1642,6 +1648,7 @@ public sealed partial class MainForm
                 enabled = true,
                 menu_order = entry.MenuOrder,
                 pawn_tag = suit.PawnTag.Trim(),
+                character_scope = PawnTagConfigService.CharacterScopeForPawnTag(suit.PawnTag),
                 progress_tag = suit.ProgressTag,
                 display_name_key = nameKey,
                 description_key = descKey,
@@ -1730,6 +1737,7 @@ public sealed partial class MainForm
                 var abs = ModService.ResolveSuitProjectPath(entry);
                 var suit = svc.LoadProject(abs);
                 if (suit is null) continue;
+                CanonicalizeProjectPawnTagOwner(suit);
 
                 var dcmdPkg = suit.TargetPackages?.Dcmd;
 
@@ -2030,6 +2038,7 @@ public sealed partial class MainForm
                 await ApplySavedComponentRemovals(
                     suit,
                     logNoRemovals: false,
+                    projectRoot: projectService.ProjectRoot,
                     stageContentRootOverride: contentRoot),
                 "Saved component removal replay");
 
@@ -2049,7 +2058,7 @@ public sealed partial class MainForm
                 requireSuccess: true);
             StageLibraryAnimsIntoContentRoot(suit, contentRoot);
 
-            if (suit.UseCustomArchetype)
+            if (AnimArchetypeGraftService.RequiresCustomArchetype(suit))
             {
                 var archetype = new AnimArchetypeGraftService().ApplyToPackagedRoot(suit, contentRoot);
                 foreach (var line in archetype.Log) AppendLog("    archetype: " + line);
@@ -2067,6 +2076,7 @@ public sealed partial class MainForm
                 await ApplySavedMaterials(
                     suit,
                     logIfNone: false,
+                    projectRoot: projectService.ProjectRoot,
                     stageContentRootOverride: contentRoot),
                 "Saved material replay");
 
@@ -2329,6 +2339,12 @@ public sealed partial class MainForm
             if (!suitIds.Add(suit.suit_id)) errors.Add($"duplicate suit_id '{suit.suit_id}'.");
             if (string.IsNullOrWhiteSpace(suit.pawn_tag) || !pawnTags.Add(suit.pawn_tag))
                 errors.Add($"missing or duplicate PawnTag for suit '{suit.suit_id}'.");
+            var expectedCharacterScope = PawnTagConfigService.CharacterScopeForPawnTag(suit.pawn_tag);
+            if (string.IsNullOrWhiteSpace(suit.character_scope) ||
+                !suit.character_scope.Equals(expectedCharacterScope, StringComparison.Ordinal))
+            {
+                errors.Add($"character_scope for suit '{suit.suit_id}' must match its PawnTag owner ('{expectedCharacterScope}').");
+            }
             if (!string.Equals(suit.display_name_key, $"Suit.{suit.suit_id}.Name", StringComparison.Ordinal) ||
                 !string.Equals(suit.description_key, $"Suit.{suit.suit_id}.Description", StringComparison.Ordinal) ||
                 !string.Equals(suit.locked_description_key, $"Suit.{suit.suit_id}.LockedDescription", StringComparison.Ordinal))
@@ -2375,32 +2391,67 @@ public sealed partial class MainForm
         {
             var dcmdPkg = suit.TargetPackages!.Dcmd;
             var dcmdFile = PackagePathToContentPath(stageContent, dcmdPkg) + ".uasset";
-            if (File.Exists(dcmdFile))
+            if (!File.Exists(dcmdFile))
             {
-                var a = new UAsset(dcmdFile, EngineVersion.VER_UE5_6, mappings, CustomSerializationFlags.SkipPreloadDependencyLoading);
-                var changed = false;
-                if (!string.IsNullOrWhiteSpace(suit.PawnTag))
-                    changed |= NativeAssetTextPatch.SetGameplayTag(a, "PawnTag", suit.PawnTag.Trim());
-                changed |= NativeAssetTextPatch.SetStringTableText(a, "DisplayName", stObjectPath, $"Suit.{suitId}.Name");
-                if (changed) a.Write(dcmdFile);
+                throw new FileNotFoundException("The staged DCMD is missing.", dcmdFile);
             }
+            if (string.IsNullOrWhiteSpace(suit.PawnTag))
+            {
+                throw new InvalidDataException("The staged suit has no PawnTag to assert during combined-mod repatching.");
+            }
+            var a = new UAsset(dcmdFile, EngineVersion.VER_UE5_6, mappings, CustomSerializationFlags.SkipPreloadDependencyLoading);
+            if (!NativeAssetTextPatch.SetGameplayTag(a, "PawnTag", suit.PawnTag.Trim()))
+            {
+                throw new InvalidDataException("The staged DCMD has no writable PawnTag.");
+            }
+            if (!NativeAssetTextPatch.SetStringTableText(a, "DisplayName", stObjectPath, $"Suit.{suitId}.Name"))
+            {
+                throw new InvalidDataException("The staged DCMD has no writable DisplayName.");
+            }
+            a.Write(dcmdFile);
+            var persistedDcmd = new UAsset(
+                dcmdFile,
+                EngineVersion.VER_UE5_6,
+                mappings,
+                CustomSerializationFlags.SkipPreloadDependencyLoading);
 
             var uimdPkg = DeriveUimdPackagePath(dcmdPkg);
             var uimdFile = PackagePathToContentPath(stageContent, uimdPkg) + ".uasset";
-            if (File.Exists(uimdFile))
+            DcmdGenService.RequirePersistedIdentityLinks(
+                persistedDcmd,
+                suit.TargetPackages.Playable,
+                suit.TargetPackages.Cutscene,
+                uimdPkg,
+                suit.PawnTag);
+
+            if (!File.Exists(uimdFile))
             {
-                var a = new UAsset(uimdFile, EngineVersion.VER_UE5_6, mappings, CustomSerializationFlags.SkipPreloadDependencyLoading);
-                var changed = false;
-                if (!string.IsNullOrWhiteSpace(suit.PawnTag))
-                    changed |= NativeAssetTextPatch.SetGameplayTag(a, "PawnTag", suit.PawnTag.Trim());
-                changed |= NativeAssetTextPatch.SetStringTableText(a, "Description", stObjectPath, $"Suit.{suitId}.Description");
-                changed |= NativeAssetTextPatch.SetStringTableText(a, "LockedDescription", stObjectPath, $"Suit.{suitId}.LockedDescription");
-                if (changed) a.Write(uimdFile);
+                throw new FileNotFoundException("The staged UIMD is missing.", uimdFile);
             }
+            var uimd = new UAsset(uimdFile, EngineVersion.VER_UE5_6, mappings, CustomSerializationFlags.SkipPreloadDependencyLoading);
+            if (!NativeAssetTextPatch.SetGameplayTag(uimd, "PawnTag", suit.PawnTag.Trim()))
+            {
+                throw new InvalidDataException("The staged UIMD has no writable PawnTag.");
+            }
+            if (!NativeAssetTextPatch.SetStringTableText(uimd, "Description", stObjectPath, $"Suit.{suitId}.Description") ||
+                !NativeAssetTextPatch.SetStringTableText(uimd, "LockedDescription", stObjectPath, $"Suit.{suitId}.LockedDescription"))
+            {
+                throw new InvalidDataException("The staged UIMD is missing one or more writable description fields.");
+            }
+            uimd.Write(uimdFile);
+            var persistedUimd = new UAsset(
+                uimdFile,
+                EngineVersion.VER_UE5_6,
+                mappings,
+                CustomSerializationFlags.SkipPreloadDependencyLoading);
+            UimdGenService.RequirePersistedPawnTag(persistedUimd, suit.PawnTag);
         }
         catch (Exception ex)
         {
-            AppendLog($"  ⚠ text repatch failed for '{suitId}': {ex.Message}");
+            AppendLog($"  text/identity repatch failed for '{suitId}': {ex.Message}");
+            throw new InvalidDataException(
+                $"Combined-mod staging could not certify the native identity for '{suitId}'.",
+                ex);
         }
     }
 
@@ -2533,6 +2584,7 @@ public sealed partial class MainForm
         public bool enabled { get; set; } = true;
         public int menu_order { get; set; }
         public string pawn_tag { get; set; } = "";
+        public string character_scope { get; set; } = "";
         public string progress_tag { get; set; } = "";
         public string display_name_key { get; set; } = "";
         public string description_key { get; set; } = "";

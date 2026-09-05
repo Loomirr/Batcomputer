@@ -598,7 +598,7 @@ public sealed class AnimArchetypeGraftService
     public Result ApplyToPackagedRoot(NativeSuitProject project, string contentRoot)
     {
         var result = new Result();
-        if (!project.UseCustomArchetype)
+        if (!RequiresCustomArchetype(project))
         {
             return result; // skipped
         }
@@ -789,7 +789,7 @@ public sealed class AnimArchetypeGraftService
     public Result Graft(NativeSuitProject project, string patchedContentRoot)
     {
         var result = new Result();
-        if (!project.UseCustomArchetype)
+        if (!RequiresCustomArchetype(project))
         {
             return result; // skipped: reparent off
         }
@@ -815,52 +815,79 @@ public sealed class AnimArchetypeGraftService
         var foreignLas = new List<string>();
         var foreignEd = new List<(int Slot, string EdPackage)>();
         var foreignAbilities = new List<string>();
+        var foreignEffects = new List<string>();
         var foreignAbilitySets = new List<string>();
+        var exactDonorEquipmentKnown = AbilityDependencyService.TryReadDonorRuntimeEquipmentSlots(
+            project,
+            gd.Db.Equipment,
+            out var donorEquipmentSlots);
         foreach (var change in project.EquipmentSlots)
         {
             var eq = gd.FindEquipment(change.Gadget);
-            if (eq is null ||
-                (!string.IsNullOrWhiteSpace(donorFamily) &&
-                 eq.NativeFamilies.Contains(donorFamily, StringComparer.OrdinalIgnoreCase)))
+            if (eq is null)
             {
-                continue; // native to donor — already in the loadout/animated
+                continue;
             }
-            if (!string.IsNullOrWhiteSpace(eq.MontageAnimSet) && !foreignMas.Contains(eq.MontageAnimSet))
-            {
-                foreignMas.Add(eq.MontageAnimSet);
-            }
-            if (!string.IsNullOrWhiteSpace(eq.LayerAnimSet) && !foreignLas.Contains(eq.LayerAnimSet))
-            {
-                foreignLas.Add(eq.LayerAnimSet);
-            }
-            if (!string.IsNullOrWhiteSpace(eq.EdPackage))
+            var nativeAtSlot = exactDonorEquipmentKnown &&
+                               donorEquipmentSlots.TryGetValue(change.Slot, out var donorItem) &&
+                               donorItem.Equals(eq.Name, StringComparison.OrdinalIgnoreCase);
+            if (!nativeAtSlot && !string.IsNullOrWhiteSpace(eq.EdPackage))
             {
                 foreignEd.Add((change.Slot, eq.EdPackage));
             }
-            var controllerSets = EquipmentDependencyService.RequiredAbilitySets(eq, donorFamily);
-            if (controllerSets.Count == 0)
-            {
-                foreach (var ability in eq.VisualAbilities)
-                {
-                    if (!foreignAbilities.Contains(ability))
-                    {
-                        foreignAbilities.Add(ability);
-                    }
-                }
-            }
-            foreach (var abilitySet in controllerSets)
-            {
-                if (!foreignAbilitySets.Contains(abilitySet))
-                {
-                    foreignAbilitySets.Add(abilitySet);
-                }
-            }
+            var controllerSets = EquipmentDependencyService.Analyze(eq, donorFamily).AbilitySets;
             if (controllerSets.Count > 0)
             {
                 result.Log.Add(
-                    $"equipment dependency [{eq.Name}]: adding native controller set " +
-                    string.Join(", ", controllerSets.Select(UnrealPathUtil.AssetName)));
+                    $"equipment dependency [{eq.Name}]: its ED owns AbilitySetsToGrant " +
+                    string.Join(", ", controllerSets.Select(UnrealPathUtil.AssetName)) +
+                    "; they are not duplicated in the character DPRD");
             }
+        }
+
+        // Ability, equipment, held-item, combat-effect, and animation dependencies are one
+        // transaction. A melee AbilitySet by itself is not a complete fighting-style swap.
+        var dependencyPlan = AbilityDependencyService.Build(project, donorFamily, gd.Db.Equipment);
+        var dependencyErrors = dependencyPlan.Issues
+            .Where(issue => issue.Severity == AbilityDependencySeverity.Error)
+            .Select(issue => issue.Message)
+            .ToList();
+        if (dependencyErrors.Count > 0)
+        {
+            result.Status = "error";
+            result.Error = "Ability/equipment dependency validation failed:\n- " +
+                           string.Join("\n- ", dependencyErrors);
+            return result;
+        }
+        foreach (var issue in dependencyPlan.Issues.Where(issue =>
+                     issue.Severity != AbilityDependencySeverity.Error))
+        {
+            result.Log.Add($"ability dependency {issue.Severity.ToString().ToLowerInvariant()}: {issue.Message}");
+        }
+        foreach (var package in dependencyPlan.RequiredAbilitySets)
+        {
+            if (!foreignAbilitySets.Contains(package, StringComparer.OrdinalIgnoreCase)) foreignAbilitySets.Add(package);
+        }
+        foreach (var package in dependencyPlan.RequiredMontageAnimSets)
+        {
+            if (!foreignMas.Contains(package, StringComparer.OrdinalIgnoreCase)) foreignMas.Add(package);
+        }
+        foreach (var package in dependencyPlan.RequiredLayerAnimSets)
+        {
+            if (!foreignLas.Contains(package, StringComparer.OrdinalIgnoreCase)) foreignLas.Add(package);
+        }
+        foreach (var package in dependencyPlan.GameplayAbilitiesToBridge)
+        {
+            if (!foreignAbilities.Contains(package, StringComparer.OrdinalIgnoreCase)) foreignAbilities.Add(package);
+        }
+        if (dependencyPlan.FightingStyle is { } fightingStyle)
+        {
+            if (!string.IsNullOrWhiteSpace(fightingStyle.CombatTypeEffectPackage) &&
+                !foreignEffects.Contains(fightingStyle.CombatTypeEffectPackage, StringComparer.OrdinalIgnoreCase))
+            {
+                foreignEffects.Add(fightingStyle.CombatTypeEffectPackage);
+            }
+            result.Log.Add($"fighting-style bundle: {fightingStyle.DisplayName}");
         }
 
         var usesPairedCapeAdapter = GliderService.IsDeclaredPairedCapeAdapterValid(
@@ -941,10 +968,15 @@ public sealed class AnimArchetypeGraftService
         }
 
         var exactSlotOverrides = project.AnimationSlotOverrides ?? [];
+        var hasAbilityCustomization = AbilityLoadoutService.HasCustomizations(project);
         if (foreignMas.Count == 0 && foreignLas.Count == 0 && foreignEd.Count == 0 &&
             foreignAbilitySets.Count == 0 &&
+            foreignEffects.Count == 0 &&
+            dependencyPlan.GameplayAbilitiesToRemove.Count == 0 &&
+            dependencyPlan.RequiredLayerSlices.Count == 0 &&
             project.AnimationOverrides.Count == 0 && project.LocomotionOverrides.Count == 0 &&
             exactSlotOverrides.Count == 0 &&
+            !hasAbilityCustomization &&
             !usesPairedCapeAdapter)
         {
             result.Log.Add("no foreign gadgets or animation overrides — archetype left on donor sets");
@@ -1002,9 +1034,18 @@ public sealed class AnimArchetypeGraftService
             }
 
             // --- Animations: clone MAS/LAS, inject foreign blocks + apply overrides, repoint. ---
-            var needMas = foreignMas.Count > 0 || montageOverrides.Count > 0 ||
+            var needMas = foreignMas.Count > 0 ||
+                          dependencyPlan.MontageAnimSetsToRemove.Count > 0 ||
+                          dependencyPlan.AnimationReplacements.Any(replacement =>
+                              replacement.Kind.StartsWith("Montage", StringComparison.OrdinalIgnoreCase)) ||
+                          montageOverrides.Count > 0 ||
                           montageSlotOverrides.Count > 0 || usesPairedCapeAdapter;
-            var needLas = foreignLas.Count > 0 || layerOverrides.Count > 0 ||
+            var needLas = foreignLas.Count > 0 ||
+                          dependencyPlan.LayerAnimSetsToRemove.Count > 0 ||
+                          dependencyPlan.RequiredLayerSlices.Count > 0 ||
+                          dependencyPlan.AnimationReplacements.Any(replacement =>
+                              replacement.Kind.Equals("Layer", StringComparison.OrdinalIgnoreCase)) ||
+                          layerOverrides.Count > 0 ||
                           layerSlotOverrides.Count > 0 || project.LocomotionOverrides.Count > 0 ||
                           usesPairedCapeAdapter;
             if (needMas || needLas)
@@ -1012,16 +1053,120 @@ public sealed class AnimArchetypeGraftService
                 if (needMas) CloneDonorAsset(extractedRoot, donor.MasCharPackage, donor.MasCharStem, patchedContentRoot, customMasPkg, masStem, mappings, result);
                 if (needLas) CloneDonorAsset(extractedRoot, donor.LasCharPackage, donor.LasCharStem, patchedContentRoot, customLasPkg, lasStem, mappings, result);
 
+                // A combat style may need a few context-gated held-item rows from another
+                // character's LAS_Default. Never replace the donor's complete default layer:
+                // clone the source into this suit, retain only the certified contexts, and add
+                // that narrow layer beside the donor's unchanged locomotion controller.
+                foreach (var slice in dependencyPlan.RequiredLayerSlices)
+                {
+                    var customSlicePackage = FightingStyleLayerSlicePackage(mod, slice);
+                    var sourceStem = UnrealPathUtil.AssetName(slice.SourcePackage);
+                    var customStem = UnrealPathUtil.AssetName(customSlicePackage);
+                    CloneDonorAsset(
+                        extractedRoot,
+                        slice.SourcePackage,
+                        sourceStem,
+                        patchedContentRoot,
+                        customSlicePackage,
+                        customStem,
+                        mappings,
+                        result);
+                    var customSliceUasset = StageUasset(patchedContentRoot, customSlicePackage);
+                    var filtered = graft.KeepOnlyLayerEntriesMatchingContexts(
+                        customSliceUasset,
+                        slice.RequiredContextTags,
+                        slice.AdditionalContextTags);
+                    result.Log.Add(
+                        $"fighting-style LAS context slice: {filtered.Status} {sourceStem} " +
+                        $"contexts=[{string.Join(",", slice.RequiredContextTags)}] rows={filtered.Added.Count}{ErrSuffix(filtered.Error)}");
+                    if (!filtered.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
+                    {
+                        result.Status = "error";
+                        result.Error =
+                            "The fighting-style held-item animation layer could not be isolated without replacing donor locomotion: " +
+                            (filtered.Error ?? filtered.Status);
+                        return result;
+                    }
+                    if (!foreignLas.Contains(customSlicePackage, StringComparer.OrdinalIgnoreCase))
+                    {
+                        foreignLas.Add(customSlicePackage);
+                    }
+                }
+
+                if (dependencyPlan.MontageAnimSetsToRemove.Count > 0)
+                {
+                    var r = graft.RemoveParentSets(
+                        StageUasset(patchedContentRoot, customMasPkg),
+                        dependencyPlan.MontageAnimSetsToRemove);
+                    result.Log.Add($"MAS displaced-equipment cleanup: {r.Status} removed=[{string.Join(",", r.Added)}]{ErrSuffix(r.Error)}");
+                    if (!r.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
+                    {
+                        result.Status = "error";
+                        result.Error = "Displaced equipment MAS dependencies could not be removed: " +
+                                       (r.Error ?? r.Status);
+                        return result;
+                    }
+                }
+                foreach (var removal in dependencyPlan.AnimationReplacements.Where(replacement =>
+                             replacement.Kind.Equals("MontageRemove", StringComparison.OrdinalIgnoreCase)))
+                {
+                    var r = graft.RemoveParentSetsByPrefix(
+                        StageUasset(patchedContentRoot, customMasPkg),
+                        removal.DonorSetPrefix);
+                    result.Log.Add(
+                        $"fighting-style MAS cleanup: {r.Status} removed=[{string.Join(",", r.Added)}]{ErrSuffix(r.Error)}");
+                    if (!r.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
+                    {
+                        result.Status = "error";
+                        result.Error = "The prior fighting-style combat animation block could not be removed: " +
+                                       (r.Error ?? r.Status);
+                        return result;
+                    }
+                }
+                foreach (var replacement in dependencyPlan.AnimationReplacements.Where(replacement =>
+                             replacement.Kind.Equals("Montage", StringComparison.OrdinalIgnoreCase)))
+                {
+                    var r = graft.SetExclusiveParentSet(
+                        StageUasset(patchedContentRoot, customMasPkg),
+                        "TTAnimSet",
+                        replacement.DonorSetPrefix,
+                        replacement.ReplacementPackage,
+                        requireExisting: false);
+                    result.Log.Add(
+                        $"fighting-style MAS replacement: {r.Status} {replacement.DonorSetPrefix}*→{UnrealPathUtil.AssetName(replacement.ReplacementPackage)}{ErrSuffix(r.Error)}");
+                    if (!r.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
+                    {
+                        result.Status = "error";
+                        result.Error = "The fighting-style combat animation block could not be installed: " +
+                                       (r.Error ?? r.Status);
+                        return result;
+                    }
+                }
                 if (foreignMas.Count > 0)
                 {
                     var r = graft.InjectParentSets(StageUasset(patchedContentRoot, customMasPkg), "TTAnimSet", foreignMas);
                     result.Log.Add($"MAS graft: {r.Status} added=[{string.Join(",", r.Added)}]{ErrSuffix(r.Error)}");
-                    if (usesPairedCapeAdapter && !r.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
+                    if ((usesPairedCapeAdapter || dependencyPlan.RequiredMontageAnimSets.Count > 0) &&
+                        !r.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
                     {
                         result.Status = "error";
                         result.Error =
-                            "The certified paired-cape MAS glide block could not be injected: " +
+                            "A required equipment/style MAS block could not be injected: " +
                             (r.Error ?? r.Status);
+                        return result;
+                    }
+                }
+                if (dependencyPlan.LayerAnimSetsToRemove.Count > 0)
+                {
+                    var r = graft.RemoveParentSets(
+                        StageUasset(patchedContentRoot, customLasPkg),
+                        dependencyPlan.LayerAnimSetsToRemove);
+                    result.Log.Add($"LAS displaced-equipment cleanup: {r.Status} removed=[{string.Join(",", r.Added)}]{ErrSuffix(r.Error)}");
+                    if (!r.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
+                    {
+                        result.Status = "error";
+                        result.Error = "Displaced equipment LAS dependencies could not be removed: " +
+                                       (r.Error ?? r.Status);
                         return result;
                     }
                 }
@@ -1054,11 +1199,32 @@ public sealed class AnimArchetypeGraftService
                 {
                     var r = graft.InjectParentSets(StageUasset(patchedContentRoot, customLasPkg), "TTLayerSet", foreignLas);
                     result.Log.Add($"LAS graft: {r.Status} added=[{string.Join(",", r.Added)}]{ErrSuffix(r.Error)}");
-                    if (usesPairedCapeAdapter && !r.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
+                    if ((usesPairedCapeAdapter || dependencyPlan.RequiredLayerAnimSets.Count > 0) &&
+                        !r.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
                     {
                         result.Status = "error";
                         result.Error =
-                            "The certified paired-cape LAS traversal block could not be injected: " +
+                            "A required equipment/style LAS block could not be injected: " +
+                            (r.Error ?? r.Status);
+                        return result;
+                    }
+                }
+                foreach (var replacement in dependencyPlan.AnimationReplacements.Where(replacement =>
+                             replacement.Kind.Equals("Layer", StringComparison.OrdinalIgnoreCase)))
+                {
+                    var r = graft.SetExclusiveParentSet(
+                        StageUasset(patchedContentRoot, customLasPkg),
+                        "TTLayerSet",
+                        replacement.DonorSetPrefix,
+                        replacement.ReplacementPackage,
+                        requireExisting: true);
+                    result.Log.Add(
+                        $"fighting-style LAS replacement: {r.Status} {replacement.DonorSetPrefix}*→{UnrealPathUtil.AssetName(replacement.ReplacementPackage)}{ErrSuffix(r.Error)}");
+                    if (!r.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
+                    {
+                        result.Status = "error";
+                        result.Error =
+                            "The fighting-style default animation layer could not replace the donor layer: " +
                             (r.Error ?? r.Status);
                         return result;
                     }
@@ -1208,11 +1374,26 @@ public sealed class AnimArchetypeGraftService
             // --- Loadout: clone DPRD, swap the gadget's ED into Equipment, repoint archetype. ---
             if (RequiresGeneratedDprdFromResolvedDependencies(
                     foreignEd.Count > 0,
-                    foreignAbilitySets.Count > 0))
+                    foreignAbilitySets.Count > 0 || foreignEffects.Count > 0 || hasAbilityCustomization))
             {
                 var customDprdPkg = $"/Game/Mods/{mod}/Characters/DA_DPRD_{mod}";
                 var dprdStem = UnrealPathUtil.AssetName(customDprdPkg);
                 CloneDonorAsset(extractedRoot, donor.DprdPackage, donor.DprdStem, patchedContentRoot, customDprdPkg, dprdStem, mappings, result);
+                var customDprdUasset = StageUasset(patchedContentRoot, customDprdPkg);
+                var equipmentMutation = new AbilityAssetMutationService();
+                var equipmentBefore = equipmentMutation.InspectDprdEquipment(customDprdUasset);
+                if (!equipmentBefore.Success)
+                {
+                    result.Status = "error";
+                    result.Error = equipmentBefore.Error ?? "The cloned donor DPRD Equipment array could not be inspected.";
+                    return result;
+                }
+                var expectedEquipment = equipmentBefore.Equipment
+                    .OrderBy(reference => reference.Index)
+                    .Select(reference => reference.IsNull
+                        ? ""
+                        : UnrealPathUtil.NormalizePackagePath(reference.PackagePath))
+                    .ToList();
                 foreach (var (slot, edPkg) in foreignEd)
                 {
                     // NOTE: the boss/NPC "equipment adapter" (clone ED + graft GetGadgetOutAbility via
@@ -1220,8 +1401,37 @@ public sealed class AnimArchetypeGraftService
                     // ability alone did not make FreezeGun usable in-game, so boss equipment needs more
                     // than the ED scaffolding (deferred research). Those helpers remain for when we
                     // resume; for now slot the gadget's base ED directly (proven path for hero gadgets).
-                    var r = graft.SetEquipmentSlot(StageUasset(patchedContentRoot, customDprdPkg), slot, edPkg);
+                    var r = graft.SetEquipmentSlot(customDprdUasset, slot, edPkg);
                     result.Log.Add($"DPRD equipment slot {slot + 1}: {r.Status} [{string.Join(",", r.Added)}]{ErrSuffix(r.Error)}");
+                    if (!r.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
+                    {
+                        result.Status = "error";
+                        result.Error = $"Runtime equipment slot {slot + 1} could not be written exactly: " +
+                                       (r.Error ?? r.Status);
+                        return result;
+                    }
+                    if (slot < 0 || slot >= expectedEquipment.Count)
+                    {
+                        result.Status = "error";
+                        result.Error = $"Runtime equipment slot {slot + 1} is outside the donor DPRD's serialized Equipment array.";
+                        return result;
+                    }
+                    expectedEquipment[slot] = UnrealPathUtil.NormalizePackagePath(edPkg);
+                }
+                var equipmentAfter = equipmentMutation.InspectDprdEquipment(customDprdUasset);
+                var actualEquipment = equipmentAfter.Equipment
+                    .OrderBy(reference => reference.Index)
+                    .Select(reference => reference.IsNull
+                        ? ""
+                        : UnrealPathUtil.NormalizePackagePath(reference.PackagePath))
+                    .ToList();
+                if (!equipmentAfter.Success ||
+                    !actualEquipment.SequenceEqual(expectedEquipment, StringComparer.OrdinalIgnoreCase))
+                {
+                    result.Status = "error";
+                    result.Error = equipmentAfter.Error ??
+                                   "The staged DPRD did not reload with the exact ordered runtime Equipment slot sequence.";
+                    return result;
                 }
                 var applied = ApplyNameMapReplacements(archetypeUasset, new Dictionary<string, string>
                 {
@@ -1230,36 +1440,274 @@ public sealed class AnimArchetypeGraftService
                 }, mappings);
                 result.Log.Add($"archetype repoint → custom DPRD: {applied} name(s)");
 
-                foreach (var abilitySet in foreignAbilitySets)
+                var customizedSetPackages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (hasAbilityCustomization && project.AbilityLoadout is { } abilityProfile)
+                {
+                    var protectedCoreEdit = abilityProfile.AllowUnsafeCoreEdits
+                        ? null
+                        : abilityProfile.AbilitySets.FirstOrDefault(selection =>
+                            AbilityLoadoutService.IsProtectedCoreSet(selection.PackagePath) &&
+                            (selection.AddedGameplayAbilities.Count > 0 ||
+                             selection.RemovedGameplayAbilities.Count > 0));
+                    if (protectedCoreEdit is not null)
+                    {
+                        result.Status = "error";
+                        result.Error =
+                            $"{UnrealPathUtil.AssetName(protectedCoreEdit.PackagePath)} is a protected core AbilitySet. " +
+                            "Open Abilities and explicitly unlock unsafe core edits before changing its grants.";
+                        return result;
+                    }
+
+                    var abilityMutation = new AbilityAssetMutationService();
+                    var inspection = abilityMutation.InspectDprdAbilitySets(customDprdUasset);
+                    if (!inspection.Success)
+                    {
+                        result.Status = "error";
+                        result.Error = inspection.Error ?? "The cloned DPRD AbilitySets array could not be inspected.";
+                        return result;
+                    }
+
+                    var donorAbilitySets = inspection.AbilitySets.Select(reference => reference.PackagePath).ToList();
+                    if (!AbilityLoadoutService.DonorMatches(
+                            abilityProfile,
+                            donor.DprdPackage,
+                            donorAbilitySets))
+                    {
+                        result.Status = "error";
+                        result.Error =
+                            "This saved ability loadout belongs to a different gameplay donor or donor revision. " +
+                            "Open Abilities, reset/remap the loadout, then build again.";
+                        return result;
+                    }
+
+                    var resolvedAbilitySets = AbilityLoadoutService.Resolve(
+                        donorAbilitySets,
+                        abilityProfile,
+                        foreignAbilitySets).ToList();
+                    var enabledSelections = abilityProfile.AbilitySets
+                        .Where(selection => selection.Enabled)
+                        .OrderBy(selection => selection.Order)
+                        .ToList();
+                    var editedIndex = 0;
+                    foreach (var selection in enabledSelections)
+                    {
+                        if (selection.AddedGameplayAbilities.Count == 0 &&
+                            selection.RemovedGameplayAbilities.Count == 0)
+                        {
+                            continue;
+                        }
+
+                        var sourcePackage = UnrealPathUtil.NormalizePackagePath(selection.PackagePath);
+                        var sourceUasset = ExtractedPackagePathService.ResolvePackageUasset(extractedRoot, sourcePackage) ?? "";
+                        if (!File.Exists(sourceUasset))
+                        {
+                            result.Status = "error";
+                            result.Error = $"The AbilitySet selected for suit-local editing is missing from the active extraction: {sourcePackage}";
+                            return result;
+                        }
+
+                        var customSetPackage = $"/Game/Mods/{mod}/Characters/AS_{mod}_User_{editedIndex++:00}";
+                        CloneDonorAsset(
+                            extractedRoot,
+                            sourcePackage,
+                            UnrealPathUtil.AssetName(sourcePackage),
+                            patchedContentRoot,
+                            customSetPackage,
+                            UnrealPathUtil.AssetName(customSetPackage),
+                            mappings,
+                            result);
+                        var customSetUasset = StageUasset(patchedContentRoot, customSetPackage);
+                        var grantEdits = selection.RemovedGameplayAbilities
+                            .Where(package => !string.IsNullOrWhiteSpace(package))
+                            .Select(package => new AbilityAssetMutationService.GameplayAbilityEdit
+                            {
+                                Kind = AbilityAssetMutationService.GameplayAbilityEditKind.Remove,
+                                TargetPackagePath = package,
+                            })
+                            .Concat(selection.AddedGameplayAbilities
+                                .Where(grant => !string.IsNullOrWhiteSpace(grant.PackagePath))
+                                .Select(grant => new AbilityAssetMutationService.GameplayAbilityEdit
+                                {
+                                    Kind = AbilityAssetMutationService.GameplayAbilityEditKind.Add,
+                                    TargetPackagePath = grant.PackagePath,
+                                    AbilityLevelOverride = grant.AbilityLevel,
+                                    InputTagOverride = grant.InputTag,
+                                }))
+                            .ToList();
+                        PopulateFirstGrantTemplateIfNeeded(grantEdits, customSetUasset, extractedRoot, abilityMutation);
+                        var editResult = abilityMutation.ApplyGameplayAbilityEdits(customSetUasset, grantEdits);
+                        if (!editResult.Success)
+                        {
+                            result.Status = "error";
+                            result.Error = editResult.Error ?? $"Could not edit {sourcePackage}.";
+                            return result;
+                        }
+                        result.Log.Add(
+                            $"AbilitySet clone {UnrealPathUtil.AssetName(sourcePackage)} → {UnrealPathUtil.AssetName(customSetPackage)}: " +
+                            string.Join(", ", editResult.Changes));
+                        customizedSetPackages[sourcePackage] = customSetPackage;
+                        for (var index = 0; index < resolvedAbilitySets.Count; index++)
+                        {
+                            if (resolvedAbilitySets[index].Equals(sourcePackage, StringComparison.OrdinalIgnoreCase))
+                            {
+                                resolvedAbilitySets[index] = customSetPackage;
+                            }
+                        }
+                    }
+
+                    var setResult = abilityMutation.SetDprdAbilitySets(customDprdUasset, resolvedAbilitySets);
+                    if (!setResult.Success)
+                    {
+                        result.Status = "error";
+                        result.Error = setResult.Error ?? "The suit-local DPRD AbilitySets list could not be written.";
+                        return result;
+                    }
+                    result.Log.Add($"DPRD ability loadout: {resolvedAbilitySets.Count} ordered set(s), {customizedSetPackages.Count} suit-local clone(s)");
+                }
+
+                foreach (var abilitySet in hasAbilityCustomization
+                             ? Enumerable.Empty<string>()
+                             : foreignAbilitySets)
                 {
                     var r = graft.AddAbilitySet(
-                        StageUasset(patchedContentRoot, customDprdPkg),
+                        customDprdUasset,
                         abilitySet);
                     result.Log.Add(
                         $"DPRD controller set: {r.Status} added=[{string.Join(",", r.Added)}] " +
                         $"skipped=[{string.Join(",", r.Skipped)}]{ErrSuffix(r.Error)}");
+                    if (!r.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
+                    {
+                        result.Status = "error";
+                        result.Error = "A required DPRD AbilitySet could not be installed: " +
+                                       (r.Error ?? r.Status);
+                        return result;
+                    }
                 }
 
                 // Clone the donor ability set and add standard foreign gadget abilities.
-                if (foreignAbilities.Count > 0 && !string.IsNullOrEmpty(donor.AbilitySetPackage))
+                if ((foreignAbilities.Count > 0 || foreignEffects.Count > 0 || dependencyPlan.FightingStyle is not null ||
+                     dependencyPlan.GameplayAbilitiesToRemove.Count > 0) &&
+                    !string.IsNullOrEmpty(donor.AbilitySetPackage))
                 {
-                    var customAsPkg = $"/Game/Mods/{mod}/Characters/AS_{mod}";
-                    var asStem = UnrealPathUtil.AssetName(customAsPkg);
-                    CloneDonorAsset(extractedRoot, donor.AbilitySetPackage, donor.AbilitySetStem, patchedContentRoot, customAsPkg, asStem, mappings, result);
-                    var r = graft.AddGrantedAbilities(StageUasset(patchedContentRoot, customAsPkg), foreignAbilities);
-                    result.Log.Add($"ability-set grant: {r.Status} added=[{string.Join(",", r.Added)}] skipped=[{string.Join(",", r.Skipped)}]{ErrSuffix(r.Error)}");
-
-                    var asApplied = ApplyNameMapReplacements(StageUasset(patchedContentRoot, customDprdPkg), new Dictionary<string, string>
+                    string customAsPkg;
+                    string customAsUasset;
+                    if (customizedSetPackages.TryGetValue(donor.AbilitySetPackage, out var existingCustomSet))
                     {
-                        [donor.AbilitySetPackage] = customAsPkg,
-                        [donor.AbilitySetStem] = asStem,
-                    }, mappings);
-                    result.Log.Add($"DPRD repoint → custom ability set: {asApplied} name(s)");
+                        customAsPkg = existingCustomSet;
+                        customAsUasset = StageUasset(patchedContentRoot, customAsPkg);
+                    }
+                    else
+                    {
+                        customAsPkg = $"/Game/Mods/{mod}/Characters/AS_{mod}";
+                        var asStem = UnrealPathUtil.AssetName(customAsPkg);
+                        CloneDonorAsset(extractedRoot, donor.AbilitySetPackage, donor.AbilitySetStem, patchedContentRoot, customAsPkg, asStem, mappings, result);
+                        customAsUasset = StageUasset(patchedContentRoot, customAsPkg);
+                        var asApplied = ApplyNameMapReplacements(customDprdUasset, new Dictionary<string, string>
+                        {
+                            [donor.AbilitySetPackage] = customAsPkg,
+                            [donor.AbilitySetStem] = asStem,
+                        }, mappings);
+                        if (asApplied == 0)
+                        {
+                            result.Status = "error";
+                            result.Error =
+                                "The donor character AbilitySet is not active in the resolved DPRD, so Batcomputer cannot replace it with the required suit-local equipment/fighting-style bridge.";
+                            return result;
+                        }
+                        result.Log.Add($"DPRD repoint → custom ability set: {asApplied} name(s)");
+                    }
+
+                    var abilityMutation = new AbilityAssetMutationService();
+                    var equipmentEdits = dependencyPlan.GameplayAbilitiesToRemove.Select(package =>
+                        new AbilityAssetMutationService.GameplayAbilityEdit
+                        {
+                            Kind = AbilityAssetMutationService.GameplayAbilityEditKind.Remove,
+                            TargetPackagePath = package,
+                        }).Concat(foreignAbilities.Select(package =>
+                        new AbilityAssetMutationService.GameplayAbilityEdit
+                        {
+                            Kind = AbilityAssetMutationService.GameplayAbilityEditKind.Add,
+                            TargetPackagePath = package,
+                        })).ToList();
+                    PopulateFirstGrantTemplateIfNeeded(equipmentEdits, customAsUasset, extractedRoot, abilityMutation);
+                    var grantResult = abilityMutation.ApplyGameplayAbilityEdits(customAsUasset, equipmentEdits);
+                    if (!grantResult.Success)
+                    {
+                        result.Status = "error";
+                        result.Error = grantResult.Error ?? "The foreign equipment gameplay abilities could not be granted.";
+                        return result;
+                    }
+                    result.Log.Add($"ability-set grant: {grantResult.Status} [{string.Join(",", grantResult.Changes)}]");
+
+                    if (dependencyPlan.FightingStyle is not null)
+                    {
+                        var hasCombatEffect = !string.IsNullOrWhiteSpace(dependencyPlan.FightingStyle.CombatTypeEffectPackage);
+                        if (foreignEffects.Count != (hasCombatEffect ? 1 : 0))
+                        {
+                            result.Status = "error";
+                            result.Error = "A fighting-style bridge must resolve to exactly one combat-type effect.";
+                            return result;
+                        }
+                        var sourceSetPackage = dependencyPlan.FightingStyle?.CharacterAbilitySetPackage ?? "";
+                        var sourceSetUasset = string.IsNullOrWhiteSpace(sourceSetPackage)
+                            ? ""
+                            : ExtractedPackagePathService.ResolvePackageUasset(extractedRoot, sourceSetPackage) ?? "";
+                        var effectResult = abilityMutation.SetExclusiveCombatTypeEffect(
+                            customAsUasset,
+                            hasCombatEffect ? new AbilityAssetMutationService.GameplayEffectAddition
+                            {
+                                PackagePath = foreignEffects[0],
+                                SourceAbilitySetUassetPath = sourceSetUasset,
+                                SourceEffectPackagePath = foreignEffects[0],
+                            } : null);
+                        if (!effectResult.Success)
+                        {
+                            result.Status = "error";
+                            result.Error = effectResult.Error ?? "The fighting-style combat effect could not be granted.";
+                            return result;
+                        }
+                        result.Log.Add($"combat-effect bridge: {effectResult.Status} [{string.Join(",", effectResult.Changes)}]");
+                    }
                 }
-                else if (foreignAbilities.Count > 0)
+                else if (foreignAbilities.Count > 0 || foreignEffects.Count > 0 || dependencyPlan.FightingStyle is not null ||
+                         dependencyPlan.GameplayAbilitiesToRemove.Count > 0)
                 {
-                    result.Log.Add("ability-set grant skipped: donor DPRD has no character ability set to clone");
+                    result.Status = "error";
+                    result.Error =
+                        "The selected donor DPRD has no character AbilitySet to clone, so required equipment/fighting-style grants cannot be applied safely.";
+                    return result;
                 }
+
+                if (SwordCombatService.Enabled(project.AbilityLoadout))
+                {
+                    var meleeSource = customizedSetPackages.GetValueOrDefault(SwordCombatService.NativeMelee, SwordCombatService.NativeMelee);
+                    SwordCombatService.Generate(project.AbilityLoadout!, extractedRoot, patchedContentRoot, mod,
+                        customDprdUasset, meleeSource, mappings!, result.Log);
+                }
+
+                if (HeldItemService.Independent(project.AbilityLoadout))
+                    HeldItemService.Generate(project.AbilityLoadout!, extractedRoot, patchedContentRoot, mod, customDprdUasset, mappings!, result.Log);
+
+                if (!VerifyStagedDependencyCertificate(
+                        project,
+                        donor,
+                        extractedRoot,
+                        patchedContentRoot,
+                        customDprdUasset,
+                        mod,
+                        foreignAbilitySets,
+                        foreignAbilities,
+                        foreignEffects,
+                        dependencyPlan,
+                        needMas ? StageUasset(patchedContentRoot, customMasPkg) : "",
+                        needLas ? StageUasset(patchedContentRoot, customLasPkg) : "",
+                        out var certificateError))
+                {
+                    result.Status = "error";
+                    result.Error = "The staged ability/equipment dependency certificate failed: " + certificateError;
+                    return result;
+                }
+                result.Log.Add("staged dependency certificate: exact DPRD/GA/GE/MAS/LAS state verified");
             }
 
             result.Status = "ok";
@@ -1271,6 +1719,318 @@ public sealed class AnimArchetypeGraftService
             result.Error = ex.ToString();
             return result;
         }
+    }
+
+    internal static bool VerifyStagedDependencyCertificate(
+        NativeSuitProject project,
+        DonorInfo donor,
+        string extractedRoot,
+        string stagedRoot,
+        string stagedDprdUasset,
+        string mod,
+        IReadOnlyCollection<string> requiredAbilitySets,
+        IReadOnlyCollection<string> bridgeAbilities,
+        IReadOnlyCollection<string> combatEffects,
+        AbilityDependencyPlan plan,
+        string stagedMasUasset,
+        string stagedLasUasset,
+        out string error)
+    {
+        error = "";
+        var mutation = new AbilityAssetMutationService();
+        var donorDprdUasset = ExtractedPackagePathService.ResolvePackageUasset(
+            extractedRoot,
+            donor.DprdPackage) ?? "";
+        var donorInspection = mutation.InspectDprdAbilitySets(donorDprdUasset);
+        if (!donorInspection.Success)
+        {
+            error = donorInspection.Error ?? "The donor DPRD AbilitySets array could not be read.";
+            return false;
+        }
+
+        var donorSets = donorInspection.AbilitySets.Select(reference => reference.PackagePath).ToList();
+        var expectedSets = AbilityLoadoutService.Resolve(
+            donorSets,
+            project.AbilityLoadout,
+            requiredAbilitySets).ToList();
+        var customizedSets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var editedIndex = 0;
+        foreach (var selection in (project.AbilityLoadout?.AbilitySets ?? [])
+                     .Where(selection => selection.Enabled)
+                     .OrderBy(selection => selection.Order))
+        {
+            if (selection.AddedGameplayAbilities.Count == 0 &&
+                selection.RemovedGameplayAbilities.Count == 0)
+            {
+                continue;
+            }
+            var source = UnrealPathUtil.NormalizePackagePath(selection.PackagePath);
+            customizedSets[source] = $"/Game/Mods/{mod}/Characters/AS_{mod}_User_{editedIndex++:00}";
+        }
+        for (var index = 0; index < expectedSets.Count; index++)
+        {
+            if (customizedSets.TryGetValue(expectedSets[index], out var custom))
+            {
+                expectedSets[index] = custom;
+            }
+        }
+
+        var needsBridge = bridgeAbilities.Count > 0 || combatEffects.Count > 0 || plan.FightingStyle is not null ||
+                          plan.GameplayAbilitiesToRemove.Count > 0;
+        var bridgePackage = "";
+        if (needsBridge)
+        {
+            if (string.IsNullOrWhiteSpace(donor.AbilitySetPackage))
+            {
+                error = "The donor has no character AbilitySet for the required grant bridge.";
+                return false;
+            }
+            bridgePackage = customizedSets.GetValueOrDefault(
+                UnrealPathUtil.NormalizePackagePath(donor.AbilitySetPackage),
+                $"/Game/Mods/{mod}/Characters/AS_{mod}");
+            for (var index = 0; index < expectedSets.Count; index++)
+            {
+                if (expectedSets[index].Equals(donor.AbilitySetPackage, StringComparison.OrdinalIgnoreCase))
+                {
+                    expectedSets[index] = bridgePackage;
+                }
+            }
+        }
+
+        if (SwordCombatService.Enabled(project.AbilityLoadout))
+        {
+            var sourceMelee = customizedSets.GetValueOrDefault(SwordCombatService.NativeMelee, SwordCombatService.NativeMelee);
+            var sourceIndex = expectedSets.FindIndex(p => p.Equals(sourceMelee, StringComparison.OrdinalIgnoreCase));
+            if (sourceIndex < 0) { error = "The sword preset requires one player martial melee set."; return false; }
+            expectedSets[sourceIndex] = SwordCombatService.MeleePackage(mod);
+            if (!SwordCombatService.Verify(project.AbilityLoadout!, extractedRoot, stagedRoot, mod, LoadMappings()!, out error)) return false;
+        }
+
+        if (HeldItemService.Independent(project.AbilityLoadout))
+        {
+            expectedSets.AddRange(project.AbilityLoadout!.HeldItems!.Select(i => HeldItemService.SetPackage(mod, i)));
+            if (!HeldItemService.Verify(project.AbilityLoadout, extractedRoot, stagedRoot, mod, LoadMappings()!, out error)) return false;
+        }
+        var actualDprd = mutation.InspectDprdAbilitySets(stagedDprdUasset);
+        var actualSets = actualDprd.AbilitySets.Select(reference => reference.PackagePath).ToList();
+        if (!actualDprd.Success ||
+            !actualSets.SequenceEqual(expectedSets, StringComparer.OrdinalIgnoreCase))
+        {
+            error = actualDprd.Error ??
+                    "The generated DPRD's serialized AbilitySets membership/order differs from the resolved loadout.";
+            return false;
+        }
+        var duplicatedEquipmentSets = actualSets.Where(actual =>
+                plan.EquipmentOwnedAbilitySets.Contains(actual, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+        if (duplicatedEquipmentSets.Count > 0)
+        {
+            error = "Equipment-owned controller AbilitySets were duplicated into DPRD: " +
+                    string.Join(", ", duplicatedEquipmentSets.Select(UnrealPathUtil.AssetName));
+            return false;
+        }
+
+        foreach (var abilitySetPackage in actualSets)
+        {
+            var abilitySetUasset = ResolveDependencyUasset(extractedRoot, stagedRoot, abilitySetPackage);
+            if (string.IsNullOrWhiteSpace(abilitySetUasset))
+            {
+                error = $"Final DPRD AbilitySet does not resolve to staged or extracted content: {abilitySetPackage}";
+                return false;
+            }
+            var abilitySet = mutation.InspectAbilitySet(abilitySetUasset);
+            if (!abilitySet.Success)
+            {
+                error = abilitySet.Error ?? $"Final AbilitySet could not be inspected: {abilitySetPackage}";
+                return false;
+            }
+            foreach (var grantPackage in abilitySet.GameplayAbilities.Concat(abilitySet.GameplayEffects)
+                         .Select(grant => grant.PackagePath)
+                         .Where(ExtractedPackagePathService.IsContentPackagePath))
+            {
+                if (string.IsNullOrWhiteSpace(ResolveDependencyUasset(extractedRoot, stagedRoot, grantPackage)))
+                {
+                    error = $"{UnrealPathUtil.AssetName(abilitySetPackage)} grants an unresolved gameplay asset: {grantPackage}";
+                    return false;
+                }
+            }
+        }
+
+        foreach (var package in plan.RequiredGameplayAbilities.Concat(plan.RequiredGameplayEffects))
+        {
+            if (string.IsNullOrWhiteSpace(ResolveDependencyUasset(extractedRoot, stagedRoot, package)))
+            {
+                error = $"A required gameplay dependency is missing from staged and extracted content: {package}";
+                return false;
+            }
+        }
+
+        if (needsBridge)
+        {
+            var bridgeUasset = ResolveDependencyUasset(extractedRoot, stagedRoot, bridgePackage);
+            var bridge = mutation.InspectAbilitySet(bridgeUasset);
+            if (!bridge.Success)
+            {
+                error = bridge.Error ?? "The suit-local character AbilitySet bridge could not be inspected.";
+                return false;
+            }
+            var actualAbilities = bridge.GameplayAbilities.Select(grant => grant.PackagePath).ToList();
+            var missingBridge = bridgeAbilities.Where(required =>
+                !actualAbilities.Contains(required, StringComparer.OrdinalIgnoreCase)).ToList();
+            var staleBridge = plan.GameplayAbilitiesToRemove.Where(removed =>
+                actualAbilities.Contains(removed, StringComparer.OrdinalIgnoreCase)).ToList();
+            if (missingBridge.Count > 0 || staleBridge.Count > 0)
+            {
+                error = "The suit-local bridge has incorrect gameplay-ability grants. Missing: " +
+                        string.Join(", ", missingBridge.Select(UnrealPathUtil.AssetName)) +
+                        "; still present after removal: " +
+                        string.Join(", ", staleBridge.Select(UnrealPathUtil.AssetName));
+                return false;
+            }
+            if (plan.FightingStyle is { } style)
+            {
+                var actualCombat = bridge.GameplayEffects
+                    .Where(effect => AbilityAssetMutationService.IsCombatTypeEffect(effect.PackagePath))
+                    .Select(effect => effect.PackagePath)
+                    .ToList();
+                var expectedCombat = string.IsNullOrWhiteSpace(style.CombatTypeEffectPackage)
+                    ? Array.Empty<string>() : new[] { style.CombatTypeEffectPackage };
+                if (!actualCombat.SequenceEqual(expectedCombat, StringComparer.OrdinalIgnoreCase))
+                {
+                    error = $"The suit-local bridge has incorrect combat effects for {style.DisplayName}. Expected: {string.Join(", ", expectedCombat)}.";
+                    return false;
+                }
+            }
+        }
+
+        if (!VerifyAnimationDependencyState(
+                "MAS",
+                stagedMasUasset,
+                extractedRoot,
+                stagedRoot,
+                plan.RequiredMontageAnimSets,
+                plan.MontageAnimSetsToRemove,
+                plan.AnimationReplacements.Where(replacement =>
+                    replacement.Kind.StartsWith("Montage", StringComparison.OrdinalIgnoreCase)),
+                out error) ||
+             !VerifyAnimationDependencyState(
+                "LAS",
+                stagedLasUasset,
+                extractedRoot,
+                stagedRoot,
+                plan.RequiredLayerAnimSets.Concat(plan.RequiredLayerSlices.Select(slice =>
+                    FightingStyleLayerSlicePackage(mod, slice))),
+                plan.LayerAnimSetsToRemove,
+                plan.AnimationReplacements.Where(replacement =>
+                    replacement.Kind.Equals("Layer", StringComparison.OrdinalIgnoreCase)),
+                out error))
+        {
+            return false;
+        }
+        return true;
+    }
+
+    internal static string FightingStyleLayerSlicePackage(
+        string mod,
+        FightingStyleLayerSlice slice)
+    {
+        var sourceStem = UnrealPathUtil.AssetName(slice.SourcePackage);
+        var contextStem = string.Join("_", slice.RequiredContextTags.Concat(slice.AdditionalContextTags ?? [])
+            .Select(tag => tag.Split('.', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? "Context")
+            .Select(segment => new string(segment.Where(char.IsLetterOrDigit).ToArray()))
+            .Where(segment => segment.Length > 0));
+        if (string.IsNullOrWhiteSpace(contextStem)) contextStem = "Context";
+        return $"/Game/Mods/{mod}/Characters/{sourceStem}_{contextStem}_{mod}";
+    }
+
+    private static bool VerifyAnimationDependencyState(
+        string label,
+        string stagedUasset,
+        string extractedRoot,
+        string stagedRoot,
+        IEnumerable<string> requiredPackages,
+        IEnumerable<string> removedPackages,
+        IEnumerable<AbilityAnimationReplacement> replacements,
+        out string error)
+    {
+        error = "";
+        var required = requiredPackages.Select(UnrealPathUtil.NormalizePackagePath)
+            .Where(package => !string.IsNullOrWhiteSpace(package))
+            .ToList();
+        var removed = removedPackages.Select(UnrealPathUtil.NormalizePackagePath)
+            .Where(package => !string.IsNullOrWhiteSpace(package))
+            .ToList();
+        var replacementList = replacements.ToList();
+        if (required.Count == 0 && removed.Count == 0 && replacementList.Count == 0)
+        {
+            return true;
+        }
+        if (string.IsNullOrWhiteSpace(stagedUasset) || !File.Exists(stagedUasset))
+        {
+            error = $"The required generated {label} composite is missing.";
+            return false;
+        }
+        var inspection = new AnimGraftService().InspectParentSets(stagedUasset);
+        if (!inspection.Success)
+        {
+            error = inspection.Error ?? $"The generated {label} ParentSetsArray could not be inspected.";
+            return false;
+        }
+        var parents = inspection.PackagePaths;
+        var missing = required.Where(package =>
+            !parents.Contains(package, StringComparer.OrdinalIgnoreCase)).ToList();
+        var stale = removed.Where(package =>
+            parents.Contains(package, StringComparer.OrdinalIgnoreCase)).ToList();
+        if (missing.Count > 0 || stale.Count > 0)
+        {
+            error = $"The generated {label} has an incorrect exact parent set. Missing: " +
+                    string.Join(", ", missing.Select(UnrealPathUtil.AssetName)) +
+                    "; stale: " + string.Join(", ", stale.Select(UnrealPathUtil.AssetName));
+            return false;
+        }
+        foreach (var replacement in replacementList)
+        {
+            var matching = parents.Where(package => UnrealPathUtil.AssetName(package).StartsWith(
+                    replacement.DonorSetPrefix,
+                    StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (replacement.Kind.Equals("MontageRemove", StringComparison.OrdinalIgnoreCase))
+            {
+                if (matching.Count > 0)
+                {
+                    error = $"The generated {label} still contains excluded {replacement.DonorSetPrefix}* parents.";
+                    return false;
+                }
+            }
+            else if (matching.Count != 1 ||
+                     !matching[0].Equals(replacement.ReplacementPackage, StringComparison.OrdinalIgnoreCase))
+            {
+                error = $"The generated {label} must contain exactly one {replacement.DonorSetPrefix}* parent, '{replacement.ReplacementPackage}'.";
+                return false;
+            }
+        }
+        foreach (var parent in parents.Where(ExtractedPackagePathService.IsContentPackagePath))
+        {
+            if (string.IsNullOrWhiteSpace(ResolveDependencyUasset(extractedRoot, stagedRoot, parent)))
+            {
+                error = $"The generated {label} references an unresolved exact parent package: {parent}";
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static string ResolveDependencyUasset(
+        string extractedRoot,
+        string stagedRoot,
+        string package)
+    {
+        var normalized = UnrealPathUtil.NormalizePackagePath(package);
+        if (!ExtractedPackagePathService.IsContentPackagePath(normalized)) return "";
+        var staged = StageUasset(stagedRoot, normalized);
+        if (File.Exists(staged)) return staged;
+        var extracted = ExtractedPackagePathService.ResolvePackageUasset(extractedRoot, normalized) ?? "";
+        return File.Exists(extracted) ? extracted : "";
     }
 
     // Generated-derivative filename prefixes: everything the archetype graft emits
@@ -1292,22 +2052,26 @@ public sealed class AnimArchetypeGraftService
         string? donorFamily)
     {
         var gameData = GameDataService.Instance;
+        var exactKnown = AbilityDependencyService.TryReadDonorRuntimeEquipmentSlots(
+            project,
+            gameData.Db.Equipment,
+            out var donorSlots);
         foreach (var change in project.EquipmentSlots)
         {
             var equipment = gameData.FindEquipment(change.Gadget);
-            if (equipment is null ||
-                (!string.IsNullOrWhiteSpace(donorFamily) &&
-                 equipment.NativeFamilies.Contains(donorFamily, StringComparer.OrdinalIgnoreCase)))
+            if (equipment is null)
             {
                 continue;
             }
-            if (!string.IsNullOrWhiteSpace(equipment.EdPackage) ||
-                EquipmentDependencyService.RequiredAbilitySets(equipment, donorFamily).Count > 0)
+            var nativeAtSlot = exactKnown &&
+                               donorSlots.TryGetValue(change.Slot, out var donorItem) &&
+                               donorItem.Equals(equipment.Name, StringComparison.OrdinalIgnoreCase);
+            if (!nativeAtSlot && !string.IsNullOrWhiteSpace(equipment.EdPackage))
             {
                 return true;
             }
         }
-        return false;
+        return AbilityLoadoutService.HasCustomizations(project);
     }
 
     /// <summary>
@@ -1320,6 +2084,79 @@ public sealed class AnimArchetypeGraftService
         bool hasForeignEquipmentDefinitions,
         bool hasForeignAbilitySets) =>
         hasForeignEquipmentDefinitions || hasForeignAbilitySets;
+
+    public static bool RequiresCustomArchetype(NativeSuitProject project) =>
+        project.UseCustomArchetype ||
+        AbilityLoadoutService.HasCustomizations(project) ||
+        HasExactEquipmentGraftDependency(project);
+
+    private static bool HasExactEquipmentGraftDependency(NativeSuitProject project)
+    {
+        if (project.EquipmentSlots.Count == 0) return false;
+        var equipment = GameDataService.Instance.Db.Equipment;
+        var exactKnown = AbilityDependencyService.TryReadDonorRuntimeEquipmentSlots(
+            project,
+            equipment,
+            out var donorSlots);
+        foreach (var change in project.EquipmentSlots)
+        {
+            var item = equipment.FirstOrDefault(candidate =>
+                candidate.Name.Equals(change.Gadget, StringComparison.OrdinalIgnoreCase));
+            if (item is null) continue;
+            if (!exactKnown ||
+                !donorSlots.TryGetValue(change.Slot, out var donorItem) ||
+                !donorItem.Equals(item.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void PopulateFirstGrantTemplateIfNeeded(
+        IList<AbilityAssetMutationService.GameplayAbilityEdit> edits,
+        string targetAbilitySetUasset,
+        string extractedRoot,
+        AbilityAssetMutationService mutation)
+    {
+        if (!edits.Any(edit => edit.Kind == AbilityAssetMutationService.GameplayAbilityEditKind.Add) ||
+            mutation.InspectAbilitySet(targetAbilitySetUasset).GameplayAbilities.Count > 0)
+        {
+            return;
+        }
+
+        const string templatePackage = "/Game/Characters/Minifig/Batman/Abilities/AS_Batman";
+        var templateUasset = ExtractedPackagePathService.ResolvePackageUasset(extractedRoot, templatePackage) ?? "";
+        if (!File.Exists(templateUasset))
+        {
+            return;
+        }
+        var templateGrant = mutation.InspectAbilitySet(templateUasset).GameplayAbilities.FirstOrDefault();
+        if (templateGrant is null)
+        {
+            return;
+        }
+
+        for (var index = 0; index < edits.Count; index++)
+        {
+            var edit = edits[index];
+            if (edit.Kind != AbilityAssetMutationService.GameplayAbilityEditKind.Add)
+            {
+                continue;
+            }
+            edits[index] = new AbilityAssetMutationService.GameplayAbilityEdit
+            {
+                Kind = edit.Kind,
+                TargetPackagePath = edit.TargetPackagePath,
+                ReplacementPackagePath = edit.ReplacementPackagePath,
+                AbilityLevelOverride = edit.AbilityLevelOverride,
+                InputTagOverride = edit.InputTagOverride,
+                InsertIndex = edit.InsertIndex,
+                SourceAbilitySetUassetPath = templateUasset,
+                SourceAbilityPackagePath = templateGrant.PackagePath,
+            };
+        }
+    }
 
     /// <summary>
     /// Adds the runtime gliding ability dependency for an ordinary replacement glider. The paired

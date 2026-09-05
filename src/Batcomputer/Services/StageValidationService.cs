@@ -66,13 +66,124 @@ public sealed class StageValidationService
             CheckCustomStaticMeshComponentIntegrity(asset, role, project, findings);
         }
 
+        CheckGameplayShellIntegrity(project, characterAssets, findings);
         CheckNativeBodyProfile(project, characterAssets, findings);
         CheckPawnTag(project, findings);
         CheckGliderAnimInjection(project, findings);
+        CheckAbilityDependencyDeclarations(project, findings);
         CheckRequiredAbilitySets(project, findings);
         CheckEquipmentDependencies(project, findings);
         CheckGliderDependencies(project, characterAssets, findings);
         return findings;
+    }
+
+    /// <summary>
+    /// Certifies the non-visual Blueprint nodes and parent archetype that the selected gameplay
+    /// donor contributes. A native body profile is only a CharacterMesh0 geometry choice; it must
+    /// never remove dialogue/character-presentation nodes or replace the donor's DPRD/MAS/LAS
+    /// inheritance chain.
+    /// </summary>
+    private void CheckGameplayShellIntegrity(
+        NativeSuitProject project,
+        IReadOnlyDictionary<string, UAsset> characterAssets,
+        List<Finding> findings)
+    {
+        foreach (var requirement in project.Requirements.Where(requirement =>
+                     requirement.Kind.Equals("remove-component", StringComparison.OrdinalIgnoreCase) &&
+                     GameplayShellComponentPolicy.IsRequired(requirement.TargetComponent)))
+        {
+            findings.Add(new("ERROR",
+                $"Saved component removal '{requirement.TargetComponent}' targets required gameplay infrastructure. " +
+                "Remove that rule and rebuild; dialogue and in-level character/suit presentation depend on this node."));
+        }
+
+        var extractedRoot = AppSettings.Current.EffectiveExtractedContentRoot();
+        foreach (var (role, stagedAsset) in characterAssets)
+        {
+            var playable = role.Equals("playable", StringComparison.OrdinalIgnoreCase);
+            var template = playable ? project.PlayableTemplate : project.CutsceneTemplate;
+            string sourcePackage;
+            try
+            {
+                sourcePackage = UAssetPatchService.EffectiveCharacterSourcePackage(project, playable);
+            }
+            catch
+            {
+                sourcePackage = UnrealPathUtil.NormalizePackagePath(template?.PackagePath);
+            }
+
+            var sourceUasset = !string.IsNullOrWhiteSpace(template?.Uasset) && File.Exists(template.Uasset)
+                ? template.Uasset
+                : ExtractedPackagePathService.ResolvePackageUasset(extractedRoot, sourcePackage) ?? "";
+            if (string.IsNullOrWhiteSpace(sourceUasset) || !File.Exists(sourceUasset))
+            {
+                continue;
+            }
+
+            try
+            {
+                var sourceAsset = new UAsset(
+                    sourceUasset,
+                    EngineVersion.VER_UE5_6,
+                    _mappings,
+                    CustomSerializationFlags.SkipPreloadDependencyLoading);
+                var missing = MissingRequiredGameplayShellComponentsForTest(
+                    LiveScsComponentNames(sourceAsset),
+                    LiveScsComponentNames(stagedAsset));
+                if (missing.Count > 0)
+                {
+                    findings.Add(new("ERROR",
+                        $"{role}: required gameplay-shell component(s) from the selected donor are inactive: " +
+                        string.Join(", ", missing) +
+                        ". Rebuild from the selected gameplay donor; body/visual cleanup may remove appearance nodes only."));
+                }
+            }
+            catch (Exception ex)
+            {
+                findings.Add(new("WARN",
+                    $"{role}: could not compare required gameplay-shell nodes with '{sourcePackage}': {ex.Message}"));
+            }
+        }
+
+        // With no generated archetype, the playable must still inherit the exact donor archetype.
+        // That parent owns the DPRD plus MAS/LAS composition, including native stealth/focus and
+        // menu behavior. A body mesh choice never has authority to change it.
+        if (project.BodyProfile is null ||
+            AnimArchetypeGraftService.RequiresCustomArchetype(project) ||
+            !characterAssets.TryGetValue("playable", out var playableAsset))
+        {
+            return;
+        }
+
+        var donor = AnimArchetypeGraftService.DetectDonorForProject(project, _contentRoot, _mappings);
+        if (donor is { Valid: true } &&
+            !IsGeneratedClassParentedToPackage(
+                playableAsset,
+                project.TargetPackages.Playable,
+                donor.ArchetypePackage))
+        {
+            findings.Add(new("ERROR",
+                "playable: selecting a native body changed or lost the gameplay donor archetype. " +
+                $"The suit must remain parented to '{donor.ArchetypePackage}' so its DPRD, abilities, " +
+                "stealth/focus behavior, animation sets, and in-level suit flow stay intact."));
+        }
+    }
+
+    internal static IReadOnlyList<string> MissingRequiredGameplayShellComponentsForTest(
+        IEnumerable<string> requiredSourceComponents,
+        IEnumerable<string> stagedComponents)
+    {
+        var required = requiredSourceComponents
+            .Select(GameplayShellComponentPolicy.ComponentName)
+            .Where(GameplayShellComponentPolicy.IsRequired)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        var actual = stagedComponents
+            .Select(GameplayShellComponentPolicy.ComponentName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return required
+            .Where(component => !actual.Contains(component))
+            .OrderBy(component => component, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private static void CheckNativeBodyProfile(
@@ -344,7 +455,8 @@ public sealed class StageValidationService
     private void CheckRequiredAbilitySets(NativeSuitProject project, List<Finding> findings)
     {
         if (project.EquipmentSlots.Count == 0 &&
-            !project.PartGrafts.Any(graft => graft.IsGlider))
+            !project.PartGrafts.Any(graft => graft.IsGlider) &&
+            !AbilityLoadoutService.HasCustomizations(project))
         {
             return;
         }
@@ -356,10 +468,13 @@ public sealed class StageValidationService
             donorFamily = gameData.FamilyForBasePath(project.PlayableTemplate?.PackagePath ?? "")?.Name;
         }
 
-        var requiredSets = project.EquipmentSlots
-            .Select(change => gameData.FindEquipment(change.Gadget))
-            .Where(equipment => equipment is not null)
-            .SelectMany(equipment => EquipmentDependencyService.RequiredAbilitySets(equipment!, donorFamily))
+        // Equipment-owned AbilitySets live on the ED's AbilitySetsToGrant and must not also be
+        // appended to DPRD. Only character-side style/glider sets belong in this certificate.
+        var requiredSets = AbilityDependencyService.Build(
+                project,
+                donorFamily,
+                gameData.Db.Equipment)
+            .RequiredAbilitySets
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         var baseContract = new AnimArchetypeGraftService().BaseCapeGlideContract(project);
@@ -374,7 +489,8 @@ public sealed class StageValidationService
         {
             requiredSets.Add(GliderService.GlidingAbilitySetPackage);
         }
-        if (requiredSets.Count == 0)
+        if (requiredSets.Count == 0 && project.EquipmentSlots.Count == 0 &&
+            !AbilityLoadoutService.HasCustomizations(project))
         {
             return;
         }
@@ -398,21 +514,82 @@ public sealed class StageValidationService
 
         try
         {
-            var asset = new UAsset(
-                uasset,
-                EngineVersion.VER_UE5_6,
-                _mappings,
-                CustomSerializationFlags.SkipPreloadDependencyLoading);
-            foreach (var abilitySet in requiredSets)
+            var donor = AnimArchetypeGraftService.DetectDonorForProject(
+                project,
+                _contentRoot,
+                _mappings);
+            if (donor is null || !donor.Valid || string.IsNullOrWhiteSpace(donor.DprdPackage))
             {
-                var name = AssetName(abilitySet);
-                if (!asset.Imports.Any(import =>
-                        import.ObjectName.ToString().Equals(name, StringComparison.OrdinalIgnoreCase)))
+                findings.Add(new("ERROR",
+                    "The generated DPRD dependency certificate could not resolve the exact gameplay donor."));
+                return;
+            }
+            var plan = AbilityDependencyService.Build(
+                project,
+                donorFamily,
+                gameData.Db.Equipment);
+            if (project.EquipmentSlots.Count > 0)
+            {
+                var mutation = new AbilityAssetMutationService();
+                var donorDprd = ExtractedPackagePathService.ResolvePackageUasset(
+                    AppSettings.Current.EffectiveExtractedContentRoot(),
+                    donor.DprdPackage) ?? "";
+                var donorEquipment = mutation.InspectDprdEquipment(donorDprd);
+                var stagedEquipment = mutation.InspectDprdEquipment(uasset);
+                if (!donorEquipment.Success || !stagedEquipment.Success)
                 {
                     findings.Add(new("ERROR",
-                        $"Required ability set '{name}' is missing from the generated DPRD. " +
-                        "The related equipment or glider would be incomplete in-game."));
+                        donorEquipment.Error ?? stagedEquipment.Error ??
+                        "The exact donor/staged DPRD Equipment arrays could not be inspected."));
                 }
+                else
+                {
+                    var expectedEquipment = donorEquipment.Equipment.OrderBy(entry => entry.Index)
+                        .Select(entry => entry.IsNull ? "" : UnrealPathUtil.NormalizePackagePath(entry.PackagePath))
+                        .ToList();
+                    var exact = true;
+                    foreach (var change in project.EquipmentSlots)
+                    {
+                        var equipment = gameData.FindEquipment(change.Gadget);
+                        if (equipment is null || string.IsNullOrWhiteSpace(equipment.EdPackage) ||
+                            change.Slot < 0 || change.Slot >= expectedEquipment.Count)
+                        {
+                            exact = false;
+                            break;
+                        }
+                        expectedEquipment[change.Slot] = UnrealPathUtil.NormalizePackagePath(equipment.EdPackage);
+                    }
+                    var actualEquipment = stagedEquipment.Equipment.OrderBy(entry => entry.Index)
+                        .Select(entry => entry.IsNull ? "" : UnrealPathUtil.NormalizePackagePath(entry.PackagePath))
+                        .ToList();
+                    if (!exact || !actualEquipment.SequenceEqual(
+                            expectedEquipment,
+                            StringComparer.OrdinalIgnoreCase))
+                    {
+                        findings.Add(new("ERROR",
+                            "The staged DPRD Equipment array does not match the exact donor runtime slots plus saved replacements."));
+                    }
+                }
+            }
+            var mas = PackagePathToBasePath($"/Game/Mods/{mod}/Characters/MAS_Char_{mod}") + ".uasset";
+            var las = PackagePathToBasePath($"/Game/Mods/{mod}/Characters/LAS_Char_{mod}") + ".uasset";
+            if (!AnimArchetypeGraftService.VerifyStagedDependencyCertificate(
+                    project,
+                    donor,
+                    AppSettings.Current.EffectiveExtractedContentRoot(),
+                    _contentRoot,
+                    uasset,
+                    mod,
+                    requiredSets,
+                    plan.GameplayAbilitiesToBridge,
+                    plan.RequiredGameplayEffects,
+                    plan,
+                    File.Exists(mas) ? mas : "",
+                    File.Exists(las) ? las : "",
+                    out var detail))
+            {
+                findings.Add(new("ERROR",
+                    "Generated ability/equipment state is not the exact resolved loadout: " + detail));
             }
         }
         catch (Exception ex)
@@ -467,7 +644,7 @@ public sealed class StageValidationService
                 else
                 {
                     findings.Add(new("WARN",
-                        $"Equipment '{resolvedEquipment.Name}' is a controller setup. The tool stages its ability set, but controller spawn and recall behavior still needs an in-game check.{actors}"));
+                        $"Equipment '{resolvedEquipment.Name}' is a controller setup. Its staged ED retains AbilitySetsToGrant without duplicating them in DPRD, but controller spawn and recall behavior still needs an in-game check.{actors}"));
                 }
             }
             else if (profile.Support is EquipmentSupportKind.Experimental or EquipmentSupportKind.FamilyOnly)
@@ -475,6 +652,33 @@ public sealed class StageValidationService
                 findings.Add(new("WARN",
                     $"Equipment '{resolvedEquipment.Name}' is {profile.SupportLabel.ToLowerInvariant()}: {profile.Summary}"));
             }
+        }
+    }
+
+    private static void CheckAbilityDependencyDeclarations(
+        NativeSuitProject project,
+        ICollection<Finding> findings)
+    {
+        if (!AbilityLoadoutService.HasCustomizations(project) && project.EquipmentSlots.Count == 0)
+        {
+            return;
+        }
+        var donorFamily = project.BaseProfile?.GameplayFamily;
+        if (string.IsNullOrWhiteSpace(donorFamily))
+        {
+            donorFamily = GameDataService.Instance
+                .FamilyForBasePath(project.PlayableTemplate?.PackagePath ?? "")?
+                .Name;
+        }
+        var plan = AbilityDependencyService.Build(
+            project,
+            donorFamily,
+            GameDataService.Instance.Db.Equipment);
+        foreach (var issue in plan.Issues)
+        {
+            findings.Add(new Finding(
+                issue.Severity == AbilityDependencySeverity.Error ? "ERROR" : "WARN",
+                issue.Message));
         }
     }
 

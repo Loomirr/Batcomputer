@@ -167,6 +167,70 @@ internal static class UiAuditCaptureService
                 ],
                 [sampleAnimationTarget],
                 []);
+            var sampleAbilityCatalog = new AbilityEditorCatalog
+            {
+                DonorDprdPackage = "/Game/Characters/Minifig/Batman/DA_DPRD_TheBatmanCharacterData",
+                DonorAbilitySetFingerprint = "ui-audit-donor-fingerprint",
+                InheritedAbilitySets =
+                [
+                    new AbilitySetCatalogEntry
+                    {
+                        PackagePath = "/Game/Characters/Abilities/CoreAbilities/AS_CharacterCoreAbilitySet",
+                        DisplayName = "Character core",
+                        Category = "Core",
+                        IsCore = true,
+                        GameplayAbilities =
+                        [
+                            new GameplayAbilityCatalogEntry
+                            {
+                                PackagePath = "/Game/Characters/Abilities/CoreAbilities/GA_CharacterCore",
+                                AbilityLevel = 1,
+                            },
+                        ],
+                    },
+                    new AbilitySetCatalogEntry
+                    {
+                        PackagePath = "/Game/Characters/Abilities/MeleeAbilities/AS_Melee_Batman",
+                        DisplayName = "Batman melee",
+                        Category = "Combat",
+                        GameplayAbilities =
+                        [
+                            new GameplayAbilityCatalogEntry
+                            {
+                                PackagePath = "/Game/Characters/Abilities/MeleeAbilities/GA_MeleeAttack_Batman",
+                                AbilityLevel = 1,
+                                InputTag = "InputTag.Ability.Melee",
+                            },
+                        ],
+                    },
+                ],
+                AvailableAbilitySets =
+                [
+                    new AbilitySetCatalogEntry
+                    {
+                        PackagePath = "/Game/Characters/Abilities/MeleeAbilities/AS_Melee_NightWing",
+                        DisplayName = "Nightwing dual sticks",
+                        Category = "Combat",
+                        GameplayAbilities =
+                        [
+                            new GameplayAbilityCatalogEntry
+                            {
+                                PackagePath = "/Game/Characters/Abilities/CoreAbilities/GA_Item_Batons",
+                                AbilityLevel = 1,
+                            },
+                        ],
+                    },
+                ],
+                GameplayAbilities =
+                [
+                    new GameplayAbilityCatalogEntry
+                    {
+                        PackagePath = "/Game/Characters/Abilities/CoreAbilities/GA_Item_Batons",
+                        SourceAbilitySetPackage = "/Game/Characters/Abilities/CoreAbilities/AS_StaffInteractions_Electric",
+                        AbilityLevel = 1,
+                    },
+                ],
+            };
             var sampleMesh = new CustomStaticMeshImport
             {
                 Id = "ui_audit_mesh",
@@ -261,6 +325,9 @@ internal static class UiAuditCaptureService
                 ("Animation replacement picker", () => new AnimationReplacementPickerForm(
                     sampleAnimationTarget,
                     sampleAnimationLibrary), 200),
+                ("Ability explorer", () => new AbilityExplorerForm(
+                    sampleProject,
+                    sampleAbilityCatalog), 200),
                 ("Base character picker", () => new BaseCharacterPicker(), 800),
                 ("Gameplay donor picker", () => new BaseCharacterPicker(playablesOnly: true), 400),
                 ("Manual base wizard", () => new BaseWizard("UI Audit Suit", "UiAudit", "C:\\Audit\\Playable.uasset", "C:\\Audit\\Cutscene.uasset", "C:\\Audit\\DCMD.uasset"), 150),
