@@ -35,6 +35,8 @@ public sealed partial class MainForm
         _currentLoadedProjectStageRestoreGeneration = 0;
 
         _currentProject = project;
+        if (_headerSuitCaption is not null) _headerSuitCaption.Text = CustomCharacterProjectService.IsCharacter(project) ? "CURRENT CHARACTER" : "CURRENT SUIT";
+        SelectWorkspaceFolder(CustomCharacterProjectService.IsCharacter(project) ? WorkspaceFolder.Characters : WorkspaceFolder.Suits, refresh: false);
         MigratePartGraftInstances(project);
         if (NormalizeGeneratedUimdIconRecipes(project))
         {
@@ -1515,6 +1517,9 @@ public sealed partial class MainForm
                 updated++;
             }
         }
+        foreach (var slot in project.SkinnedMeshes.SelectMany(mesh => mesh.Materials))
+            if (UnrealPathUtil.NormalizePackagePath(slot.MaterialPath).Equals(oldPackage, StringComparison.OrdinalIgnoreCase))
+            { slot.MaterialPath = replacement; updated++; }
         return updated;
     }
 
@@ -1526,7 +1531,9 @@ public sealed partial class MainForm
         return (project.CustomStaticMeshes ?? new List<CustomStaticMeshImport>())
             .Sum(mesh => StaticMeshObjProbeService.EffectiveMaterialSlots(mesh).Count(slot =>
                 UnrealPathUtil.NormalizePackagePath(slot.MaterialPath)
-                    .Equals(package, StringComparison.OrdinalIgnoreCase)));
+                    .Equals(package, StringComparison.OrdinalIgnoreCase))) +
+            project.SkinnedMeshes.SelectMany(mesh => mesh.Materials).Count(slot =>
+                UnrealPathUtil.NormalizePackagePath(slot.MaterialPath).Equals(package, StringComparison.OrdinalIgnoreCase));
     }
 
     private async Task DeleteGeneratedMaterialAsync(string miPackagePath)
@@ -2516,6 +2523,7 @@ public sealed partial class MainForm
     internal static IReadOnlyList<string> DeclaredCustomMeshPackagesForRelease(NativeSuitProject project) =>
         (project.CustomStaticMeshes ?? new List<CustomStaticMeshImport>())
             .Select(mesh => CustomStaticMeshImportService.MeshPackagePathFor(project, mesh))
+            .Concat(project.SkinnedMeshes.Select(mesh => mesh.MeshPackage))
             .Select(UnrealPathUtil.NormalizePackagePath)
             .Where(package => !string.IsNullOrWhiteSpace(package))
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -2541,6 +2549,7 @@ public sealed partial class MainForm
             .Concat((project.CustomStaticMeshes ?? new List<CustomStaticMeshImport>())
                 .SelectMany(mesh => StaticMeshObjProbeService.EffectiveMaterialSlots(mesh)
                     .Select(slot => slot.MaterialPath)))
+            .Concat(project.SkinnedMeshes.SelectMany(mesh => mesh.Materials.Select(slot => slot.MaterialPath)))
             .Select(UnrealPathUtil.NormalizePackagePath)
             .Where(package => !string.IsNullOrWhiteSpace(package));
 

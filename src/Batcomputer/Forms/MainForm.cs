@@ -155,6 +155,7 @@ public sealed partial class MainForm : AdaptiveForm
     {
         Home,
         Suits,
+        Characters,
         Viewer,
     }
 
@@ -202,7 +203,7 @@ public sealed partial class MainForm : AdaptiveForm
 
     private readonly SegmentedTabs _inspectorTabs = new();
 
-    private const string SuitTabName = "Suit";
+    private const string SuitTabName = "Components";
 
     private const string ResearchTabName = "Research";
 
@@ -585,6 +586,10 @@ public sealed partial class MainForm : AdaptiveForm
         _headerModValue.Text = modName;
         _headerModValue.ForeColor = hasMod ? Theme.Mods : Theme.OnDarkMuted;
         _headerModDetail.Text = modDetail;
+        _toyboxSaveButton.Text = "Save " + CurrentProjectNoun;
+        _toyboxToolTip.SetToolTip(_toyboxSaveButton, "Save the current " + CurrentProjectNoun + " project");
+        if (_headerSuitCaption is not null) _headerSuitCaption.Text = "CURRENT " + CurrentProjectNoun.ToUpperInvariant();
+        _tipsHeader.SetToolTip(_headerModDetail, modDetail);
 
         var slot = _slotIdText.Text.Trim();
         var pak = CurrentPackageBaseName();
@@ -594,9 +599,11 @@ public sealed partial class MainForm : AdaptiveForm
             var changeCount = Changes.Count;
             parts.Add(changeCount == 1 ? "1 change" : $"{changeCount} changes");
         }
-        if (slot.Length > 0) { parts.Add("slot " + slot); }
-        if (!string.IsNullOrWhiteSpace(pak)) { parts.Add("pak " + pak); }
+        if (_currentProject?.CustomCharacter is { } identity)
+            parts.Add(identity.IsDefinition ? "default suit · unlocked" : "suit for " + identity.CharacterId);
+        else if (_currentProject is not null) parts.Add("suit project");
         _headerMetaLabel.Text = string.Join("  ·  ", parts);
+        _tipsHeader.SetToolTip(_headerMetaLabel, $"{_headerMetaLabel.Text}\nProject: {slot}\nPackage: {pak}");
     }
 
     private (string Name, string Detail, bool HasMod) ResolveHeaderModContext()
@@ -623,7 +630,7 @@ public sealed partial class MainForm : AdaptiveForm
                 ?? matches.FirstOrDefault();
             if (selected is not null)
             {
-                return (selected.DisplayName, $"{selected.SuitCount} suit{(selected.SuitCount == 1 ? "" : "s")} in this mod", true);
+                return (selected.DisplayName, DescribeModContent(ModService.LoadMod(selected.Path)), true);
             }
 
             if (!string.IsNullOrWhiteSpace(_homeActiveModProjectPath))
@@ -632,7 +639,7 @@ public sealed partial class MainForm : AdaptiveForm
                     string.Equals(summary.Path, _homeActiveModProjectPath, StringComparison.OrdinalIgnoreCase));
                 if (active is not null)
                 {
-                    return (active.DisplayName, $"{active.SuitCount} suit{(active.SuitCount == 1 ? "" : "s")} in this mod", true);
+                    return (active.DisplayName, DescribeModContent(ModService.LoadMod(active.Path)), true);
                 }
             }
         }
@@ -643,10 +650,10 @@ public sealed partial class MainForm : AdaptiveForm
 
         if (_currentProject is not null)
         {
-            return ("No release mod", "Add this suit to a mod from Home", false);
+            return ("No release mod", "Add this " + CurrentProjectNoun + " from Home", false);
         }
 
-        return ("No mod selected", "Open a mod or suit to begin", false);
+        return ("No mod selected", "Select a mod from Home", false);
     }
 
     private Button RailButton(string category, string glyph)
@@ -842,6 +849,11 @@ public sealed partial class MainForm : AdaptiveForm
     /// </summary>
     private void EditNativeIdentity()
     {
+        if (_currentProject?.CustomCharacter is not null)
+        {
+            EditCustomCharacterIdentity();
+            return;
+        }
         if (BlockSynchronousEditWhileLoadedProjectRestores("Editing the suit identity"))
         {
             return;
@@ -901,7 +913,7 @@ public sealed partial class MainForm : AdaptiveForm
         }
 
         var svc = new SuitProjectService(_projectRootText.Text.Trim());
-        using var dlg = new LoadSuitDialog(svc.ListProjects(), DeleteSavedSuit);
+        using var dlg = new LoadSuitDialog(svc.ListProjects().Where(project => !project.IsCharacter).ToArray(), DeleteSavedSuit);
         if (dlg.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(dlg.SelectedPath))
         {
             return;
@@ -976,6 +988,7 @@ public sealed partial class MainForm : AdaptiveForm
         };
         _projectService = new SuitProjectService(_projectRootText.Text.Trim());
         _customSlotKeys.Clear();
+        if (_headerSuitCaption is not null) _headerSuitCaption.Text = "CURRENT SUIT";
         _selectedPlayablePart = null;
         _selectedCutscenePart = null;
 
@@ -995,6 +1008,7 @@ public sealed partial class MainForm : AdaptiveForm
         UpdateSelectedLabels();
         afterCreated?.Invoke(_currentProject);
         AppendLog($"Started new suit '{name}' (mod {mod}). Next: Base → Pick base character to choose the character to build from.");
+        SelectWorkspaceFolder(WorkspaceFolder.Suits, refresh: false);
         SelectComboValue(_toyboxCategoryCombo, "Base");
         _session.RaiseChanged();
         RefreshToyboxTiles();
@@ -1393,6 +1407,17 @@ public sealed partial class MainForm : AdaptiveForm
         {
             AppendLog($"Delete skipped: could not load {summary.Path}");
             return false;
+        }
+
+        if (deleteFromTool && CustomCharacterProjectService.IsCharacter(project))
+        {
+            var dependents = svc.ListProjectFiles().Where(item => !item.IsCharacter)
+                .Where(item => svc.LoadProject(item.Path)?.CustomCharacter?.DefinitionSlotId == project.SlotId).ToArray();
+            if (dependents.Length > 0)
+            {
+                Dialog.Warn(this, "Character has saved suits", "Remove its child suits first. These suits still depend on this character:\n\n" + string.Join("\n", dependents.Select(item => item.DisplayName)));
+                return false;
+            }
         }
 
         var target = deleteFromGame && deleteFromTool
@@ -2174,6 +2199,16 @@ public sealed partial class MainForm : AdaptiveForm
 
     private void DeriveOutputs()
     {
+        // Character/child targets are stable identities, not derived from the native donor or
+        // editable display name. Rebase and donor selection must not turn them back into Batman.
+        if (_currentProject?.CustomCharacter is not null)
+        {
+            _slotIdText.Text = _currentProject.SlotId;
+            _targetPlayableText.Text = _currentProject.TargetPackages.Playable;
+            _targetCutsceneText.Text = _currentProject.TargetPackages.Cutscene;
+            _targetDcmdText.Text = _currentProject.TargetPackages.Dcmd;
+            return;
+        }
         var suit = _suitNameText.Text.Trim();
         var mod = _modFolderText.Text.Trim();
         if (string.IsNullOrWhiteSpace(suit) || string.IsNullOrWhiteSpace(mod) ||
@@ -2582,7 +2617,7 @@ public sealed partial class MainForm : AdaptiveForm
     /// <summary>Saves the open suit from the visible builder command bar.</summary>
     private async Task SaveCurrentSuitAsync()
     {
-        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("save the current suit"))
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("save the current project"))
         {
             return;
         }
@@ -2596,18 +2631,18 @@ public sealed partial class MainForm : AdaptiveForm
         {
             ReadFieldsIntoProject(_currentProject);
             var project = _currentProject;
-            var saved = await SaveCurrentProjectSnapshotAsync(project, "save the current suit");
-            RequireCurrentProjectSaveCommitted(saved, "save the current suit");
-            AppendLog($"Saved suit: {saved.Path}");
+            var saved = await SaveCurrentProjectSnapshotAsync(project, "save the current project");
+            RequireCurrentProjectSaveCommitted(saved, "save the current project");
+            AppendLog($"Saved {CurrentProjectNoun}: {saved.Path}");
         }
         catch (CurrentProjectSaveSupersededException ex)
         {
-            AppendLog("Save suit stopped: " + ex.Message);
+            AppendLog( "Save project stopped: " + ex.Message);
         }
         catch (Exception ex)
         {
-            AppendLog($"Save suit failed: {ex.Message}");
-            Dialog.Error(this, "Save suit failed", ex.Message);
+            AppendLog($"Save project failed: {ex.Message}");
+            Dialog.Error(this, "Save project failed", ex.Message);
         }
     }
 
@@ -3121,6 +3156,7 @@ public sealed partial class MainForm : AdaptiveForm
 
     private static string SuggestPawnTag(NativeSuitProject project, string? serializedDonorPawnTag = null)
     {
+        if (project.CustomCharacter is { } identity) return CustomCharacterProjectService.PawnTag(identity);
         var seed = Seed(project.DisplayName) ?? Seed(project.SlotId);
         var leaf = ToGameplayTagLeaf(seed ?? "");
         if (serializedDonorPawnTag is null)
@@ -3156,6 +3192,7 @@ public sealed partial class MainForm : AdaptiveForm
         NativeSuitProject project,
         NativeMetadataDonorService.Donor? donor = null)
     {
+        if (project.CustomCharacter is not null) return false;
         donor ??= NativeMetadataDonorService.TryRead(
             project.DcmdTemplate,
             project.PlayableTemplate,

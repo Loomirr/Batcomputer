@@ -181,6 +181,7 @@ public sealed class ReleasePreflightForm : AdaptiveForm
 
             lastFindingsWidth = width;
             findings.SuspendLayout();
+            foreach (Control oldRow in findings.Controls.Cast<Control>().ToArray()) oldRow.Dispose();
             findings.Controls.Clear();
             foreach (var finding in ordered)
             {
@@ -256,7 +257,8 @@ public sealed class ReleasePreflightForm : AdaptiveForm
             Theme.Body,
             new Size(width - 58, int.MaxValue),
             TextFormatFlags.WordBreak | TextFormatFlags.NoPadding).Height;
-        var height = Math.Max(62, 38 + messageHeight);
+        var visibleMessageHeight = Math.Clamp(messageHeight + 12, 48, 240);
+        var height = 38 + visibleMessageHeight;
         var row = new RoundedPanel
         {
             Width = width,
@@ -292,16 +294,21 @@ public sealed class ReleasePreflightForm : AdaptiveForm
             BackColor = Color.Transparent,
             AutoEllipsis = true,
         });
-        var message = new Label
+        var message = new TextBox
         {
             Left = 14,
             Top = 28,
             Width = width - 28,
-            Height = messageHeight + 2,
+            Height = visibleMessageHeight,
             Text = finding.Message,
             Font = Theme.Body,
             ForeColor = Theme.OnDark,
-            BackColor = Color.Transparent,
+            BackColor = Theme.CardBg,
+            BorderStyle = BorderStyle.None,
+            Multiline = true,
+            ReadOnly = true,
+            WordWrap = true,
+            ScrollBars = ScrollBars.Vertical,
         };
         var copy = new ContextMenuStrip();
         copy.Items.Add("Copy finding", null, (_, _) =>
@@ -311,6 +318,7 @@ public sealed class ReleasePreflightForm : AdaptiveForm
         });
         row.ContextMenuStrip = copy;
         message.ContextMenuStrip = copy;
+        row.Disposed += (_, _) => copy.Dispose();
         row.Controls.Add(message);
         return row;
     }

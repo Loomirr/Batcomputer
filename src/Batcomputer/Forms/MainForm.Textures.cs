@@ -3481,7 +3481,7 @@ public sealed partial class MainForm
                value.EndsWith("_BASECOLOUR", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool IsUiTextureKind(string? textureKind) =>
+    internal static bool IsUiTextureKind(string? textureKind) =>
         !string.IsNullOrWhiteSpace(textureKind) &&
         (textureKind.Contains("ui", StringComparison.OrdinalIgnoreCase) ||
          textureKind.Contains("icon", StringComparison.OrdinalIgnoreCase) ||
@@ -3502,11 +3502,11 @@ public sealed partial class MainForm
         (textureKind.Equals("Character icon", StringComparison.OrdinalIgnoreCase) ||
          textureKind.Contains("character portrait", StringComparison.OrdinalIgnoreCase));
 
-    private static bool IsNativeUimdIconCookProfile(string? cookProfile) =>
+    internal static bool IsNativeUimdIconCookProfile(string? cookProfile) =>
         string.Equals(cookProfile, NativeUimdIconCookProfile, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(cookProfile, NativeCharacterIconCookProfile, StringComparison.OrdinalIgnoreCase);
 
-    private static bool UseNearestNeighborMipsForTextureKind(string? textureKind, string? cookProfile = null) => false;
+    internal static bool UseNearestNeighborMipsForTextureKind(string? textureKind, string? cookProfile = null) => false;
 
     private static IReadOnlyList<UimdIconRecipeRequirement> UimdIconRecipeRequirements(
         NativeSuitProject project) =>

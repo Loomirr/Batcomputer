@@ -122,10 +122,12 @@ public sealed partial class MainForm
 
         menu.Items.Add("New suit", null, (_, _) => StartNewSuit());
         menu.Items.Add("Open suit…", null, (_, _) => LoadSuit());
+        menu.Items.Add("New character…", null, (_, _) => _ = CreateCharacterAsync());
+        menu.Items.Add("Your characters", null, (_, _) => SelectWorkspaceFolder(WorkspaceFolder.Characters));
         menu.Items.Add(new ToolStripSeparator());
 
         menu.Items.Add("Preview package…", null, (_, _) => ShowPackageContentsPreview());
-        menu.Items.Add("Rebase suit to current dump…", null, (_, _) => RebaseCurrentSuitToActiveDump());
+        menu.Items.Add("Rebase current project to current dump…", null, (_, _) => RebaseCurrentSuitToActiveDump());
         menu.Items.Add("Clean generated output…", null, (_, _) => CleanGeneratedOutputForCurrentSuit());
         menu.Items.Add(new ToolStripSeparator());
 
@@ -487,44 +489,16 @@ public sealed partial class MainForm
             return PackageBuildResult.Failed("The IoStore packaging script was not found.");
         }
 
-        var authoringContentRoot = CurrentPackageContentRoot(_currentProject);
-        if (IsIncompleteDeclarativeGraftStage(_currentProject, authoringContentRoot))
-        {
-            const string message =
-                "The current grafted-part stage did not finish rebuilding, so packaging was stopped before a partial suit could be emitted. " +
-                "Close any asset viewer holding this suit's generated files, then edit/reapply a part or base to rebuild the stage.";
-            AppendLog("IoStore package aborted: " + message);
-            Dialog.Error(this, "Incomplete generated stage", message);
-            return PackageBuildResult.Failed(message);
-        }
-
         NativeSuitProject packageProject;
         PackagePreparationStage preparationStage;
         try
         {
             packageProject = CloneProjectForPackagePreparation(_currentProject);
-            var packageMetadataDonor = NativeMetadataDonorService.TryRead(
-                packageProject.DcmdTemplate,
-                packageProject.PlayableTemplate,
-                packageProject.CutsceneTemplate);
-            if (CanonicalizeProjectPawnTagOwner(packageProject, packageMetadataDonor))
-            {
-                AppendLog($"Package preparation canonicalized the PawnTag character owner from its donor: {packageProject.PawnTag}");
-            }
-            var ownerMismatch = PawnTagConfigService.CharacterOwnerMismatchError(
-                packageProject.PawnTag,
-                packageMetadataDonor?.PawnTag);
-            if (!string.IsNullOrWhiteSpace(ownerMismatch))
-            {
-                throw new InvalidDataException(ownerMismatch);
-            }
             preparationStage = await CreatePackagePreparationStageAsync(packageProject, projectRoot);
         }
         catch (Exception ex)
         {
-            var message =
-                "Batcomputer could not create an isolated package-preparation copy, so the certified authoring stage was left untouched. " +
-                ex.Message;
+            var message = "Batcomputer could not prepare the saved suit for packaging. " + ex.Message;
             AppendLog("IoStore package aborted: " + message);
             Dialog.Error(this, "Package preparation failed", message);
             return PackageBuildResult.Failed(message);
@@ -533,6 +507,21 @@ public sealed partial class MainForm
         var contentRootToPackage = preparationStage.ContentRoot;
         try
         {
+            var packageMetadataDonor = NativeMetadataDonorService.TryRead(
+                packageProject.DcmdTemplate,
+                packageProject.PlayableTemplate,
+                packageProject.CutsceneTemplate);
+            if (CanonicalizeProjectPawnTagOwner(packageProject, packageMetadataDonor))
+            {
+                AppendLog($"Package preparation canonicalized the PawnTag character owner from its donor: {packageProject.PawnTag}");
+            }
+            var ownerMismatch = CustomCharacterProjectService.IdentityError(
+                packageProject,
+                packageMetadataDonor?.PawnTag);
+            if (!string.IsNullOrWhiteSpace(ownerMismatch))
+            {
+                throw new InvalidDataException(ownerMismatch);
+            }
             AppendLog($"Package preparation copy: {contentRootToPackage}");
             var packageGliderComponent = ActiveGliderVisualComponent(packageProject);
             if (!string.IsNullOrWhiteSpace(packageGliderComponent))
@@ -585,7 +574,6 @@ public sealed partial class MainForm
         // the content root so they get bundled into the pak (otherwise materials
         // resolve to null at runtime and render grey).
         _packageProgress?.Report("Staging materials and textures…");
-        StageGeneratedMaterialsIntoContentRoot(packageProject, contentRootToPackage);
         if (!StageGeneratedTexturesIntoContentRoot(
                 packageProject,
                 contentRootToPackage,
@@ -595,6 +583,7 @@ public sealed partial class MainForm
             AppendLog("IoStore package aborted: " + textureStageError);
             return PackageBuildResult.Failed(textureStageError);
         }
+        StageGeneratedMaterialsIntoContentRoot(packageProject, contentRootToPackage);
 
         // Every suit needs its own DCMD (points to the menu icon + equipment + the
         // generated pawn/cutscene classes). Generate it into the pack content root.
@@ -856,9 +845,9 @@ public sealed partial class MainForm
         return true;
     }
 
-    private string CurrentPackageContentRoot(NativeSuitProject project)
+    private string CurrentPackageContentRoot(NativeSuitProject project, string? projectRootOverride = null)
     {
-        var projectRoot = _projectRootText.Text.Trim();
+        var projectRoot = projectRootOverride ?? _projectRootText.Text.Trim();
         var slotId = project.SlotId;
         var defaultPatchedContentRoot = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "NativeSuitGuiProjects", slotId, "PatchedNameMapStage", "LEGOBatmanLotDK", "Content");
         var genericGraftedContentRoot = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "NativeSuitGuiProjects", slotId, "GraftedPartStage", "LEGOBatmanLotDK", "Content");
@@ -873,10 +862,10 @@ public sealed partial class MainForm
                 : defaultPatchedContentRoot;
     }
 
-    private bool IsIncompleteDeclarativeGraftStage(NativeSuitProject project, string contentRoot)
+    private bool IsIncompleteDeclarativeGraftStage(NativeSuitProject project, string contentRoot, string? projectRootOverride = null)
     {
         var projectStageRoot = Path.Combine(
-            AppSettings.GeneratedRootFor(_projectRootText.Text.Trim()),
+            AppSettings.GeneratedRootFor(projectRootOverride ?? _projectRootText.Text.Trim()),
             "NativeSuitGuiProjects",
             project.SlotId);
         if (File.Exists(Path.Combine(projectStageRoot, IncompleteDeclarativeStageMarkerName)))
@@ -890,7 +879,7 @@ public sealed partial class MainForm
         // saved grafts or custom meshes. Derive the required stage from project state instead.
         if (ProjectRequiresCompletedGraftStage(project))
         {
-            var expectedContentRoot = DeclarativeGraftContentRoot(project);
+            var expectedContentRoot = DeclarativeGraftContentRoot(project, projectRootOverride);
             var expectedStageRoot = Directory.GetParent(expectedContentRoot)?.Parent;
             return !Directory.Exists(expectedContentRoot) ||
                    expectedStageRoot is null ||
@@ -909,6 +898,7 @@ public sealed partial class MainForm
         project.BodyProfile is not null ||
         project.PartGrafts is { Count: > 0 } ||
         project.CustomStaticMeshes is { Count: > 0 } ||
+        project.SkinnedMeshes is { Count: > 0 } ||
         project.MaterialAssignments is { Count: > 0 } ||
         AnimArchetypeGraftService.RequiresCustomArchetype(project) ||
         project.EquipmentSlots is { Count: > 0 } ||
@@ -917,9 +907,9 @@ public sealed partial class MainForm
         project.Requirements.Any(requirement =>
             requirement.Kind.Equals("remove-component", StringComparison.OrdinalIgnoreCase));
 
-    private string DeclarativeGraftContentRoot(NativeSuitProject project)
+    private string DeclarativeGraftContentRoot(NativeSuitProject project, string? projectRootOverride = null)
     {
-        var projectRoot = _projectRootText.Text.Trim();
+        var projectRoot = projectRootOverride ?? _projectRootText.Text.Trim();
         return Path.Combine(
             AppSettings.GeneratedRootFor(projectRoot),
             "NativeSuitGuiProjects",
@@ -1495,8 +1485,8 @@ public sealed partial class MainForm
             AppendLog($"Canonicalized the staged PawnTag character owner from the donor DCMD: {project.PawnTag}");
         }
 
-        var ownerMismatch = PawnTagConfigService.CharacterOwnerMismatchError(
-            project.PawnTag,
+        var ownerMismatch = CustomCharacterProjectService.IdentityError(
+            project,
             metadataDonor?.PawnTag);
         if (!string.IsNullOrWhiteSpace(ownerMismatch))
         {

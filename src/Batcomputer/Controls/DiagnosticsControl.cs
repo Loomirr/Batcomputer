@@ -1,5 +1,6 @@
 using System.Text;
 using System.Runtime.InteropServices;
+using System.Collections.Concurrent;
 
 namespace Batcomputer;
 
@@ -13,6 +14,9 @@ public partial class DiagnosticsControl : UserControl
 {
     private const int EmGetFirstVisibleLine = 0x00CE;
     private const int EmLineScroll = 0x00B6;
+    private readonly int _uiThreadId = Environment.CurrentManagedThreadId;
+    private readonly ConcurrentQueue<string> _pendingLog = new();
+    private int _logDrainPosted;
 
     [DllImport("user32.dll")]
     private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
@@ -28,15 +32,17 @@ public partial class DiagnosticsControl : UserControl
         _logText.BorderStyle = BorderStyle.None;
         _logText.WordWrap = true;
         _logText.ScrollBars = ScrollBars.Vertical;
+        Disposed += (_, _) => _pendingLog.Clear();
     }
 
     /// <summary>
     /// Appends a timestamped message. One "[HH:mm:ss] line" per newline-separated segment,
-    /// blank lines skipped - identical to the original MainForm.AppendLog formatting.
+    /// blank lines skipped. Worker callbacks are queued to the owning UI thread; they never
+    /// read the TextBox or synchronously wait for the UI (which may be waiting for that worker).
     /// </summary>
     public void AppendLog(string message)
     {
-        if (string.IsNullOrWhiteSpace(message))
+        if (string.IsNullOrWhiteSpace(message) || IsDisposed || Disposing)
         {
             return;
         }
@@ -50,6 +56,56 @@ public partial class DiagnosticsControl : UserControl
             }
             builder.Append('[').Append(DateTime.Now.ToString("HH:mm:ss")).Append("] ").AppendLine(line);
         }
+        _pendingLog.Enqueue(builder.ToString());
+        if (Environment.CurrentManagedThreadId == _uiThreadId)
+        {
+            DrainLogOnUiThread();
+        }
+        else
+        {
+            PostLogDrain();
+        }
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        PostLogDrain();
+    }
+
+    protected override void OnHandleDestroyed(EventArgs e)
+    {
+        Interlocked.Exchange(ref _logDrainPosted, 0);
+        base.OnHandleDestroyed(e);
+    }
+
+    private void PostLogDrain()
+    {
+        // InvokeRequired alone returns false before a handle exists. Keep early worker messages
+        // queued instead of accidentally creating the control's first handle on a worker thread.
+        if (IsDisposed || Disposing || !IsHandleCreated || _pendingLog.IsEmpty ||
+            Interlocked.CompareExchange(ref _logDrainPosted, 1, 0) != 0) return;
+        try { BeginInvoke((Action)DrainLogOnUiThread); }
+        catch (InvalidOperationException)
+        {
+            // The handle/message loop can disappear between the checks and BeginInvoke during
+            // shutdown or recreation. A recreated handle schedules the retained queue again.
+            Interlocked.Exchange(ref _logDrainPosted, 0);
+        }
+    }
+
+    private void DrainLogOnUiThread()
+    {
+        Interlocked.Exchange(ref _logDrainPosted, 0);
+        if (IsDisposed || Disposing || _logText.IsDisposed)
+        {
+            _pendingLog.Clear();
+            return;
+        }
+        var builder = new StringBuilder();
+        while (_pendingLog.TryDequeue(out var text)) builder.Append(text);
+        if (builder.Length == 0) return;
+
         var selectionStart = _logText.SelectionStart;
         var selectionLength = _logText.SelectionLength;
         var firstVisibleLine = FirstVisibleLine();
@@ -97,7 +153,11 @@ public partial class DiagnosticsControl : UserControl
     }
 
     /// <summary>Clears the diagnostics surface.</summary>
-    public void ClearLog() => _logText.Clear();
+    public void ClearLog()
+    {
+        _pendingLog.Clear();
+        _logText.Clear();
+    }
 
     /// <summary>The full log text (for Copy all / Save report actions).</summary>
     public string LogText => _logText.Text;

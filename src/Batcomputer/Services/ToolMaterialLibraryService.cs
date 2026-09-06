@@ -366,7 +366,9 @@ public sealed class ToolMaterialLibraryService
                 .Select(slot => slot.MaterialPath)
                 .Any(materialPath => UnrealPathUtil.NormalizePackagePath(materialPath)
                     .Equals(package, StringComparison.OrdinalIgnoreCase)));
-            if (ownsRecord || hasAssignment || hasCustomMeshMaterial)
+            var hasSkinnedMaterial = project.SkinnedMeshes.SelectMany(mesh => mesh.Materials).Any(slot =>
+                UnrealPathUtil.NormalizePackagePath(slot.MaterialPath).Equals(package, StringComparison.OrdinalIgnoreCase));
+            if (ownsRecord || hasAssignment || hasCustomMeshMaterial || hasSkinnedMaterial)
             {
                 references.Add(string.IsNullOrWhiteSpace(project.DisplayName)
                     ? project.SlotId
@@ -503,6 +505,38 @@ public sealed class ToolMaterialLibraryService
             ValidateClosurePackageBase(destinationBase, package, "fresh packaging stage");
         }
         return copied;
+    }
+
+    /// <summary>Copy-only path: regenerated textures are certified at their new identity before
+    /// traversing the old material graph. Never repair/overwrite the original suit or fall back to
+    /// stale texture archives. Normal packaging still requires every original cook to be valid.</summary>
+    internal void CopyCharacterMaterialSources(IEnumerable<string> roots, string contentRoot,
+        IReadOnlyDictionary<string, (GeneratedTextureEntry Texture, string PackageBase)> regeneratedTextures)
+    {
+        var gate = RepairGate;
+        gate.Wait();
+        try
+        {
+            foreach (var pair in regeneratedTextures)
+                if (!IsSafeModPackagePath(pair.Key) || !MainForm.ValidateGeneratedTextureCook(pair.Value.Texture, pair.Value.PackageBase, out _))
+                    throw new InvalidDataException("The new character's texture copy is not certified: " + pair.Key);
+            var closure = roots.SelectMany(root => WalkModLocalMaterialDependencyClosure(root,
+                package => regeneratedTextures.ContainsKey(package) ? [] : DirectModLocalPackageDependencies(package, false)))
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+            foreach (var package in closure)
+            {
+                if (regeneratedTextures.ContainsKey(package)) continue;
+                var source = ResolvePackageBase(package);
+                ValidateClosurePackageBase(source, package, "source character material");
+                var destination = PackageBaseUnder(contentRoot, package)
+                    ?? throw new InvalidDataException("Invalid copied material package: " + package);
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                foreach (var extension in CookedPackageExtensions)
+                    if (File.Exists(source + extension)) File.Copy(source + extension, destination + extension, overwrite: false);
+                ValidateClosurePackageBase(destination, package, "copied character material");
+            }
+        }
+        finally { gate.Release(); }
     }
 
     /// <summary>
@@ -826,6 +860,7 @@ public sealed class ToolMaterialLibraryService
             foreach (var package in (project?.CustomStaticMeshes ?? Enumerable.Empty<CustomStaticMeshImport>())
                          .SelectMany(mesh => StaticMeshObjProbeService.EffectiveMaterialSlots(mesh)
                              .Select(slot => slot.MaterialPath))
+                         .Concat((project?.SkinnedMeshes ?? []).SelectMany(mesh => mesh.Materials).Select(slot => slot.MaterialPath))
                          .Select(UnrealPathUtil.NormalizePackagePath)
                          .Where(package => package.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase))
                          .Distinct(StringComparer.OrdinalIgnoreCase))

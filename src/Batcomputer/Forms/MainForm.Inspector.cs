@@ -33,6 +33,26 @@ public sealed partial class MainForm
         string detail,
         string status = "applied")
     {
+        RecordProjectChange(project, category, target, detail, status);
+        try
+        {
+            _projectService = ResolveProjectServiceForRoot(_projectService, _projectRootText.Text.Trim());
+            _projectService.SaveProject(project);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Change recorded in memory, but the suit project could not be saved: {ex.Message}");
+        }
+        _session.RaiseChanged();
+    }
+
+    /// <summary>
+    /// Journal only. Stage transactions must use this and commit the recipe and journal together
+    /// after replay succeeds; an eager SaveProject here would invalidate their rollback ownership.
+    /// </summary>
+    internal static void RecordProjectChange(
+        NativeSuitProject project, string category, string target, string detail, string status = "applied")
+    {
         // Collapse duplicates: re-doing an idempotent action (re-picking the same base, re-grafting
         // the same hair, re-applying the same material) previously appended an identical card every
         // time - the review list filled with 8 identical "Base" entries. Drop any prior entry with
@@ -50,31 +70,19 @@ public sealed partial class MainForm
             Detail = detail,
             Status = status,
         });
-        try
-        {
-            _projectService = ResolveProjectServiceForRoot(_projectService, _projectRootText.Text.Trim());
-            _projectService.SaveProject(project);
-        }
-        catch (Exception ex)
-        {
-            // Keep the in-memory edit usable, but never tell the author it was durable when the
-            // project file remained unchanged.
-            AppendLog($"Change recorded in memory, but the suit project could not be saved: {ex.Message}");
-        }
-        _session.RaiseChanged();
     }
 
     private void CopyChangeSummary()
     {
         if (Changes.Count == 0)
         {
-            AppendLog("No changes recorded for this suit yet.");
+            AppendLog("No changes recorded for this project yet.");
             return;
         }
 
         var lines = Changes.Select(c =>
             $"[{c.Status}] {c.Category} · {c.Target}: {c.Detail} ({FormatWhen(c.When)})");
-        var summary = $"Suit: {_suitNameText.Text}  (mod {_modFolderText.Text})" +
+        var summary = $"Project: {_suitNameText.Text}  (assets {_modFolderText.Text})" +
             Environment.NewLine + string.Join(Environment.NewLine, lines);
         try
         {
@@ -147,7 +155,7 @@ public sealed partial class MainForm
 
             if (project is null)
             {
-                Dialog.Warn(this, "No active suit", "Open a suit before removing one of its parts.");
+                Dialog.Warn(this, "No active project", "Open a character or suit before removing a part.");
                 return;
             }
 
@@ -174,8 +182,8 @@ public sealed partial class MainForm
                 : first.Label;
             if (!Dialog.Confirm(
                     this,
-                    "Remove part from suit",
-                    $"Remove '{label}' from this suit?\n\n" +
+                    "Remove part",
+                    $"Remove '{label}' from this project?\n\n" +
                     "Batcomputer will rebuild both the playable and cutscene versions. " +
                     "Your original game files are not changed."))
             {
@@ -195,7 +203,7 @@ public sealed partial class MainForm
             Dialog.Error(
                 this,
                 "Part was not removed",
-                "Batcomputer could not finish the inspector removal. The saved suit remains active.\n\n" +
+                "Batcomputer could not finish the inspector removal. The saved project remains active.\n\n" +
                 ex.Message,
                 windowTitle: "Parts");
         }
@@ -287,7 +295,7 @@ public sealed partial class MainForm
 
             if (string.IsNullOrWhiteSpace(slotId))
             {
-                _inspector.SetMessage("Set a base suit first (Base category → Set base).");
+                _inspector.SetMessage("Choose a base first (Base category → Set base).");
                 _customSlotKeys.Clear();
                 UpdateSlotDots();
                 UpdateToyboxChips();

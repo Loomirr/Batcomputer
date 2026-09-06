@@ -91,8 +91,13 @@ public static class ModelPreviewService
             var root = roots[index];
             try
             {
+                // Preserve the GameFile's OWN mounted path, not only its dictionary key. CUE uses
+                // that path to find split .uexp/.ubulk data when reading a cooked skeletal mesh.
+                var directory = new DirectoryInfo(root);
+                bool canonical = directory.Name.Equals("Content", StringComparison.OrdinalIgnoreCase) &&
+                    directory.Parent?.Name.Equals("LEGOBatmanLotDK", StringComparison.OrdinalIgnoreCase) == true;
                 using var loose = new DefaultFileProvider(
-                    root,
+                    canonical ? directory.Parent!.Parent!.FullName : root,
                     SearchOption.AllDirectories,
                     new VersionContainer(EGame.GAME_UE5_6),
                     StringComparer.OrdinalIgnoreCase);
@@ -102,8 +107,8 @@ public static class ModelPreviewService
                     continue;
                 }
 
-                var files = loose.Files.ToDictionary(
-                    pair => GameContentFilePrefix + pair.Key.TrimStart('/', '\\').Replace('\\', '/'),
+                var files = loose.Files.Where(pair => !canonical || pair.Key.StartsWith(GameContentFilePrefix, StringComparison.OrdinalIgnoreCase)).ToDictionary(
+                    pair => canonical ? pair.Key : GameContentFilePrefix + pair.Key.TrimStart('/', '\\').Replace('\\', '/'),
                     pair => pair.Value,
                     StringComparer.OrdinalIgnoreCase);
                 provider.Files.AddFiles(files, long.MaxValue - index);
@@ -957,11 +962,16 @@ public static class ModelPreviewService
             }
         }
 
+        foreach (var custom in project.SkinnedMeshes)
+            additions.Add(new PreviewAdditionalPart(custom.Component, UnrealPathUtil.ObjectPath(custom.MeshPackage),
+                IsStaticAttachment: false, MaterialPaths: custom.Materials.Select(m => m.MaterialPath).ToList(), ReplaceExisting: true));
+
         var hidden = project.Requirements
             .Where(requirement => requirement.Kind.Equals("remove-component", StringComparison.OrdinalIgnoreCase))
             .Select(requirement => ComponentFromSlotKey(requirement.TargetComponent))
             .Where(component => !string.IsNullOrWhiteSpace(component))
             .ToList();
+        hidden.AddRange(project.SkinnedMeshes.SelectMany(mesh => mesh.HiddenComponents));
         if (project.CustomStaticMeshes?.Any(mesh =>
                 mesh.HideBaseHead &&
                 CustomStaticMeshImportService.ResolveAttachmentSlot(mesh.Target, mesh.AttachSocket).CanHideBaseHead) == true &&

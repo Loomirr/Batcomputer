@@ -21,7 +21,7 @@ public sealed partial class MainForm
         // Make the single workspace column consume the width it is actually given.
         outer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         // The extra height keeps the workspace labels and suit details readable.
-        outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 80));
+        outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 96));
         outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
         outer.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         Theme.StyleTooltip(_toyboxToolTip); // readable dark tooltips app-wide
@@ -29,6 +29,14 @@ public sealed partial class MainForm
         // Command bar hosted in its designer-editable shell.
         var commandBar = new CommandBarControl { Dock = DockStyle.Fill };
         commandBar.HostContent(CreateToyboxHeader());
+        void FitCommandBar()
+        {
+            var scale = Math.Max(96, DeviceDpi) / 96f;
+            outer.RowStyles[0].Height = Math.Max(96 * scale,
+                Theme.Eyebrow.Height + Theme.Title.Height + Theme.Caption.Height + 36 * scale);
+        }
+        outer.SizeChanged += (_, _) => FitCommandBar();
+        outer.DpiChangedAfterParent += (_, _) => FitCommandBar();
         outer.Controls.Add(commandBar, 0, 0);
 
         outer.Controls.Add(CreateWorkspaceFolderTabs(), 0, 1);
@@ -193,40 +201,14 @@ public sealed partial class MainForm
         {
             Dock = DockStyle.Fill,
             Orientation = Orientation.Vertical,
+            FixedPanel = FixedPanel.Panel2,
             Margin = new Padding(3),
             BackColor = Theme.FrameLine,
         };
         rightSplit.Panel1.Padding = new Padding(1);
         rightSplit.Panel2.Padding = new Padding(1);
         _toyboxWorkspaceSplit = rightSplit;
-        var layingOutSplit = false;
-        rightSplit.SizeChanged += (_, _) =>
-        {
-            if (layingOutSplit || rightSplit.Width <= rightSplit.SplitterWidth + 2) return;
-            layingOutSplit = true;
-            try
-            {
-                var dpi = Math.Max(96, DeviceDpi);
-                int Scale(int logical) => Math.Max(1, logical * dpi / 96);
-                var available = Math.Max(2, rightSplit.ClientSize.Width - rightSplit.SplitterWidth);
-                var panel1Minimum = Math.Min(Scale(260), available / 2);
-                var panel2Minimum = Math.Min(Scale(260), available - panel1Minimum);
-                var inspectorWidth = Math.Clamp(Scale(330), panel2Minimum, available - panel1Minimum);
-                rightSplit.Panel1MinSize = 0;
-                rightSplit.Panel2MinSize = 0;
-                rightSplit.SplitterDistance = Math.Max(1, available - inspectorWidth);
-                rightSplit.Panel1MinSize = panel1Minimum;
-                rightSplit.Panel2MinSize = panel2Minimum;
-            }
-            catch (ArgumentOutOfRangeException)
-            {
-                // WinForms can report a transient zero-size splitter while its parent relayouts.
-            }
-            finally
-            {
-                layingOutSplit = false;
-            }
-        };
+        rightSplit.SizeChanged += (_, _) => LayoutWorkspaceInspector();
         var toybox = new ToyboxControl { Dock = DockStyle.Fill };
         toybox.HostContent(toyBox);
         rightSplit.Panel1.Controls.Add(toybox);
@@ -342,11 +324,11 @@ public sealed partial class MainForm
         var right = new FlowLayoutPanel
         {
             Dock = DockStyle.Right,
-            Width = 540,
+            Width = 466,
             FlowDirection = FlowDirection.RightToLeft,
             BackColor = Color.Transparent,
             WrapContents = false,
-            Padding = new Padding(0, 23, 12, 0),
+            Padding = new Padding(4, 28, 12, 0),
         };
 
         _menuButton.Text = "☰";
@@ -365,7 +347,7 @@ public sealed partial class MainForm
         _toyboxPackageButton.Click += async (_, _) => await BuildModForCurrentSuitAsync();
 
         _toyboxSaveButton.Text = "Save suit";
-        _toyboxSaveButton.Width = 90; _toyboxSaveButton.Height = 34; _toyboxSaveButton.Margin = new Padding(6, 0, 0, 0);
+        _toyboxSaveButton.AutoSize = true; _toyboxSaveButton.MinimumSize = new Size(118, 34); _toyboxSaveButton.Margin = new Padding(6, 0, 0, 0);
         Theme.StyleDarkButton(_toyboxSaveButton);
         _toyboxSaveButton.Enabled = false;
         _toyboxToolTip.SetToolTip(_toyboxSaveButton, "Save the current suit project");
@@ -410,7 +392,11 @@ public sealed partial class MainForm
         header.Controls.Add(right);
 
         // --- workspace context (fills the middle) -----------------------------
-        var suit = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
+        var suit = new TableLayoutPanel { Dock = DockStyle.Fill, BackColor = Color.Transparent,
+            ColumnCount = 2, RowCount = 1, Padding = new Padding(0, 8, 6, 8) };
+        suit.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 34));
+        suit.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 66));
+        suit.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         _suitNameText.BorderStyle = BorderStyle.None;
         _suitNameText.BackColor = HeaderGround;
@@ -427,8 +413,8 @@ public sealed partial class MainForm
             Cursor = Cursors.IBeam,
         };
         _suitNamePencil.Click += (_, _) => _suitNameText.Focus();
-        _tipsHeader.SetToolTip(_suitNamePencil, "Click the name to rename this suit");
-        _tipsHeader.SetToolTip(_suitNameText, "Click to rename this suit");
+        _tipsHeader.SetToolTip(_suitNamePencil, "Edit the current project's display name");
+        _tipsHeader.SetToolTip(_suitNameText, "Edit the current project's display name");
 
         _suitNameText.Enter += (_, _) => RefreshSuitNameState();
         _suitNameText.Leave += (_, _) => RefreshSuitNameState();
@@ -469,7 +455,7 @@ public sealed partial class MainForm
             Font = Theme.Caption, ForeColor = Theme.OnDarkMuted,
             BackColor = Color.Transparent, TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true,
         };
-        _tipsHeader.SetToolTip(_headerModValue, "Current release mod. Manage its suit list from Home.");
+        _tipsHeader.SetToolTip(_headerModValue, "Current release mod. Manage its characters and suits from Home.");
 
         _headerSuitCaption = new Label
         {
@@ -486,48 +472,63 @@ public sealed partial class MainForm
             AutoEllipsis = true,
         };
 
-        suit.Controls.Add(_headerModCaption);
-        suit.Controls.Add(modDot);
-        suit.Controls.Add(_headerModValue);
-        suit.Controls.Add(_headerModDetail);
-        suit.Controls.Add(_headerSuitCaption);
-        suit.Controls.Add(_suitNameText);
-        suit.Controls.Add(_suitNamePencil);
-        suit.Controls.Add(_headerMetaLabel);
+        modDot.Dispose();
+        var nameRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1,
+            Margin = Padding.Empty, Padding = Padding.Empty };
+        nameRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        nameRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        _suitNameText.Dock = DockStyle.Fill;
+        _suitNameText.Margin = new Padding(0, 1, 4, 0);
+        _suitNamePencil.Dock = DockStyle.Fill;
+        _suitNamePencil.Margin = Padding.Empty;
+        nameRow.Controls.Add(_suitNameText, 0, 0);
+        nameRow.Controls.Add(_suitNamePencil, 1, 0);
 
-        void LayoutSuit()
+        Control ContextCard(Label caption, Control name, Label detail)
         {
-            var modWidth = Math.Clamp(suit.Width / 3, 126, 176);
-            var suitLeft = modWidth + 35;
-
-            _headerModCaption.Left = 18;
-            _headerModCaption.Top = 10;
-            _headerModCaption.Width = modWidth - 18;
-            modDot.Left = 18;
-            modDot.Top = 26;
-            _headerModValue.Left = modDot.Right + 2;
-            _headerModValue.Top = 23;
-            _headerModValue.Width = Math.Max(60, modWidth - 14);
-            _headerModDetail.Left = 18;
-            _headerModDetail.Top = 49;
-            _headerModDetail.Width = modWidth;
-
-            _headerSuitCaption.Left = suitLeft;
-            _headerSuitCaption.Top = 10;
-            _headerSuitCaption.Width = Math.Max(70, suit.Width - suitLeft - 12);
-            _suitNameText.Top = 23;
-            _suitNameText.Left = suitLeft;
-            _suitNameText.Width = Math.Max(80, suit.Width - suitLeft - 34);
-            _suitNamePencil.Top = _suitNameText.Top + 2;
-            _suitNamePencil.Left = _suitNameText.Right + 5;
-
-            _headerMetaLabel.Top = 49;
-            _headerMetaLabel.Left = suitLeft;
-            _headerMetaLabel.Width = Math.Max(40, suit.Width - suitLeft - 10);
-            RefreshSuitNameState();
+            var card = new RoundedPanel { Dock = DockStyle.Fill, BackColor = HeaderGround,
+                BorderColor = Theme.LineSoft, CornerRadius = Theme.RadiusSm,
+                Margin = new Padding(4, 0, 4, 0), Padding = new Padding(10, 5, 10, 5) };
+            var rows = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3,
+                Margin = Padding.Empty, Padding = Padding.Empty };
+            rows.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            rows.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            rows.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            rows.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            foreach (var label in new[] { caption, detail })
+            {
+                label.AutoSize = false;
+                label.Height = label.Font.Height + 3;
+                label.Dock = DockStyle.Top;
+                label.Margin = Padding.Empty;
+                label.AutoEllipsis = true;
+            }
+            name.Dock = DockStyle.Fill;
+            name.Margin = Padding.Empty;
+            rows.Controls.Add(caption, 0, 0);
+            rows.Controls.Add(name, 0, 1);
+            rows.Controls.Add(detail, 0, 2);
+            card.Controls.Add(rows);
+            return card;
         }
-        suit.Resize += (_, _) => LayoutSuit();
-        suit.HandleCreated += (_, _) => LayoutSuit();
+        suit.Controls.Add(ContextCard(_headerModCaption, _headerModValue, _headerModDetail), 0, 0);
+        suit.Controls.Add(ContextCard(_headerSuitCaption, nameRow, _headerMetaLabel), 1, 0);
+        void FitHeader()
+        {
+            var scale = Math.Max(96, DeviceDpi) / 96f;
+            var compact = header.Width < 1180 * scale;
+            brand.Width = (int)((compact ? 154 : 196) * scale);
+            _toyboxStatusChip.Visible = !compact;
+            // AutoSize + Dock.Right + right-to-left FlowLayout can chase its own preferred
+            // width when the status chip reappears. Measure the fixed actions explicitly.
+            right.Width = right.Padding.Horizontal + right.Controls.Cast<Control>()
+                .Where(control => control != _toyboxStatusChip || !compact)
+                .Sum(control => control.Width + control.Margin.Horizontal);
+            right.Padding = new Padding((int)(4 * scale),
+                Math.Max(0, (header.ClientSize.Height - _toyboxPackageButton.Height) / 2), (int)(12 * scale), 0);
+        }
+        header.SizeChanged += (_, _) => FitHeader();
+        header.DpiChangedAfterParent += (_, _) => FitHeader();
 
         header.Controls.Add(suit);
         suit.BringToFront();
@@ -583,6 +584,7 @@ public sealed partial class MainForm
 
         tabs.Controls.Add(CreateWorkspaceFolderButton(WorkspaceFolder.Home, "Home", Theme.Gold, "Home.png"));
         tabs.Controls.Add(CreateWorkspaceFolderButton(WorkspaceFolder.Suits, "Suits", Theme.Base, "Suits.png"));
+        tabs.Controls.Add(CreateWorkspaceFolderButton(WorkspaceFolder.Characters, "Characters", Theme.Materials));
         tabs.Controls.Add(CreateWorkspaceFolderButton(WorkspaceFolder.Viewer, "3D viewer", Theme.Gliders, "3D.gif"));
         return strip;
     }
@@ -596,6 +598,7 @@ public sealed partial class MainForm
               {
                   WorkspaceFolder.Home => 112,
                   WorkspaceFolder.Suits => 110,
+                  WorkspaceFolder.Characters => 124,
                   WorkspaceFolder.Viewer => 124,
                   _ => 100,
             },
@@ -769,13 +772,14 @@ public sealed partial class MainForm
         {
             _workspaceFolder = folder;
             var isHome = folder == WorkspaceFolder.Home;
-            var isSuits = folder == WorkspaceFolder.Suits;
+            var isSuits = folder is WorkspaceFolder.Suits or WorkspaceFolder.Characters;
+            var matchesProjectKind = (folder == WorkspaceFolder.Characters) == CustomCharacterProjectService.IsCharacter(_currentProject);
             var isViewer = folder == WorkspaceFolder.Viewer;
             var isDedicatedWorkspace = isViewer;
 
-            if (_suitWorkflowRail is not null) _suitWorkflowRail.Visible = isSuits;
+            if (_suitWorkflowRail is not null) _suitWorkflowRail.Visible = isSuits && matchesProjectKind;
             if (_homeWorkflowRail is not null) _homeWorkflowRail.Visible = isHome;
-            _yourCharacter.Visible = isSuits;
+            _yourCharacter.Visible = isSuits && matchesProjectKind;
             if (_viewerWorkspaceHost is not null) _viewerWorkspaceHost.Visible = isViewer;
             _toyboxWorkspaceSplit.Visible = !isDedicatedWorkspace;
 
@@ -783,7 +787,7 @@ public sealed partial class MainForm
             // of Home progressively shrinking after selecting its subcategories.
             _toyboxBodyLayout.SetColumn(_toyboxWorkspaceSplit, isHome ? 1 : 2);
             _toyboxBodyLayout.SetColumnSpan(_toyboxWorkspaceSplit, isHome ? 2 : 1);
-            _toyboxWorkspaceSplit.Panel2Collapsed = isHome;
+            _toyboxWorkspaceSplit.Panel2Collapsed = isHome || !matchesProjectKind;
 
             var selectedCategory = _toyboxCategoryCombo.SelectedItem?.ToString() ?? "Home";
             if (isHome)
@@ -794,7 +798,7 @@ public sealed partial class MainForm
                     SelectComboValue(_toyboxCategoryCombo, homeCategory);
                 }
             }
-            else if (isSuits && IsHomeOnlyCategory(selectedCategory))
+            else if (isSuits && (IsHomeOnlyCategory(selectedCategory) || !matchesProjectKind))
             {
                 SelectComboValue(_toyboxCategoryCombo, "Home");
             }
@@ -814,6 +818,7 @@ public sealed partial class MainForm
             _switchingWorkspaceFolder = false;
             _toyboxBodyLayout.ResumeLayout(performLayout: true);
             _toyboxBodyLayout.PerformLayout();
+            LayoutWorkspaceInspector(resetWidth: true);
         }
 
         if (folder != WorkspaceFolder.Viewer)
@@ -835,11 +840,11 @@ public sealed partial class MainForm
     {
         var category = _toyboxCategoryCombo.SelectedItem?.ToString() ?? "Home";
         if (!_switchingWorkspaceFolder &&
-            _workspaceFolder != WorkspaceFolder.Suits &&
+            _workspaceFolder is not (WorkspaceFolder.Suits or WorkspaceFolder.Characters) &&
             !category.Equals("Home", StringComparison.OrdinalIgnoreCase) &&
             !IsHomeOnlyCategory(category))
         {
-            SelectWorkspaceFolder(WorkspaceFolder.Suits, refresh: false);
+            SelectWorkspaceFolder(CustomCharacterProjectService.IsCharacter(_currentProject) ? WorkspaceFolder.Characters : WorkspaceFolder.Suits, refresh: false);
         }
 
         UpdateCategoryRailSelection();
@@ -946,9 +951,15 @@ public sealed partial class MainForm
         // browsing only if the user asks or the catalog isn't loaded.
         if (GameDataService.Instance.HasCatalog)
         {
-            using var picker = new BaseCharacterPicker();
+            using var picker = new BaseCharacterPicker(false, customCharacters: CustomCharacterProjectService.IsCharacter(_currentProject)
+                ? [] : new SuitProjectService(_projectRootText.Text.Trim()).ListProjects().Where(project => project.IsCharacter));
             if (picker.ShowDialog(this) != DialogResult.OK)
             {
+                return;
+            }
+            if (picker.SelectedCharacterProjectPath is { } characterPath)
+            {
+                _ = CreateSuitFromSavedCharacterPathAsync(characterPath);
                 return;
             }
             if (!picker.BrowseManuallyRequested && !string.IsNullOrWhiteSpace(picker.SelectedVisualPackage))
@@ -2011,7 +2022,7 @@ public sealed partial class MainForm
     {
         var service = new SuitProjectService(_projectRootText.Text.Trim());
         var suits = new List<SuitProjectService.ProjectSummary>();
-        try { suits = service.ListProjects().OrderByDescending(suit => suit.Modified).ToList(); } catch { /* no saved suits yet */ }
+        try { suits = service.ListProjects().Where(suit => !suit.IsCharacter).OrderByDescending(suit => suit.Modified).ToList(); } catch { /* no saved suits yet */ }
 
         var hero = new VirtualTilePanel.HeroModel
         {
@@ -2033,7 +2044,7 @@ public sealed partial class MainForm
             {
                 Section = "SUITS",
                 Title = "＋ New suit",
-                Subtitle = "start a custom character",
+                Subtitle = "new suit for an existing character",
                 Accent = Theme.Base,
                 Dashed = true,
                 OnClick = () => StartNewSuit(),
@@ -2066,7 +2077,7 @@ public sealed partial class MainForm
 
     private void RefreshSuitWorkspaceTiles()
     {
-        var hasSuit = _currentProject is not null;
+        var hasSuit = _currentProject is not null && !CustomCharacterProjectService.IsCharacter(_currentProject);
         var hero = new VirtualTilePanel.HeroModel
         {
             Overline = "SUIT WORKSPACE",
@@ -2087,7 +2098,7 @@ public sealed partial class MainForm
             {
                 Section = "SUIT",
                 Title = "＋ New suit",
-                Subtitle = "start a custom character",
+                Subtitle = "new suit for an existing character",
                 Accent = Theme.Base,
                 Dashed = true,
                 OnClick = () => StartNewSuit(),
@@ -2115,7 +2126,9 @@ public sealed partial class MainForm
 
         var suitService = new SuitProjectService(_projectRootText.Text.Trim());
         var savedSuits = new List<SuitProjectService.ProjectSummary>();
-        try { savedSuits = suitService.ListProjects().OrderByDescending(suit => suit.Modified).ToList(); } catch { /* no saved suits yet */ }
+        try { savedSuits = suitService.ListProjects().Where(suit => !suit.IsCharacter).OrderByDescending(suit => suit.Modified).ToList(); } catch { /* no saved suits yet */ }
+        tiles.Add(new() { Section = "SUIT", Title = "Use your character", Subtitle = "new suit from a saved custom character", Accent = Theme.Materials,
+            OnClick = () => _ = ChooseCustomCharacterBaseAsync() });
         foreach (var suit in savedSuits)
         {
             var captured = suit;
@@ -2182,8 +2195,8 @@ public sealed partial class MainForm
             Overline = "MOD WORKSPACE",
             Title = hasActiveMod ? activeSummary!.DisplayName : "Start your first mod",
             Subtitle = hasActiveMod
-                ? $"{activeSuitCount} enabled of {includedSuitCount} included suit{(includedSuitCount == 1 ? "" : "s")}; all {savedSuits.Count} saved suits are shown below."
-                : "Create or select a mod first, then add the suits that ship together.",
+                ? $"Selected: {DescribeModContent(activeMod, true, savedSuits)}. All saved characters and suits are shown in their own sections below."
+                : "Create or select a mod, then choose the characters and suits that ship together.",
             Badge = "",
             ThumbAccent = hasActiveMod ? Theme.Mods : Theme.Gold,
             Chips = chips,
@@ -2201,7 +2214,7 @@ public sealed partial class MainForm
                 {
                     Label = "2. CONTENT",
                     Detail = hasActiveMod
-                        ? (activeContentCount > 0 ? "suits" : "add content")
+                        ? (activeContentCount > 0 ? "content selected" : "add content")
                         : "select a mod first",
                     Accent = Theme.Base,
                     Current = hasActiveMod && activeContentCount == 0,
@@ -2209,7 +2222,7 @@ public sealed partial class MainForm
                 new VirtualTilePanel.HeroModel.WorkflowStep
                 {
                     Label = "3. BUILD",
-                    Detail = activeContentCount > 0 ? "release when ready" : "add content first",
+                    Detail = activeContentCount > 0 ? "build release" : "add content first",
                     Accent = Theme.Gold,
                     Current = hasActiveMod && activeContentCount > 0,
                 },
@@ -2217,8 +2230,9 @@ public sealed partial class MainForm
         };
 
         const string SectionMod = "MODS";
-        const string SectionSuits = "2. SUITS";
-        const string SectionBuild = "3. BUILD MOD";
+        const string SectionCharacters = "2. CHARACTERS";
+        const string SectionSuits = "3. SUITS";
+        const string SectionBuild = "4. BUILD MOD";
         const string SectionSavedSuits = "SAVED SUITS";
         var tiles = new List<VirtualTilePanel.Tile>();
 
@@ -2244,12 +2258,28 @@ public sealed partial class MainForm
                 Section = SectionMod,
                 Title = TrimMiddle(captured.DisplayName, 26),
                 Subtitle = isActive
-                    ? $"{captured.SuitCount} suit{(captured.SuitCount == 1 ? "" : "s")} · current mod"
-                    : $"{captured.SuitCount} suit{(captured.SuitCount == 1 ? "" : "s")} · select workspace",
+                    ? $"{DescribeModContent(ModService.LoadMod(captured.Path), summaries: savedSuits)} · current mod"
+                    : $"{DescribeModContent(ModService.LoadMod(captured.Path), summaries: savedSuits)} · select workspace",
                 Accent = isActive ? Theme.Mods : Theme.OnDarkMuted,
                 OnClick = () => SelectHomeMod(captured.Path),
                 MenuFactory = () => BuildModTileMenu(captured.Path, captured.ModId),
             });
+        }
+
+        tiles.Add(new() { Section = SectionCharacters, Title = "＋ New character",
+            Subtitle = "own roster entry + default suit", Accent = Theme.Good, Dashed = true,
+            OnClick = () => _ = CreateCharacterAsync() });
+        tiles.Add(new() { Section = SectionCharacters, Title = "Character workshop",
+            Subtitle = $"{savedSuits.Count(item => item.IsCharacter)} saved characters · create or edit",
+            Accent = Theme.Good, OnClick = () => SelectWorkspaceFolder(WorkspaceFolder.Characters) });
+        foreach (var character in ModWorkspaceSuitTileSummaries(savedSuits, activeSuits.Select(item => item.Summary)).Where(item => item.IsCharacter))
+        {
+            var entry = activeSuits.FirstOrDefault(item => item.Summary?.Path == character.Path).Entry;
+            tiles.Add(new() { Section = SectionCharacters, Title = character.DisplayName,
+                Subtitle = entry is null ? "character · saved · not in this mod" : entry.Enabled ? "character · in this mod · enabled" : "character · in this mod · disabled",
+                Accent = entry is null ? Theme.OnDarkMuted : entry.Enabled ? Theme.Good : Theme.Warn,
+                Image = LoadSuitCoverImage(character), OnClick = () => OpenRecentProject(character.Path),
+                MenuFactory = () => BuildSuitTileMenu(character) });
         }
 
         if (!hasActiveMod)
@@ -2258,11 +2288,11 @@ public sealed partial class MainForm
             {
                 Section = SectionSavedSuits,
                 Title = "All suits",
-                Subtitle = $"{savedSuits.Count} saved in the tool",
+                Subtitle = $"{savedSuits.Count(item => !item.IsCharacter)} saved suits",
                 Accent = Theme.Base,
                 OnClick = LoadSuit,
             });
-            foreach (var suit in savedSuits)
+            foreach (var suit in savedSuits.Where(item => !item.IsCharacter))
             {
                 var captured = suit;
                 tiles.Add(new VirtualTilePanel.Tile
@@ -2294,8 +2324,8 @@ public sealed partial class MainForm
         tiles.Add(new VirtualTilePanel.Tile
         {
             Section = SectionSuits,
-            Title = "Manage suits",
-            Subtitle = "add or remove saved suits",
+            Title = "Manage content",
+            Subtitle = "add/remove characters and suits",
             Accent = Theme.Base,
             OnClick = () => EditModSuits(modPath),
         });
@@ -2303,7 +2333,7 @@ public sealed partial class MainForm
         {
             Section = SectionSuits,
             Title = "All suits",
-            Subtitle = $"{savedSuits.Count} saved in the tool",
+            Subtitle = $"{savedSuits.Count(item => !item.IsCharacter)} saved suits",
             Accent = Theme.Base,
             OnClick = LoadSuit,
         });
@@ -2314,7 +2344,7 @@ public sealed partial class MainForm
             .ToDictionary(group => group.Key, group => group.First().Entry, StringComparer.OrdinalIgnoreCase);
         foreach (var summary in ModWorkspaceSuitTileSummaries(
                      savedSuits,
-                     activeSuits.Select(item => item.Summary)))
+                     activeSuits.Select(item => item.Summary)).Where(item => !item.IsCharacter))
         {
             var capturedSummary = summary;
             var isIncluded = activeEntryByProjectPath.TryGetValue(summary.Path, out var includedEntry);
@@ -2325,7 +2355,7 @@ public sealed partial class MainForm
             {
                 Section = SectionSuits,
                 Title = TrimMiddle(capturedSummary.DisplayName, 26),
-                Subtitle = $"{inclusion} · {capturedSummary.Modified:MMM d}",
+                Subtitle = $"{(capturedSummary.IsCharacter ? "character" : "suit")} · {inclusion}",
                 Accent = isIncluded
                     ? includedEntry!.Enabled ? Theme.Good : Theme.Warn
                     : Theme.OnDarkMuted,
@@ -2344,7 +2374,7 @@ public sealed partial class MainForm
             {
                 Section = SectionSuits,
                 Title = capturedEntry.SuitId,
-                Subtitle = "in this mod · missing saved suit",
+                Subtitle = "in this mod · missing saved project",
                 Accent = Theme.Warn,
                 OnClick = () => EditModSuits(modPath),
             });
@@ -2356,7 +2386,7 @@ public sealed partial class MainForm
             {
                 Section = SectionBuild,
                 Title = "Add content first",
-                Subtitle = $"{modName} needs a suit before it can build",
+                Subtitle = $"{modName} needs a character or suit before it can build",
                 Accent = Theme.Gold,
                 Dashed = true,
                 OnClick = () => StartNewSuitInMod(modPath),
@@ -2368,7 +2398,7 @@ public sealed partial class MainForm
             {
                 Section = SectionBuild,
                 Title = $"Build {TrimMiddle(modName, 20)}",
-                Subtitle = "build and install your mod/suits to your game",
+                Subtitle = "build and install selected characters + suits",
                 Accent = Theme.Gold,
                 OnClick = () => BuildMod(modPath),
             });
@@ -2376,7 +2406,7 @@ public sealed partial class MainForm
             {
                 Section = SectionBuild,
                 Title = "Manage mod",
-                Subtitle = "identity, suits, output",
+                Subtitle = "identity, content, output",
                 Accent = Theme.Research,
                 OnClick = () => OpenModDetails(modPath, activeSummary.ModId),
             });
@@ -2385,7 +2415,7 @@ public sealed partial class MainForm
                 tiles.Add(new VirtualTilePanel.Tile
                 {
                     Section = SectionBuild,
-                    Title = "Check current suit",
+                    Title = $"Check current {CurrentProjectNoun}",
                     Subtitle = "before packaging",
                     Accent = Theme.Materials,
                     OnClick = RunV2PreflightFromUi,
@@ -2393,7 +2423,7 @@ public sealed partial class MainForm
                 tiles.Add(new VirtualTilePanel.Tile
                 {
                     Section = SectionBuild,
-                    Title = "Preview current suit",
+                    Title = $"Preview current {CurrentProjectNoun}",
                     Subtitle = "inspect package contents",
                     Accent = Theme.Materials,
                     OnClick = ShowPackageContentsPreview,
@@ -2469,9 +2499,12 @@ public sealed partial class MainForm
         {
             new() { Section = SectionBase, Title = hasBase ? "Change visual base" : "Pick visual base", Subtitle = hasBase ? "visual + gameplay donor" : "start with a character or cutscene", Accent = Theme.Base, Dashed = !hasBase, OnClick = OpenBaseWizard },
         };
+        if (!CustomCharacterProjectService.IsCharacter(_currentProject))
+            tiles.Add(new() { Section = SectionBase, Title = "Your custom characters", Subtitle = "create a new suit with its character's owner", Accent = Theme.Materials,
+                OnClick = () => _ = ChooseCustomCharacterBaseAsync() });
         if (hasBase)
         {
-            tiles.Add(new() { Section = SectionIdentity, Title = "Native identity", Subtitle = NativeIdentityTileSubtitle(), Accent = Theme.Gold, OnClick = EditNativeIdentity });
+            tiles.Add(new() { Section = SectionIdentity, Title = _currentProject?.CustomCharacter is null ? "Native identity" : "Character identity", Subtitle = NativeIdentityTileSubtitle(), Accent = Theme.Gold, OnClick = EditNativeIdentity });
             tiles.Add(new() { Section = SectionIdentity, Title = "Set icons", Subtitle = "menu / UIMD", Accent = Theme.Base, OnClick = OpenIconsDialog });
         }
 
@@ -2499,6 +2532,20 @@ public sealed partial class MainForm
 
         HideViewerPanel();
         SetHomeInspectorCollapsed(false);
+
+        if (_workspaceFolder == WorkspaceFolder.Characters &&
+            (category == "Home" || !CustomCharacterProjectService.IsCharacter(_currentProject)))
+        {
+            if (!CustomCharacterProjectService.IsCharacter(_currentProject)) SetHomeInspectorCollapsed(true);
+            RefreshCharacterWorkspaceTiles();
+            return;
+        }
+        if (_workspaceFolder == WorkspaceFolder.Suits && CustomCharacterProjectService.IsCharacter(_currentProject))
+        {
+            SetHomeInspectorCollapsed(true);
+            RefreshSuitWorkspaceTiles();
+            return;
+        }
 
         if (category == "Home")
         {
@@ -2620,7 +2667,36 @@ public sealed partial class MainForm
         if (_toyboxWorkspaceSplit is not null)
         {
             _toyboxWorkspaceSplit.Panel2Collapsed = collapsed;
+            if (!collapsed) LayoutWorkspaceInspector(resetWidth: true);
         }
+    }
+
+    private bool _layingOutWorkspaceInspector;
+
+    private void LayoutWorkspaceInspector(bool resetWidth = false)
+    {
+        if (_toyboxWorkspaceSplit is not { } split || _layingOutWorkspaceInspector) return;
+        _layingOutWorkspaceInspector = true;
+        try { FitWorkspaceInspector(split, Math.Max(96, DeviceDpi), resetWidth); }
+        finally { _layingOutWorkspaceInspector = false; }
+    }
+
+    internal static void FitWorkspaceInspector(SplitContainer split, int dpi, bool resetWidth)
+    {
+        // Setting SplitterDistance while Panel2 is collapsed does not establish its restored
+        // width. In particular Home's full-width layout used to leave a tiny toybox on return.
+        if (split.Panel2Collapsed || split.ClientSize.Width <= split.SplitterWidth + 2) return;
+        int Scale(int value) => Math.Max(1, value * Math.Max(96, dpi) / 96);
+        var available = split.ClientSize.Width - split.SplitterWidth;
+        var minimum = Math.Min(Scale(260), available / 2);
+        var maximum = Math.Min(Scale(520), Math.Max(minimum, available / 2));
+        var width = resetWidth ? Scale(360) : available - split.SplitterDistance;
+        width = Math.Clamp(width, minimum, maximum);
+        split.Panel1MinSize = 0;
+        split.Panel2MinSize = 0;
+        split.SplitterDistance = available - width;
+        split.Panel1MinSize = minimum;
+        split.Panel2MinSize = minimum;
     }
 
     /// <summary>
@@ -4494,6 +4570,12 @@ public sealed partial class MainForm
         }
 
         var previousSlotId = _currentProject.SlotId;
+        if (_currentProject.SkinnedMeshes.Count > 0 &&
+            (_currentProject.PlayableTemplate?.PackagePath != playable.PackagePath || _currentProject.CutsceneTemplate?.PackagePath != cutscene.PackagePath))
+        {
+            Dialog.Warn(this, "Existing-rig replacements", "Remove the skinned replacements in Parts before changing this suit's base, then reimport against the new donor. Their cached cook is tied to this rig and suit; it cannot be moved silently.");
+            return false;
+        }
         var previousProjectPath = _projectService.ProjectPathForSlot(previousSlotId);
         _currentProject.PlayableTemplate = playable;
         _currentProject.CutsceneTemplate = cutscene;
@@ -4578,6 +4660,12 @@ public sealed partial class MainForm
         }
         if (!previousSlotId.Equals(_currentProject.SlotId, StringComparison.OrdinalIgnoreCase))
         {
+            if (_currentProject.SkinnedMeshes.Count > 0)
+            {
+                RestoreAfterFailedBaseChange(previousProjectSnapshot);
+                Dialog.Warn(this, "Existing-rig replacements", "Remove the skinned replacements before changing the suit identity, then reimport them in the new slot. The original suit and source files have been kept.");
+                return false;
+            }
             var destinationProjectPath = _projectService.ProjectPathForSlot(_currentProject.SlotId);
             var destinationOutputDirectory = _projectService.ProjectOutputDirectory(_currentProject);
             try

@@ -210,11 +210,11 @@ public sealed class InspectorControl : UserControl
     /// <summary>Suit identity shown at the top of the panel.</summary>
     public void SetIdentity(string suit, string mod, string slotId, bool packaged)
     {
-        _suitLabel.Text = string.IsNullOrWhiteSpace(suit) ? "No suit loaded" : suit;
+        _suitLabel.Text = string.IsNullOrWhiteSpace(suit) ? "No project loaded" : suit;
         _chipData = new (string, Color?)[]
         {
             (packaged ? "packaged" : "not packaged", packaged ? Theme.Good : Theme.OnDarkMuted),
-            ($"mod {(string.IsNullOrWhiteSpace(mod) ? "—" : mod)}", null),
+            ($"assets {(string.IsNullOrWhiteSpace(mod) ? "—" : mod)}", null),
             ($"slot {(string.IsNullOrWhiteSpace(slotId) ? "—" : slotId)}", null),
         };
         LayoutChips();

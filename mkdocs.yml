@@ -53,12 +53,15 @@ nav:
       - First-time setup: getting-started/setup.md
   - Tutorials:
       - Create your first suit: guides/first-suit.md
+      - Custom characters: guides/custom-characters.md
       - Update or repair a suit: guides/update-repair-suit.md
       - Materials, textures, and faces: guides/materials-textures-faces.md
       - Character animations: guides/animations.md
       - Suit abilities: guides/abilities.md
       - Custom static meshes: guides/custom-meshes.md
+      - Skinned meshes (experimental): guides/skeletal-mesh-proof.md
       - Build, test, and share: guides/build-test-share.md
+      - Next-release test checklist: guides/release-test-checklist.md
   - Reference:
       - Workspace and files: reference/workspace.md
       - Compatibility and beta limits: reference/compatibility.md

@@ -17,6 +17,10 @@ public sealed class RegistryPluginService
     public const string PawnMetadataClass = "/Script/DinnerPawnMetaData.DinnerCharacterMetaData";
     public const string EquipmentPrimaryAssetType = "EquipmentTaggedAsset";
     public const string EquipmentTaggedAssetClass = "/Script/TtEquipment.TtEquipmentTaggedAsset";
+    public const string CharacterGroupPrimaryAssetType = "TtCharacterGroupDataAsset";
+    public const string CharacterGroupClass = "/Script/TtCharacterGroupMetaData.TtCharacterGroupDataAsset";
+    public const string ProgressDefinitionPrimaryAssetType = "TtGameProgressDefinitionSet";
+    public const string ProgressDefinitionClass = "/Script/TtGameProgress.TtGameProgressDefinitionSet";
     public const string WriterResultMarker = "BATCOMPUTER_REGISTRY_WRITER_RESULT";
     public const string GameplayBundle = "ASSETBUNDLE_GAMEPLAY";
     public const string MetadataBundle = "ASSETBUNDLE_METADATA";
@@ -197,11 +201,17 @@ public sealed class RegistryPluginService
                 raw.EffectiveAssetClass == EquipmentTaggedAssetClass &&
                 package.StartsWith("/Game/Characters/Equipment/Mods/", StringComparison.Ordinal) &&
                 package["/Game/Characters/Equipment/Mods/".Length..].Split('/').Length >= 2;
+            // New-character proofs use the native scan roots without replacing shipped assets.
+            // Each exception requires the exact native type/class AND a mod-owned subfolder.
+            var characterDiscoveryRoot = IsOwnedDiscoveryRow(raw, package,
+                CharacterGroupPrimaryAssetType, CharacterGroupClass, "/Game/Characters/MetaData/Groups/Mods/") ||
+                IsOwnedDiscoveryRow(raw, package, ProgressDefinitionPrimaryAssetType,
+                    ProgressDefinitionClass, "/Game/GameProgress/Mods/");
             if (string.IsNullOrWhiteSpace(package) ||
-                (!package.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase) && !equipmentDiscoveryRoot) ||
+                (!package.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase) && !equipmentDiscoveryRoot && !characterDiscoveryRoot) ||
                 package.Split('/').Skip(1).Any(segment => !UnrealPathUtil.IsValidIdentifier(segment)))
             {
-                errors.Add($"Registry asset must be a clean mod-owned package path (/Game/Mods, or EquipmentTaggedAsset under /Game/Characters/Equipment/Mods/<mod>): '{raw.PackagePath}'.");
+                errors.Add($"Registry asset must be a clean mod-owned package path (/Game/Mods, or the matching native equipment/group/progress scan root under Mods/<mod>): '{raw.PackagePath}'.");
                 continue;
             }
             if (!packages.Add(package))
@@ -256,6 +266,10 @@ public sealed class RegistryPluginService
         }
         return errors;
     }
+
+    private static bool IsOwnedDiscoveryRow(RegistryRow row, string package, string type, string assetClass, string root) =>
+        row.EffectivePrimaryAssetType == type && row.EffectiveAssetClass == assetClass &&
+        package.StartsWith(root, StringComparison.Ordinal) && package[root.Length..].Split('/').Length >= 2;
 
     internal static bool IsBundleObjectPath(string? path)
     {

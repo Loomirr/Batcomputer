@@ -392,6 +392,8 @@ public sealed class CustomStaticMeshImportService
         custom.MeshObjectName = meshName;
         custom.MeshObjectPath = meshPackage + "." + meshName;
         custom.AttachSocket = attachment.AttachSocket;
+        // The component shell is borrowed from a hat, but its runtime slot is not always Head.
+        custom.ComponentTags = ["TtCharacterAsset." + attachment.Id];
         custom.Materials = materialSlots
             .OrderBy(slot => slot.Slot)
             .Select(slot =>

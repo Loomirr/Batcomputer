@@ -141,7 +141,7 @@ partial class MainForm
         MinimumSize = new Size(960, 640);
         Name = "MainForm";
         StartPosition = FormStartPosition.CenterScreen;
-        Text = "Batcomputer — Suit Builder";
+        Text = "Batcomputer — Character & Suit Workshop";
 
         _mainRootLayout.ResumeLayout(false);
         _mainWorkspaceHost.ResumeLayout(false);

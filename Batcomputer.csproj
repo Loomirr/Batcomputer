@@ -15,6 +15,9 @@
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <!-- Code-built controls do not need designer serialization metadata. -->
     <NoWarn>$(NoWarn);WFO1000</NoWarn>
+    <!-- Disposable fixtures can contain links to replaced extraction caches. Do not
+         let default SDK globs traverse them and silently omit shipped runtime data. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);artifacts\**;Generated\**</DefaultItemExcludes>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="BCnEncoder.Net" Version="2.3.0" />
@@ -56,6 +59,7 @@
     <EmbeddedResource Include="Assets\Mayhem.ico" Condition="Exists('Assets\Mayhem.ico')" />
     <!-- Offline three.js preview runtime; see licenses/three.js-LICENSE.txt. -->
     <EmbeddedResource Include="Web\preview\*.js" />
+    <EmbeddedResource Include="Tools\SkinnedMesh\import_mesh.py" />
     <!-- Shipped game-data catalogs and runtime socket calibration profiles. -->
     <None Update="gamedata\**\*.json"
           CopyToOutputDirectory="PreserveNewest"

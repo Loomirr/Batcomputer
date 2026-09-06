@@ -72,7 +72,9 @@ public sealed class SuitProjectService
         string Path,
         DateTime Modified,
         string CoverImagePath,
-        string TargetPlayablePath);
+        string TargetPlayablePath,
+        bool IsCharacter = false,
+        string CharacterId = "");
 
     /// <summary>Lists saved suit projects (newest first).</summary>
     public IReadOnlyList<ProjectSummary> ListProjects()
@@ -106,6 +108,8 @@ public sealed class SuitProjectService
             var display = slot;
             var cover = "";
             var targetPlayable = "";
+            var isCharacter = false;
+            var characterId = "";
             try
             {
                 var project = JsonSerializer.Deserialize<NativeSuitProject>(File.ReadAllText(path), JsonOptions);
@@ -119,13 +123,15 @@ public sealed class SuitProjectService
                     slot = project.SlotId;
                     cover = project.CoverImagePath ?? "";
                     targetPlayable = UnrealPathUtil.NormalizePackagePath(project.TargetPackages?.Playable);
+                    isCharacter = CustomCharacterProjectService.IsCharacter(project);
+                    characterId = project.CustomCharacter?.CharacterId ?? "";
                 }
             }
             catch
             {
                 // Keep a corrupt file visible by filename so it can still be removed from Home.
             }
-            results.Add(new ProjectSummary(slot, display, path, File.GetLastWriteTime(path), cover, targetPlayable));
+            results.Add(new ProjectSummary(slot, display, path, File.GetLastWriteTime(path), cover, targetPlayable, isCharacter, characterId));
         }
 
         return results;
@@ -152,7 +158,12 @@ public sealed class SuitProjectService
             return null;
         }
 
-        var project = JsonSerializer.Deserialize<NativeSuitProject>(File.ReadAllText(path), JsonOptions);
+        return LoadProjectContents(File.ReadAllText(path));
+    }
+
+    internal static NativeSuitProject? LoadProjectContents(string contents)
+    {
+        var project = JsonSerializer.Deserialize<NativeSuitProject>(contents, JsonOptions);
         if (project is not null)
         {
             project.ProgressTag = NativeMetadataDonorService.CanonicalProgressTag(project.ProgressTag);

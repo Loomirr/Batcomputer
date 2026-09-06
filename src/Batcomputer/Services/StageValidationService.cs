@@ -68,6 +68,7 @@ public sealed class StageValidationService
 
         CheckGameplayShellIntegrity(project, characterAssets, findings);
         CheckNativeBodyProfile(project, characterAssets, findings);
+        CheckSkinnedMeshes(project, characterAssets, findings);
         CheckPawnTag(project, findings);
         CheckGliderAnimInjection(project, findings);
         CheckAbilityDependencyDeclarations(project, findings);
@@ -221,7 +222,8 @@ public sealed class StageValidationService
             }
             var actual = UnrealPathUtil.NormalizePackagePath(
                 NativeBodyProfileService.TryReadBodyMeshPackage(asset));
-            if (!actual.Equals(canonical.MeshPackagePath, StringComparison.OrdinalIgnoreCase))
+            var expected = project.SkinnedMeshes.FirstOrDefault(m => m.Component == "CharacterMesh0")?.MeshPackage ?? canonical.MeshPackagePath;
+            if (!actual.Equals(expected, StringComparison.OrdinalIgnoreCase))
             {
                 findings.Add(new("ERROR",
                     $"{role}: CharacterMesh0 uses '{actual}' but the suit declares native body '{canonical.MeshPackagePath}'. Rebuild the suit so the body profile is applied to both roles."));
@@ -245,6 +247,28 @@ public sealed class StageValidationService
     /// </summary>
     private const string LegacyDonorPawnTag = "Pawns.Playable.Batman.TheBatman2025";
 
+    private void CheckSkinnedMeshes(NativeSuitProject project, IReadOnlyDictionary<string, UAsset> assets, List<Finding> findings)
+    {
+        foreach (var mesh in project.SkinnedMeshes)
+        {
+            try
+            {
+                SkinnedMeshStageService.ValidateRecipe(mesh);
+                SkinnedMeshStageService.ReadManifest(new SuitProjectService(_projectRoot).ProjectOutputDirectory(project), mesh);
+                var file = SkinnedMeshCookService.SafePath(_contentRoot, mesh.MeshPackage[6..] + ".uasset");
+                if (!File.Exists(file) || !File.Exists(Path.ChangeExtension(file, ".uexp"))) throw new InvalidDataException("Custom skeletal mesh pair is missing.");
+                foreach (var (role, asset) in assets)
+                {
+                    var component = MaterialReplaceService.FindComponentExport(asset, mesh.Component);
+                    var value = component?.Data.OfType<ObjectPropertyData>().FirstOrDefault(p => p.Name.ToString() == "SkeletalMesh");
+                    if (value is null || EquipmentAssetService.Reference(asset, value)?.Package != mesh.MeshPackage)
+                        throw new InvalidDataException($"{role}: skinned component '{mesh.Component}' does not reference its saved mesh.");
+                }
+            }
+            catch (Exception ex) { findings.Add(new("ERROR", $"Skinned mesh '{mesh.Name}': {ex.Message}")); }
+        }
+    }
+
     /// <summary>
     /// Every native suit owns a globally-unique pawn tag. Sharing one is what makes custom-to-custom
     /// switching do nothing (the game sees no identity change, so it never rebuilds the pawn), makes
@@ -254,6 +278,8 @@ public sealed class StageValidationService
     /// </summary>
     private static void CheckPawnTag(NativeSuitProject project, List<Finding> findings)
     {
+        if (project.CustomCharacter is not null && CustomCharacterProjectService.IdentityError(project) is { } error)
+            findings.Add(new("ERROR", error));
         var tag = (project.PawnTag ?? "").Trim();
 
         if (string.IsNullOrWhiteSpace(tag))
@@ -1223,6 +1249,9 @@ public sealed class StageValidationService
                 continue;
             }
             var expectedMeshObject = UnrealPathUtil.ObjectPath(meshPackage);
+            var expectedTag = "TtCharacterAsset." + CustomStaticMeshImportService.ResolveAttachmentSlot(custom.Target, custom.AttachSocket).Id;
+            var runtimeTags = component.Data.OfType<ArrayPropertyData>().FirstOrDefault(p => p.Name.ToString() == "ComponentTags")?.Value.OfType<NamePropertyData>().Select(p => p.Value.ToString()).ToArray() ?? [];
+            if (!runtimeTags.Contains(expectedTag, StringComparer.OrdinalIgnoreCase)) Error("is missing its real attachment-slot tag '" + expectedTag + "'. Rebuild this custom attachment.");
             var actualMesh = FindObjectProperty(component.Data, "StaticMesh");
             if (actualMesh is null || actualMesh.Value.IsNull() ||
                 !ObjectIdentityMatches(asset, actualMesh.Value, expectedMeshObject))

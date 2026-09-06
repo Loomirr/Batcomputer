@@ -1040,11 +1040,11 @@ public sealed class PartGraftService
             newNode.ObjectName = MakeName(asset, scsNodeName);
             newNode.OuterIndex = FromExportNumber(scsExportIndex);
             newNode.Asset = asset;
-            SetObjectPropertyValueLive(newNode.Data, "ComponentTemplate", FromExportNumber(componentExportIndex));
+            SetObjectPropertyValueLive(newNode.Data, "ComponentTemplate", FromExportNumber(componentExportIndex), asset);
             SetNamePropertyValueLive(asset, newNode.Data, "AttachToName", ResolveAttachSocket(donorPart, attachSocket));
             SetNamePropertyValueLive(asset, newNode.Data, "ParentComponentOrVariableName", ResolveParentComponent(newNode.Data, donorPart));
             SetNamePropertyValueLive(asset, newNode.Data, "InternalVariableName", targetSlot);
-            SetGuidPropertyValueLive(newNode.Data, "VariableGuid", Guid.NewGuid());
+            SetGuidPropertyValueLive(asset, newNode.Data, "VariableGuid", Guid.NewGuid());
             RepairScsNodeComponentDependencyLive(newNode);
             newNode.SerializationBeforeCreateDependencies = new List<FPackageIndex> { newNode.ClassIndex, newNode.TemplateIndex }.Where(x => !x.IsNull()).ToList();
             newNode.CreateBeforeCreateDependencies = new List<FPackageIndex> { FromExportNumber(scsExportIndex) };
@@ -1625,7 +1625,7 @@ public sealed class PartGraftService
     /// response channels into unrelated component tags, sockets, and asset paths. Walk the complete
     /// cloned property graph and recreate every FName against the target package before writing it.
     /// </summary>
-    private static List<PropertyData> DeepClonePropertiesRebased(
+    internal static List<PropertyData> DeepClonePropertiesRebased(
         IEnumerable<PropertyData> properties,
         UAsset target)
     {
@@ -1931,7 +1931,7 @@ public sealed class PartGraftService
         var animClass = FindPropertyLive<ObjectPropertyData>(component.Data, "AnimClass");
         if (!animImport.IsNull())
         {
-            SetObjectPropertyValueLive(component.Data, "AnimClass", animImport);
+            SetObjectPropertyValueLive(component.Data, "AnimClass", animImport, asset);
         }
         else if (!donorPart.MeshKind.Equals("StaticMesh", StringComparison.OrdinalIgnoreCase) &&
                  animClass is not null)
@@ -2166,6 +2166,53 @@ public sealed class PartGraftService
                    []).Select(index => index.Index).SequenceEqual([-7]);
     }
 
+    internal static IEnumerable<(bool Passed, string Description)> SparseComponentPropertiesForTest()
+    {
+        foreach (var kind in new[] { "StaticMesh", "SkeletalMesh" })
+        foreach (var populated in new[] { false, true })
+        {
+            var asset = new UAsset(EngineVersion.VER_UE5_6, null, CustomSerializationFlags.None);
+            asset.ClearNameIndexList();
+            var component = new NormalExport { Data = [] };
+            if (populated)
+                foreach (var name in kind == "StaticMesh" ? new[] { "StaticMesh" } : new[] { "AnimClass", "SkeletalMesh", "SkinnedAsset" })
+                    component.Data.Add(new ObjectPropertyData(MakeName(asset, name)) { Value = FromImportNumber(1) });
+            var donor = new NativeSuitPartRecord { MeshKind = kind, ComponentTags = ["TtCharacterAsset.Hip"] };
+            var animation = kind == "StaticMesh" ? FPackageIndex.FromRawIndex(0) : FromImportNumber(8);
+            // Both roles and repeated replay use this shared setter; no duplicate serialized fields.
+            for (int pass = 0; pass < 2; pass++)
+                SetComponentTemplateDataLive(asset, component, donor, FromImportNumber(7), animation, [FromImportNumber(9)]);
+            var meshNames = kind == "StaticMesh" ? new[] { "StaticMesh" } : new[] { "SkeletalMesh", "SkinnedAsset" };
+            yield return (meshNames.All(name => GetObjectPropertyValueLive(component.Data, name).Index == -7) &&
+                (kind == "StaticMesh" ? !component.Data.Any(p => p.Name.ToString() == "AnimClass") :
+                    GetObjectPropertyValueLive(component.Data, "AnimClass").Index == -8) &&
+                component.Data.GroupBy(p => p.Name.ToString()).All(group => group.Count() == 1) &&
+                component.Data.All(p => ReferenceEquals(p.Name.Asset, asset)) &&
+                FindPropertyLive<ArrayPropertyData>(component.Data, "OverrideMaterials")?.Value.Length == 1,
+                $"{kind} graft {(populated ? "updates existing" : "creates omitted default")} component properties and replays idempotently");
+        }
+        var typedAsset = new UAsset(EngineVersion.VER_UE5_6, null, CustomSerializationFlags.None);
+        typedAsset.ClearNameIndexList();
+        var invalid = new List<PropertyData> { new BoolPropertyData(MakeName(typedAsset, "AnimClass")) };
+        bool rejected = false;
+        try { SetObjectPropertyValueLive(invalid, "AnimClass", FromImportNumber(1), typedAsset); }
+        catch (InvalidOperationException) { rejected = true; }
+        yield return (rejected && invalid.Count == 1, "grafts reject conflicting property types instead of serializing duplicate fields");
+        var node = new List<PropertyData>();
+        var guid = Guid.NewGuid();
+        for (int pass = 0; pass < 2; pass++)
+        {
+            SetObjectPropertyValueLive(node, "ComponentTemplate", FromExportNumber(1), typedAsset);
+            SetNamePropertyValueLive(typedAsset, node, "AttachToName", "Spine_01_Socket");
+            SetNamePropertyValueLive(typedAsset, node, "ParentComponentOrVariableName", "CharacterMesh0");
+            SetNamePropertyValueLive(typedAsset, node, "InternalVariableName", "Hip");
+            SetGuidPropertyValueLive(typedAsset, node, "VariableGuid", guid);
+        }
+        yield return (node.Count == 5 && FindPropertyLive<NamePropertyData>(node, "AttachToName")?.Value.ToString() == "Spine_01_Socket" &&
+            FindPropertyLive<StructPropertyData>(node, "VariableGuid")?.Value[0] is GuidPropertyData data && data.Value == guid,
+            "attachment-node templates create omitted native socket/name/GUID defaults without duplicate fields on replay");
+    }
+
     internal static bool AddsScsNodeDependencyInNativeOrderForTest()
     {
         var existing = new[] { 30, 31, 32, 33, 34, 29 }
@@ -2332,7 +2379,7 @@ public sealed class PartGraftService
         property.Value = values.ToArray();
     }
 
-    private static void SetObjectPropertyValueLive(List<PropertyData> properties, string propertyName, FPackageIndex objectIndex, UAsset? asset = null)
+    private static void SetObjectPropertyValueLive(List<PropertyData> properties, string propertyName, FPackageIndex objectIndex, UAsset asset)
     {
         var property = FindPropertyLive<ObjectPropertyData>(properties, propertyName);
         if (property is not null)
@@ -2343,9 +2390,9 @@ public sealed class PartGraftService
         // Property not serialized on the (possibly default-valued) clone - add it.
         // The unversioned writer keys off the class schema, so this only matters when
         // the component's class actually has the property (ensured by clone-kind match).
-        if (asset is null)
+        if (properties.Any(candidate => candidate.Name.ToString().Equals(propertyName, StringComparison.OrdinalIgnoreCase)))
         {
-            throw new InvalidOperationException($"Could not find object property '{propertyName}'.");
+            throw new InvalidOperationException($"Component property '{propertyName}' exists with an unexpected type; refused to add a duplicate property.");
         }
         properties.Add(new ObjectPropertyData(MakeName(asset, propertyName)) { Value = objectIndex });
     }
@@ -2379,15 +2426,30 @@ public sealed class PartGraftService
 
     private static void SetNamePropertyValueLive(UAsset asset, List<PropertyData> properties, string propertyName, string value)
     {
-        var property = FindPropertyLive<NamePropertyData>(properties, propertyName)
-            ?? throw new InvalidOperationException($"Could not find name property '{propertyName}'.");
+        var property = FindPropertyLive<NamePropertyData>(properties, propertyName);
+        if (property is null)
+        {
+            if (properties.Any(p => p.Name.ToString().Equals(propertyName, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException($"Node property '{propertyName}' has an unexpected type; expected a name.");
+            property = new NamePropertyData(MakeName(asset, propertyName));
+            properties.Add(property);
+        }
         property.Value = MakeName(asset, value);
     }
 
-    private static void SetGuidPropertyValueLive(List<PropertyData> properties, string propertyName, Guid value)
+    private static void SetGuidPropertyValueLive(UAsset asset, List<PropertyData> properties, string propertyName, Guid value)
     {
-        var property = FindPropertyLive<StructPropertyData>(properties, propertyName)
-            ?? throw new InvalidOperationException($"Could not find guid struct property '{propertyName}'.");
+        var property = FindPropertyLive<StructPropertyData>(properties, propertyName);
+        if (property is null)
+        {
+            if (properties.Any(p => p.Name.ToString().Equals(propertyName, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException($"Node property '{propertyName}' has an unexpected type; expected a GUID struct.");
+            property = new StructPropertyData(MakeName(asset, propertyName), MakeName(asset, "Guid"))
+            {
+                Value = [new GuidPropertyData(MakeName(asset, propertyName)) { Value = value }]
+            };
+            properties.Add(property);
+        }
         if (property.Value.Count == 0 || property.Value[0] is not GuidPropertyData guidProperty)
         {
             throw new InvalidOperationException($"Guid property '{propertyName}' had an unexpected shape.");
@@ -2398,8 +2460,7 @@ public sealed class PartGraftService
 
     private static void SetObjectArrayPropertyLive(UAsset asset, List<PropertyData> properties, string propertyName, List<FPackageIndex> objectIndexes)
     {
-        var property = FindPropertyLive<ArrayPropertyData>(properties, propertyName)
-            ?? throw new InvalidOperationException($"Could not find object array property '{propertyName}'.");
+        var property = GetOrCreateComponentArrayLive(asset, properties, propertyName, "ObjectProperty");
         var output = objectIndexes
             .Where(index => !index.IsNull())
             .Select((index, i) => (PropertyData)new ObjectPropertyData(MakeName(asset, i.ToString()))
@@ -2412,8 +2473,7 @@ public sealed class PartGraftService
 
     private static void SetNameArrayPropertyLive(UAsset asset, List<PropertyData> properties, string propertyName, List<string> values)
     {
-        var property = FindPropertyLive<ArrayPropertyData>(properties, propertyName)
-            ?? throw new InvalidOperationException($"Could not find name array property '{propertyName}'.");
+        var property = GetOrCreateComponentArrayLive(asset, properties, propertyName, "NameProperty");
         var output = values
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Select((value, i) => (PropertyData)new NamePropertyData(MakeName(asset, i.ToString()))
@@ -2422,6 +2482,24 @@ public sealed class PartGraftService
             })
             .ToArray();
         property.Value = output;
+    }
+
+    private static ArrayPropertyData GetOrCreateComponentArrayLive(
+        UAsset asset, List<PropertyData> properties, string propertyName, string elementType)
+    {
+        var existing = properties.FirstOrDefault(p => p.Name.ToString().Equals(propertyName, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null && existing is not ArrayPropertyData)
+            throw new InvalidOperationException($"Component property '{propertyName}' has an unexpected type; expected an array.");
+        var array = (ArrayPropertyData?)existing;
+        if (array?.ArrayType is not null && !array.ArrayType.ToString().Equals(elementType, StringComparison.Ordinal))
+            throw new InvalidOperationException($"Component array '{propertyName}' has unexpected elements; expected {elementType}.");
+        if (array is null)
+        {
+            array = new ArrayPropertyData(MakeName(asset, propertyName));
+            properties.Add(array);
+        }
+        array.ArrayType = MakeName(asset, elementType);
+        return array;
     }
 
     private static T? FindPropertyLive<T>(List<PropertyData> properties, string propertyName)

@@ -12,6 +12,11 @@ or Loomirr's LOTDK UE4SS.
 
 ## What it does
 
+The development branch also includes [independent custom characters](docs/guides/custom-characters.md)
+with their own default/child suits and an experimental [existing-rig skinned-mesh workshop](docs/guides/skeletal-mesh-proof.md).
+These additions are undergoing [next-release acceptance testing](docs/guides/release-test-checklist.md);
+they are not a claim that an older downloadable beta contains the new workflow.
+
 - Starts a suit with a gameplay donor and a playable, cutscene, or supported extracted `_Quest`
   visual base.
 - Adds hair, hats, capes, torsos, accessories, equipment, and exact per-suit animation overrides.
@@ -30,8 +35,8 @@ or Loomirr's LOTDK UE4SS.
 - Applies coordinated native fighting-style bundles and sword/bat/baton player adapters while keeping exactly
   one melee style active and validating the matching effects, held items, equipment, upgrades, and
   animation parents before packaging.
-- Adds independently customizable held items, cosmetic VFX placement with approximate previews,
-  and opt-in experimental stun/smoke hit statuses for the player melee adapters.
+- Adds independently customizable held items. Expanded cosmetic VFX and stun/smoke status prototypes
+  remain parked after reported crashes; they are not accepted release features.
 - Creates the PawnTag, DCMD, UIMD, StringTable, and Asset Registry data the game needs.
 - Builds one or more suits into a single mod release.
 - Installs the pak trio, PawnTags configuration, mod manifest, and registry plugin to the correct

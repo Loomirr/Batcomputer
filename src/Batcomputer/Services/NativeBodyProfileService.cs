@@ -424,7 +424,7 @@ public sealed class NativeBodyProfileService
         }
     }
 
-    private static void EnsureMinimalSchema(UAsset asset, string schemaName, string modulePath)
+    internal static void EnsureMinimalSchema(UAsset asset, string schemaName, string modulePath)
     {
         var mappings = asset.Mappings;
         if (mappings is null || mappings.Schemas.ContainsKey(schemaName))

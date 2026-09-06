@@ -30,8 +30,15 @@
 
 ## Not supported yet
 
+The development branch adds [independent characters](../guides/custom-characters.md), their default
+and child suits, and an experimental existing-rig mesh importer. The first character/body proofs
+worked in-game; the [release matrix](../guides/release-test-checklist.md) remains necessary.
+Scripted story casting, new voices, new rigs and arbitrary unlock rules are not provided.
+
 - Custom Red Brick creation. The viewer only previews the game's existing colour options.
-- Custom skeletal-mesh cooking or skeleton transfer.
+- Arbitrary skeletal-mesh/skeleton transfer. The development build has an experimental
+  [existing-rig FBX workshop](../guides/skeletal-mesh-proof.md) for bodies and compatible parts;
+  facial rigs, cloth and skeletal equipment remain outside that first pass.
 - Arbitrary skeleton swapping. Supported Minifig and Smallfig body profiles already use the same
   native skeleton; other rigs still need separate research and in-game proof.
 - Arbitrary new gameplay powers or code-driven character mechanics.
@@ -42,6 +49,10 @@
   indexed character variant.
 
 ## Content that needs extra testing
+
+Expanded configurable item VFX/on-hit status combinations were reported to crash on suit hover.
+They remain parked and must be isolated or excluded before release. Do not confuse them with the
+separate, previously working native baton-trail proof.
 
 - Equipment driven by controller actors, remote gadgets, or complex spawn/recall logic.
 - Unusual body rigs or character scales.

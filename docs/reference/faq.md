@@ -227,8 +227,10 @@ BC5 stores only two normal channels, so choose BGRA8, DXT5, or BC7 when the mate
 
 ### Can I import a model?
 
-The beta supports verified OBJ static-mesh attachments. It does not cook arbitrary skeletal meshes
-or transfer skeletons.
+The beta supports verified OBJ static-mesh attachments. The development build also has an
+experimental [existing-rig FBX workshop](../guides/skeletal-mesh-proof.md) for bodies and compatible
+parts. Rigging and weights must be prepared externally first; arbitrary skeleton transfer, facial
+rigs, cloth and skeletal equipment are not supported by this first pass.
 
 ### Why did my custom mesh move back after another edit?
 
@@ -242,6 +244,18 @@ No. The Red Brick selector is a read-only preview of the game's existing colour 
 compatible playable bodies. It does not create, unlock, register, or package Red Bricks.
 
 ## Building and sharing
+
+### Why does a hip material error mention a torso, or a build say its stage is incomplete?
+
+Material changes replay the whole saved suit, so a previously failed part can block an unrelated
+material edit. The current development build fixes omitted native animation/component defaults and
+premature part/glider saves that could leave failed edits behind. Build Mod waits for saved-suit
+restoration and retries an incomplete stage once automatically, without rewriting the saved recipe.
+
+If recovery still fails, the error names the part or operation. Open that suit, reapply/remove the
+named part or repair the named material/model, then choose **Build Mod** again. Close any viewer
+holding the generated files when the error specifically reports a file lock. Waiting alone cannot
+fix a missing donor or invalid recipe; partial playable/cutscene stages stay blocked from packaging.
 
 ### Why does building require Unreal Engine 5.6?
 

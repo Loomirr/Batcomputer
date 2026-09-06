@@ -16,7 +16,7 @@ public sealed class ModDetailsDialog : AdaptiveForm
 
     private readonly ToolTip _tips = new();
 
-    public ModDetailsDialog(NativeSuitModProject mod, IReadOnlyList<(string Suit, string Slot)> suits, bool built, string buildPath)
+    public ModDetailsDialog(NativeSuitModProject mod, IReadOnlyList<(string Suit, string Slot)> suits, bool built, string buildPath, string? contentSummary = null)
     {
         Text = "Mod";
         AutoScaleMode = AutoScaleMode.Dpi;
@@ -76,7 +76,7 @@ public sealed class ModDetailsDialog : AdaptiveForm
             BackColor = Color.Transparent, WrapContents = false,
         };
         chips.Controls.Add(Chip(built ? "built" : "not built", built ? Theme.Good : Theme.OnDarkMuted));
-        chips.Controls.Add(Chip($"{suits.Count} suit{(suits.Count == 1 ? "" : "s")}", Theme.Parts));
+        chips.Controls.Add(Chip(contentSummary ?? $"{suits.Count} projects", Theme.Parts));
         chips.Controls.Add(Chip(mod.PackageBaseName, null));
         card.Controls.Add(chips);
         body.Controls.Add(card);
@@ -108,7 +108,7 @@ public sealed class ModDetailsDialog : AdaptiveForm
 
         // --- suits -------------------------------------------------------------
         y += 8;
-        body.Controls.Add(SectionLabel("SUITS IN THIS MOD", pad, y, w));
+        body.Controls.Add(SectionLabel("CHARACTERS & SUITS IN THIS MOD", pad, y, w));
         y += 22;
 
         var list = new ListView
@@ -116,12 +116,12 @@ public sealed class ModDetailsDialog : AdaptiveForm
             Left = pad, Top = y, Width = w, Height = 118,
             View = View.Details, FullRowSelect = true, HeaderStyle = ColumnHeaderStyle.Nonclickable,
         };
-        list.Columns.Add("Suit", w - 150);
+        list.Columns.Add("Content", w - 150);
         list.Columns.Add("Slot", 120);
         Theme.StyleListView(list);
         if (suits.Count == 0)
         {
-            list.Items.Add(new ListViewItem(new[] { "No suits yet - use Edit suits to add some.", "" })
+            list.Items.Add(new ListViewItem(new[] { "No content yet - use Manage content.", "" })
             {
                 ForeColor = Theme.OnDarkMuted,
             });
@@ -161,16 +161,16 @@ public sealed class ModDetailsDialog : AdaptiveForm
         };
 
         // Row 1: the things you do while building the mod.
-        AddAction(footer, "Edit suits", pad, 14, 94, ModAction.EditSuits, false,
-            "Add or remove suits from this mod");
-        AddAction(footer, "Rename", pad + 102, 14, 88, ModAction.Rename, false,
+        AddAction(footer, "Manage content", pad, 14, 118, ModAction.EditSuits, false,
+            "Add or remove characters and suits from this mod");
+        AddAction(footer, "Rename", pad + 124, 14, 72, ModAction.Rename, false,
             "Change the display name");
-        AddAction(footer, "Change ID", pad + 198, 14, 100, ModAction.ChangeId, false,
+        AddAction(footer, "Change ID", pad + 202, 14, 84, ModAction.ChangeId, false,
             "Change the technical pak / registry / StringTable identity before release");
-        AddAction(footer, "Output", pad + 306, 14, 94, ModAction.OpenOutput, false,
+        AddAction(footer, "Output", pad + 292, 14, 68, ModAction.OpenOutput, false,
             "Open the build folder in Explorer");
         AddAction(footer, "Delete", ClientSize.Width - pad - 74, 14, 74, ModAction.Delete, false,
-            "Delete the mod project. The suits it references are kept.", Theme.Crit);
+            "Delete the mod project. Its character and suit projects are kept.", Theme.Crit);
 
         // Row 2: the primary flow.
         AddAction(footer, "Build mod", pad, 56, 150, ModAction.Build, true,

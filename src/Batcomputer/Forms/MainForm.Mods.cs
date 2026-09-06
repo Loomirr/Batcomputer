@@ -88,19 +88,19 @@ public sealed partial class MainForm
     /// </summary>
     private async Task BuildModForCurrentSuitAsync()
     {
-        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("build the current suit mod"))
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("build the current project’s mod"))
         {
             return;
         }
 
         if (_currentProject is null)
         {
-            Dialog.Info(this, "Build mod", "Create or open a suit before building a mod.");
+            Dialog.Info(this, "Build mod", "Create or open a character or suit before building a mod.");
             return;
         }
         if (!HasCurrentSuitBase())
         {
-            Dialog.Info(this, "Build mod", "Set a playable and cutscene base before building this suit's mod.");
+            Dialog.Info(this, "Build mod", "Set a playable and cutscene base before building this project’s mod.");
             return;
         }
 
@@ -113,8 +113,8 @@ public sealed partial class MainForm
         if (matches.Count == 0)
         {
             var displayName = PromptForText(
-                "Create mod for this suit",
-                "Exports are mod-based. Give the new one-suit mod a display name:",
+                "Create mod for this project",
+                "Exports are mod-based. Give the new mod a display name:",
                 $"{_currentProject.DisplayName} Mod");
             if (string.IsNullOrWhiteSpace(displayName))
             {
@@ -129,7 +129,7 @@ public sealed partial class MainForm
             }
             if (ModService.ListMods().Any(m => string.Equals(m.ModId, modId, StringComparison.OrdinalIgnoreCase)))
             {
-                Dialog.Warn(this, "Create mod", $"A mod with ID '{modId}' already exists. Add this suit to it from Home.");
+                Dialog.Warn(this, "Create mod", $"A mod with ID '{modId}' already exists. Add this project to it from Home.");
                 return;
             }
 
@@ -142,7 +142,7 @@ public sealed partial class MainForm
                 MenuOrder = 100,
             });
             modPath = ModService.SaveMod(mod);
-            AppendLog($"Created one-suit mod '{mod.DisplayName}' ({mod.ModId}) for this export.");
+            AppendLog($"Created mod '{mod.DisplayName}' ({mod.ModId}) for this export.");
             RefreshWorkspaceAfterModChange();
         }
         else if (matches.Count == 1)
@@ -152,7 +152,7 @@ public sealed partial class MainForm
         else
         {
             Dialog.Warn(this, "Choose a mod",
-                $"This suit belongs to {matches.Count} mods. Open the intended mod from Home and choose Build mod.\n\n" +
+                $"This project belongs to {matches.Count} mods. Open the intended mod from Home and choose Build mod.\n\n" +
                 string.Join("\n", matches.Select(m => $"- {m.DisplayName} ({m.ModId})")));
             return;
         }
@@ -162,19 +162,19 @@ public sealed partial class MainForm
 
     private void InstallModForCurrentSuit()
     {
-        if (BlockSynchronousEditWhileLoadedProjectRestores("Installing the current suit mod"))
+        if (BlockSynchronousEditWhileLoadedProjectRestores("Installing the current project’s mod"))
         {
             return;
         }
 
         if (_currentProject is null)
         {
-            Dialog.Info(this, "Install mod", "Create or open a suit before installing a mod.");
+            Dialog.Info(this, "Install mod", "Create or open a character or suit before installing a mod.");
             return;
         }
         if (!HasCurrentSuitBase())
         {
-            Dialog.Info(this, "Install mod", "Set a playable and cutscene base before installing this suit's mod.");
+            Dialog.Info(this, "Install mod", "Set a playable and cutscene base before installing this project’s mod.");
             return;
         }
 
@@ -188,8 +188,8 @@ public sealed partial class MainForm
         }
 
         var detail = matches.Count == 0
-            ? "Build a mod for this suit first. The Build mod button can create a one-suit mod."
-            : "This suit belongs to more than one mod. Open the intended mod from Home and choose Install mod.";
+            ? "Build a mod for this project first. The Build mod button can create one."
+            : "This project belongs to more than one mod. Open the intended mod from Home and choose Install mod.";
         Dialog.Info(this, "Install mod", detail);
     }
 
@@ -271,14 +271,14 @@ public sealed partial class MainForm
         var (summary, _) = ResolveHomeActiveMod(mods);
         if (summary is null)
         {
-            Dialog.Info(this, "Build mod", "Create or select a mod first. A mod can contain one suit or a whole collection.");
+            Dialog.Info(this, "Build mod", "Create or select a mod first. A mod can contain characters, suits, or a whole collection.");
             return;
         }
 
         var mod = ModService.LoadMod(summary.Path);
         if (mod?.Suits.Any(entry => entry.Enabled) != true)
         {
-            Dialog.Info(this, "Build mod", "Add at least one enabled suit to the active mod before building it.");
+            Dialog.Info(this, "Build mod", "Add at least one enabled character or suit to the active mod before building it.");
             return;
         }
 
@@ -307,13 +307,13 @@ public sealed partial class MainForm
             Overline = "MOD RELEASE",
             Title = hasActiveMod ? activeSummary!.DisplayName : "Choose a mod to build",
             Subtitle = hasActiveMod
-                ? $"{activeSuitCount} enabled suit{(activeSuitCount == 1 ? "" : "s")} will build and install as one game release."
+                ? $"Selected: {DescribeModContent(activeMod, enabledOnly: true)}. Built together; required character defaults are included automatically."
                 : "Select a saved mod or create one, then build and install it from here.",
             ThumbAccent = Theme.Gold,
             Chips = new List<(string, Color)>
             {
                 (hasActiveMod ? "mod selected" : "no mod selected", hasActiveMod ? Theme.Research : Theme.Warn),
-                ($"{activeSuitCount} enabled suit{(activeSuitCount == 1 ? "" : "s")}", activeSuitCount > 0 ? Theme.Parts : Theme.OnDarkMuted),
+                (DescribeModContent(activeMod, enabledOnly: true), activeSuitCount > 0 ? Theme.Parts : Theme.OnDarkMuted),
                 (hasInstalledRelease ? "installed" : hasBuild ? "built; not installed" : "not built", hasInstalledRelease ? Theme.Good : hasBuild ? Theme.Warn : Theme.Warn),
             },
             Workflow = new[]
@@ -356,7 +356,7 @@ public sealed partial class MainForm
                 {
                     Section = SectionRelease,
                     Title = "Add content first",
-                    Subtitle = "this mod has no enabled suits to build",
+                    Subtitle = "enable a character or suit to build this mod",
                     Accent = Theme.Base,
                     Dashed = true,
                     OnClick = () => EditModSuits(modPath),
@@ -366,7 +366,7 @@ public sealed partial class MainForm
             {
                 Section = SectionRelease,
                 Title = "Manage mod",
-                Subtitle = "identity, suits, output",
+                Subtitle = "identity, content, output",
                 Accent = Theme.Research,
                 OnClick = () => OpenModDetails(modPath, modId),
             });
@@ -414,8 +414,8 @@ public sealed partial class MainForm
                 Section = SectionMods,
                 Title = TrimMiddle(captured.DisplayName, 26),
                 Subtitle = isActive
-                    ? $"{captured.SuitCount} suit{(captured.SuitCount == 1 ? "" : "s")} · active"
-                    : $"{captured.SuitCount} suit{(captured.SuitCount == 1 ? "" : "s")} · select to build",
+                    ? $"{DescribeModContent(ModService.LoadMod(captured.Path))} · active"
+                    : $"{DescribeModContent(ModService.LoadMod(captured.Path))} · select to build",
                 Accent = isActive ? Theme.Research : Theme.OnDarkMuted,
                 OnClick = () =>
                 {
@@ -486,7 +486,7 @@ public sealed partial class MainForm
         {
             Section = SectionMods,
             Title = "＋ New mod",
-            Subtitle = "bundle suits into one pak",
+            Subtitle = "bundle characters and suits",
             Accent = Theme.Gold,
             Dashed = true,
             OnClick = CreateModFlow,
@@ -502,7 +502,7 @@ public sealed partial class MainForm
                 {
                     Section = SectionMods,
                     Title = TrimMiddle(m.DisplayName, 26),
-                    Subtitle = $"{m.SuitCount} suit{(m.SuitCount == 1 ? "" : "s")} · {m.ModId}",
+                    Subtitle = $"{DescribeModContent(ModService.LoadMod(m.Path))} · {m.ModId}",
                     Accent = Theme.Research,
                     MenuFactory = () => BuildModTileMenu(path, modId),
                     OnClick = () => OpenModDetails(path, modId),
@@ -536,7 +536,8 @@ public sealed partial class MainForm
             {
                 var match = projects.FirstOrDefault(p =>
                     string.Equals(p.SlotId, entry.SuitId, StringComparison.OrdinalIgnoreCase));
-                var name = match?.DisplayName ?? entry.SuitId;
+                var name = match is null ? entry.SuitId + " (missing project)" :
+                    (match.IsCharacter ? "Character · " : "Suit · ") + match.DisplayName;
                 suits.Add((entry.Enabled ? name : name + "  (disabled)", entry.SuitId));
             }
         }
@@ -551,7 +552,7 @@ public sealed partial class MainForm
         var buildDir = ModBuildRoot(modId);
         var built = Directory.Exists(buildDir);
 
-        using var dlg = new ModDetailsDialog(mod, suits, built, buildDir);
+        using var dlg = new ModDetailsDialog(mod, suits, built, buildDir, DescribeModContent(mod));
         if (dlg.ShowDialog(this) != DialogResult.OK)
         {
             return;
@@ -572,7 +573,7 @@ public sealed partial class MainForm
     private System.Windows.Forms.ContextMenuStrip BuildModTileMenu(string modProjectPath, string modId)
     {
         var menu = new System.Windows.Forms.ContextMenuStrip();
-        menu.Items.Add("Edit suits (add / remove)…", null, (_, _) => EditModSuits(modProjectPath));
+        menu.Items.Add("Manage content (add / remove)…", null, (_, _) => EditModSuits(modProjectPath));
         menu.Items.Add("Rename mod…", null, (_, _) => RenameMod(modProjectPath));
         menu.Items.Add("Change Mod ID…", null, (_, _) => ChangeModId(modProjectPath));
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
@@ -580,7 +581,7 @@ public sealed partial class MainForm
         menu.Items.Add("Install mod to game", null, (_, _) => InstallMod(modProjectPath));
         menu.Items.Add("Open build output", null, (_, _) => OpenModBuildOutput(modId));
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
-        menu.Items.Add("Delete mod (keeps suits)", null, (_, _) => DeleteMod(modProjectPath));
+        menu.Items.Add("Delete mod (keeps projects)", null, (_, _) => DeleteMod(modProjectPath));
         return menu;
     }
 
@@ -624,7 +625,7 @@ public sealed partial class MainForm
 
         var saved = ModService.SaveMod(mod);
         _homeActiveModProjectPath = saved;
-        AppendLog($"Created mod '{mod.DisplayName}' ({modId}) with {mod.Suits.Count} suit(s): {saved}");
+        AppendLog($"Created mod '{mod.DisplayName}' ({modId}) with {DescribeModContent(mod)}: {saved}");
         RefreshWorkspaceAfterModChange();
     }
 
@@ -721,7 +722,7 @@ public sealed partial class MainForm
         mod.Suits.Clear();
         AddSuitEntries(mod, picked);
         ModService.SaveMod(mod);
-        AppendLog($"Mod '{mod.DisplayName}' now has {mod.Suits.Count} suit(s).");
+        AppendLog($"Mod '{mod.DisplayName}' now has {DescribeModContent(mod)}.");
         RefreshWorkspaceAfterModChange();
     }
 
@@ -750,7 +751,7 @@ public sealed partial class MainForm
         var label = mod?.DisplayName ?? Path.GetFileName(modProjectPath);
         if (!Dialog.Confirm(this,
                 $"Delete mod '{label}'?",
-                "This removes the mod project only. The suits it referenced are NOT deleted.",
+                "This removes the mod project only. Its character and suit projects are NOT deleted.",
                 confirmText: "Delete mod", severity: Dialog.Level.Crit))
         {
             return;
@@ -760,7 +761,7 @@ public sealed partial class MainForm
         {
             _homeActiveModProjectPath = "";
         }
-        AppendLog($"Deleted mod project '{label}' (suits kept).");
+        AppendLog($"Deleted mod project '{label}' (character and suit projects kept).");
         RefreshWorkspaceAfterModChange();
     }
 
@@ -862,7 +863,7 @@ public sealed partial class MainForm
                     "Loomirr's LOTDK UE4SS is missing required shared registry files:\n\n" +
                     missingList +
                     "\n\nInstall or update Loomirr's LOTDK UE4SS, then install this mod again. " +
-                    "The suit build is complete and does not need to be rebuilt.";
+                    "The content build is complete and does not need to be rebuilt.";
                 AppendLog("Install mod stopped before copying files: Loomirr's LOTDK UE4SS shared registry is incomplete.");
                 foreach (var missingPath in missingCoreRegistryFiles)
                 {
@@ -1206,13 +1207,13 @@ public sealed partial class MainForm
         var suits = new SuitProjectService(_projectRootText.Text.Trim()).ListProjects().ToList();
         if (suits.Count == 0)
         {
-            AppendLog("No saved suits to add. Create and save a suit first.");
+            AppendLog("No saved content to add. Create and save a character or suit first.");
             return Array.Empty<string>();
         }
 
         using var dlg = new AdaptiveDialogForm
         {
-            Text = $"Suits in {modId}",
+            Text = $"Characters and suits in {modId}",
             Width = 460,
             Height = 460,
             AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi,
@@ -1226,7 +1227,7 @@ public sealed partial class MainForm
         dlg.Shown += (_, _) => Theme.UseDarkTitleBar(dlg);
         var lbl = new System.Windows.Forms.Label
         {
-            Text = "Check the suits to include in this mod:",
+            Text = "Include characters and suits (required defaults are added at build):",
             Left = 14, Top = 12, Width = 420, ForeColor = Theme.OnDark,
         };
         var list = new System.Windows.Forms.CheckedListBox
@@ -1257,7 +1258,7 @@ public sealed partial class MainForm
     private sealed record SuitItem(SuitProjectService.ProjectSummary Summary)
     {
         public override string ToString() =>
-            string.IsNullOrWhiteSpace(Summary.DisplayName) ? Summary.SlotId : Summary.DisplayName;
+            (Summary.IsCharacter ? "Character · " : "Suit · ") + (string.IsNullOrWhiteSpace(Summary.DisplayName) ? Summary.SlotId : Summary.DisplayName);
     }
 
     /// <summary>
@@ -1294,7 +1295,7 @@ public sealed partial class MainForm
             catch (Exception ex)
             {
                 inputs.Add(new ModReleaseValidationService.SuitInput(entry, projectPath, null,
-                    $"Could not read the saved suit project '{projectPath}': {ex.Message}"));
+                    $"Could not read the saved project '{projectPath}': {ex.Message}"));
             }
         }
 
@@ -1305,6 +1306,13 @@ public sealed partial class MainForm
             AppSettings.Current.EffectiveExportContentRoot(),
             AppSettings.GeneratedRootFor(_projectRootText.Text.Trim()),
             EffectiveGameContentPacksFolder());
+        if (inputs.Any(input => input.Project?.CustomCharacter is not null))
+        {
+            var nativeContent = AppSettings.Current.EffectiveExtractedContentRoot();
+            var missing = CustomCharacterRegistrationService.MissingDonorFiles(nativeContent);
+            if (missing.Count > 0)
+                result.AddError("character registration", CustomCharacterRegistrationService.MissingDonorMessage(nativeContent, missing));
+        }
         AppendLog($"Build check: {(result.Passed ? "passed" : "failed")} ({result.ErrorCount} error(s), {result.WarningCount} warning(s)).");
         foreach (var finding in result.Findings.Where(f => !f.Severity.Equals("INFO", StringComparison.OrdinalIgnoreCase)))
         {
@@ -1323,7 +1331,9 @@ public sealed partial class MainForm
             return;
         }
         ModProjectService.ApplyDerivedFields(mod);
-        var enabled = mod.Suits.Where(entry => entry.Enabled).ToList();
+        List<ModSuitEntry> enabled;
+        try { enabled = CustomCharacterProjectService.ExpandMembers(mod.Suits, ModService, new SuitProjectService(_projectRootText.Text.Trim())); }
+        catch (Exception ex) { Dialog.Error(this, "Character dependencies", ex.Message); return; }
         var preflight = ValidateModReleaseAuthoring(mod, enabled);
         ReleasePreflightForm.Show(this, mod.DisplayName, preflight.Result);
     }
@@ -1454,7 +1464,7 @@ public sealed partial class MainForm
         try
         {
             progress.SetStep("Building mod release");
-            ModReleaseStep("Reading the mod and its saved suits…");
+            ModReleaseStep("Reading the mod’s characters and suits…");
             built = await BuildModAsync(modProjectPath);
             if (built)
             {
@@ -1516,7 +1526,7 @@ public sealed partial class MainForm
         if (!string.IsNullOrWhiteSpace(result.BuildOutput)) model.Fields.Add(("Build output", result.BuildOutput));
         if (!string.IsNullOrWhiteSpace(result.TrioDestination)) model.Fields.Add(("Pak files", result.TrioDestination));
         if (!string.IsNullOrWhiteSpace(result.TagsDestination)) model.Fields.Add(("Gameplay tags", result.TagsDestination));
-        if (!string.IsNullOrWhiteSpace(result.RegistryDestination)) model.Fields.Add(("Suit manifest", result.RegistryDestination));
+        if (!string.IsNullOrWhiteSpace(result.RegistryDestination)) model.Fields.Add(("Content manifest", result.RegistryDestination));
         if (!string.IsNullOrWhiteSpace(result.CoreRegistryDestination)) model.Fields.Add(("Asset Manager scan", result.CoreRegistryDestination));
         if (!string.IsNullOrWhiteSpace(result.AssetRegistryDestination)) model.Fields.Add(("Asset Registry", result.AssetRegistryDestination));
         Dialog.Show(this, model);
@@ -1549,7 +1559,7 @@ public sealed partial class MainForm
         var names = string.Join("\n", mods.Select(m => $"  {m.DisplayName}  ({m.SuitCount} suit{(m.SuitCount == 1 ? "" : "s")})"));
         if (!Dialog.Confirm(this,
                 $"Rebuild {mods.Count} mod{(mods.Count == 1 ? "" : "s")}?",
-                $"{names}\n\nEach mod is rebuilt from the latest saved state of its included suits.",
+                $"{names}\n\nEach mod is rebuilt from the latest saved state of its characters and suits.",
                 confirmText: "Rebuild all"))
         {
             return;
@@ -1591,12 +1601,19 @@ public sealed partial class MainForm
         var mod = ModService.LoadMod(modProjectPath);
         if (mod is null) { AppendLog("Build mod: could not load project."); return false; }
         ModProjectService.ApplyDerivedFields(mod);
-        ModReleaseStep("Checking enabled suits and gameplay tags…");
+        ModReleaseStep("Checking selected characters, suits and gameplay tags…");
 
-        var enabled = mod.Suits.Where(s => s.Enabled).ToList();
+        List<ModSuitEntry> enabled;
+        try { enabled = CustomCharacterProjectService.ExpandMembers(mod.Suits, ModService, new SuitProjectService(_projectRootText.Text.Trim())); }
+        catch (Exception ex)
+        {
+            var failure = new ModReleaseValidationService.Result(); failure.AddError("character dependencies", ex.Message);
+            _lastModReleaseFailure = new ModReleaseFailure(mod.DisplayName, failure);
+            AppendLog("Build stopped: " + ex.Message); return false;
+        }
         if (enabled.Count == 0)
         {
-            AppendLog("Build mod: no enabled suits.");
+            AppendLog("Build mod: no enabled characters or suits.");
             return false;
         }
 
@@ -1639,6 +1656,11 @@ public sealed partial class MainForm
             tagRows.Add(new PawnTagConfigService.TagRow(suit.PawnTag.Trim(), $"{mod.ModId}: {suit.DisplayName}"));
             tagRows.AddRange(HeldItemService.TagRows(suit));
             tagRows.AddRange(CustomEquipmentService.TagRows(suit));
+            if (suit.CustomCharacter is { } character)
+            {
+                tagRows.AddRange(CustomCharacterRegistrationService.AdditionalTags(suit, mod.ModId));
+                if (character.IsDefinition) stEntries[CustomCharacterRegistrationService.NameKey(character.CharacterId)] = suit.DisplayName;
+            }
             stEntries[nameKey] = suit.DisplayName ?? "";
             stEntries[descKey] = suit.Description ?? "";
             stEntries[lockKey] = suit.LockedDescription ?? "";
@@ -1744,7 +1766,7 @@ public sealed partial class MainForm
 
                 if (!string.IsNullOrWhiteSpace(dcmdPkg) && !seenDcmd.Add(dcmdPkg!))
                 {
-                    AppendLog($"Build mod ABORTED: two suits share the asset path '{dcmdPkg}'. Each suit needs its own /Game/Mods/<folder> root.");
+                    AppendLog($"Build mod ABORTED: two projects share the asset path '{dcmdPkg}'. Each project needs its own /Game/Mods/<folder> root.");
                     return false;
                 }
                 if (string.IsNullOrWhiteSpace(dcmdPkg))
@@ -1757,7 +1779,7 @@ public sealed partial class MainForm
                 var preparation = await PrepareSuitForReleaseAsync(suit, svc);
                 if (preparation.Prepared is null)
                 {
-                    preflight.Result.AddError("suit preparation", preparation.Error, suit.SlotId);
+                    preflight.Result.AddError(CustomCharacterProjectService.IsCharacter(suit) ? "character preparation" : "suit preparation", preparation.Error, suit.SlotId);
                     _lastModReleaseFailure = new ModReleaseFailure(mod.DisplayName, preflight.Result);
                     AppendLog($"Build mod ABORTED: could not prepare '{suit.DisplayName}': {preparation.Error}");
                     return false;
@@ -1779,6 +1801,9 @@ public sealed partial class MainForm
                 }
             }
 
+            var characterRows = CustomCharacterRegistrationService.Generate(stageContent,
+                AppSettings.Current.EffectiveExtractedContentRoot(), mod.ModId, preparedSuits,
+                mappings ?? throw new InvalidDataException("Character registration requires mappings."));
             var tagConfigPath = string.Empty;
 
             try
@@ -1856,7 +1881,7 @@ public sealed partial class MainForm
             {
                 registryRows = CharacterRegistryBundleService.CreateRows(
                     stageContent, manifestSuits.Select(suit => suit.dcmd), mappings ??
-                    throw new InvalidDataException("A .usmap mappings file is required to read staged character loading bundles."));
+                    throw new InvalidDataException("A .usmap mappings file is required to read staged character loading bundles.")).Concat(characterRows).ToArray();
             }
             catch (Exception ex)
             {
@@ -1887,6 +1912,7 @@ public sealed partial class MainForm
                 return false;
             }
             preflight.Result.AddInfo("Asset Registry", $"Verified {registry.Rows.Count} primary-asset row(s).");
+            CustomCharacterRegistrationService.WriteRosterConfig(registry.Layout.PluginDirectory, preparedSuits);
             if (string.IsNullOrWhiteSpace(tagConfigPath) || !File.Exists(tagConfigPath))
             {
                 preflight.Result.AddError("Gameplay tags", $"The generated loose tag file for '{mod.ModId}' is missing.");
@@ -2054,7 +2080,6 @@ public sealed partial class MainForm
                     stageContentRootOverride: contentRoot),
                 "Saved component removal replay");
 
-            StageGeneratedMaterialsIntoContentRoot(suit, contentRoot);
             if (!StageGeneratedTexturesIntoContentRoot(
                     suit,
                     contentRoot,
@@ -2063,6 +2088,7 @@ public sealed partial class MainForm
             {
                 throw new InvalidOperationException(textureStageError);
             }
+            StageGeneratedMaterialsIntoContentRoot(suit, contentRoot);
             StageGeneratedDcmdIntoContentRoot(
                 suit,
                 contentRoot,

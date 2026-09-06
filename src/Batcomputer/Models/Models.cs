@@ -154,6 +154,9 @@ public sealed class RecommendedDonorPlan
 
 public sealed class NativeSuitProject
 {
+    // Null is a normal suit for a native character. A definition is the new character's
+    // default suit; a child keeps an explicit reference to that saved definition.
+    public CustomCharacterIdentity? CustomCharacter { get; set; }
     public int SchemaVersion { get; set; } = 1;
     public string ToolVersion { get; set; } = "0.1-plan-gui";
     public string SlotId { get; set; } = "custom_suit";
@@ -248,6 +251,8 @@ public sealed class NativeSuitProject
     // OBJ static meshes created by Batcomputer. These are separate from native grafts because
     // their cooked mesh is rebuilt from a project-owned source file on every fresh stage.
     public List<CustomStaticMeshImport> CustomStaticMeshes { get; set; } = new();
+
+    public List<SkinnedMeshImport> SkinnedMeshes { get; set; } = new();
 
     // Per-suit preview offsets layered over the donor transform.
     public List<SavedPreviewPartPlacement> PreviewPartPlacements { get; set; } = new();
@@ -622,6 +627,8 @@ public sealed class PairedCapeVisualOverlayProfile
 /// <summary>A project-owned static OBJ attachment and its authored import transform.</summary>
 public sealed class CustomStaticMeshImport
 {
+    // Null uses native belt/shoulder clearance. Zero explicitly disables that clearance.
+    public float? BodyClearance { get; set; }
     public string Id { get; set; } = "";
     public string DisplayName { get; set; } = "";
     public string SourceObjRelativePath { get; set; } = "";

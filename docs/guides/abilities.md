@@ -162,7 +162,9 @@ new style's verified attack defaults and keeps the held items.
 
 Baton is a melee adapter, not an automatic electrical power. The integrated bat/baton test paks,
 held-item tool flow and separate native baton-trail experiment have passed user testing.
-The new configurable effects and on-hit status paths below still need their own in-game acceptance.
+Expanded configurable effects and on-hit status tests were later reported to crash on suit hover.
+Those paths are parked, not accepted stable features. Keep them out of ordinary release-test mods;
+the descriptions below document the prototype, not a recommendation to enable it.
 
 ### Cosmetic item effects
 

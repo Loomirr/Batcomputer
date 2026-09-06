@@ -155,6 +155,7 @@ public sealed class GameAssetRefreshService
     public static IReadOnlyList<string> AllCharacterFilters { get; } = new[]
     {
         "Content/Characters/",
+        "Content/GameProgress/PROG_Characters",
         "Content/Localization/StringTables/",
         "Content/Animation/",
         CharacterGadgetFilter,
@@ -183,24 +184,15 @@ public sealed class GameAssetRefreshService
     // refresh and may take substantially longer and consume more disk space. It
     // is still scoped to character-adjacent content rather than extracting the
     // entire game.
-    public static IReadOnlyList<string> DeveloperResearchFilters { get; } = new[]
+    // Always include the normal builder's dependencies. Maintaining two separate lists let
+    // PROG_Characters (and future required donors) disappear from a successful developer dump.
+    public static IReadOnlyList<string> DeveloperResearchFilters { get; } = AllCharacterFilters.Concat(new[]
     {
-        "Content/Characters/",
-        "Content/Animation/",
         "Content/Equipment/",
         "Content/Abilities/",
         "Content/Gameplay/",
-        CharacterGadgetFilter,
-        KatanaMeshFilter,
-        KatanaMaterialFilter,
-        KatanaTextureFilter,
-        AdditionalContentFilter,
-        CapeTransparentMaterialFilter,
         "Content/UI/",
-        "Content/Localization/StringTables/",
-        GameFeatureContentFilter,
-        ViewerBaseGameRedBrickPaletteService.RetocFilter,
-    }.Concat(HeldItemFilters).Concat(HeldItemEffectService.ExtractionFilters).Concat(CharacterDependencyAbilityFilters).ToArray();
+    }).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
 
     private readonly string _projectRoot;
 
@@ -1005,6 +997,13 @@ public sealed class GameAssetRefreshService
 
         result.Logs.Add(
             $"Character-dependency ability package sentinels={CharacterDependencyAbilitySentinelPackages.Count}");
+        var missingCharacterDonors = CustomCharacterRegistrationService.MissingDonorFiles(contentRoot);
+        if (missingCharacterDonors.Count > 0)
+            throw new InvalidDataException(
+                "The refresh did not extract complete custom-character registration donors: " +
+                string.Join(", ", missingCharacterDonors) + ". The previous extracted dump remains active. " +
+                "Verify the original game Content\\Paks folder and retry with the updated full-character or developer profile.");
+        result.Logs.Add("Custom-character registration donors verified: character group + PROG_Characters (complete asset/uexp pairs).");
     }
 
     private static string? FindContentRoot(string outputRoot, bool requireCharacters = true)

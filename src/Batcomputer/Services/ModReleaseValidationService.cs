@@ -50,6 +50,15 @@ public sealed class ModReleaseValidationService
         // another enabled suit. Validate against the complete release set, not whichever suit
         // happens to be visited first below. A reference to an omitted/disabled suit still fails.
         var releaseGeneratedTextures = ReleaseGeneratedTexturePackages(enabled);
+        var characterProjects = enabled.Where(input => input.Project?.CustomCharacter is not null).Select(input => input.Project!).ToArray();
+        foreach (var family in characterProjects.GroupBy(project => project.CustomCharacter!.CharacterId, StringComparer.OrdinalIgnoreCase))
+        {
+            var definitions = family.Where(CustomCharacterProjectService.IsCharacter).ToArray();
+            if (definitions.Length != 1)
+                result.AddError("character dependencies", $"Character '{family.Key}' must include exactly one enabled default definition.");
+            else if (family.Any(project => project.CustomCharacter!.DefinitionSlotId != definitions[0].SlotId))
+                result.AddError("character dependencies", $"A suit for '{family.Key}' refers to a different saved character definition.");
+        }
 
         var suitIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var pawnTags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -172,11 +181,13 @@ public sealed class ModReleaseValidationService
             suit.DcmdTemplate,
             suit.PlayableTemplate,
             suit.CutsceneTemplate);
-        var ownerMismatch = PawnTagConfigService.CharacterOwnerMismatchError(tag, donor?.PawnTag);
+        var ownerMismatch = CustomCharacterProjectService.IdentityError(suit, donor?.PawnTag);
         if (!string.IsNullOrWhiteSpace(ownerMismatch))
         {
             result.AddError("PawnTag", ownerMismatch, suitId);
         }
+        if (suit.CustomCharacter is { } character && CustomCharacterProjectService.IsNativeOwner(character.CharacterId))
+            result.AddError("character", "A custom character cannot reuse a native character group ID.", suitId);
         AddUnique(pawnTags, tag, suitId, "PawnTag", result, suitId);
     }
 

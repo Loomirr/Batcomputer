@@ -14,6 +14,8 @@ public sealed class CustomStaticMeshImportDialog : AdaptiveForm
     private readonly NumericUpDown _rotationYaw = Number(0m, -360m, 360m, 2, 1m);
     private readonly NumericUpDown _rotationRoll = Number(0m, -360m, 360m, 2, 1m);
     private readonly CheckBox _hideBaseHead = new();
+    private readonly CheckBox _nativeClearance = new() { Text = "Use native belt / shoulder clearance", AutoSize = true };
+    private readonly NumericUpDown _clearance = Number(0m, 0m, 30m, 3, .1m);
 
     public string SourceObjPath => _source.Text.Trim();
     public string DisplayName => _name.Text.Trim();
@@ -28,6 +30,7 @@ public sealed class CustomStaticMeshImportDialog : AdaptiveForm
     public float RotationYaw => (float)_rotationYaw.Value;
     public float RotationRoll => (float)_rotationRoll.Value;
     public bool HideBaseHead => _hideBaseHead.Checked;
+    public float? BodyClearance => _nativeClearance.Checked ? null : (float)_clearance.Value;
     public bool DeleteRequested { get; private set; }
 
     public CustomStaticMeshImportDialog(CustomStaticMeshImport? existing = null, string? sourcePath = null)
@@ -109,7 +112,7 @@ public sealed class CustomStaticMeshImportDialog : AdaptiveForm
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 3,
-            RowCount = 12,
+            RowCount = 15,
             BackColor = Color.Transparent,
         };
         fields.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 132));
@@ -176,6 +179,22 @@ public sealed class CustomStaticMeshImportDialog : AdaptiveForm
         };
         fields.Controls.Add(note, 0, 11);
         fields.SetColumnSpan(note, 3);
+        _nativeClearance.Checked = existing?.BodyClearance is null;
+        _clearance.Value = Clamp(existing?.BodyClearance ?? AttachmentClearanceService.DefaultForSlot(AttachmentSlot.Id), 0, 30);
+        fields.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+        fields.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+        fields.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        fields.Controls.Add(_nativeClearance, 1, 12); fields.SetColumnSpan(_nativeClearance, 2);
+        AddNumberRow(fields, 13, "Body clearance", _clearance, "Bone-space clearance, separate from this mesh's XYZ placement. Hip moves Spine_01; Shoulder moves Neck. Zero disables this attachment's contribution. Existing native clearance is preserved.");
+        var clearanceNote = new Label { AutoSize = true, MaximumSize = new Size(620, 0), Text = "Hip / belt: native 4.3. Shoulder / neck: native armour 3.0. These adjust the body bones in gameplay and cutscenes, not just the accessory position.", ForeColor = Theme.OnDarkMuted, Font = Theme.Caption };
+        fields.Controls.Add(clearanceNote, 0, 14); fields.SetColumnSpan(clearanceNote, 3);
+        void SyncClearance()
+        {
+            bool supported = AttachmentClearanceService.BoneForSlot(AttachmentSlot.Id) is not null;
+            _nativeClearance.Enabled = supported; _clearance.Enabled = supported && !_nativeClearance.Checked;
+            if (_nativeClearance.Checked) _clearance.Value = (decimal)AttachmentClearanceService.DefaultForSlot(AttachmentSlot.Id);
+        }
+        _target.SelectedIndexChanged += (_, _) => SyncClearance(); _nativeClearance.CheckedChanged += (_, _) => SyncClearance(); SyncClearance();
 
         var footer = new FlowLayoutPanel
         {

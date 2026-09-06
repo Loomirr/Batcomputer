@@ -12,6 +12,18 @@ internal static class ReleaseRegressionChecks
     public static int Run(TextWriter output)
     {
         var failures = new List<string>();
+        foreach (var result in CustomCharacterRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
+        foreach (var result in CustomCharacterUiRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
+        foreach (var result in PartGraftService.SparseComponentPropertiesForTest())
+            Check(result.Passed, result.Description, failures, output);
+        foreach (var result in StageTransactionRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
+        foreach (var result in DiagnosticsRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
+        foreach (var result in SkinnedMeshRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
         foreach (var result in CustomEquipmentRegressionChecks.Run())
             Check(result.Passed, result.Description, failures, output);
         Check(GameAssetRefreshService.AllCharacterFilters.Contains(GameAssetRefreshService.KatanaMeshFilter) &&
@@ -1970,6 +1982,17 @@ internal static class ReleaseRegressionChecks
             RegistryPluginService.EquipmentTaggedAssetClass,
             GameplayBundleAssets: ["/Game/Mods/EquipmentCheck/BP_Test_ED.BP_Test_ED_C"]);
         var equipmentRows = new[] { new RegistryPluginService.RegistryRow("/Game/Mods/EquipmentCheck/DA_DCMD_Test"), equipmentRow };
+        foreach (var row in new[] {
+            new RegistryPluginService.RegistryRow("/Game/Characters/MetaData/Groups/Mods/CharacterProof/DA_Group", RegistryPluginService.CharacterGroupPrimaryAssetType, RegistryPluginService.CharacterGroupClass),
+            new RegistryPluginService.RegistryRow("/Game/GameProgress/Mods/CharacterProof/PROG_Character", RegistryPluginService.ProgressDefinitionPrimaryAssetType, RegistryPluginService.ProgressDefinitionClass) })
+        {
+            Check(RegistryPluginService.ValidateRows([row]).Count == 0 &&
+                  RegistryPluginService.ValidateRows([row with { AssetClassOverride = RegistryPluginService.PawnMetadataClass }]).Count > 0 &&
+                  RegistryPluginService.ValidateRows([row with { PrimaryAssetTypeOverride = RegistryPluginService.PrimaryAssetType }]).Count > 0 &&
+                  RegistryPluginService.ValidateRows([row with { PackagePath = row.PackagePath.Replace("/Mods/CharacterProof/", "/") }]).Count > 0 &&
+                  RegistryPluginService.ValidateRows([row with { PackagePath = row.PackagePath.Replace("/CharacterProof/", "/") }]).Count > 0,
+                "character registration permits only a mod-owned native scan path with its matching type and class: " + row.EffectivePrimaryAssetType, failures, output);
+        }
         var discoverableEquipment = equipmentRow with { PackagePath = "/Game/Characters/Equipment/Mods/EquipmentCheck/DA_ETA_EquipmentCheck" };
         Check(RegistryPluginService.ValidateRows([discoverableEquipment]).Count == 0 &&
               RegistryPluginService.ValidateRows([discoverableEquipment with { AssetClassOverride = RegistryPluginService.PawnMetadataClass }]).Count > 0 &&
@@ -2313,6 +2336,15 @@ internal static class ReleaseRegressionChecks
             "SM_Custom_Multi",
             compactedAssignmentSlots);
         var expectedGraftMaterials = new[] { assignmentMetal, assignmentTrim };
+        foreach (var region in new[] { "Hip", "Shoulder" })
+        {
+            var regionPart = CustomStaticMeshImportService.CreateStaticAttachmentPart(
+                multiMaterialDonorIndex, "playable", graftPlayable, CustomStaticMeshImportService.ResolveAttachmentSlot(region),
+                "/Game/Mods/SlotFlow/Meshes/SM_Custom_Multi", "SM_Custom_Multi", compactedAssignmentSlots);
+            Check(regionPart.ComponentTags.SequenceEqual(["TtCharacterAsset." + region]) &&
+                !regionPart.ComponentTags.Contains("TtCharacterAsset.Head"),
+                $"custom {region} attachments replace the head donor's tag with their actual slot", failures, output);
+        }
         Check(
             playableMultiMaterialPart.Materials.Select(material => material.PackagePath)
                 .SequenceEqual(expectedGraftMaterials, StringComparer.OrdinalIgnoreCase) &&

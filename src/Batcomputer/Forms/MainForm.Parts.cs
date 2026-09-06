@@ -2152,8 +2152,17 @@ public sealed partial class MainForm
                 Dashed = true,
                 OnClick = () => _ = OpenCustomStaticMeshDialogAsync(null),
                 ToolTip = "Imports a project-owned OBJ as a static attachment. Each distinct usemtl name becomes a material slot. Pick a real game socket, then set scale, local XYZ offset, and rotation."
-            }
+            },
+            new() { Title = "+ Import skinned mesh", Subtitle = "Weighted FBX · existing rig", Accent = Theme.Parts, Dashed = true,
+                OnClick = () => _ = OpenSkinnedMeshWorkshopAsync(null), ToolTip = SkinnedMeshCookService.Warning }
         };
+        foreach (var skinned in _currentProject?.SkinnedMeshes ?? [])
+        {
+            var current = skinned;
+            if (MatchesToyboxSearch(search, current.Name, current.Component, "skinned FBX"))
+                tiles.Add(new VirtualTilePanel.Tile { Section = "SKINNED MESHES", Title = current.Name, Subtitle = current.Component + " · " + current.Materials.Count + " materials",
+                    Accent = Theme.Parts, OnClick = () => _ = OpenSkinnedMeshWorkshopAsync(current), ToolTip = "Edit materials, reimport the weighted FBX, inspect deformation, or restore the native component." });
+        }
 
         if (_currentProject?.CustomStaticMeshes is not { Count: > 0 })
         {
@@ -2509,6 +2518,7 @@ public sealed partial class MainForm
         mesh.RotationYaw = dialog.RotationYaw;
         mesh.RotationRoll = dialog.RotationRoll;
         mesh.HideBaseHead = dialog.HideBaseHead;
+        mesh.BodyClearance = dialog.BodyClearance;
         mesh.Target = dialog.AttachmentSlot.Id;
         mesh.AttachSocket = dialog.AttachmentSlot.AttachSocket;
         try
@@ -3254,7 +3264,7 @@ public sealed partial class MainForm
                 RemoveSavedRemovalForComponent(project, adapterComponent);
             }
 
-            RecordChange("Gliders", "Glide visual", "restored gameplay donor default", status: "staged");
+            RecordProjectChange(project, "Gliders", "Glide visual", "restored gameplay donor default", status: "staged");
             await RebuildGraftStageCoreAsync(project, projectRoot, persistProject: false);
             saveCapture = CaptureCurrentProjectSave(editContext, "save the cleared glider");
             var saveResult = await CommitCurrentProjectSaveCaptureAsync(saveCapture);
@@ -4577,7 +4587,7 @@ public sealed partial class MainForm
                 targetSlot = "Torso";
                 autoPairedCape = true;
                 AppendLog("Glide cape: automatically added its matching regular Cape and reserved Torso for the glide mesh. " + matchingCapeDetail);
-                RecordChange(
+                RecordProjectChange(transactionProject,
                     "Parts",
                     "Cape + Torso",
                     "added the selected donor's authored regular-cape and glide-cape pair",
@@ -4590,7 +4600,7 @@ public sealed partial class MainForm
                 {
                     transactionProject.UseCustomArchetype = true;
                     transactionProject.GliderAutoEnabledCustomArchetype = true;
-                    RecordChange("Animations", "archetype", "enabled for glider dependencies", status: "staged");
+                    RecordProjectChange(transactionProject, "Animations", "archetype", "enabled for glider dependencies", status: "staged");
                     AppendLog("Glider: enabled the custom archetype for its gameplay and pose dependencies.");
                 }
 
@@ -4687,7 +4697,7 @@ public sealed partial class MainForm
                     }
 
                     AppendLog("Cape adapter: " + adapterDetail);
-                    RecordChange(
+                    RecordProjectChange(transactionProject,
                         "Gliders",
                         "dynamic paired-cape adapter",
                         $"preserve {transactionProject.BaseProfile?.GameplayFamily ?? "gameplay donor"} gameplay + use {UnrealPathUtil.AssetName(transactionProject.GliderAnimMas)} glide",
@@ -4710,7 +4720,7 @@ public sealed partial class MainForm
                 }
             }
             var donor = System.IO.Path.GetFileNameWithoutExtension(samplePart.SourceUasset);
-            RecordChange("Parts", $"{targetSlot} @ {attachSocket}", $"graft {donor} (clone {cloneSlot})");
+            RecordProjectChange(transactionProject, "Parts", $"{targetSlot} @ {attachSocket}", $"graft {donor} (clone {cloneSlot})");
             await RebuildGraftStageCoreAsync(
                 transactionProject,
                 projectRoot,
@@ -4758,7 +4768,7 @@ public sealed partial class MainForm
             }
             if (superseded || !CurrentProjectEditContextMatches(editContext))
             {
-                AppendLog("Selected-part graft stopped after a newer suit edit or workspace operation superseded it; the current editor was left unchanged and the generated stage remains blocked until rebuilt.");
+                AppendLog("Selected-part graft stopped after a newer suit edit or workspace operation superseded it; the current editor was left unchanged. Original failure: " + reportedFailure.Message);
                 return false;
             }
 
@@ -5543,7 +5553,7 @@ public sealed partial class MainForm
                 if (failedPackages.Count > 0)
                 {
                     var failureSummary = string.Join(" | ", failedPackages.Select(package =>
-                        $"{package.Role}: {(!string.IsNullOrWhiteSpace(package.Error) ? package.Error : "unknown graft error")}"));
+                        $"{package.Role}: {(!string.IsNullOrWhiteSpace(package.Error) ? package.Error.Split('\n')[0].Trim() : "unknown graft error")}"));
                     throw new InvalidOperationException(
                         $"Part '{pg.Label}' could not be replayed for every required character package. " +
                         $"The rebuild stopped before producing a partial suit. {failureSummary}");
@@ -5590,7 +5600,9 @@ public sealed partial class MainForm
                 var detail = FileLockUtil.IsTransient(ex)
                     ? $"Part '{pg.Label}' could not be replayed because its generated asset stayed locked. " +
                       "Close FModel or any asset viewer using this suit, then retry."
-                    : $"Part '{pg.Label}' could not be replayed for the playable and cutscene packages.";
+                    : $"Part '{pg.Label}' (slot {pg.Slot}) failed during the whole-suit rebuild. " +
+                      "This may be an existing part, not the material or part you just changed. " +
+                      ex.Message.Split('\n')[0].Trim();
                 if (FileLockUtil.IsTransient(ex))
                 {
                     throw new TransientFileLockException(
@@ -5620,6 +5632,14 @@ public sealed partial class MainForm
 
         SyncCustomStaticMeshHeadRemoval(project);
         await StageCustomStaticMeshesAsync(project, projectRoot);
+
+        var customContent = Path.Combine(new SuitProjectService(projectRoot).ProjectOutputDirectory(project), "GraftedPartStage", "LEGOBatmanLotDK", "Content");
+        await RunWithFileLockRetryAsync(() =>
+        {
+            SkinnedMeshStageService.Apply(customContent, new SuitProjectService(projectRoot).ProjectOutputDirectory(project), project, AppendLog);
+            AttachmentClearanceService.Apply(customContent, project, AppendLog);
+            return true;
+        }, "apply skinned meshes and attachment body clearance");
 
         // Re-apply the rest of the suit's declarative edits onto the freshly grafted stage.
         var removalReplay = await ApplySavedComponentRemovals(
