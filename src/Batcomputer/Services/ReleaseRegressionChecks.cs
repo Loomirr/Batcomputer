@@ -12,6 +12,8 @@ internal static class ReleaseRegressionChecks
     public static int Run(TextWriter output)
     {
         var failures = new List<string>();
+        foreach (var result in CustomEquipmentRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
         Check(GameAssetRefreshService.AllCharacterFilters.Contains(GameAssetRefreshService.KatanaMeshFilter) &&
               GameAssetRefreshService.DeveloperResearchFilters.Contains(GameAssetRefreshService.KatanaMeshFilter),
             "first-time/full and developer extraction include the sword mesh outside Characters", failures, output);
@@ -22,6 +24,11 @@ internal static class ReleaseRegressionChecks
         }
 
         foreach (var result in GameplayShellRegressionChecks.Run())
+        {
+            Check(result.Passed, result.Description, failures, output);
+        }
+
+        foreach (var result in CharacterRegistryBundleRegressionChecks.Run())
         {
             Check(result.Passed, result.Description, failures, output);
         }
@@ -1958,6 +1965,30 @@ internal static class ReleaseRegressionChecks
             "registry verification trusts exact structured writer counts without fragile command-line text",
             failures,
             output);
+        var equipmentRow = new RegistryPluginService.RegistryRow(
+            "/Game/Mods/EquipmentCheck/DA_ETA_Test", RegistryPluginService.EquipmentPrimaryAssetType,
+            RegistryPluginService.EquipmentTaggedAssetClass,
+            GameplayBundleAssets: ["/Game/Mods/EquipmentCheck/BP_Test_ED.BP_Test_ED_C"]);
+        var equipmentRows = new[] { new RegistryPluginService.RegistryRow("/Game/Mods/EquipmentCheck/DA_DCMD_Test"), equipmentRow };
+        var discoverableEquipment = equipmentRow with { PackagePath = "/Game/Characters/Equipment/Mods/EquipmentCheck/DA_ETA_EquipmentCheck" };
+        Check(RegistryPluginService.ValidateRows([discoverableEquipment]).Count == 0 &&
+              RegistryPluginService.ValidateRows([discoverableEquipment with { AssetClassOverride = RegistryPluginService.PawnMetadataClass }]).Count > 0 &&
+              RegistryPluginService.ValidateRows([equipmentRow with { PackagePath = "/Game/Characters/Equipment/Batarang/DA_ETA_Batarang" }]).Count > 0 &&
+              RegistryPluginService.ValidateRows([equipmentRow with { PackagePath = "/Game/Characters/Equipment/Mods/DA_ETA_NoOwner" }]).Count > 0,
+            "equipment discovery allows only the dedicated mod-owned subtree, never stock equipment or unrelated asset classes", failures, output);
+        Check(RegistryPluginService.ValidateRows(equipmentRows).Count == 0 &&
+              !RegistryPluginService.VerificationMatches(structuredVerification, equipmentRows) &&
+              RegistryPluginService.VerificationMatches(structuredVerification + " exact_bundle_rows=1 exact_bundles=1 exact_bundle_assets=1 all_expected_bundles=yes", equipmentRows) &&
+              !RegistryPluginService.VerificationMatches(structuredVerification + " exact_bundle_rows=10 exact_bundles=1 exact_bundle_assets=1 all_expected_bundles=yes", equipmentRows) &&
+              !RegistryPluginService.VerificationMatches(structuredVerification + " exact_gameplay_bundles=1 all_expected_gameplay_bundles=yes", equipmentRows),
+            "custom equipment registry requires an exactly verified gameplay-loading bundle; old writers cannot silently omit it", failures, output);
+        foreach (var invalidPath in new[] { "/Game/Mods/Test/BP_NoObject", "/Script/Module.Class", "/Game/Mods/Test/../BP_Test.BP_Test_C", "/Game/Mods/Test/BP_Test.BP_Test_C;Injected", "/Game/Mods/Test/BP_Test.BP_Test_C:Subobject", "" })
+        {
+            Check(RegistryPluginService.ValidateRows([equipmentRow with { GameplayBundleAssets = [invalidPath] }]).Count > 0,
+                "registry gameplay bundle rejects invalid content object path: " + invalidPath, failures, output);
+        }
+        Check(RegistryPluginService.ValidateRows([equipmentRow with { GameplayBundleAssets = [equipmentRow.GameplayBundleAssets![0], equipmentRow.GameplayBundleAssets[0]] }]).Count > 0,
+            "registry gameplay bundle rejects duplicate object paths", failures, output);
         Check(
             UnrealPathUtil.SanitizeIdentifier("Joker TDKR (Jacket)") == "Joker_TDKR_Jacket" &&
             UnrealPathUtil.IsValidIdentifier("Joker_TDKR_Jacket") &&

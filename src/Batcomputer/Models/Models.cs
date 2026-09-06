@@ -715,6 +715,7 @@ public sealed class EquipmentSlotChange
 {
     public int Slot { get; set; }
     public string Gadget { get; set; } = "";
+    public CustomEquipmentRecipe? Custom { get; set; }
 }
 
 public sealed class NativeSuitRequirement

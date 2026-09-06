@@ -2957,6 +2957,19 @@ public sealed partial class MainForm
         var familyFilter = FilterVal(0);   // owning family
         var search = CurrentToyboxSearch();
         var tiles = new List<VirtualTilePanel.Tile>();
+        tiles.Add(new VirtualTilePanel.Tile
+        {
+            Title = "+ Custom equipment", Subtitle = "models · projectiles · HUD assets", Accent = Theme.Equipment,
+            OnClick = () => OpenEquipmentWorkshop(),
+            ToolTip = "Inspect extracted equipment and create a suit-local derivative. Static models use the held-item alignment workshop."
+        });
+        foreach (var saved in _currentProject?.EquipmentSlots.Where(s => s.Custom is not null) ?? [])
+        {
+            var captured = saved;
+            tiles.Add(new VirtualTilePanel.Tile { Title = saved.Custom!.Name,
+                Subtitle = $"slot {saved.Slot + 1} · custom {saved.Gadget}", Accent = Theme.Info,
+                OnClick = () => OpenEquipmentWorkshop(captured) });
+        }
         foreach (var eq in gd.Db.Equipment)
         {
             if (!MatchesToyboxSearch(search, eq.Name, string.Join(" ", eq.NativeFamilies)))
@@ -3238,6 +3251,38 @@ public sealed partial class MainForm
         var note = profile.SupportLabel.ToLowerInvariant();
         RecordChange("Equipment", $"slot {slot + 1}", $"{eq.Name} ({note})", status: "staged");
         AppendLog($"Staged '{eq.Name}' into equipment slot {slot + 1} and saved. See Review.");
+    }
+
+    private async void OpenEquipmentWorkshop(EquipmentSlotChange? existing = null)
+    {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("customize equipment")) return;
+        EnsureProject();
+        if (_currentProject is null) { Dialog.Info(this, "Select a suit", "Choose a base suit before creating equipment."); return; }
+        using var workshop = new EquipmentWorkshopForm(existing?.Custom);
+        if (workshop.ShowDialog(this) != DialogResult.OK || workshop.Result is null || workshop.SelectedEquipment is not { } equipment) return;
+        if (!new AnimArchetypeGraftService().BaseSupportsEquipment(_currentProject, out _))
+        { Dialog.Info(this, "Equipment unavailable", "This gameplay donor cannot carry equipment. Choose a playable combat donor first."); return; }
+        var profile = EquipmentDependencyService.Analyze(equipment, _currentProject.BaseProfile?.GameplayFamily);
+        if (profile.Support == EquipmentSupportKind.Controller)
+        { Dialog.Info(this, "Controller equipment", profile.Summary); return; }
+        if (profile.Support is EquipmentSupportKind.Experimental or EquipmentSupportKind.FamilyOnly &&
+            !Dialog.Confirm(this, "Experimental equipment", profile.Summary + "\n\nA static mesh does not supply missing player controls. Continue with an experimental derivative?", confirmText: "Continue")) return;
+        var slot = existing?.Slot ?? AskEquipmentSlot(equipment);
+        if (slot < 0) return;
+        var candidate = CloneProjectForPackagePreparation(_currentProject);
+        var recipe = workshop.Result.Clone(); recipe.Id = existing?.Custom?.Id ?? $"slot_{slot + 1}";
+        candidate.EquipmentSlots.RemoveAll(s => s.Slot == slot);
+        candidate.EquipmentSlots.Add(new() { Slot = slot, Gadget = equipment.Name, Custom = recipe });
+        candidate.UseCustomArchetype = true; candidate.GliderAutoEnabledCustomArchetype = false;
+        try
+        {
+            (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(candidate);
+            _currentProject = candidate;
+            RecordChange("Equipment", $"slot {slot + 1}", $"custom {recipe.Name} ({equipment.Name})", status: "staged");
+            AppendLog($"Saved custom equipment '{recipe.Name}'. Build mod to bake and register its independent assets.");
+            RefreshEquipmentCompatTiles(_toyboxTypeCombo.SelectedItem?.ToString());
+        }
+        catch (Exception ex) { Dialog.Error(this, "Equipment was not saved", ex.Message); }
     }
 
     private Button MakeTile(string title, string subtitle, Action onClick, Color accent, bool dashed = false)

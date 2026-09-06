@@ -1638,6 +1638,7 @@ public sealed partial class MainForm
 
             tagRows.Add(new PawnTagConfigService.TagRow(suit.PawnTag.Trim(), $"{mod.ModId}: {suit.DisplayName}"));
             tagRows.AddRange(HeldItemService.TagRows(suit));
+            tagRows.AddRange(CustomEquipmentService.TagRows(suit));
             stEntries[nameKey] = suit.DisplayName ?? "";
             stEntries[descKey] = suit.Description ?? "";
             stEntries[lockKey] = suit.LockedDescription ?? "";
@@ -1850,9 +1851,20 @@ public sealed partial class MainForm
             // Do this before retoc so a bad primary-asset row never produces a
             // misleadingly successful package.
             ModReleaseStep("Verifying the mod Asset Registry plugin…");
-            var registryRows = manifestSuits
-                .Select(suit => new RegistryPluginService.RegistryRow(suit.dcmd))
-                .ToList();
+            IReadOnlyList<RegistryPluginService.RegistryRow> registryRows;
+            try
+            {
+                registryRows = CharacterRegistryBundleService.CreateRows(
+                    stageContent, manifestSuits.Select(suit => suit.dcmd), mappings ??
+                    throw new InvalidDataException("A .usmap mappings file is required to read staged character loading bundles."));
+            }
+            catch (Exception ex)
+            {
+                preflight.Result.AddError("Asset Registry", "Could not read staged loading bundles: " + ex.Message);
+                _lastModReleaseFailure = new ModReleaseFailure(mod.DisplayName, preflight.Result);
+                AppendLog("Build mod ABORTED: could not prepare Asset Registry loading bundles: " + ex.Message);
+                return false;
+            }
             var registry = await new RegistryPluginService().BuildAsync(
                 outRoot,
                 mod.ModId,
@@ -2069,6 +2081,9 @@ public sealed partial class MainForm
                         archetype.Error ?? "custom archetype preparation failed.");
                 }
             }
+
+            await Task.Run(() => CustomEquipmentService.Generate(suit, contentRoot,
+                line => AppendLog("    equipment: " + line)));
 
             // Grafting can replace the stage from the donor, so material bindings must
             // be applied after the last possible stage rebuild.

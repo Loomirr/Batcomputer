@@ -1,6 +1,7 @@
 #include "BatcomputerRegistryWriterCommandlet.h"
 
 #include "AssetRegistry/AssetData.h"
+#include "AssetRegistry/AssetBundleData.h"
 #include "AssetRegistry/AssetRegistryState.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
@@ -27,6 +28,24 @@ struct FAdditionalRegistryRow
     FString ClassPathText;
     FTopLevelAssetPath AssetClassPath;
 };
+
+bool BundlesMatch(const FAssetBundleData& Actual, const FAssetBundleData& Expected)
+{
+    // Cooked registry serialization sorts bundle names and asset paths. Compare
+    // exact membership, not insertion order (the equipment slot order lives in DCMD).
+    if (Actual.Bundles.Num() != Expected.Bundles.Num()) return false;
+    for (const FAssetBundleEntry& Entry : Expected.Bundles)
+    {
+        const FAssetBundleEntry* Found = Actual.Bundles.FindByPredicate(
+            [&](const FAssetBundleEntry& Candidate) { return Candidate.BundleName == Entry.BundleName; });
+        if (!Found || Found->AssetPaths.Num() != Entry.AssetPaths.Num()) return false;
+        for (const FTopLevelAssetPath& Path : Entry.AssetPaths)
+        {
+            if (!Found->AssetPaths.Contains(Path)) return false;
+        }
+    }
+    return true;
+}
 
 bool ReadRequiredValue(
     const FString& Params,
@@ -186,6 +205,88 @@ int32 UBatcomputerRegistryWriterCommandlet::Main(const FString& Params)
         }
     }
 
+    // Character metadata preloads EquipmentList and UpgradeDataAssets through
+    // METADATA, and actor classes through GAMEPLAY/CINEMATIC. ETAs then preload
+    // their equipment definition through GAMEPLAY. Registering IDs alone is not enough.
+    TMap<FString, FAssetBundleData> AssetBundles;
+    FString AssetBundlesText, AssetBundlesFile;
+    if (FParse::Value(*Params, TEXT("AssetBundlesFile="), AssetBundlesFile))
+    {
+        AssetBundlesFile.TrimQuotesInline();
+        if (!FFileHelper::LoadFileToString(AssetBundlesText, *AssetBundlesFile))
+        {
+            UE_LOG(LogBatcomputerRegistryWriter, Error, TEXT("Could not read bundle input: %s"), *AssetBundlesFile);
+            return 11;
+        }
+    }
+    else if (FParse::Value(*Params, TEXT("AssetBundles="), AssetBundlesText))
+    {
+        AssetBundlesText.TrimQuotesInline();
+    }
+    FString LegacyBundlesText;
+    if (FParse::Value(*Params, TEXT("GameplayBundles="), LegacyBundlesText))
+    {
+        // Keep standalone equipment proofs compatible; current Batcomputer uses
+        // the named-bundle file protocol, avoiding command-line length limits.
+        LegacyBundlesText.TrimQuotesInline();
+        TArray<FString> LegacyRows;
+        LegacyBundlesText.ParseIntoArray(LegacyRows, TEXT(";"), false);
+        for (const FString& LegacyRow : LegacyRows)
+        {
+            FString LegacyPackage, LegacyAssets;
+            if (!LegacyRow.Split(TEXT("|"), &LegacyPackage, &LegacyAssets)) return 11;
+            if (!AssetBundlesText.IsEmpty()) AssetBundlesText += TEXT(";");
+            AssetBundlesText += LegacyPackage + TEXT("|ASSETBUNDLE_GAMEPLAY|") + LegacyAssets;
+        }
+    }
+    int32 ExpectedBundles = 0, ExpectedBundleAssets = 0;
+    if (!AssetBundlesText.IsEmpty())
+    {
+        TArray<FString> BundleRows;
+        AssetBundlesText.ParseIntoArray(BundleRows, TEXT(";"), false);
+        for (const FString& BundleRow : BundleRows)
+        {
+            TArray<FString> Fields;
+            BundleRow.ParseIntoArray(Fields, TEXT("|"), false);
+            if (Fields.Num() != 3) return 11;
+            const FString& BundlePackage = Fields[0];
+            const FString& BundleName = Fields[1];
+            const FString& AssetPathsText = Fields[2];
+            if ((BundleName != TEXT("ASSETBUNDLE_GAMEPLAY") &&
+                 BundleName != TEXT("ASSETBUNDLE_METADATA") &&
+                 BundleName != TEXT("ASSETBUNDLE_CINEMATIC")) ||
+                (AssetBundles.Contains(BundlePackage) && AssetBundles[BundlePackage].FindEntry(FName(*BundleName))) ||
+                (BundlePackage != PackageName && !AdditionalRows.ContainsByPredicate(
+                    [&](const FAdditionalRegistryRow& Row) { return Row.PackageName == BundlePackage; })))
+            {
+                UE_LOG(LogBatcomputerRegistryWriter, Error, TEXT("Invalid or duplicate bundle row: %s"), *BundleRow);
+                return 11;
+            }
+            TArray<FString> AssetPaths;
+            AssetPathsText.ParseIntoArray(AssetPaths, TEXT(","), false);
+            FAssetBundleData& Bundle = AssetBundles.FindOrAdd(BundlePackage);
+            TSet<FString> SeenPaths;
+            for (const FString& Path : AssetPaths)
+            {
+                const FSoftObjectPath ObjectPathValue(Path);
+                if (!ObjectPathValue.IsValid() || !ObjectPathValue.GetSubPathString().IsEmpty() ||
+                    !FPackageName::IsValidObjectPath(Path) ||
+                    Path.StartsWith(TEXT("/Script/"), ESearchCase::IgnoreCase) ||
+                    Path.Contains(TEXT("|")) || Path.Contains(TEXT(";")) ||
+                    Path.Contains(TEXT("\\")) || Path.Contains(TEXT("..")) ||
+                    SeenPaths.Contains(Path.ToLower()))
+                {
+                    UE_LOG(LogBatcomputerRegistryWriter, Error, TEXT("Invalid bundle object path: %s"), *Path);
+                    return 11;
+                }
+                SeenPaths.Add(Path.ToLower());
+                Bundle.AddBundleAsset(FName(*BundleName), ObjectPathValue.GetAssetPath());
+            }
+            if (SeenPaths.IsEmpty()) return 11;
+            ++ExpectedBundles;
+            ExpectedBundleAssets += SeenPaths.Num();
+        }
+    }
     const TArray<int32> ChunkIds;
 
     FAssetRegistryState State;
@@ -208,15 +309,19 @@ int32 UBatcomputerRegistryWriterCommandlet::Main(const FString& Params)
                 FPrimaryAssetId::PrimaryAssetNameTag,
                 InPrimaryAssetName);
 
-            State.AddAssetData(
-                new FAssetData(
+            FAssetData* AssetData = new FAssetData(
                     FName(*InPackageName),
                     FName(*InPackagePath),
                     FName(*InAssetName),
                     InAssetClassPath,
                     MoveTemp(Tags),
                     ChunkIds,
-                    0));
+                    0);
+            if (const FAssetBundleData* Bundle = AssetBundles.Find(InPackageName))
+            {
+                AssetData->TaggedAssetBundles = MakeShared<FAssetBundleData, ESPMode::ThreadSafe>(*Bundle);
+            }
+            State.AddAssetData(AssetData);
         };
 
     AddPrimaryAssetRow(PackageName, PrimaryAssetType, PrimaryAssetName, AssetClassPath);
@@ -324,6 +429,7 @@ int32 UBatcomputerRegistryWriterCommandlet::Main(const FString& Params)
     }
 
     int32 AssetCount = 0;
+    int32 ExactBundleRows = 0, ExactBundles = 0, ExactBundleAssets = 0;
     bool bFoundExactRow = false;
     bool bFoundExactPrimaryId = false;
     TArray<FString> ExpectedObjectPaths;
@@ -365,6 +471,18 @@ int32 UBatcomputerRegistryWriterCommandlet::Main(const FString& Params)
         [&](const FAssetData& AssetData)
         {
             ++AssetCount;
+            if (const FAssetBundleData* ExpectedBundle = AssetBundles.Find(AssetData.PackageName.ToString()))
+            {
+                if (AssetData.TaggedAssetBundles && BundlesMatch(*AssetData.TaggedAssetBundles, *ExpectedBundle))
+                {
+                    ++ExactBundleRows;
+                    ExactBundles += ExpectedBundle->Bundles.Num();
+                    for (const FAssetBundleEntry& Entry : ExpectedBundle->Bundles)
+                    {
+                        ExactBundleAssets += Entry.AssetPaths.Num();
+                    }
+                }
+            }
             const FString AssetObjectPath =
                 AssetData.GetObjectPathString();
             bool bMatchedExpectedPrimaryRow = false;
@@ -433,11 +551,13 @@ int32 UBatcomputerRegistryWriterCommandlet::Main(const FString& Params)
         ExactPrimaryIds == ExpectedObjectPaths.Num();
     const FString ExpectedPrimaryAssetIdsText =
         FString::Join(ExpectedPrimaryAssetIds, TEXT("|"));
+    const bool bFoundAllBundles = ExactBundleRows == AssetBundles.Num() &&
+        ExactBundles == ExpectedBundles && ExactBundleAssets == ExpectedBundleAssets;
 
     UE_LOG(
         LogBatcomputerRegistryWriter,
         Display,
-        TEXT("BATCOMPUTER_REGISTRY_WRITER_RESULT output=%s bytes=%lld cooked_header=%s assets=%d expected_primary_rows=%d exact_primary_rows=%d exact_primary_ids=%d expected_primary_asset_ids=%s package=%s object=%s class=%s primary_id=%s:%s exact_row=%s exact_primary_id=%s additional_rows=%d all_expected_rows=%s all_expected_primary_ids=%s sentinel_enabled=%s sentinel_object=%s sentinel_primary_id=%s:%s sentinel_exact_row=%s sentinel_exact_primary_id=%s"),
+        TEXT("BATCOMPUTER_REGISTRY_WRITER_RESULT output=%s bytes=%lld cooked_header=%s assets=%d expected_primary_rows=%d exact_primary_rows=%d exact_primary_ids=%d expected_primary_asset_ids=%s package=%s object=%s class=%s primary_id=%s:%s exact_row=%s exact_primary_id=%s additional_rows=%d all_expected_rows=%s all_expected_primary_ids=%s sentinel_enabled=%s sentinel_object=%s sentinel_primary_id=%s:%s sentinel_exact_row=%s sentinel_exact_primary_id=%s exact_bundle_rows=%d exact_bundles=%d exact_bundle_assets=%d all_expected_bundles=%s"),
         *OutputPath,
         static_cast<long long>(Serialized.Num()),
         bHasCookedHeader ? TEXT("yes") : TEXT("no"),
@@ -461,10 +581,15 @@ int32 UBatcomputerRegistryWriterCommandlet::Main(const FString& Params)
         bWriteSentinel ? *SentinelPrimaryAssetType : TEXT("<none>"),
         bWriteSentinel ? *SentinelPrimaryAssetName : TEXT("<none>"),
         bFoundExactSentinelRow ? TEXT("yes") : TEXT("no"),
-        bFoundExactSentinelPrimaryId ? TEXT("yes") : TEXT("no"));
+        bFoundExactSentinelPrimaryId ? TEXT("yes") : TEXT("no"),
+        ExactBundleRows,
+        ExactBundles,
+        ExactBundleAssets,
+        bFoundAllBundles ? TEXT("yes") : TEXT("no"));
 
     return bFoundAllExpectedRows &&
                    bFoundAllExpectedPrimaryIds &&
+                   bFoundAllBundles &&
                    bFoundExactSentinelRow &&
                    bFoundExactSentinelPrimaryId
                ? 0

@@ -15,7 +15,12 @@ public sealed class RegistryPluginService
 {
     public const string PrimaryAssetType = "PawnMetaData";
     public const string PawnMetadataClass = "/Script/DinnerPawnMetaData.DinnerCharacterMetaData";
+    public const string EquipmentPrimaryAssetType = "EquipmentTaggedAsset";
+    public const string EquipmentTaggedAssetClass = "/Script/TtEquipment.TtEquipmentTaggedAsset";
     public const string WriterResultMarker = "BATCOMPUTER_REGISTRY_WRITER_RESULT";
+    public const string GameplayBundle = "ASSETBUNDLE_GAMEPLAY";
+    public const string MetadataBundle = "ASSETBUNDLE_METADATA";
+    public const string CinematicBundle = "ASSETBUNDLE_CINEMATIC";
     private const string ProofSentinelRoot = "/Game/Developers/BatcomputerRegistryProbe";
     private const string WriterProbePackage = "/Game/Mods/BatcomputerWriterProbe/Characters/DA_DCMD_BatcomputerWriterProbe_Playable";
     private const string PrebuiltDirectoryName = "Prebuilt";
@@ -28,12 +33,23 @@ public sealed class RegistryPluginService
     /// <paramref name="PackagePath"/>; a mod can also include other native asset
     /// systems in the same cooked plugin registry.
     /// </summary>
+    public sealed record AssetBundle(string Name, IReadOnlyList<string> Assets);
+
     public sealed record RegistryRow(
         string PackagePath,
         string? PrimaryAssetTypeOverride = null,
         string? AssetClassOverride = null,
-        string? PrimaryAssetNameOverride = null)
+        string? PrimaryAssetNameOverride = null,
+        IReadOnlyList<string>? GameplayBundleAssets = null,
+        IReadOnlyList<AssetBundle>? Bundles = null)
     {
+        // Retain the equipment proof's convenience parameter, but serialize and
+        // verify every bundle through the same named-bundle contract.
+        public IEnumerable<AssetBundle> EffectiveBundles =>
+            (GameplayBundleAssets?.Count > 0
+                ? new[] { new AssetBundle(GameplayBundle, GameplayBundleAssets) }
+                : Array.Empty<AssetBundle>()).Concat(Bundles ?? Array.Empty<AssetBundle>());
+
         public string AssetName => string.IsNullOrWhiteSpace(PrimaryAssetNameOverride)
             ? UnrealPathUtil.AssetName(PackagePath)
             : PrimaryAssetNameOverride.Trim();
@@ -177,9 +193,15 @@ public sealed class RegistryPluginService
         foreach (var raw in candidates)
         {
             var package = UnrealPathUtil.NormalizePackagePath(raw.PackagePath);
-            if (string.IsNullOrWhiteSpace(package) || !package.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase))
+            var equipmentDiscoveryRoot = raw.EffectivePrimaryAssetType == EquipmentPrimaryAssetType &&
+                raw.EffectiveAssetClass == EquipmentTaggedAssetClass &&
+                package.StartsWith("/Game/Characters/Equipment/Mods/", StringComparison.Ordinal) &&
+                package["/Game/Characters/Equipment/Mods/".Length..].Split('/').Length >= 2;
+            if (string.IsNullOrWhiteSpace(package) ||
+                (!package.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase) && !equipmentDiscoveryRoot) ||
+                package.Split('/').Skip(1).Any(segment => !UnrealPathUtil.IsValidIdentifier(segment)))
             {
-                errors.Add($"Registry asset must be a clean /Game/Mods package path: '{raw.PackagePath}'.");
+                errors.Add($"Registry asset must be a clean mod-owned package path (/Game/Mods, or EquipmentTaggedAsset under /Game/Characters/Equipment/Mods/<mod>): '{raw.PackagePath}'.");
                 continue;
             }
             if (!packages.Add(package))
@@ -209,6 +231,23 @@ public sealed class RegistryPluginService
             {
                 errors.Add($"Registry asset class must be a /Script class path for '{package}': '{raw.EffectiveAssetClass}'.");
             }
+            var bundleNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var bundle in raw.EffectiveBundles)
+            {
+                if (bundle.Name is not (GameplayBundle or MetadataBundle or CinematicBundle) ||
+                    !bundleNames.Add(bundle.Name) || bundle.Assets.Count == 0)
+                {
+                    errors.Add($"Registry bundle must have a unique supported name and at least one asset for '{package}': '{bundle.Name}'.");
+                }
+                var bundleAssets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var path in bundle.Assets)
+                {
+                    if (!IsBundleObjectPath(path) || !bundleAssets.Add(path))
+                    {
+                        errors.Add($"Registry bundle '{bundle.Name}' needs unique, explicit content object paths: '{path}'.");
+                    }
+                }
+            }
         }
 
         if (packages.Count == 0)
@@ -217,6 +256,22 @@ public sealed class RegistryPluginService
         }
         return errors;
     }
+
+    internal static bool IsBundleObjectPath(string? path)
+    {
+        var dot = path?.LastIndexOf('.') ?? -1;
+        // References may point at native content (including DLC mounts). This
+        // does not relax the separate ownership checks on primary registry rows.
+        return !string.IsNullOrWhiteSpace(path) && dot > 0 && path.StartsWith('/') &&
+            !path.StartsWith("/Script/", StringComparison.OrdinalIgnoreCase) &&
+            path[..dot].Split('/').Length >= 3 &&
+            path[..dot].Split('/').Skip(1).All(UnrealPathUtil.IsValidIdentifier) &&
+            UnrealPathUtil.IsValidIdentifier(path[(dot + 1)..]);
+    }
+
+    internal static string SerializeBundles(IEnumerable<RegistryRow> rows) => string.Join(";",
+        rows.SelectMany(row => row.EffectiveBundles.Select(bundle =>
+            $"{row.PackagePath}|{bundle.Name}|{string.Join(',', bundle.Assets)}")));
 
     public static string BuildDescriptorJson(string pluginName, string modDisplayName)
     {
@@ -344,17 +399,24 @@ public sealed class RegistryPluginService
         }
     }
 
-    public static bool VerificationMatches(string verificationLine, IReadOnlyList<RegistryRow> rows) =>
-        verificationLine.Contains(WriterResultMarker, StringComparison.Ordinal) &&
-        verificationLine.Contains("cooked_header=yes", StringComparison.OrdinalIgnoreCase) &&
-        verificationLine.Contains($"expected_primary_rows={rows.Count}", StringComparison.OrdinalIgnoreCase) &&
-        verificationLine.Contains($"exact_primary_rows={rows.Count}", StringComparison.OrdinalIgnoreCase) &&
-        verificationLine.Contains($"exact_primary_ids={rows.Count}", StringComparison.OrdinalIgnoreCase) &&
-        verificationLine.Contains("all_expected_rows=yes", StringComparison.OrdinalIgnoreCase) &&
-        verificationLine.Contains("all_expected_primary_ids=yes", StringComparison.OrdinalIgnoreCase) &&
-        verificationLine.Contains("sentinel_enabled=yes", StringComparison.OrdinalIgnoreCase) &&
-        verificationLine.Contains("sentinel_exact_row=yes", StringComparison.OrdinalIgnoreCase) &&
-        verificationLine.Contains("sentinel_exact_primary_id=yes", StringComparison.OrdinalIgnoreCase);
+    public static bool VerificationMatches(string verificationLine, IReadOnlyList<RegistryRow> rows)
+    {
+        var fields = verificationLine.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var bundles = rows.SelectMany(row => row.EffectiveBundles).ToArray();
+        return fields.Contains(WriterResultMarker) && fields.Contains("cooked_header=yes") &&
+            fields.Contains($"expected_primary_rows={rows.Count}") &&
+            fields.Contains($"exact_primary_rows={rows.Count}") &&
+            fields.Contains($"exact_primary_ids={rows.Count}") &&
+            fields.Contains("all_expected_rows=yes") && fields.Contains("all_expected_primary_ids=yes") &&
+            fields.Contains("sentinel_enabled=yes") && fields.Contains("sentinel_exact_row=yes") &&
+            fields.Contains("sentinel_exact_primary_id=yes") &&
+            (bundles.Length == 0 ||
+             (fields.Contains("all_expected_bundles=yes") &&
+              fields.Contains($"exact_bundle_rows={rows.Count(row => row.EffectiveBundles.Any())}") &&
+              fields.Contains($"exact_bundles={bundles.Length}") &&
+              fields.Contains($"exact_bundle_assets={bundles.Sum(bundle => bundle.Assets.Count)}")));
+    }
 
     private static bool TryGetWriterToolchain(out WriterToolchain toolchain, out string error)
     {
@@ -567,13 +629,30 @@ public sealed class RegistryPluginService
             arguments.Add("-AdditionalRows=" + string.Join(";", rows.Skip(1).Select(row =>
                 $"{row.PackagePath}|{row.AssetName}|{row.EffectivePrimaryAssetType}|{row.EffectiveAssetClass}")));
         }
+        string? bundleFile = null;
+        var bundleText = SerializeBundles(rows);
+        if (bundleText.Length > 0)
+        {
+            // Large suit collections exceed Windows' command-line limit when
+            // their metadata dependencies are embedded in arguments.
+            bundleFile = Path.Combine(Path.GetDirectoryName(outputPath)!, $"bundles-{Guid.NewGuid():N}.txt");
+            await File.WriteAllTextAsync(bundleFile, bundleText, new UTF8Encoding(false));
+            arguments.Add($"-AssetBundlesFile={bundleFile}");
+        }
         arguments.Add($"-SentinelPackage={ProofSentinelRoot}/{pluginName}Sentinel");
         arguments.AddRange(new[] { "-Unattended", "-NoSplash", "-NoSourceControl", "-UTF8Output" });
-        return await RunProcessAsync(
-            toolchain.EditorCommand,
-            Path.GetDirectoryName(toolchain.WriterProject) ?? toolchain.EngineRoot,
-            arguments,
-            log);
+        try
+        {
+            return await RunProcessAsync(
+                toolchain.EditorCommand,
+                Path.GetDirectoryName(toolchain.WriterProject) ?? toolchain.EngineRoot,
+                arguments,
+                log);
+        }
+        finally
+        {
+            if (bundleFile is not null) File.Delete(bundleFile);
+        }
     }
 
     private static string FindVerificationLine(string output) =>

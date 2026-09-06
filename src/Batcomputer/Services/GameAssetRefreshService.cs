@@ -174,6 +174,7 @@ public sealed class GameAssetRefreshService
         // a Red Brick authoring or collectables extraction profile.
         ViewerBaseGameRedBrickPaletteService.RetocFilter,
     }.Concat(HeldItemFilters).Concat(HeldItemEffectService.ExtractionFilters).Concat(CharacterDependencyAbilityFilters)
+        .Concat(EquipmentAssetService.ExtractionFilters)
         .Concat(TextureCookTemplateService.RetocFilters.Where(filter =>
             !filter.StartsWith(CharacterGadgetFilter, StringComparison.OrdinalIgnoreCase)))
         .ToArray();

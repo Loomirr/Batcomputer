@@ -18,10 +18,11 @@ public sealed class WeaponModelEditorForm : AdaptiveForm
     private readonly Button _save;
     public WeaponModelRecipe? Result { get; private set; }
 
-    public WeaponModelEditorForm(string reference, WeaponModelRecipe? existing)
+    public WeaponModelEditorForm(string reference, WeaponModelRecipe? existing, bool equipment = false)
     {
         _working = existing?.Clone();
-        Text = "Batcomputer — Weapon workshop";
+        Text = equipment ? "Batcomputer — Equipment model workshop" : "Batcomputer — Weapon workshop";
+        if (equipment) _original.Text = "Show original equipment model";
         ClientSize = new Size(1220, 840); MinimumSize = new Size(980, 720);
         BackColor = Theme.WindowBg; ForeColor = Theme.OnDark; Font = Theme.Body;
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 3, Padding = new Padding(14) };
@@ -29,7 +30,7 @@ public sealed class WeaponModelEditorForm : AdaptiveForm
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 78)); root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 70));
         Controls.Add(root);
         var header = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Padding = new Padding(6, 0, 0, 8) };
-        header.Controls.Add(new Label { Text = "WEAPON WORKSHOP", ForeColor = Theme.Gold, Font = new Font(Font.FontFamily, 18, FontStyle.Bold), AutoSize = true }, 0, 0);
+        header.Controls.Add(new Label { Text = equipment ? "EQUIPMENT MODEL WORKSHOP" : "WEAPON WORKSHOP", ForeColor = Theme.Gold, Font = new Font(Font.FontFamily, 18, FontStyle.Bold), AutoSize = true }, 0, 0);
         header.Controls.Add(new Label { Text = "Import your model · align against the original · validate the game-ready mesh", AutoSize = true, ForeColor = Theme.OnDarkMuted }, 0, 1);
         root.Controls.Add(header, 0, 0); root.SetColumnSpan(header, 2);
         var previewCard = new Panel { Dock = DockStyle.Fill, BackColor = Theme.CardBg, Padding = new Padding(1), Margin = new Padding(10, 0, 0, 0) };
@@ -70,7 +71,8 @@ public sealed class WeaponModelEditorForm : AdaptiveForm
         cancel.Dock = DockStyle.Fill; _save.Dock = DockStyle.Fill;
         footer.Controls.Add(_status, 0, 0); footer.Controls.Add(cancel, 1, 0); footer.Controls.Add(_save, 2, 0);
         root.Controls.Add(footer, 0, 2); root.SetColumnSpan(footer, 2);
-        panel.Controls.Add(new Label { Text = "Collision, hitboxes and damage stay native. Material preview uses slot colors, not final game shaders. Save the parent ability editor, then rebuild your suit to package the model.", AutoSize = true, MaximumSize = new Size(320, 0) });
+        panel.Controls.Add(new Label { Text = (equipment ? "OBJ baking reuses a donor collision shell; it does not fit collision or retune projectiles. " : "Collision, hitboxes and damage stay native. ") + "Material preview uses slot colors, not final game shaders. " +
+            (equipment ? "Save the Equipment workshop, then rebuild your mod to package the model." : "Save the parent ability editor, then rebuild your suit to package the model."), AutoSize = true, MaximumSize = new Size(320, 0) });
         FillMaterials();
         _timer.Tick += async (_, _) => { _timer.Stop(); await RefreshAsync(); };
         Shown += async (_, _) =>

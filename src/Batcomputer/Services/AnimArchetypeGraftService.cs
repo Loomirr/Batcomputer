@@ -831,7 +831,7 @@ public sealed class AnimArchetypeGraftService
             var nativeAtSlot = exactDonorEquipmentKnown &&
                                donorEquipmentSlots.TryGetValue(change.Slot, out var donorItem) &&
                                donorItem.Equals(eq.Name, StringComparison.OrdinalIgnoreCase);
-            if (!nativeAtSlot && !string.IsNullOrWhiteSpace(eq.EdPackage))
+            if ((!nativeAtSlot || change.Custom is not null) && !string.IsNullOrWhiteSpace(eq.EdPackage))
             {
                 foreignEd.Add((change.Slot, eq.EdPackage));
             }
@@ -2087,6 +2087,7 @@ public sealed class AnimArchetypeGraftService
 
     public static bool RequiresCustomArchetype(NativeSuitProject project) =>
         project.UseCustomArchetype ||
+        project.EquipmentSlots.Any(slot => slot.Custom is not null) ||
         AbilityLoadoutService.HasCustomizations(project) ||
         HasExactEquipmentGraftDependency(project);
 

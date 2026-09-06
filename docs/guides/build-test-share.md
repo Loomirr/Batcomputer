@@ -34,6 +34,12 @@ or installation fails, it does not publish a partial trio over the last working 
 Restart the game after each new installation. Unreal discovers tags, registry rows, and primary
 assets during startup.
 
+Registry loading bundles are rebuilt from each suit's final staged character metadata, including
+its playable/cinematic actors, equipment entries and upgrade references. Referenced custom
+equipment entries also register their definition-loading bundle. Missing staged custom dependencies
+or unreadable metadata stop the build; native and DLC dependencies are referenced without being
+overwritten. These are Batcomputer packaging changes and do not require a runtime DLL update.
+
 ![Successful build check](../assets/screenshots/release-preflight-passed.jpg){ .bc-doc-shot loading=lazy }
 
 ## Test matrix
@@ -62,6 +68,7 @@ Suit releases require Loomirr's LOTDK UE4SS. They must not include or overwrite 
 
 ## Before publishing
 
+- Custom equipment: use the [Equipment workshop checklist](equipment-workshop.md#limits-and-testing), including separate projectile variants and a native-suit control test.
 - Back up your project and source textures or OBJ files.
 - Confirm the Mod ID is final.
 - Include Loomirr's LOTDK UE4SS and the compatible game build in requirements.

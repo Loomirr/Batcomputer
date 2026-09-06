@@ -557,7 +557,9 @@ public sealed class StageValidationService
                             exact = false;
                             break;
                         }
-                        expectedEquipment[change.Slot] = UnrealPathUtil.NormalizePackagePath(equipment.EdPackage);
+                        expectedEquipment[change.Slot] = change.Custom is null
+                            ? UnrealPathUtil.NormalizePackagePath(equipment.EdPackage)
+                            : CustomEquipmentService.DefinitionPackage(project, change.Custom);
                     }
                     var actualEquipment = stagedEquipment.Equipment.OrderBy(entry => entry.Index)
                         .Select(entry => entry.IsNull ? "" : UnrealPathUtil.NormalizePackagePath(entry.PackagePath))

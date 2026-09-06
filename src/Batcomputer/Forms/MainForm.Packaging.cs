@@ -631,6 +631,9 @@ public sealed partial class MainForm
             }
         }
 
+        await Task.Run(() => CustomEquipmentService.Generate(packageProject, contentRootToPackage,
+            line => AppendLog("Custom equipment: " + line)));
+
         // Re-apply saved material assignments to the FINAL packaged stage. A part/
         // glider graft can rebuild the stage from the base playable (dropping the
         // materials), so without this the pak ships with base-game materials instead
@@ -1879,7 +1882,7 @@ public sealed partial class MainForm
             var rule = new Dictionary<string, object?>
             {
                 ["slot"] = change.Slot,
-                ["with_equipment"] = ToObjectPath(newEq.EtaPackage),
+                ["with_equipment"] = ToObjectPath(CustomEquipmentService.EffectiveEtaPackage(project, change, newEq.EtaPackage)),
             };
             if (!string.IsNullOrWhiteSpace(newEq.UpgradePackage))
             {
