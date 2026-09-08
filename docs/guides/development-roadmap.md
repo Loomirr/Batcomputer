@@ -1,33 +1,43 @@
-# Development and release order
+# What's next
 
-## Current priority: release stabilization
+The next release is mostly about testing and fixing bugs. Custom characters, extra suits, held items, and existing-rig body imports have worked in-game. Now we need to check the combinations people will actually use.
 
-The independent-character proof, both variants and the normal editor build have passed user testing. Existing-rig body import also has a successful in-game proof. These are implemented beta workflows, not a reason to skip compatibility testing.
+The [release test checklist](release-test-checklist.md) covers the full run. These are the main areas we're watching.
 
-Work through the [next-release acceptance checklist](release-test-checklist.md) before adding features or assembling the release archive. Prioritize characters and child suits, save/restart behavior, material/stage recovery, skinned bodies/parts and unchanged native-character suits. A successful build is not proof of runtime behavior.
+## Characters and suits
+
+The [character editor](custom-characters.md) creates a separate roster entry with its own suits. We're checking multiple characters and mods together, saved selections after restarting, and co-op.
+
+New voices, scripted story roles, unlock challenges, custom roster emblems, and default-vehicle editing aren't supported yet.
 
 ## Abilities and held items
 
-Supported combat bundles, sword/bat/baton adapters, independent held items, fourteen native examples, custom models and left/right-hand placement are implemented. User tests confirmed the normal bat/baton/prop flow and the separate native baton trail. Regression coverage checks dependencies and combat-only animation changes.
+Combat styles, sword/bat/baton attacks, custom held models, and left/right-hand placement are working. Combat-style changes should only replace combat animations, not a character's whole animation set.
 
-Configurable VFX/status combinations were subsequently reported to crash during suit hover. They remain parked, not accepted for release. The original working baton trail does not certify the expanded editor. Before release, isolate those experimental controls behind a clear opt-in or leave them out of the public build. Shield/hammer BigFig adapters remain out of scope.
-
-## Recovery and native-suit fixes
-
-Stage transactions, generated-texture recovery, attachment offsets and character-aware UI fixes have regression coverage. Catwoman/Robin cutscene and restart behavior still belong in every release's in-game smoke test with the separately supplied runtime. The frontend remains Batman-only by design.
+The extra effects and status-effect experiments are on hold after crashes when hovering over suits. The working native baton trail doesn't mean every effect combination is safe. BigFig shield and hammer adapters aren't part of the current work.
 
 ## Custom equipment
 
-The independent banana/Batarang proof was confirmed visible and usable, with native upgrades. The workshop supports eligible playable static-mesh equipment, visual references and projectile meshes. Validate the normal editor flow on more supported donors; NPC/boss, unsupported and mainly skeletal equipment remain view-only. Independent held props are distinct from selectable equipment.
+The [equipment workshop](equipment-workshop.md) supports eligible playable equipment with static-mesh bodies. Held models and projectile models can be changed separately. NPC, boss, and mainly skeletal equipment stay view-only.
 
-## Experimental existing-rig skinned meshes
+HUD icons need more testing. The normal workflow starts with one white PNG, but the automatic SDF conversion isn't fully verified against the native shader yet.
 
-The weighted FBX body proof loaded in-game. The [workshop](skeletal-mesh-proof.md) imports bodies and compatible skeletal parts, validates the existing rig and cooks project-owned revisions. Expand acceptance to attachments, materials, failed imports, save/reopen and in-game deformation. New skeletons, facial rigs, cloth and skeletal equipment remain outside this pass.
+## Skinned meshes
 
-## Independent characters
+The [skinned-mesh importer](skeletal-mesh-proof.md) uses rigs already in the game. The model needs to be weighted in Blender or another 3D editor before importing.
 
-The [character editor](custom-characters.md) separates roster identity from gameplay donor, creates default and child suits, and generates additive group/progression/roster data without runtime DLL changes. The proof and normal build work in-game. Complete the multi-character, multi-mod, save/restart and co-op matrix before release. Scripted story casting, new voices, unlock challenges, custom roster emblems and default vehicles are not implemented by this pass.
+We're checking attachments, material assignments, save/reopen, failed imports, and deformation in-game. New rigs, cloth, facial rigs, and skeletal equipment need separate work.
 
-## After release acceptance
+## Fixes to keep checking
 
-Choose the next bounded feature from character roster presentation, broader supported equipment coverage or existing-rig import polish. Revisit unsafe effects separately with isolated tests. Do not expand into new rigs or story-character replacement until their own research and proof are authorized.
+- Catwoman and Robin suits in cutscenes and after restarting.
+- Texture recovery and rebuilding older projects.
+- Hip and shoulder clearance without offsets stacking.
+- Ordinary native-character suits alongside custom characters.
+- A clean portable install, with no development files or test mods included.
+
+The frontend stays Batman-only. That's intended.
+
+## After this release
+
+Possible next steps are better character presentation options, more supported equipment, and improvements to skinned-mesh imports. The crash-prone effects need their own tests before coming back.

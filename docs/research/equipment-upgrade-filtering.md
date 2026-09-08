@@ -16,8 +16,8 @@ These observations describe serialized assets, not a completed runtime test of f
 
 Keep the native upgrade ownership/purchase data unchanged. Clone the Batarang functionality data asset under the suit/mod namespace, retain only the Number of Batarangs entry, and repoint only that suit's Batarang entry in `UpgradeDataAssets`. Preserve the Batclaw entry and all unrelated character data. Do not remove global unlock tags or patch the shipped functionality set.
 
-This is a plausible suit-local whitelist, not yet a guarantee of per-equipment isolation. Functionality effects apply through character attributes; two Batarang-derived items on the same suit may share those attributes. Trace selection/unselection and ability-condition evaluation before promising independent upgrade policies for multiple items on one character.
+This may work for one suit, but separate items on the same character could still affect each other. The effects use character attributes, which two Batarang-derived items may share. Selection changes and ability conditions need testing before each item can have its own upgrade rules.
 
 Test with upgrades already purchased as well as a clean test save. Confirm multi-throw works, disabled special modes cannot be selected or triggered, native Batarangs on other suits retain every upgrade, co-op players remain independent, and save/restart does not restore filtered effects. Review upgrade-menu presentation separately from runtime functionality so it does not advertise unsupported modes for the custom item.
 
-No upgrade filters, progression changes or runtime DLL changes were implemented during this research. The first proof should remain isolated and assets/config-only unless evidence establishes a need for additional runtime support.
+Upgrade filtering isn't implemented yet. This research didn't change progression or runtime DLLs. An isolated test using assets and configuration is the next step.

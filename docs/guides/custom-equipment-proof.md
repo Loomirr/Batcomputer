@@ -1,4 +1,4 @@
-# Custom equipment proof - current status
+# Custom equipment: registration and testing
 
 The banana Batarang metadata fix is **confirmed working in-game**: the custom equipment appears, can be used, and inherits working Batarang upgrades. Some native Batarang effects remain. The first [Equipment workshop](equipment-workshop.md) now brings independent static-model and visual bindings into the tool; that generalized authoring flow still needs in-game acceptance testing. Independent held props and fighting styles remain separate systems.
 
@@ -14,7 +14,7 @@ Batcomputer now reads the **finished staged DCMD** when building a mod and write
 
 The writer reloads the cooked registry and checks every bundle name and asset path. Unreadable metadata or missing staged mod-owned dependencies stop the build. Native dependencies are referenced, not overwritten or added as mod-owned registry rows.
 
-The `BananaEquipmentV2-MetadataFix-Test` was a registry-only correction of the existing V2 suit: its trio, loose tags, manifest and descriptor were unchanged. Neither LOTDKExpanded nor LOTDKDeveloperTools was modified. The user subsequently confirmed the missing-slot/use issue was resolved and Batarang upgrades worked.
+The metadata-fix test changed only the registry; the suit's trio, loose tags, manifest, and descriptor stayed the same. Neither runtime DLL changed. In-game testing then confirmed the equipment slot, attacks, and inherited Batarang upgrades worked.
 
 ## Earlier registration retest
 
@@ -24,7 +24,7 @@ The new `Banana Equipment V2` test also uses a unique primary-asset name and pla
 
 Offline checks verify all 18 cooked packages, the matching ETA/definition gameplay tags, the suit's metadata and runtime equipment slot, the localized menu name, and the registry gameplay bundle. These establish correct package structure, not in-game success.
 
-## Acceptance gate
+## What to test in-game
 
 On Batman, select **Banana Equipment V2** after a full game restart. Check the banana HUD icon, switching between it and the Batclaw, aiming, quick throwing, the held/projectile models, and returning to an ordinary Batman suit with its original Batarang. Then reselect the test after a restart.
 

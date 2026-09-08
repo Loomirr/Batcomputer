@@ -1,13 +1,26 @@
-# Character projects and suit projects
+# How characters and suits fit together
 
-The first custom character and both suits worked in-game. The editor is now implemented; see [Custom characters](../guides/custom-characters.md). Scripted cutscene casting is explicitly out of scope. Permanent owner/variant IDs and initially unlocked progression are the first supported identity model; group emblem/default-vehicle and unlock-rule editing remain future work.
+The first custom character and both of its suits worked in-game. The [Characters tab](../guides/custom-characters.md) now uses that same setup.
 
-- **Characters** is a separate main tab, alongside **Suits**. Each character owns its default suit and additional variants.
-- Mods can contain character projects and suit projects. Adding a character includes its default suit and its required group, registry, localization, tag and progress assets.
-- Character editing should reuse the suit editor's categories (parts, materials, textures, animations, abilities, equipment and previews). Shared controls should not be duplicated into a second independent implementation.
-- Character identity replaces suit-only identity controls: character name, unique owner tag, group/emblem, default variant and unlock settings. Gameplay/rig donor remains separate from roster identity.
-- A created character becomes available as a **suit base**. New suits inherit that character's owner, group and compatible gameplay defaults, but receive unique child pawn/progress tags, metadata and asset paths. Never silently put them back under the donor's original owner.
-- The default suit belongs to the new character. A generic example is `Pawns.Playable.CustomCharacter.CustomCharacter`, unlocked by default. Its second variant is `Pawns.Playable.CustomCharacter.NoHood`, identical except for the removed head attachment in playable and cutscene assets.
-- Reusing a saved user suit for character creation must copy its recipe and dependencies without moving or altering the original.
+## Character projects
 
-Regression tests should cover roster discovery, both suits, independent progression, save/restart, character switching and cinematic loading. Keep the existing suit-only donor-owner checks until explicit character ownership is modeled; do not remove those checks globally.
+A character project creates a separate roster entry and includes its default suit. It has a permanent character ID, its own pawn tag, and the group and progression data needed by the game.
+
+The editor shares the suit tools: parts, materials, textures, animations, abilities, equipment, gliders, and previews. The gameplay donor supplies compatible gameplay and rig data; it doesn't own the new character.
+
+## Additional suits
+
+Once saved, a character appears under **Your characters** in the base picker. Creating a suit from it keeps the character owner and gives the new suit its own variant ID and asset paths.
+
+For example:
+
+- Default: `Pawns.Playable.CustomCharacter.CustomCharacter`
+- Extra suit: `Pawns.Playable.CustomCharacter.NoHood`
+
+Copying an existing suit into a character leaves the original project in place. A mod can include characters and ordinary suit projects together.
+
+## Limits
+
+Variants start unlocked. Scripted story roles aren't supported. Group emblems, default vehicles, and custom unlock rules aren't editable yet.
+
+The [release checklist](../guides/release-test-checklist.md) covers roster discovery, suit switching, saved selections, restarts, and co-op.

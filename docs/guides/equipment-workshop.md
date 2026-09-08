@@ -52,7 +52,7 @@ Automatic HUD conversion is still experimental. The generated shape can look rig
 
 Custom OBJ materials take precedence over the component's original override materials. Set those slots in the 3D editor; conflicting component overrides are rejected. The preview uses neutral/reference and colored-slot alignment shaders, not a final in-game material renderer.
 
-Native effects and audio are visible for inspection but read-only in this pass. Leftover Batarang trails, impact effects or sounds are therefore expected. This does not re-enable the parked extra-effects/status experiments.
+You can inspect native effects and audio, but can't edit them here yet. A custom Batarang may still have the original trails, impact effects, or sounds. The crash-prone extra-effects experiments are still on hold.
 
 ## Limits and testing
 

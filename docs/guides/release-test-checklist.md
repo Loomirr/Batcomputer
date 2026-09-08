@@ -1,6 +1,6 @@
-# Next-release acceptance checklist
+# What to test before the next release
 
-Use the normal Batcomputer UI, not only prebuilt proof paks. The character proof and latest normal build passed in-game; this matrix covers combinations those successes do not establish. Automated checks complement gameplay testing, not replace it.
+Use the normal Batcomputer menus for these tests, even if the prebuilt test paks worked. We're checking that you can create, save, reopen, and build the same thing yourself—not just load a finished mod.
 
 ## Before starting
 

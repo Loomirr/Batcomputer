@@ -2,7 +2,7 @@
 
 Batcomputer is a Windows modding tool for *LEGO Batman: Legacy of the Dark Knight*.
 Build suits, customize equipment, and create new playable characters using assets from your own
-copy of the game. Batcomputer handles packaging and installation.
+copy of the game. Pick a base, make your changes, and build a mod to try in-game.
 
 > **Current release:** `0.9.0-beta.10`
 > **Documentation:** [loomirr.github.io/Batcomputer](https://loomirr.github.io/Batcomputer/)
@@ -15,7 +15,7 @@ or Loomirr's LOTDK UE4SS.
 The development build adds [custom characters](https://loomirr.github.io/Batcomputer/guides/custom-characters/)
 with their own suits, a [custom equipment workshop](https://loomirr.github.io/Batcomputer/guides/equipment-workshop/),
 and experimental [skinned-mesh imports using existing game rigs](https://loomirr.github.io/Batcomputer/guides/skeletal-mesh-proof/).
-These are being tested for the next release and may not be in the current download.
+We're testing these for the next release, so they may not be in the current download yet.
 Use the [release test checklist](https://loomirr.github.io/Batcomputer/guides/release-test-checklist/) if you're testing a development build.
 
 - Build a suit from a visual base and a playable gameplay donor.
@@ -28,8 +28,7 @@ Use the [release test checklist](https://loomirr.github.io/Batcomputer/guides/re
 - Create a new playable character and give it its own suits.
 - Package characters and suits together, install the mod, or export a ZIP to share.
 
-New characters and existing-rig skinned meshes are development features. Extra cosmetic effects
-and status-effect experiments are on hold after crash reports.
+Extra effects and status-effect experiments are on hold while we track down crash reports.
 
 ## Requirements
 
@@ -83,7 +82,7 @@ For the complete walkthrough, see the
 
 ## Loomirr's LOTDK UE4SS
 
-The required UE4SS package is installed separately. Batcomputer installs each mod's `mod.json` under
+Install Loomirr's LOTDK UE4SS separately. Batcomputer puts each mod's `mod.json` under
 `ue4ss\LOTDKExpanded\Mods` and its registry plugin under
 `ue4ss\LOTDKExpanded\RegistryPlugins`. Loomirr's LOTDK UE4SS supplies the shared
 `LOTDKExpandedCoreRegistry` plugin that keeps the Asset Manager scanning `/Game/Mods`. Mod archives

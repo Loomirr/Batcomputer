@@ -42,6 +42,6 @@ Do not install a proof/test mod and a new mod using the same character/pawn iden
 ## Current boundaries
 
 - Scripted story cutscene casting is **not supported** for new characters. Compatible cutscene Blueprint assets are still generated as part of the normal metadata/loading structure; this does not grant a story role.
-- New voices, dialogue, mission permissions, bespoke skeletons and unlock challenges are not part of this pass.
+- New voices, dialogue, mission permissions, new skeletons, and unlock challenges aren't supported yet.
 - Variants start unlocked. The roster group currently inherits Batman's emblem/default vehicle and native upgrade-menu flag; per-character roster presentation controls are future work. Portraits and suit icons are editable normally.
-- Abilities/equipment support is the same as for suits. Previously deferred VFX/status-effect risks have not been changed by this feature.
+- Abilities and equipment work the same way as they do for suits. The extra VFX/status-effect experiments are still on hold because of crashes.
