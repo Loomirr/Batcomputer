@@ -15,7 +15,7 @@ or Loomirr's LOTDK UE4SS.
 The development build adds [custom characters](https://loomirr.github.io/Batcomputer/guides/custom-characters/)
 with their own suits, a [custom equipment workshop](https://loomirr.github.io/Batcomputer/guides/equipment-workshop/),
 and experimental [skinned-mesh imports using existing game rigs](https://loomirr.github.io/Batcomputer/guides/skeletal-mesh-proof/).
-We're testing these for the next release, so they may not be in the current download yet.
+These are still being tested for the next release, so they may not be in the current download yet.
 Use the [release test checklist](https://loomirr.github.io/Batcomputer/guides/release-test-checklist/) if you're testing a development build.
 
 - Build a suit from a visual base and a playable gameplay donor.
@@ -28,7 +28,7 @@ Use the [release test checklist](https://loomirr.github.io/Batcomputer/guides/re
 - Create a new playable character and give it its own suits.
 - Package characters and suits together, install the mod, or export a ZIP to share.
 
-Extra effects and status-effect experiments are on hold while we track down crash reports.
+Extra effects and status-effect experiments are on hold until the reported crashes are resolved.
 
 ## Requirements
 

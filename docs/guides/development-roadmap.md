@@ -1,12 +1,12 @@
 # What's next
 
-The next release is mostly about testing and fixing bugs. Custom characters, extra suits, held items, and existing-rig body imports have worked in-game. Now we need to check the combinations people will actually use.
+The next release is mostly about testing and fixing bugs. Custom characters, extra suits, held items, and existing-rig body imports have worked in-game. The combinations people will actually use still need testing.
 
-The [release test checklist](release-test-checklist.md) covers the full run. These are the main areas we're watching.
+The [release test checklist](release-test-checklist.md) covers the full run. These are the main areas to check.
 
 ## Characters and suits
 
-The [character editor](custom-characters.md) creates a separate roster entry with its own suits. We're checking multiple characters and mods together, saved selections after restarting, and co-op.
+The [character editor](custom-characters.md) creates a separate roster entry with its own suits. Multiple characters and mods together, saved selections after restarting, and co-op still need testing.
 
 New voices, scripted story roles, unlock challenges, custom roster emblems, and default-vehicle editing aren't supported yet.
 
@@ -26,7 +26,7 @@ HUD icons need more testing. The normal workflow starts with one white PNG, but 
 
 The [skinned-mesh importer](skeletal-mesh-proof.md) uses rigs already in the game. The model needs to be weighted in Blender or another 3D editor before importing.
 
-We're checking attachments, material assignments, save/reopen, failed imports, and deformation in-game. New rigs, cloth, facial rigs, and skeletal equipment need separate work.
+Attachments, material assignments, save/reopen, failed imports, and deformation in-game still need testing. New rigs, cloth, facial rigs, and skeletal equipment need separate work.
 
 ## Fixes to keep checking
 
