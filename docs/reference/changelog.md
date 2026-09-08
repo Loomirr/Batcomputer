@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Custom characters have their own editor and default suit, with additional suits grouped under the same character. See [Custom characters](../guides/custom-characters.md).
+- The [equipment workshop](../guides/equipment-workshop.md) supports custom models, model/settings copy and paste, and a shared UI-texture picker. Icon entries distinguish direct SDF inputs, material SDF inputs, upgrade icons, and BCA color textures.
+- The icon guide now starts with a single white PNG and explains conversion and assignment. Automatic SDF conversion still needs in-game validation.
+
 - **Settings** → **Visual** now changes the header, window icon, and accent palette. **Classic**
   keeps the original gold look, **Alternate** uses blue highlights, and **Mayhem Mode** combines its
   own artwork with purple and lime. The dark layout, category colors, and status colors stay

@@ -1,8 +1,8 @@
 [![Batcomputer](docs/assets/brand/Header.png)](https://loomirr.github.io/Batcomputer/)
 
-Batcomputer is a Windows tool for creating playable suit mods for
-*LEGO Batman: Legacy of the Dark Knight*. It builds suits from character assets in your own copy of
-the game, then packages and installs them.
+Batcomputer is a Windows modding tool for *LEGO Batman: Legacy of the Dark Knight*.
+Build suits, customize equipment, and create new playable characters using assets from your own
+copy of the game. Batcomputer handles packaging and installation.
 
 > **Current release:** `0.9.0-beta.10`
 > **Documentation:** [loomirr.github.io/Batcomputer](https://loomirr.github.io/Batcomputer/)
@@ -12,37 +12,24 @@ or Loomirr's LOTDK UE4SS.
 
 ## What it does
 
-The development branch also includes [independent custom characters](docs/guides/custom-characters.md)
-with their own default/child suits and an experimental [existing-rig skinned-mesh workshop](docs/guides/skeletal-mesh-proof.md).
-These additions are undergoing [next-release acceptance testing](docs/guides/release-test-checklist.md);
-they are not a claim that an older downloadable beta contains the new workflow.
+The development build adds [custom characters](https://loomirr.github.io/Batcomputer/guides/custom-characters/)
+with their own suits, a [custom equipment workshop](https://loomirr.github.io/Batcomputer/guides/equipment-workshop/),
+and experimental [skinned-mesh imports using existing game rigs](https://loomirr.github.io/Batcomputer/guides/skeletal-mesh-proof/).
+These are being tested for the next release and may not be in the current download.
+Use the [release test checklist](https://loomirr.github.io/Batcomputer/guides/release-test-checklist/) if you're testing a development build.
 
-- Starts a suit with a gameplay donor and a playable, cutscene, or supported extracted `_Quest`
-  visual base.
-- Adds hair, hats, capes, torsos, accessories, equipment, and exact per-suit animation overrides.
-- Selects the exact shipped Minifig or Smallfig root-body geometry without replacing the gameplay
-  donor's runtime setup.
-- Adapts verified native cape/glider pairs across compatible gameplay donors without replacing the
-  donor's general play style or visual identity.
-- Copies working game materials and applies new textures to individual mesh slots.
-- Imports static OBJ attachments with a separate stable slot for each named `usemtl` section.
-- Keeps tool-created materials available to other suits in the same workspace and previews indexed
-  native parts with their resolved default materials before applying them.
-- Imports cooked animation packs into a workspace-wide library and lets one exact action, montage,
-  layer, or locomotion row use a compatible base-game, DLC, or imported animation.
-- Edits each suit's ordered AbilitySet loadout and individual gameplay-ability grants through
-  mod-local clones, with protected core entries and required equipment/glider dependencies.
-- Applies coordinated native fighting-style bundles and sword/bat/baton player adapters while keeping exactly
-  one melee style active and validating the matching effects, held items, equipment, upgrades, and
-  animation parents before packaging.
-- Adds independently customizable held items. Expanded cosmetic VFX and stun/smoke status prototypes
-  remain parked after reported crashes; they are not accepted release features.
-- Creates the PawnTag, DCMD, UIMD, StringTable, and Asset Registry data the game needs.
-- Builds one or more suits into a single mod release.
-- Installs the pak trio, PawnTags configuration, mod manifest, and registry plugin to the correct
-  game folders.
-- Creates an installable ZIP with the correct game folder layout.
-- Includes a 3D preview with saved placement and UV adjustments for each part.
+- Build a suit from a visual base and a playable gameplay donor.
+- Add parts, capes, gliders, materials, textures, and custom OBJ attachments.
+- Preview the model in 3D and save custom-part placement and UV adjustments.
+- Import cooked animation packs into a shared library, then replace individual animations.
+- Change abilities and fighting styles, with checks for required equipment and compatible animations.
+- Add held items separately from the fighting style.
+- Customize supported equipment models, projectiles, and icons.
+- Create a new playable character and give it its own suits.
+- Package characters and suits together, install the mod, or export a ZIP to share.
+
+New characters and existing-rig skinned meshes are development features. Extra cosmetic effects
+and status-effect experiments are on hold after crash reports.
 
 ## Requirements
 
@@ -124,7 +111,20 @@ The documentation includes a full
 [materials and faces guide](https://loomirr.github.io/Batcomputer/guides/materials-textures-faces/),
 [character animation guide](https://loomirr.github.io/Batcomputer/guides/animations/),
 [suit abilities guide](https://loomirr.github.io/Batcomputer/guides/abilities/),
+[equipment workshop guide](https://loomirr.github.io/Batcomputer/guides/equipment-workshop/),
 and [troubleshooting checklist](https://loomirr.github.io/Batcomputer/help/troubleshooting/).
+
+## Equipment icons
+
+Start with one white icon on a transparent background. In **Textures**, choose
+**Equipment HUD icon (transparent PNG)** to convert it into a game-ready SDF texture.
+Assign that same cook to the matching **HUD SDF / direct** and **HUD SDF / material** entries,
+then save the equipment and rebuild. You don't need to draw a second colored image.
+
+The prepared-SDF profile is for already encoded artwork; it does not convert a white PNG.
+BCA color icons are a separate format, only for references labeled BCA. The current converter
+is experimental: its output still needs checking in-game. See the
+[icon setup steps](https://loomirr.github.io/Batcomputer/guides/equipment-workshop/#equipment-icons).
 
 ## Visual base and gameplay donor
 
@@ -176,4 +176,4 @@ Batcomputer is not affiliated with TT Games, Warner Bros. Games, or the LEGO Gro
 
 ## License
 
-[MIT](LICENSE). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for bundled dependency notices.
+[MIT](LICENSE). See the [third-party notices](https://loomirr.github.io/Batcomputer/reference/third-party-notices/) for bundled dependencies.

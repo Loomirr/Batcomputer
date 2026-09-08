@@ -1,6 +1,6 @@
 site_name: Batcomputer
 site_url: https://loomirr.github.io/Batcomputer/
-site_description: Create playable suit mods for LEGO Batman — Legacy of the Dark Knight
+site_description: Create suits, equipment, and custom characters for LEGO Batman — Legacy of the Dark Knight
 repo_url: https://github.com/Loomirr/Batcomputer
 repo_name: Loomirr/Batcomputer
 edit_uri: edit/main/docs/
@@ -58,6 +58,7 @@ nav:
       - Materials, textures, and faces: guides/materials-textures-faces.md
       - Character animations: guides/animations.md
       - Suit abilities: guides/abilities.md
+      - Custom equipment: guides/equipment-workshop.md
       - Custom static meshes: guides/custom-meshes.md
       - Skinned meshes (experimental): guides/skeletal-mesh-proof.md
       - Build, test, and share: guides/build-test-share.md
@@ -67,6 +68,7 @@ nav:
       - Compatibility and beta limits: reference/compatibility.md
       - Frequently asked questions: reference/faq.md
       - Changelog: reference/changelog.md
+      - Third-party notices: reference/third-party-notices.md
   - Help:
       - Troubleshooting: help/troubleshooting.md
       - Report a problem: help/reporting-issues.md

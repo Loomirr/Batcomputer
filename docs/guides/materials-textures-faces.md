@@ -134,7 +134,7 @@ The import window makes a first guess from the PNG name. Common game-style endin
 This is only a shortcut. Check the selected use before importing, especially when a filename contains
 the word `mask` but is not an MMR or colour mask.
 
-Current cook profiles write the full mip chain, including the small inline mips Unreal can select
+World-texture cook profiles write the full mip chain, including the small inline mips Unreal can select
 when texture quality is lowered or the streaming pool is busy. A 2K character texture should carry
 all twelve levels from 2048 through 1 pixel. **Epic** texture quality is not a fix for a broken cook;
 it can simply keep one of the good larger mips resident and hide a bad lower level.
@@ -242,6 +242,11 @@ gameplay and cutscene donors with native micro-detail but without the Mask of Te
 metallic switch and unusually strong negative decal-roughness value.
 
 ### UI icons
+
+Equipment HUD icons use a different workflow from the portraits below. Start with one white PNG
+on a transparent background and choose **Equipment HUD icon (transparent PNG)**. Assign its
+generated SDF to both matching HUD inputs in the equipment workshop. See
+[Equipment icons](equipment-workshop.md#equipment-icons) for the steps and current limitations.
 
 The four UIMD icon fields do not all use the same size:
 

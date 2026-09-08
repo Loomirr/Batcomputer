@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Refreshes the README and Pages guides with the custom-character and equipment workflows, clearer icon instructions, and generic character examples. README guide links now open the documentation site.
+
+- Equipment icon rows now distinguish direct HUD SDF inputs, material SDF inputs, upgrade variants and BCA color artwork. Selection help explains which cook belongs in each binding and keeps unverified HUD conversion behavior explicit.
+
+- Adds an editable texture path plus a workspace-wide UI-cook picker to the Equipment workshop, including safe staging of referenced cooks from other saved projects. Equipment icons have separate transparent-PNG-to-SDF, prepared SDF, and color/alpha BCA profiles. HUD conversion validates the alpha silhouette; BCA retains the native single-mip layout. These profiles need in-game visual validation. Clarifies that cooking alone does not assign an equipment icon.
+
+- Adds Copy model and settings / Paste model and settings in the Equipment workshop. Reuse a custom OBJ, alignment, scale and material slots across static-model parts of the same equipment; pasted copies remain independently editable.
+
 - Adds a next-release acceptance checklist and updates the roadmap to reflect the proven character/equipment/body workflows, while keeping crash-prone configurable effects/status combinations explicitly parked.
 
 - Fixes DeveloperResearch extraction omitting `PROG_Characters` after a successful refresh. Developer filters now inherit all full-character dependencies; refresh coverage and early build preflight verify complete character-group/progression donor pairs.

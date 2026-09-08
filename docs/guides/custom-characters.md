@@ -1,6 +1,6 @@
 # Custom characters
 
-The **Characters** tab creates independent playable roster entries, not additional suits under Batman or another native character. The Moon Knight registration proof and both variants were confirmed working in-game. The editor integration is a new beta workflow and should be tested on a backed-up save.
+The **Characters** tab creates independent playable roster entries, not additional suits under Batman or another native character. Custom characters and their suit variants have been tested in-game. The editor is still in beta, so back up your save before testing.
 
 ## Create a character
 

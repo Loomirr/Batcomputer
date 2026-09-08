@@ -1,25 +1,27 @@
 # New characters with their own suits — research, 6 September 2026
 
-Status: initial research followed by Moon Knight proof 01 (authorized 6 September). The isolated proof has passed offline cooked-container checks; in-game roster discovery is not verified yet. No runtime DLL change, game installation or save modification. The Characters-tab workflow remains planned, as described in [the editor flow](custom-character-editor-flow.md).
+These notes record the first custom-character registration test. The character, both suits, and their abilities later worked in-game, and the editor now uses that registration path without runtime DLL changes. See [Custom characters](../guides/custom-characters.md) for the current workflow.
 
-## Assessment
+## Initial assessment
+
+This section records the questions raised before the first in-game test. The results and remaining test coverage are listed below.
 
 Feasible, with much of the asset-authoring work already available. A first existing-rig, donor-gameplay character is a medium-to-high difficulty registration proof, not another skeletal import problem. Production-ready roster integration, progression, save/load and scripted story behavior remain the harder part. A character group alone is not sufficient.
 
-The smallest useful proof is **one genuinely new character with two visibly different suits**, while retaining Batman as a separate, unchanged roster entry. Per the user's preference, proof 01 uses their existing **Moon Knight suit** as the starting visual recipe, not CJ. It reuses its proven Gray Ghost gameplay donor, with no new animations, skeletons, equipment controllers or custom voice work. The second suit removes only the head attachment; both start unlocked.
+The smallest useful proof is **one genuinely new character with two visibly different suits**, while retaining Batman as a separate, unchanged roster entry. The test started from an existing custom suit. It reuses its proven Gray Ghost gameplay donor, with no new animations, skeletons, equipment controllers or custom voice work. The second suit removes only the head attachment; both start unlocked.
 
 ## Confirmed structure and proposed mapping
 
-The identity tags below are used by proof 01, which has not been installed. Actor and metadata stems carry the proof ID to avoid colliding with the original Moon Knight suit's primary asset IDs.
+The tags below are generic examples, not installed asset names. Each character needs unique owner and variant IDs; actor and metadata names must also avoid collisions with existing suits.
 
 | Layer | Example | Purpose |
 |---|---|---|
-| Character identity | `Pawns.Playable.MoonKnight` | Independent roster owner; not another Batman suit tag |
-| Group asset | `DA_CharacterGroup_MoonKnight` | Base tag, character name/emblem, default suit and permission to select variants |
-| Default suit | `Pawns.Playable.MoonKnight.MoonKnight` | Own DCMD, playable, cutscene and UI metadata |
-| Second suit | `Pawns.Playable.MoonKnight.NoHood` | Second independent identity beneath the same group; head attachment removed |
-| Progress | `GameProgress.Definitions.Characters.MoonKnight.MoonKnight` / `.NoHood` | Unlock, viewed and saved state for each suit |
-| Gameplay donor | Retain the existing Moon Knight suit's proven donor | Movement, combat, interaction and input machinery; separate from roster ownership |
+| Character identity | `Pawns.Playable.CustomCharacter` | Independent roster owner; not another Batman suit tag |
+| Group asset | `DA_CharacterGroup_CustomCharacter` | Base tag, character name/emblem, default suit and permission to select variants |
+| Default suit | `Pawns.Playable.CustomCharacter.CustomCharacter` | Own DCMD, playable, cutscene and UI metadata |
+| Second suit | `Pawns.Playable.CustomCharacter.NoHood` | Second independent identity beneath the same group; head attachment removed |
+| Progress | `GameProgress.Definitions.Characters.CustomCharacter.CustomCharacter` / `.NoHood` | Unlock, viewed and saved state for each suit |
+| Gameplay donor | Retain the existing custom character suit's proven donor | Movement, combat, interaction and input machinery; separate from roster ownership |
 
 The current base-game group assets were read directly from the installed containers. Batman's group contains `BaseCharacterTag`, `DisplayName`, `Symbol`, `DefaultCharacterVariant`, `DefaultVehicle`, `bAllowPlayerVariantSelection=true`, and `AbilityTags`. Catwoman has the same structure. **There is no explicit suit array on the group asset.**
 
@@ -41,7 +43,7 @@ Primary asset type/ID registration, scan rules and loading bundles are separate 
 
 Already reusable: native tags, DCMD/UIMD and text generation, independent suit packages, registry writer supporting multiple primary types, cinematic/loading bundles, existing-rig bodies, attachments, materials, abilities, combat styles, held items and custom equipment. `LOTDKExpanded` currently derives character scope generically from `Pawns.Playable.<owner>`, maintains selections per scope, and intentionally limits frontend startup preload to Batman. These are useful foundations, **not proof that it adds new roster groups**. Leave the Batman-only frontend policy intact.
 
-Still to prove:
+Original research questions:
 
 - Startup discovery of a custom group and a custom progress-definition set, including registry IDs and actual native group lookup.
 - Safe additive roster configuration and menu materialization. Generated `TtCharacterGroupSystem` headers expose no registration function or map contents; their generated `.cpp` stubs are not the game's native implementation.
@@ -54,13 +56,13 @@ Try an assets/config-first proof. **Do not promise zero runtime work yet:** if t
 
 Update, 6 September: the user confirmed that the independent character, both suit variants and their abilities worked fully in-game. Scripted story cutscene appearances were absent and accepted as unsupported. This does not establish new dialogue/story permissions or a complete co-op/restart matrix. The editor now uses the proven assets/config registration path without runtime DLL changes.
 
-1. Copy the existing Moon Knight visual recipe into an isolated proof; leave the original suit untouched. Register the new Moon Knight group, two pawn tags and progress tags; package all assets in unique paths. Keep existing characters untouched.
+1. Copy the existing custom character visual recipe into an isolated proof; leave the original suit untouched. Register the new custom character group, two pawn tags and progress tags; package all assets in unique paths. Keep existing characters untouched.
 2. Verify primary IDs for group, both DCMDs and progress set; verify exact DCMD lookup and child-tag enumeration before spawning.
 3. Verify the new roster tile, correct name/emblem, two suit tiles and initially unlocked state.
 4. Select each suit in gameplay; switch back to Batman; restart and retest both suits, cinematic loading and co-op. Start with a backup/test save.
-5. Only after those pass, integrate a new-character project above the existing suit projects in Batcomputer.
+5. Repeat these checks through the Characters tab as well as with the original test packages.
 
-Offline proof 01 checks passed: 27 packages re-read from the final IoStore container, 10 texture payloads and the custom hood mesh decoded, both progress definitions initially Unlocked, exact playable/menu/cinematic links, original saved suit unchanged, and all non-head component properties equal between variants. The registry commandlet verified four exact primary rows and six character loading bundles. A native engine-source trace confirms plugin `Config/CharacterSelectSystem.ini` is the additive configuration layer; actual Shipping-game roster acceptance remains an in-game test. The proof is in `artifacts/MoonKnightCharacterProof01` with its builder, acceptance report and install-layout ZIP.
+Offline proof 01 checks passed: 27 packages re-read from the final IoStore container, 10 texture payloads and the custom hood mesh decoded, both progress definitions initially Unlocked, exact playable/menu/cinematic links, original saved suit unchanged, and all non-head component properties equal between variants. The registry commandlet verified four exact primary rows and six character loading bundles. A native engine-source trace confirms plugin `Config/CharacterSelectSystem.ini` is the additive configuration layer; the subsequent in-game test confirmed roster discovery and both suits.
 
 ## Evidence and limits
 

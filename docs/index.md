@@ -1,8 +1,8 @@
 # Batcomputer
 
-Batcomputer is a Windows tool for creating playable suit mods for
-*LEGO Batman: Legacy of the Dark Knight*. It uses assets extracted from your own game, creates the
-metadata the game needs, and packages the finished mod for Loomirr's LOTDK UE4SS.
+Batcomputer is a Windows modding tool for *LEGO Batman: Legacy of the Dark Knight*.
+Create suits, change equipment, and build new playable characters from assets in your own game.
+Batcomputer handles the files and registration needed to package and install your mod.
 
 ![Batcomputer's mod workspace](assets/screenshots/home-mods.jpg){ .bc-doc-shot loading=lazy }
 
@@ -12,6 +12,10 @@ metadata the game needs, and packages the finished mod for Loomirr's LOTDK UE4SS
     repeatable problem.
 
 ## Start here
+
+Testing the development build? Start with [custom characters](guides/custom-characters.md),
+[custom equipment](guides/equipment-workshop.md), or the
+[next-release test checklist](guides/release-test-checklist.md). These features may not be in the current download.
 
 <div class="grid cards" markdown>
 
