@@ -14,25 +14,37 @@ public static class CharacterRegistryBundleService
     {
         var rows = new List<RegistryPluginService.RegistryRow>();
         var equipment = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var upgrades = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void AddUpgrade(string package)
+        {
+            if (!IsModOwned(package) || !upgrades.Add(package)) return;
+            if (upgrades.Count > 256) throw new InvalidDataException("Custom upgrade registry graph exceeds the supported bound.");
+            var asset = LoadStaged(stageContentRoot, package, mappings);
+            var export = asset.Exports.OfType<NormalExport>().SingleOrDefault(candidate =>
+                candidate.GetExportClassType()?.ToString() is "UpgradeFunctionalityDataAsset" or "UpgradeFunctionalitySet")
+                ?? throw new InvalidDataException($"'{package}' has no supported upgrade metadata export.");
+            var isRoot = export.GetExportClassType()!.ToString() == "UpgradeFunctionalityDataAsset";
+            var row = CreateUpgradeRow(package, export, isRoot);
+            RequireOwnedRow(row); rows.Add(row);
+            if (isRoot) foreach (var child in ReadArray(export, "UpgradeSets")) AddUpgrade(child[..child.LastIndexOf('.')]);
+        }
         foreach (var package in characterPackages)
         {
             RequireOwnedRow(new RegistryPluginService.RegistryRow(package));
             var character = LoadStaged(stageContentRoot, package, mappings);
             rows.Add(CreateCharacterRow(package, character));
             var metadata = CharacterExport(character);
+            foreach (var path in ReadArray(metadata, "UpgradeDataAssets")) AddUpgrade(path[..path.LastIndexOf('.')]);
             foreach (var path in ReadArray(metadata, "EquipmentList"))
             {
                 var etaPackage = path[..path.LastIndexOf('.')];
                 if (!IsModOwned(etaPackage) || !equipment.Add(etaPackage)) continue;
-                var etaRow = new RegistryPluginService.RegistryRow(etaPackage,
-                    RegistryPluginService.EquipmentPrimaryAssetType, RegistryPluginService.EquipmentTaggedAssetClass);
-                RequireOwnedRow(etaRow);
                 var eta = LoadStaged(stageContentRoot, etaPackage, mappings);
                 var export = eta.Exports.OfType<NormalExport>()
-                    .SingleOrDefault(candidate => candidate.GetExportClassType()?.ToString() == "TtEquipmentTaggedAsset")
-                    ?? throw new InvalidDataException($"'{etaPackage}' has no TtEquipmentTaggedAsset export.");
-                var definition = ReadReference(export, "Equipment", required: true)!;
-                rows.Add(etaRow with { GameplayBundleAssets = [definition] });
+                    .SingleOrDefault(candidate => candidate.GetExportClassType()?.ToString() is "TtEquipmentTaggedAsset" or "TtDeployableEquipmentTaggedAsset")
+                    ?? throw new InvalidDataException($"'{etaPackage}' has no supported equipment tagged-asset export.");
+                var etaRow = CreateEquipmentRow(etaPackage, export, export.GetExportClassType()!.ToString() == "TtDeployableEquipmentTaggedAsset");
+                RequireOwnedRow(etaRow); rows.Add(etaRow);
             }
         }
 
@@ -49,6 +61,34 @@ public static class CharacterRegistryBundleService
 
     internal static RegistryPluginService.RegistryRow CreateCharacterRow(string package, UAsset character)
         => CreateCharacterRowFromMetadata(package, CharacterExport(character));
+
+    internal static RegistryPluginService.RegistryRow CreateEquipmentRow(string package, NormalExport metadata, bool deployable)
+    {
+        var dependencies = new List<string>();
+        if (deployable) dependencies.Add(ReadReference(metadata, "DeployableCharacterMetaData", required: true)!);
+        dependencies.Add(ReadReference(metadata, "Equipment", required: true)!);
+        return new(package, RegistryPluginService.EquipmentPrimaryAssetType,
+            deployable ? RegistryPluginService.DeployableEquipmentTaggedAssetClass : RegistryPluginService.EquipmentTaggedAssetClass,
+            GameplayBundleAssets: dependencies.Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
+    }
+
+    internal static RegistryPluginService.RegistryRow CreateUpgradeRow(string package, NormalExport metadata, bool isRoot)
+    {
+        var bundles = new List<RegistryPluginService.AssetBundle>();
+        if (isRoot)
+        {
+            var sets = ReadArray(metadata, "UpgradeSets").Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            if (sets.Length > 0) bundles.Add(new(RegistryPluginService.MetadataBundle, sets));
+        }
+        else
+        {
+            var functions = ReadArray(metadata, "UpgradeFunctionality").Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            if (functions.Length > 0) bundles.Add(new(RegistryPluginService.GameplayBundle, functions));
+            bundles.Add(new(RegistryPluginService.MetadataBundle, [ReadReference(metadata, "UpgradeData", required: true)!]));
+        }
+        return new(package, isRoot ? RegistryPluginService.UpgradeRootType : RegistryPluginService.UpgradeSetType,
+            isRoot ? RegistryPluginService.UpgradeRootClass : RegistryPluginService.UpgradeSetClass, Bundles: bundles);
+    }
 
     internal static RegistryPluginService.RegistryRow CreateCharacterRowFromMetadata(string package, NormalExport metadata)
     {

@@ -10,7 +10,7 @@ internal static class ExtractedPackagePathService
 {
     internal sealed record Mount(string PackageRoot, string ContentRoot);
 
-    public static IReadOnlyList<Mount> EnumerateMounts(string baseContentRoot)
+    public static IReadOnlyList<Mount> EnumerateMounts(string baseContentRoot, bool includeGameFeatures = true)
     {
         if (string.IsNullOrWhiteSpace(baseContentRoot))
         {
@@ -34,6 +34,7 @@ internal static class ExtractedPackagePathService
         }
 
         var mounts = new List<Mount> { new("/Game", contentRoot) };
+        if (!includeGameFeatures) return mounts;
         var gameRoot = Directory.GetParent(contentRoot)?.FullName;
         if (string.IsNullOrWhiteSpace(gameRoot))
         {
@@ -89,7 +90,12 @@ internal static class ExtractedPackagePathService
             return null;
         }
 
-        foreach (var mount in EnumerateMounts(baseContentRoot))
+        var baseMount = EnumerateMounts(baseContentRoot, includeGameFeatures: false);
+        // Most lookups are inside Content. Do not rescan every installed DLC directory
+        // for each template, material dependency and sidecar in a multi-suit build.
+        var mounts = baseMount.Count > 0 && IsWithinOrEqual(fullPath, baseMount[0].ContentRoot)
+            ? baseMount : EnumerateMounts(baseContentRoot);
+        foreach (var mount in mounts)
         {
             if (!IsWithinOrEqual(fullPath, mount.ContentRoot))
             {
@@ -130,7 +136,9 @@ internal static class ExtractedPackagePathService
             return null;
         }
 
-        foreach (var mount in EnumerateMounts(baseContentRoot))
+        var isBaseGame = package.Equals("/Game", StringComparison.OrdinalIgnoreCase) ||
+            package.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase);
+        foreach (var mount in EnumerateMounts(baseContentRoot, includeGameFeatures: !isBaseGame))
         {
             if (!package.Equals(mount.PackageRoot, StringComparison.OrdinalIgnoreCase) &&
                 !package.StartsWith(mount.PackageRoot + "/", StringComparison.OrdinalIgnoreCase))

@@ -23,4 +23,4 @@ Copying an existing suit into a character leaves the original project in place. 
 
 Variants start unlocked. Scripted story roles aren't supported. Group emblems, default vehicles, and custom unlock rules aren't editable yet.
 
-The [release checklist](../guides/release-test-checklist.md) covers roster discovery, suit switching, saved selections, restarts, and co-op.
+Multiple installed character mods, saved selections and co-op still need broader testing.

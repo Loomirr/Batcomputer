@@ -16,7 +16,6 @@ The development build adds [custom characters](https://loomirr.github.io/Batcomp
 with their own suits, a [custom equipment workshop](https://loomirr.github.io/Batcomputer/guides/equipment-workshop/),
 and experimental [skinned-mesh imports using existing game rigs](https://loomirr.github.io/Batcomputer/guides/skeletal-mesh-proof/).
 These are still being tested for the next release, so they may not be in the current download yet.
-Use the [release test checklist](https://loomirr.github.io/Batcomputer/guides/release-test-checklist/) if you're testing a development build.
 
 - Build a suit from a visual base and a playable gameplay donor.
 - Add parts, capes, gliders, materials, textures, and custom OBJ attachments.
@@ -115,14 +114,15 @@ and [troubleshooting checklist](https://loomirr.github.io/Batcomputer/help/troub
 
 ## Equipment icons
 
-Start with one white icon on a transparent background. In **Textures**, choose
-**Equipment HUD icon (transparent PNG)** to convert it into a game-ready SDF texture.
-Assign that same cook to the matching **HUD SDF / direct** and **HUD SDF / material** entries,
-then save the equipment and rebuild. You don't need to draw a second colored image.
+Import a white silhouette on transparency as **Equipment SDF icon (white + green PNG)**. Paint optional
+accent areas pure green (`#00FF00`); the material adds the outline. A 256×256 canvas with roughly 32px
+margins is a useful starting point. Choose the SDF in **Set up HUD icon material…**, adjust its appearance,
+then save equipment and rebuild. Fill and outline colours, opacity, width, glow, grain and sharpness
+are adjustable. **Native defaults** restores the tested starting appearance.
 
-The prepared-SDF profile is for already encoded artwork; it does not convert a white PNG.
-BCA color icons are a separate format, only for references labeled BCA. The current converter
-is experimental: its output still needs checking in-game. See the
+Existing prepared-SDF cooks keep their original recipes. **Equipment color icon (BCA)** preserves the
+painted image, including any outline, and is only needed for inputs labelled BCA. SDF icons and green
+accents have passed in-game testing; the new appearance controls still need an in-game check. See the
 [icon setup steps](https://loomirr.github.io/Batcomputer/guides/equipment-workshop/#equipment-icons).
 
 ## Visual base and gameplay donor

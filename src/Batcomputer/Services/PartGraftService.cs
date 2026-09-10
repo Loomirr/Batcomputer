@@ -45,9 +45,11 @@ public sealed class PartGraftService
     public string ProjectRoot { get; }
     public string GuiOutputRoot => Path.Combine(AppSettings.GeneratedRootFor(ProjectRoot), "NativeSuitGuiProjects");
 
-    public PartGraftService(string projectRoot)
+    private readonly NativeSuitPartIndex? _replayIndex;
+    public PartGraftService(string projectRoot, NativeSuitPartIndex? replayIndex = null)
     {
         ProjectRoot = projectRoot;
+        _replayIndex = replayIndex;
     }
 
     public PartGraftBatchResult CreateTorso2GraftedStage(NativeSuitProject project)
@@ -817,7 +819,7 @@ public sealed class PartGraftService
             return null;
         }
 
-        var index = new PartIndexService(ProjectRoot).LoadPartIndex();
+        var index = _replayIndex ?? new PartIndexService(ProjectRoot).LoadPartIndex();
         if (index is null)
         {
             return part;

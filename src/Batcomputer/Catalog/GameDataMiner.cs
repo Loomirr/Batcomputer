@@ -8,8 +8,9 @@ namespace Batcomputer;
 /// Mines the shippable <see cref="GameDataDb"/> from an extracted game content
 /// dump. Runs once (dev-side) whenever the game patches; the resulting JSON is
 /// shipped in the tool so end users never extract anything for compatibility
-/// features. Only reads import tables (no .usmap required) and enumerates files
-/// on disk - it never copies asset bytes.
+/// features. Reads references and enumerates files without copying asset bytes.
+/// Mappings resolve exact equipment definitions; unambiguous name/import-table
+/// references provide a fallback when mappings are unavailable.
 /// </summary>
 public sealed class GameDataMiner
 {
@@ -77,68 +78,76 @@ public sealed class GameDataMiner
             }
         }
 
-        // 2) Equipment catalog - one entry per gadget folder that has a DA_ETA_*.
+        // 2) One entry per tagged asset, including nested DataAssets folders.
         var equipmentByName = new Dictionary<string, GameDataEquipment>(StringComparer.OrdinalIgnoreCase);
         if (Directory.Exists(equipmentRoot))
         {
             foreach (var dir in Directory.EnumerateDirectories(equipmentRoot))
             {
-                var eta = Directory.EnumerateFiles(dir, "DA_ETA_*.uasset").FirstOrDefault();
-                if (eta is null)
+                if (Path.GetFileName(dir).Equals("Mods", StringComparison.OrdinalIgnoreCase)) continue;
+                var taggedAssets = Directory.EnumerateFiles(dir, "DA_ETA_*.uasset", SearchOption.AllDirectories).OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToArray();
+                foreach (var eta in taggedAssets)
                 {
-                    continue;
-                }
-
-                var gadget = Path.GetFileName(dir);
-                // Pick the CANONICAL loadout ED, not just the first BP_*_ED alphabetically.
-                // Folders often hold variants (…Rapid_ED, …_P2_ED) that sort before the
-                // base ED (e.g. BP_RasThrowingStarsRapid_ED < BP_RasThrowingStars_ED because
-                // 'R' < '_'). The base-game loadout + the DA_ETA both use "BP_<Gadget>_ED",
-                // so prefer that exact name; then the shortest ED name; else the first.
-                var eds = Directory.EnumerateFiles(dir, "BP_*_ED.uasset").ToList();
-                var preferredEdName = $"BP_{gadget}_ED";
-                var ed = eds.FirstOrDefault(f => Path.GetFileNameWithoutExtension(f)
-                             .Equals(preferredEdName, StringComparison.OrdinalIgnoreCase))
-                         ?? eds.OrderBy(f => Path.GetFileNameWithoutExtension(f).Length)
-                             .ThenBy(f => f, StringComparer.OrdinalIgnoreCase)
-                             .FirstOrDefault();
-                var upgradesDir = Path.Combine(dir, "Upgrades");
-                var upgrade = Directory.Exists(upgradesDir)
-                    ? Directory.EnumerateFiles(upgradesDir, "DA_UF_*.uasset").FirstOrDefault()
-                    : null;
-                // Abilities to grant into the suit's ability set so the gadget actually functions.
-                // Most hand/thrown gadgets (whip, batarang, ninjastar) use LAM-managed
-                // GA_Item_<Gadget>* packages. WEAPON-style gadgets (FreezeGun, MachineGun,
-                // RocketLauncher, Pistol, …) instead keep their gameplay abilities in the gadget's
-                // OWN Abilities/ subfolder (GA_Aim*/GA_Fire*/GA_*Beam). Without granting those the
-                // weapon equips but does nothing. So: prefer the LAM GA_Item_ set; if none, fall
-                // back to the gadget folder's own GA_*.
-                var visualAbilities = lamItemAbilities
-                    .Where(a => a.StartsWith($"GA_Item_{gadget}", StringComparison.OrdinalIgnoreCase))
-                    .Select(a => $"/Game/Characters/Abilities/LAMManagedAbilities/{a}")
-                    .ToList();
-                if (visualAbilities.Count == 0)
-                {
-                    var abilitiesDir = Path.Combine(dir, "Abilities");
-                    if (Directory.Exists(abilitiesDir))
+                    var gadget = taggedAssets.Length == 1 ? Path.GetFileName(dir) : Path.GetFileNameWithoutExtension(eta)["DA_ETA_".Length..];
+                    string edPackage = "";
+                    if (_mappings is not null)
                     {
-                        visualAbilities = Directory.EnumerateFiles(abilitiesDir, "GA_*.uasset")
-                            .Select(ToGamePath)
-                            .ToList();
+                        try
+                        {
+                            var asset = EquipmentAssetService.Read(_contentRoot, ToGamePath(eta), _mappings);
+                            var property = asset.Exports.OfType<UAssetAPI.ExportTypes.NormalExport>().SelectMany(e => e.Data)
+                                .Single(p => p.Name.ToString() == "Equipment");
+                            edPackage = EquipmentAssetService.Reference(asset, property)?.Package ?? "";
+                        }
+                        catch (Exception error) { result.Warnings.Add($"Cannot resolve equipment definition for {gadget}: {error.Message}"); }
                     }
+                    else
+                    {
+                        var definitions = SafeNameMapEntries(eta, result).Concat(SafeImportObjectNames(eta, result))
+                            .Where(p => p.StartsWith("/Game/", StringComparison.Ordinal) && p.EndsWith("_ED", StringComparison.Ordinal))
+                            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+                        if (definitions.Length == 1) edPackage = definitions[0];
+                        else result.Warnings.Add($"Equipment definition for {gadget} is ambiguous; configure mappings and mine again.");
+                    }
+                    var upgradesDir = Path.Combine(dir, "Upgrades");
+                    var upgradeRoots = Directory.Exists(upgradesDir)
+                        ? Directory.EnumerateFiles(upgradesDir, "DA_UF_*.uasset", SearchOption.AllDirectories).ToArray() : [];
+                    var upgrade = upgradeRoots.FirstOrDefault(f => Path.GetFileNameWithoutExtension(f).Equals($"DA_UF_{gadget}Upgrades", StringComparison.OrdinalIgnoreCase))
+                        ?? (upgradeRoots.Length == 1 ? upgradeRoots[0] : null);
+                    // Abilities to grant into the suit's ability set so the gadget actually functions.
+                    // Most hand/thrown gadgets (whip, batarang, ninjastar) use LAM-managed
+                    // GA_Item_<Gadget>* packages. WEAPON-style gadgets (FreezeGun, MachineGun,
+                    // RocketLauncher, Pistol, …) instead keep their gameplay abilities in the gadget's
+                    // OWN Abilities/ subfolder (GA_Aim*/GA_Fire*/GA_*Beam). Without granting those the
+                    // weapon equips but does nothing. So: prefer the LAM GA_Item_ set; if none, fall
+                    // back to the gadget folder's own GA_*.
+                    var visualAbilities = lamItemAbilities
+                        .Where(a => a.StartsWith($"GA_Item_{gadget}", StringComparison.OrdinalIgnoreCase))
+                        .Select(a => $"/Game/Characters/Abilities/LAMManagedAbilities/{a}")
+                        .ToList();
+                    if (visualAbilities.Count == 0)
+                    {
+                        var abilitiesDir = Path.Combine(dir, "Abilities");
+                        if (Directory.Exists(abilitiesDir))
+                        {
+                            visualAbilities = Directory.EnumerateFiles(abilitiesDir, "GA_*.uasset")
+                                .Select(ToGamePath)
+                                .ToList();
+                        }
+                    }
+                    var entry = new GameDataEquipment
+                    {
+                        Name = gadget,
+                        EtaPackage = ToGamePath(eta),
+                        EdPackage = edPackage,
+                        UpgradePackage = upgrade is null ? "" : ToGamePath(upgrade),
+                        LayerAnimSet = MatchLayerSet(gadget, result.Db.EquipmentLayerSets),
+                        MontageAnimSet = MatchAnimSetForGadget(gadget, equipMontageSets, "MAS_Equipment_"),
+                        VisualAbilities = visualAbilities,
+                    };
+                    equipmentByName[gadget] = entry;
+                    result.Db.Equipment.Add(entry);
                 }
-                var entry = new GameDataEquipment
-                {
-                    Name = gadget,
-                    EtaPackage = ToGamePath(eta),
-                    EdPackage = ed is null ? "" : ToGamePath(ed),
-                    UpgradePackage = upgrade is null ? "" : ToGamePath(upgrade),
-                    LayerAnimSet = MatchLayerSet(gadget, result.Db.EquipmentLayerSets),
-                    MontageAnimSet = MatchAnimSetForGadget(gadget, equipMontageSets, "MAS_Equipment_"),
-                    VisualAbilities = visualAbilities,
-                };
-                equipmentByName[gadget] = entry;
-                result.Db.Equipment.Add(entry);
             }
         }
         else

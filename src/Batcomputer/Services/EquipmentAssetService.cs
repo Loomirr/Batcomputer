@@ -13,6 +13,7 @@ public static class EquipmentAssetService
     // Serialized visual dependencies outside Characters/Models/Gadgets. Keep this
     // scoped to equipment, not all Props, UI, VFX or story levels.
     public static IReadOnlyList<string> ExtractionFilters { get; } = new[] {
+        "VFX/Mechanic/Gadgets/Batarang/Emitters/NS_Batarang_SuccessfulHit",
         "UI/Icons/Gadgets/", "UI/Icons/GadgetUpgrades/", "UI/Global/M_UI_SDFIconGadget",
         "UI/Hud/Art/Reticles/", "UI/Hud/Art/T_UI_RetRubberBullet",
         "Models/Bolts/SM_Ducktank_Rocket", "Models/Bolts/SM_RocketLauncher_Bolt",
@@ -91,7 +92,7 @@ public static class EquipmentAssetService
                 var category = kind switch {
                     "NiagaraSystem" or "ParticleSystem" => "Effects (native, read-only)",
                     "WubAudioEvent" => "Audio (native, read-only)",
-                    "SkeletalMesh" => "Skinned model (read-only)",
+                    "SkeletalMesh" => "Skinned model (native rig)",
                     "Texture2D" => "Icons / textures",
                     "Material" or "MaterialInstanceConstant" => "Materials / icon materials",
                     _ => package.Contains("Projectile", StringComparison.OrdinalIgnoreCase) ? "Projectile models" : "Held / attached models"
@@ -106,7 +107,9 @@ public static class EquipmentAssetService
         return result;
     }
 
-    internal static UAsset Read(string root, string package, Usmap mappings)
+    internal static UAsset Read(string root, string package, Usmap mappings) => ReadRaw(root, package, mappings, CustomSerializationFlags.None);
+
+    internal static UAsset ReadRaw(string root, string package, Usmap mappings, CustomSerializationFlags flags)
     {
         if (!HeldItemService.ValidPackage(package)) throw new InvalidDataException("Invalid equipment package: " + package);
         var file = ExtractedPackagePathService.ResolvePackageUasset(root, package);
@@ -117,7 +120,7 @@ public static class EquipmentAssetService
         if (split) { using var source = File.OpenRead(Path.ChangeExtension(file, ".uexp")); source.CopyTo(bytes); }
         bytes.Position = 0;
         using var reader = new AssetBinaryReader(bytes);
-        return new UAsset(reader, EngineVersion.VER_UE5_6, mappings, split, CustomSerializationFlags.None);
+        return new UAsset(reader, EngineVersion.VER_UE5_6, mappings, split, flags);
     }
 
     internal static IEnumerable<(string Path, PropertyData Property)> Properties(IEnumerable<PropertyData> properties, string prefix = "")

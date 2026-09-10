@@ -47,7 +47,8 @@ public sealed partial class MainForm
         // Suit name / mod folder / settings now live in the Builder header
         // (CreateToyboxHeader). Keep their behavior hooks here.
         _settingsButton.Click += (_, _) => OpenSettings();
-        _suitNameText.TextChanged += (_, _) => DeriveOutputs();
+        // A display-name edit must not move the project or its imported payloads.
+        ConnectDisplayNameEditor(_suitNameText, _displayNameText);
         _modFolderText.TextChanged += (_, _) => DeriveOutputs();
 
         // The current Home/toybox workflow owns the whole window. The retired tabbed fallback is

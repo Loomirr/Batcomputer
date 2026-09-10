@@ -41,7 +41,7 @@ internal sealed class SkinnedMeshWorkshopForm : AdaptiveForm
         foreach (var target in targets) _target.Items.Add(target);
         _target.SelectedItem = targets.FirstOrDefault(t => t.Component == recipe.Component) ?? targets.FirstOrDefault();
         _target.Enabled = !existing; _name.Text = recipe.Name; _scale.Value = Math.Clamp((decimal)recipe.ImportScale, _scale.Minimum, _scale.Maximum);
-        Add("1  Native component / rig donor", _target, 40); Add("Name", _name, 32); Add("FBX unit correction (not a body-size control)", _scale, 32);
+        Add("1  Which native rig did you use? (component / reference mesh)", _target, 40); Add("Name", _name, 32); Add("FBX unit correction (keep the native bone rest pose)", _scale, 32);
         Add("2  Reference and source", Button("Export native reference + rig (GLB)…", async (_, _) => await ExportAsync()), 40);
         Add("", Button("Import / replace weighted FBX…", async (_, _) => await ImportAsync(false)), 40);
         Add("", Button("Reimport saved FBX", async (_, _) => await ImportAsync(true)), 40);

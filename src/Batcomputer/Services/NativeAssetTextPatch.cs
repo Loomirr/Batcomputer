@@ -19,11 +19,21 @@ public static class NativeAssetTextPatch
     /// Repoints an FText property to a StringTable entry: sets HistoryType to
     /// StringTableEntry, TableId to the table's OBJECT path
     /// (e.g. "/Game/Mods/&lt;ModId&gt;/Localization/ST_&lt;ModId&gt;.ST_&lt;ModId&gt;")
-    /// and the referenced key. Returns false if the property is absent.
+    /// and the referenced key. Missing pawn-UI description defaults are created;
+    /// other absent or wrongly typed properties return false.
     /// </summary>
     public static bool SetStringTableText(UAsset asset, string propName, string tableObjectPath, string key)
     {
         var ne = FindExportWithProp(asset, propName);
+        // Some native pawn UI templates omit their empty descriptions. These are
+        // real fields on TtPawnUIMetaData, so materialize just those defaults when
+        // a custom character supplies its own localized text.
+        if (ne is null && propName is "Description" or "LockedDescription")
+        {
+            ne = asset.Exports.OfType<NormalExport>().SingleOrDefault(export =>
+                export.GetExportClassType()?.ToString() == "TtPawnUIMetaData");
+            if (ne is not null) ne.Data.Add(new TextPropertyData(new FName(asset, propName)));
+        }
         if (ne is null)
         {
             return false;

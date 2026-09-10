@@ -243,9 +243,15 @@ metallic switch and unusually strong negative decal-roughness value.
 
 ### UI icons
 
-Equipment HUD icons use a different workflow from the portraits below. Start with one white PNG
-on a transparent background and choose **Equipment HUD icon (transparent PNG)**. Assign its
-generated SDF to both matching HUD inputs in the equipment workshop. See
+Equipment icons use separate **Equipment color icon (BCA)** and **Equipment SDF icon (white + green PNG)**
+imports. BCA preserves the painted image, including any outline. For SDF, use a white silhouette on
+transparency with optional pure-green (`#00FF00`) accent areas; the material adds the outline. The converter keeps the whole silhouette in red
+and generates the accent field in green. No painted green means no accent. Match each cook to the
+workshop's suggested type; BCA is only needed when the equipment actually has a BCA input.
+Use a 256×256 transparent canvas with roughly 32px margins; SDF output is 64×64. In the equipment
+workshop, **Set up HUD icon material…** assigns the SDF and a private native-shader material to all
+HUD modes together. Its compact appearance editor offers fill and outline colours, opacity, width, glow, grain and sharpness.
+BCA stays separate where the equipment has a BCA slot. SDF accents have passed in-game testing; the new appearance controls still need a game check. See
 [Equipment icons](equipment-workshop.md#equipment-icons) for the steps and current limitations.
 
 The four UIMD icon fields do not all use the same size:

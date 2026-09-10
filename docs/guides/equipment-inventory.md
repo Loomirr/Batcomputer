@@ -1,6 +1,8 @@
 # Equipment inventory — September 5, 2026
 
-Local serialized-asset inspection found **52 native equipment lookup entries**, compared with 35 entries in the bundled equipment catalog. The workshop discovers all 52; uncataloged variants are inspection-only. Counts are from this installed extraction, not a promise that every user owns the same content.
+The September 5 inspection found **52 native equipment lookup entries**, compared with 35 entries in the catalogue at that time. The workshop discovers all 52; uncataloged variants are inspection-only. Counts are from this installed extraction, not a promise that every user owns the same content.
+
+The equipment trace covers 130 playable menu variants and 15 equipment types, including both tether launchers and the cross-folder Ninja Teleport definition. Drone and Remote Kitten use deployable-equipment registration with a controlled-pawn dependency. Native equipment clones have passed gameplay checks. Gordon's skeletal pistol replacement has also passed; other skeletal models are available as experimental imports on their original rigs.
 
 51 actor/data graphs could be read. FreezeGun was blocked by the unextracted story-specific `BP_Hacking_QuickHack_MrFreeze` dependency. The inspector follows equipment definitions, instances, actor/projectile references and icon materials; it intentionally does not recursively clone ability, animation, Niagara or audio graphs. Zero below means no explicit static binding found in that traced graph, not that a gadget has no visuals anywhere.
 
@@ -67,4 +69,4 @@ Batarang has separate held, ordinary, alarm, concussive and bat-swarm model bind
 
 Rubber projectile data also contains native speed/acceleration and ricochet settings, and the instance carries a native range. Those are candidates for a later per-family tuning adapter, not controls exposed or gameplay-verified by this workshop pass. Beam, tether, remote-control and ability-driven gear need separate handling; a model replacement alone cannot implement their behavior.
 
-Next acceptance priority: tool-built Batarang with different held/projectile shapes and a compatible HUD SDF. Rubber Bullet Gun experiments are now parked: its main body is skeletal, so the whole donor is view-only, including bullets and icons. NPC/boss equipment and equipment without a confirmed playable owner are also view-only. The workshop and builder share this restriction; this inventory is research, not an editable-donor whitelist.
+The workshop warns about untested skeletal equipment rather than locking the entire donor. Imports still need valid native rigs and weights. A listed NPC or boss weapon is not a promise that its abilities work on a playable character; check the support banner and test the result.

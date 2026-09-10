@@ -207,7 +207,8 @@
       "MontageAnimSet": "/Game/Animation/MontageAnimSets/Character/MAS_Char_Nightwing",
       "LayerAnimSet": "/Game/Animation/LayerAnimSets/Character/LAS_Char_Nightwing",
       "NativeEquipment": [
-        "Electrorang"
+        "Electrorang",
+        "ElectricTetherLauncher"
       ],
       "Dcmds": [
         "/Game/Characters/Minifig/Nightwing/DA_DCMD_Nightwing_BronzeAge_Playable",
@@ -258,7 +259,8 @@
       "MontageAnimSet": "/Game/Animation/MontageAnimSets/Character/MAS_Char_RobinDickGrayson",
       "LayerAnimSet": "/Game/Animation/LayerAnimSets/Character/LAS_Char_RobinDickGrayson",
       "NativeEquipment": [
-        "Birdarang"
+        "Birdarang",
+        "TetherLauncher"
       ],
       "Dcmds": [
         "/Game/Characters/Minifig/Robin_DickGrayson/DA_DCMD_RobinDickGrayson_1966_Playable",
@@ -607,7 +609,7 @@
     {
       "Name": "NinjaTeleport",
       "EtaPackage": "/Game/Characters/Equipment/NinjaTeleport/DA_ETA_NinjaTeleport",
-      "EdPackage": "",
+      "EdPackage": "/Game/Characters/Equipment/NinjaTeleport_Blink/BP_NinjaTeleport_BlinkProto_ED",
       "UpgradePackage": "/Game/Characters/Equipment/NinjaTeleport/Upgrades/DA_UF_NinjaTeleportUpgrades",
       "LayerAnimSet": "/Game/Animation/LayerAnimSets/Equipment/LAS_Equipment_NinjaTeleport",
       "MontageAnimSet": "",
@@ -619,6 +621,26 @@
         "/Game/Characters/Equipment/NinjaTeleport/Abilities/GA_NinjaTeleport_Invisibility",
         "/Game/Characters/Equipment/NinjaTeleport/Abilities/GA_NinjaTeleport_SneakAttack"
       ]
+    },
+    {
+      "Name": "TetherLauncher",
+      "EtaPackage": "/Game/Characters/Equipment/TetherLauncher/DataAssets/DA_ETA_TetherLauncher",
+      "EdPackage": "/Game/Characters/Equipment/TetherLauncher/BP_TetherLauncher_ED",
+      "UpgradePackage": "/Game/Characters/Equipment/TetherLauncher/Upgrades/DA_UF_TetherLauncherUpgrades",
+      "LayerAnimSet": "/Game/Animation/LayerAnimSets/Equipment/LAS_Equipment_TetherLauncher",
+      "MontageAnimSet": "/Game/Animation/MontageAnimSets/Equipment/MAS_Equipment_TetherLauncher",
+      "NativeFamilies": ["Robin_DickGrayson"],
+      "VisualAbilities": []
+    },
+    {
+      "Name": "ElectricTetherLauncher",
+      "EtaPackage": "/Game/Characters/Equipment/TetherLauncher/DataAssets/DA_ETA_ElectricTetherLauncher",
+      "EdPackage": "/Game/Characters/Equipment/TetherLauncher/BP_ElectricTetherLauncher_ED",
+      "UpgradePackage": "/Game/Characters/Equipment/TetherLauncher/Upgrades/ElectricTether/DA_UF_ElectricTetherLauncherUpgrades",
+      "LayerAnimSet": "/Game/Animation/LayerAnimSets/Equipment/LAS_Equipment_TetherLauncher",
+      "MontageAnimSet": "/Game/Animation/MontageAnimSets/Equipment/MAS_Equipment_TetherLauncher",
+      "NativeFamilies": ["Nightwing"],
+      "VisualAbilities": []
     },
     {
       "Name": "PenguinUmbrella",

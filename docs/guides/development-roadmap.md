@@ -2,7 +2,7 @@
 
 The next release is mostly about testing and fixing bugs. Custom characters, extra suits, held items, and existing-rig body imports have worked in-game. The combinations people will actually use still need testing.
 
-The [release test checklist](release-test-checklist.md) covers the full run. These are the main areas to check.
+These are the main areas still getting attention.
 
 ## Characters and suits
 
@@ -20,7 +20,7 @@ The extra effects and status-effect experiments are on hold after crashes when h
 
 The [equipment workshop](equipment-workshop.md) supports eligible playable equipment with static-mesh bodies. Held models and projectile models can be changed separately. NPC, boss, and mainly skeletal equipment stay view-only.
 
-HUD icons need more testing. The normal workflow starts with one white PNG, but the automatic SDF conversion isn't fully verified against the native shader yet.
+The white-and-green SDF import, shared HUD material and appearance controls have worked in-game. Batarang upgrade choices and corrected custom-instance bindings are now experimental; special modes, filtering and upgrade-state transitions need a targeted gameplay retest. Impact effects can still contain the native model.
 
 ## Skinned meshes
 

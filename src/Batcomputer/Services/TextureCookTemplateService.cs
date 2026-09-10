@@ -26,6 +26,10 @@ internal static class TextureCookTemplateService
     public const string NativeFaceDetailFullNormalTemplateFolder = "TextureStandaloneTemplate_FaceDetail512_BC5";
     public const string NativeCtTemplateFolder = "TextureStandaloneTemplate_CT512_DXT1";
     public const string NativeRaoTemplateFolder = "TextureStandaloneTemplate_RAO1024_DXT1";
+    public const string EquipmentSdfTemplateFolder = "TextureStandaloneTemplate_GadgetIconSDF_BGRA8";
+    public const string EquipmentAlphaTemplateFolder = "TextureStandaloneTemplate_GadgetIconAlphaToSDF_BGRA8";
+    public const string EquipmentAccentTemplateFolder = "TextureStandaloneTemplate_GadgetIconGreenToSDF_BGRA8";
+    public const string EquipmentColorTemplateFolder = "TextureStandaloneTemplate_GadgetIconBCA_BGRA8";
     private const string NativeSuitIconAssetName = "T_SuitIcon_NULL_BCA";
     private const string NativeCharacterIconAssetName = "T_UI_IconChar_Batman_TheBatman2025_Menu_BCA";
     private const int NativeSuitIconFullUassetBytes = 1616;
@@ -100,6 +104,26 @@ internal static class TextureCookTemplateService
 
     private static readonly Definition[] Definitions =
     {
+        new(EquipmentAccentTemplateFolder, "T_UI_IconBatarang_SDF.json", "UI/Icons/Gadgets/T_UI_IconBatarang_SDF",
+            "/Game/UI/Icons/Gadgets/T_UI_IconBatarang_SDF", 64, 64, "PF_B8G8R8A8", 4, 7, 0, 123, 0,
+            1058, 22091, 0,
+            "B3237CD05B33BB6B6F3E62499E744A58A36067C09105702EBD1C659544F53E43",
+            "C53A86BF4FDF4EEFBD6DB649B020CDD13E354B6F54E53D2FE8B38E593F580220", ""),
+        new(EquipmentAlphaTemplateFolder, "T_UI_IconBatarang_SDF.json", "UI/Icons/Gadgets/T_UI_IconBatarang_SDF",
+            "/Game/UI/Icons/Gadgets/T_UI_IconBatarang_SDF", 64, 64, "PF_B8G8R8A8", 4, 7, 0, 123, 0,
+            1058, 22091, 0,
+            "B3237CD05B33BB6B6F3E62499E744A58A36067C09105702EBD1C659544F53E43",
+            "C53A86BF4FDF4EEFBD6DB649B020CDD13E354B6F54E53D2FE8B38E593F580220", ""),
+        new(EquipmentColorTemplateFolder, "T_UI_IconBatarang_BCA.json", "UI/Icons/Gadgets/T_UI_IconBatarang_BCA",
+            "/Game/UI/Icons/Gadgets/T_UI_IconBatarang_BCA", 256, 256, "PF_B8G8R8A8", 4, 1, 0, 122, 0,
+            788, 262294, 0,
+            "D572BD166E2A31A2D93F4324EA4196157DF45A378906B232A9DFA07FF7F835F3",
+            "16E235283C00F5D5F65B5895F4C5D9C39BBC50639E0483345161D9D06E66CCBA", ""),
+        new(EquipmentSdfTemplateFolder, "T_UI_IconBatarang_SDF.json", "UI/Icons/Gadgets/T_UI_IconBatarang_SDF",
+            "/Game/UI/Icons/Gadgets/T_UI_IconBatarang_SDF", 64, 64, "PF_B8G8R8A8", 4, 7, 0, 123, 0,
+            1058, 22091, 0,
+            "B3237CD05B33BB6B6F3E62499E744A58A36067C09105702EBD1C659544F53E43",
+            "C53A86BF4FDF4EEFBD6DB649B020CDD13E354B6F54E53D2FE8B38E593F580220", ""),
         new(
             "TextureStandaloneTemplate_DroneControlBGRA8",
             "T_GA_DroneControl_BatGirl_AO.json",
@@ -695,6 +719,9 @@ internal static class TextureCookTemplateService
     // import the original world textures; a Full refresh adds the new donor
     // packages and makes each matching profile available automatically.
     private static bool IsOptionalProfileDefinition(Definition definition) =>
+        definition.Folder == EquipmentSdfTemplateFolder ||
+        definition.Folder == EquipmentAlphaTemplateFolder || definition.Folder == EquipmentColorTemplateFolder ||
+        definition.Folder == EquipmentAccentTemplateFolder ||
         IsNativeUiIconDefinition(definition) ||
         definition.Folder.Equals(NativeFaceDetailColorTemplateFolder, StringComparison.Ordinal) ||
         definition.Folder.Equals(NativeFaceArtTemplateFolder, StringComparison.Ordinal) ||

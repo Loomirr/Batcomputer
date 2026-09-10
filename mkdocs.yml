@@ -62,7 +62,6 @@ nav:
       - Custom static meshes: guides/custom-meshes.md
       - Skinned meshes (experimental): guides/skeletal-mesh-proof.md
       - Build, test, and share: guides/build-test-share.md
-      - Next-release test checklist: guides/release-test-checklist.md
   - Reference:
       - Workspace and files: reference/workspace.md
       - Compatibility and beta limits: reference/compatibility.md

@@ -1517,7 +1517,7 @@ public sealed partial class MainForm
                 updated++;
             }
         }
-        foreach (var slot in project.SkinnedMeshes.SelectMany(mesh => mesh.Materials))
+        foreach (var slot in project.SkinnedMeshes.Concat(EquipmentSkinnedModelService.Models(project)).SelectMany(mesh => mesh.Materials))
             if (UnrealPathUtil.NormalizePackagePath(slot.MaterialPath).Equals(oldPackage, StringComparison.OrdinalIgnoreCase))
             { slot.MaterialPath = replacement; updated++; }
         return updated;
@@ -1532,7 +1532,7 @@ public sealed partial class MainForm
             .Sum(mesh => StaticMeshObjProbeService.EffectiveMaterialSlots(mesh).Count(slot =>
                 UnrealPathUtil.NormalizePackagePath(slot.MaterialPath)
                     .Equals(package, StringComparison.OrdinalIgnoreCase))) +
-            project.SkinnedMeshes.SelectMany(mesh => mesh.Materials).Count(slot =>
+            project.SkinnedMeshes.Concat(EquipmentSkinnedModelService.Models(project)).SelectMany(mesh => mesh.Materials).Count(slot =>
                 UnrealPathUtil.NormalizePackagePath(slot.MaterialPath).Equals(package, StringComparison.OrdinalIgnoreCase));
     }
 
@@ -2115,6 +2115,7 @@ public sealed partial class MainForm
 
     private async Task ApplyMaterialAssignmentAsync()
     {
+        using var timing = new OperationTiming("Apply material", AppendLog);
         if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("apply the material assignment"))
         {
             return;
@@ -2155,7 +2156,7 @@ public sealed partial class MainForm
 
         var materialLibrary = new ToolMaterialLibraryService(projectRoot);
         var knownMaterials = (project.GeneratedMaterials ?? new List<GeneratedMaterialEntry>())
-            .Concat(materialLibrary.LoadAvailable())
+            .Concat(await Task.Run(materialLibrary.LoadAssignmentMetadata))
             .ToList();
         var roleResolution = ResolveTemplateMaterialAssignments(knownMaterials, mi, context);
         if (roleResolution.Assignments.Count == 0)
@@ -2208,6 +2209,8 @@ public sealed partial class MainForm
             AppendLog("Apply material stopped because another suit or workspace was selected.");
             return;
         }
+        var materialEditContent = DeclarativeGraftContentRoot(project, projectRoot);
+        var materialOnly = CanReuseMaterialStage(project, projectRoot, materialEditContent, component);
         BaseStageFilesystemSnapshot stageSnapshot;
         try
         {
@@ -2270,7 +2273,17 @@ public sealed partial class MainForm
         var projectSaved = false;
         try
         {
-            await RebuildGraftStageCoreAsync(project, projectRoot, persistProject: false);
+            if (materialOnly)
+            {
+                await MarkDeclarativeStageIncompleteAsync(project, projectRoot);
+                if (!StageGeneratedTexturesIntoContentRoot(project, materialEditContent, out var textureError, persistProjectChanges: false))
+                    throw new InvalidOperationException(textureError);
+                StageGeneratedMaterialsIntoContentRoot(project, materialEditContent);
+                RequireCompleteDeclarativeReplay(await ApplySavedMaterials(project, false, projectRoot, materialEditContent),
+                    "Material-only replay");
+                AppendLog("Material-only update: kept the validated parts and mesh cooks; updated material bindings in both roles.");
+            }
+            else await RebuildGraftStageCoreAsync(project, projectRoot, persistProject: false);
             saveCapture = CaptureCurrentProjectSave(editContext, "save the completed material assignment");
             var saveResult = await CommitCurrentProjectSaveCaptureAsync(saveCapture);
             RequireCurrentProjectSaveCommitted(saveResult, "save the completed material assignment");
@@ -2482,15 +2495,13 @@ public sealed partial class MainForm
         string contentRoot)
     {
         ThrowIfMaterialPackageCollidesWithCustomMesh(project);
-        // Older Material Forge projects saved only the assignment. LoadAvailable migrates those
-        // packages into the durable library, so the assignment remains sufficient declarative
-        // ownership even when GeneratedMaterials is empty.
-        var availablePackages = library.LoadAvailable()
-            .Select(material => material.PackagePath)
-            .ToList();
-        var referencedPackages = ReferencedGeneratedMaterialPackagesForRelease(
-            project,
-            availablePackages);
+        // A release needs this project's dependencies, not an availability/repair pass over
+        // every material in every saved project. CopyMaterialClosure also resolves and adopts
+        // legacy assignment-only materials from their persisted source before copying.
+        var requiredAssignedPackages = AssignedModMaterialPackagesForRelease(project);
+        var referencedPackages = ReferencedGeneratedMaterialPackagesForRelease(project)
+            .Concat(requiredAssignedPackages)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
 
         var copied = 0;
         foreach (var package in referencedPackages)
@@ -2502,7 +2513,6 @@ public sealed partial class MainForm
         // even when an older project did not retain GeneratedMaterials and the
         // shared library can no longer recover it. Filtering the validation to
         // known library entries would let an assignment disappear silently.
-        var requiredAssignedPackages = AssignedModMaterialPackagesForRelease(project);
         var missing = MissingReferencedGeneratedMaterialFiles(requiredAssignedPackages, contentRoot);
         if (missing.Count > 0)
         {
@@ -2523,7 +2533,7 @@ public sealed partial class MainForm
     internal static IReadOnlyList<string> DeclaredCustomMeshPackagesForRelease(NativeSuitProject project) =>
         (project.CustomStaticMeshes ?? new List<CustomStaticMeshImport>())
             .Select(mesh => CustomStaticMeshImportService.MeshPackagePathFor(project, mesh))
-            .Concat(project.SkinnedMeshes.Select(mesh => mesh.MeshPackage))
+            .Concat(project.SkinnedMeshes.Concat(EquipmentSkinnedModelService.Models(project)).Select(mesh => mesh.MeshPackage))
             .Select(UnrealPathUtil.NormalizePackagePath)
             .Where(package => !string.IsNullOrWhiteSpace(package))
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -2549,7 +2559,10 @@ public sealed partial class MainForm
             .Concat((project.CustomStaticMeshes ?? new List<CustomStaticMeshImport>())
                 .SelectMany(mesh => StaticMeshObjProbeService.EffectiveMaterialSlots(mesh)
                     .Select(slot => slot.MaterialPath)))
-            .Concat(project.SkinnedMeshes.SelectMany(mesh => mesh.Materials.Select(slot => slot.MaterialPath)))
+            .Concat(project.SkinnedMeshes.Concat(EquipmentSkinnedModelService.Models(project)).SelectMany(mesh => mesh.Materials.Select(slot => slot.MaterialPath)))
+            .Concat(project.EquipmentSlots.Where(slot => slot.Custom is not null)
+                .SelectMany(slot => slot.Custom!.Parts.Where(part => part.Model is not null))
+                .SelectMany(part => part.Model!.Materials.Select(material => material.MaterialPath)))
             .Select(UnrealPathUtil.NormalizePackagePath)
             .Where(package => !string.IsNullOrWhiteSpace(package));
 

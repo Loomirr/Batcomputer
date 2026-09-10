@@ -1003,6 +1003,7 @@ public sealed partial class MainForm : AdaptiveForm
         _matOutputText.Text = "";
         _lastAutoMaterialOutputPackage = "";
 
+        DeriveOutputs();
         ReadFieldsIntoProject(_currentProject);
         ApplyProjectToFields(_currentProject);
         UpdateSelectedLabels();
@@ -1746,8 +1747,8 @@ public sealed partial class MainForm : AdaptiveForm
             foreach (var textureKind in new[]
                      {
                          "Character texture", "Normal map", "Roughness/spec mask", "Color mask",
-                         "CT map", "RAO map", "Face detail", "Face detail normal", "Suit selector icon", "Character icon", "UI artwork", "Other texture"
-                     })
+                         "CT map", "RAO map", "Face detail", "Face detail normal", "Suit selector icon", "Character icon"
+                     }.Concat(EquipmentUiTextureCatalog.NewImportKinds).Concat(new[] { "UI artwork", "Other texture" }))
             {
                 kind.Items.Add(textureKind);
             }
@@ -1789,7 +1790,11 @@ public sealed partial class MainForm : AdaptiveForm
             if (profile.Items.Count > 0)
             {
                 profile.SelectedIndex = 0;
-                profileStatus.Text = "Choose the profile that matches where this texture is used.";
+                profileStatus.Text = kind.SelectedItem?.ToString() == EquipmentUiTextureCatalog.AccentKind
+                    ? "White/outline PNG + green (#00FF00) accents → SDF. Transparent background; leave margins. Experimental."
+                    : kind.SelectedItem?.ToString() == EquipmentUiTextureCatalog.ColorKind
+                    ? "Original white/outline artwork → BCA. Keep the green-marked copy for the separate SDF import."
+                    : "Choose the profile that matches where this texture is used.";
                 profileStatus.ForeColor = Theme.OnDarkMuted;
                 if (ok is not null) ok.Enabled = true;
             }
@@ -1800,6 +1805,8 @@ public sealed partial class MainForm : AdaptiveForm
                     ? "The matching face-detail donor is not in the current extract. Run Full refresh, then reopen this import dialog."
                     : IsSuitSelectorIconTextureKind(selectedKind)
                     ? "Native suit-icon donor unavailable. Refresh game assets to prepare the verified 256px BC7 profile."
+                    : EquipmentUiTextureCatalog.IsEquipmentIcon(selectedKind)
+                    ? "The matching native gadget icon donor is missing. Run Full refresh, then reopen this import dialog."
                     : "No compatible native cook profile is available for this texture type.";
                 profileStatus.ForeColor = Theme.Warn;
                 if (ok is not null) ok.Enabled = false;
@@ -2288,6 +2295,9 @@ public sealed partial class MainForm : AdaptiveForm
             Role = role
         };
     }
+
+    internal static void ConnectDisplayNameEditor(TextBox editor, TextBox displayName) =>
+        editor.TextChanged += (_, _) => displayName.Text = editor.Text.Trim();
 
     internal static TemplateRecord? TemplateFromUassetForTest(
         string filePath,

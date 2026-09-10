@@ -17,6 +17,11 @@ public sealed class RegistryPluginService
     public const string PawnMetadataClass = "/Script/DinnerPawnMetaData.DinnerCharacterMetaData";
     public const string EquipmentPrimaryAssetType = "EquipmentTaggedAsset";
     public const string EquipmentTaggedAssetClass = "/Script/TtEquipment.TtEquipmentTaggedAsset";
+    public const string DeployableEquipmentTaggedAssetClass = "/Script/TtDeployableEquipment.TtDeployableEquipmentTaggedAsset";
+    public const string UpgradeRootType = "UpgradeFunctionalityDataAsset";
+    public const string UpgradeRootClass = "/Script/TtUpgrades.UpgradeFunctionalityDataAsset";
+    public const string UpgradeSetType = "UpgradeFunctionalitySet";
+    public const string UpgradeSetClass = "/Script/TtUpgrades.UpgradeFunctionalitySet";
     public const string CharacterGroupPrimaryAssetType = "TtCharacterGroupDataAsset";
     public const string CharacterGroupClass = "/Script/TtCharacterGroupMetaData.TtCharacterGroupDataAsset";
     public const string ProgressDefinitionPrimaryAssetType = "TtGameProgressDefinitionSet";
@@ -197,8 +202,10 @@ public sealed class RegistryPluginService
         foreach (var raw in candidates)
         {
             var package = UnrealPathUtil.NormalizePackagePath(raw.PackagePath);
-            var equipmentDiscoveryRoot = raw.EffectivePrimaryAssetType == EquipmentPrimaryAssetType &&
-                raw.EffectiveAssetClass == EquipmentTaggedAssetClass &&
+            var equipmentDiscoveryRoot = ((raw.EffectivePrimaryAssetType == EquipmentPrimaryAssetType &&
+                raw.EffectiveAssetClass is EquipmentTaggedAssetClass or DeployableEquipmentTaggedAssetClass) ||
+                (raw.EffectivePrimaryAssetType == UpgradeRootType && raw.EffectiveAssetClass == UpgradeRootClass) ||
+                (raw.EffectivePrimaryAssetType == UpgradeSetType && raw.EffectiveAssetClass == UpgradeSetClass)) &&
                 package.StartsWith("/Game/Characters/Equipment/Mods/", StringComparison.Ordinal) &&
                 package["/Game/Characters/Equipment/Mods/".Length..].Split('/').Length >= 2;
             // New-character proofs use the native scan roots without replacing shipped assets.
@@ -638,25 +645,27 @@ public sealed class RegistryPluginService
             $"-PrimaryAssetType={first.EffectivePrimaryAssetType}",
             $"-PrimaryAssetName={first.AssetName}",
         };
-        if (rows.Count > 1)
-        {
-            arguments.Add("-AdditionalRows=" + string.Join(";", rows.Skip(1).Select(row =>
-                $"{row.PackagePath}|{row.AssetName}|{row.EffectivePrimaryAssetType}|{row.EffectiveAssetClass}")));
-        }
+        string? rowsFile = null;
         string? bundleFile = null;
-        var bundleText = SerializeBundles(rows);
-        if (bundleText.Length > 0)
-        {
-            // Large suit collections exceed Windows' command-line limit when
-            // their metadata dependencies are embedded in arguments.
-            bundleFile = Path.Combine(Path.GetDirectoryName(outputPath)!, $"bundles-{Guid.NewGuid():N}.txt");
-            await File.WriteAllTextAsync(bundleFile, bundleText, new UTF8Encoding(false));
-            arguments.Add($"-AssetBundlesFile={bundleFile}");
-        }
-        arguments.Add($"-SentinelPackage={ProofSentinelRoot}/{pluginName}Sentinel");
-        arguments.AddRange(new[] { "-Unattended", "-NoSplash", "-NoSourceControl", "-UTF8Output" });
         try
         {
+            if (rows.Count > 1)
+            {
+                rowsFile = Path.Combine(Path.GetDirectoryName(outputPath)!, $"rows-{Guid.NewGuid():N}.txt");
+                await File.WriteAllTextAsync(rowsFile, SerializeAdditionalRows(rows), new UTF8Encoding(false));
+                arguments.Add($"-AdditionalRowsFile={rowsFile}");
+            }
+            var bundleText = SerializeBundles(rows);
+            if (bundleText.Length > 0)
+            {
+                // Unreal has a smaller command-line buffer than Windows. Both growing
+                // payloads use files; only fixed metadata and file paths go in arguments.
+                bundleFile = Path.Combine(Path.GetDirectoryName(outputPath)!, $"bundles-{Guid.NewGuid():N}.txt");
+                await File.WriteAllTextAsync(bundleFile, bundleText, new UTF8Encoding(false));
+                arguments.Add($"-AssetBundlesFile={bundleFile}");
+            }
+            arguments.Add($"-SentinelPackage={ProofSentinelRoot}/{pluginName}Sentinel");
+            arguments.AddRange(new[] { "-Unattended", "-NoSplash", "-NoSourceControl", "-UTF8Output" });
             return await RunProcessAsync(
                 toolchain.EditorCommand,
                 Path.GetDirectoryName(toolchain.WriterProject) ?? toolchain.EngineRoot,
@@ -666,8 +675,13 @@ public sealed class RegistryPluginService
         finally
         {
             if (bundleFile is not null) File.Delete(bundleFile);
+            if (rowsFile is not null) File.Delete(rowsFile);
         }
     }
+
+    internal static string SerializeAdditionalRows(IEnumerable<RegistryRow> rows) =>
+        string.Join(";", rows.Skip(1).Select(row =>
+            $"{row.PackagePath}|{row.AssetName}|{row.EffectivePrimaryAssetType}|{row.EffectiveAssetClass}"));
 
     private static string FindVerificationLine(string output) =>
         output.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries)

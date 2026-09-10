@@ -43,6 +43,7 @@ public static class CustomEquipmentService
         var extracted = AppSettings.Current.EffectiveExtractedContentRoot();
         var mappingPath = AppSettings.Current.EffectiveUsmapPath() ?? throw new InvalidDataException("Mappings are required.");
         var mappings = MappingsCache.Load(mappingPath);
+        EquipmentUpgradeService.ValidateLoadout(project, contentRoot, mappings);
         var mod = Namespace(project);
         foreach (var slot in custom)
         {
@@ -62,7 +63,11 @@ public static class CustomEquipmentService
                 throw new InvalidDataException("This equipment graph has ambiguous object names and needs a specialized adapter.");
             if (recipe.Parts.Select(p => p.Key).Distinct(StringComparer.Ordinal).Count() != recipe.Parts.Count)
                 throw new InvalidDataException("The same equipment component is customized twice.");
-            foreach (var model in recipe.Parts.Where(p => p.Model is not null))
+            foreach (var mesh in recipe.Parts.Where(p => p.SkinnedModel is not null))
+                if (recipe.Parts.Any(p => p != mesh && p.OwnerPackage == mesh.OwnerPackage && p.ExportName == mesh.ExportName &&
+                    p.PropertyPath is "SkeletalMesh" or "SkinnedAsset"))
+                    throw new InvalidDataException("A skeletal component has conflicting mesh bindings. Reopen its model editor and save one weighted model.");
+            foreach (var model in recipe.Parts.Where(p => p.Model is not null || p.SkinnedModel is not null))
                 if (recipe.Parts.Any(p => p.OwnerPackage == model.OwnerPackage && p.ExportName == model.ExportName &&
                     p.PropertyPath.StartsWith("OverrideMaterials", StringComparison.Ordinal)))
                     throw new InvalidDataException("Set custom model materials inside the 3D editor; component material overrides conflict with its slots.");
@@ -80,11 +85,18 @@ public static class CustomEquipmentService
                     throw new InvalidDataException("An edited equipment component is no longer present: " + edit.Key);
                 if (!part.CanEdit || !part.Package.Equals(edit.OriginalPackage, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException("An equipment donor reference changed or is unsupported: " + edit.Key);
+                // Preserve older manual assignments in the recipe for Reset, but the shared
+                // material owns these inputs while enabled (including missing legacy cooks).
+                if (recipe.HudIcon is not null && EquipmentHudIconService.Manages(profile, part)) continue;
                 var asset = cloneAssets[part.OwnerPackage];
                 var export = asset.Exports.OfType<NormalExport>().Single(e => e.ObjectName.ToString() == RenamedObject(part.ExportName, redirects));
                 var property = EquipmentAssetService.Properties(export.Data).Single(p => p.Path == edit.PropertyPath).Property;
                 var replacement = edit.ReplacementPackage;
-                if (edit.Model is not null)
+                if (part.AssetClass == "SkeletalMesh")
+                    replacement = EquipmentSkinnedModelService.Bake(project, contentRoot, root, part, edit, asset, export);
+                if (edit.Model is not null && EquipmentImpactMeshService.Supports(part))
+                    replacement = EquipmentImpactMeshService.Bake(part, edit.Model, root, extracted, contentRoot, mappingPath, mappings);
+                else if (edit.Model is not null)
                 {
                     if (part.AssetClass != "StaticMesh") throw new InvalidDataException("OBJ recipes can only replace StaticMesh components.");
                     if (part.PropertyPath != "StaticMesh" || !export.GetExportClassType()!.ToString().Contains("StaticMeshComponent", StringComparison.Ordinal))
@@ -112,12 +124,19 @@ public static class CustomEquipmentService
                 }
                 if (!HeldItemService.ValidPackage(replacement)) throw new InvalidDataException("Choose a cooked replacement package for " + edit.PropertyPath);
                 UAsset replacementAsset;
+                // A picker may reference a certified UI cook owned by another saved project.
+                // Stage its current library closure, never a stale archived package or a native overwrite.
+                if (replacement.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase) &&
+                    !File.Exists(Path.Combine(contentRoot, replacement[6..].Replace('/', Path.DirectorySeparatorChar)) + ".uasset"))
+                    new ToolMaterialLibraryService(AppSettings.Current.EffectiveProjectRoot()).CopyMaterialClosureToContentRoot(replacement, contentRoot);
                 var stagedReplacement = ExtractedPackagePathService.ResolvePackageUasset(contentRoot, replacement);
                 replacementAsset = EquipmentAssetService.Read(stagedReplacement is not null && File.Exists(stagedReplacement) ? contentRoot : extracted, replacement, mappings);
                 if (!replacementAsset.Exports.Any(e => e.GetExportClassType()?.ToString() == part.AssetClass))
                     throw new InvalidDataException($"Replacement for {part.PropertyPath} must be {part.AssetClass}.");
                 ReplaceReference(asset, export, property, replacement, part.AssetClass);
             }
+            if (recipe.HudIcon is not null)
+                EquipmentHudIconService.Generate(recipe.HudIcon, root, extracted, contentRoot, mappings, profile, cloneAssets, log);
             // Retain the native behavior tags (draw/fire/animation/upgrades). Only the identity
             // linking the character lookup to its equipment definition becomes custom.
             SetTag(cloneAssets[profile.EtaPackage], "EquipmentTag", EquipmentTag(project, recipe));
@@ -138,11 +157,20 @@ public static class CustomEquipmentService
                     var expected = EquipmentAssetService.Reference(asset, EquipmentAssetService.Properties(expectedExport.Data).Single(p => p.Path == edit.PropertyPath).Property);
                     var actual = EquipmentAssetService.Reference(reread, EquipmentAssetService.Properties(actualExport.Data).Single(p => p.Path == edit.PropertyPath).Property);
                     if (expected != actual) throw new InvalidDataException("Custom equipment binding failed cooked roundtrip: " + edit.Key);
+                    if (edit.SkinnedModel is not null)
+                        foreach (var binding in new[] { "SkeletalMesh", "SkinnedAsset" })
+                        {
+                            var reference = EquipmentAssetService.Reference(reread, EquipmentAssetService.Properties(actualExport.Data).Single(p => p.Path == binding).Property);
+                            if (reference != EquipmentAssetService.Reference(asset, EquipmentAssetService.Properties(expectedExport.Data).Single(p => p.Path == binding).Property))
+                                throw new InvalidDataException("Skeletal equipment binding failed cooked roundtrip: " + binding);
+                        }
                 }
             }
             var dcmd = StagedPath(contentRoot, project.TargetPackages.Dcmd);
+            var upgradePackage = EquipmentUpgradeService.Generate(recipe, native.UpgradePackage, root,
+                redirects, extracted, contentRoot, mappings, log);
             var change = new DcmdGenService(AppSettings.Current.ProjectRoot!).ReplaceEquipment(dcmd,
-                [new(slot.Slot, slot.Gadget, EtaPackage(project, recipe), string.IsNullOrEmpty(native.UpgradePackage) ? null : native.UpgradePackage)]);
+                [new(slot.Slot, slot.Gadget, EtaPackage(project, recipe), upgradePackage)]);
             if (change.Status != "ok") throw new InvalidDataException(change.Error ?? "Custom DCMD equipment replacement failed.");
             var dprd = StagedPath(contentRoot, $"/Game/Mods/{mod}/Characters/DA_DPRD_{mod}");
             var graft = new AnimGraftService().SetEquipmentSlot(dprd, slot.Slot, DefinitionPackage(project, recipe));
@@ -150,7 +178,7 @@ public static class CustomEquipmentService
             var equipment = new AbilityAssetMutationService().InspectDprdEquipment(dprd);
             if (!equipment.Success || equipment.Equipment.ElementAtOrDefault(slot.Slot)?.PackagePath != DefinitionPackage(project, recipe))
                 throw new InvalidDataException("Custom equipment did not survive the DPRD roundtrip.");
-            log($"Custom equipment '{recipe.Name}': {profile.OwnedGraph.Count} isolated assets, {recipe.Parts.Count} customized bindings; native upgrades retained.");
+            log($"Custom equipment '{recipe.Name}': {profile.OwnedGraph.Count} isolated equipment assets, {recipe.Parts.Count} customized bindings; upgrade chain staged.");
         }
     }
 
@@ -188,7 +216,7 @@ public static class CustomEquipmentService
         }
         return name;
     }
-    private static void Rename(UAsset asset, IReadOnlyDictionary<string, string> redirects)
+    internal static void Rename(UAsset asset, IReadOnlyDictionary<string, string> redirects)
     {
         var names = asset.GetNameMapIndexList();
         for (int i = 0; i < names.Count; i++)

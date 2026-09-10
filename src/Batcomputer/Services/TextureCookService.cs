@@ -222,7 +222,11 @@ public sealed class TextureCookService
                 request.BleedTransparentRgb,
                 template.PixelFormat,
                 request.Bc7InputLayout,
-                request.Bc7Quality);
+                request.Bc7Quality,
+                string.Equals(Path.GetFileName(Path.GetDirectoryName(request.TemplateJsonPath)),
+                    TextureCookTemplateService.EquipmentAlphaTemplateFolder, StringComparison.OrdinalIgnoreCase),
+                string.Equals(Path.GetFileName(Path.GetDirectoryName(request.TemplateJsonPath)),
+                    TextureCookTemplateService.EquipmentAccentTemplateFolder, StringComparison.OrdinalIgnoreCase));
             var sourceIntegrityAfter = FileIntegrity(request.SourceImagePath);
             if (sourceIntegrityAfter != sourceIntegrityBefore)
             {
@@ -366,6 +370,9 @@ public sealed class TextureCookService
             : effectivePixelFormat;
         hash.AppendData(Encoding.UTF8.GetBytes(
             "effective-pixel-format:" + NormalizePixelFormat(effectivePixelFormat)));
+        if (string.Equals(Path.GetFileName(Path.GetDirectoryName(templateJsonPath)),
+                TextureCookTemplateService.EquipmentAccentTemplateFolder, StringComparison.OrdinalIgnoreCase))
+            hash.AppendData(Encoding.UTF8.GetBytes("equipment-white-green-sdf:v2;whole-alpha-red;accent-green-dominance32;range8;canvas64;supersample4"));
         return Convert.ToHexString(hash.GetHashAndReset());
     }
 
@@ -493,7 +500,12 @@ public sealed class TextureCookService
         }
 
         var last = template.Mips[^1];
-        if (last.SizeX != 1 || last.SizeY != 1)
+        // This native UI donor intentionally has no mip tail. Do not extend
+        // that exception to ordinary world textures or arbitrary UI recipes.
+        var nativeBca = template.Package == "/Game/UI/Icons/Gadgets/T_UI_IconBatarang_BCA" &&
+            template.PixelFormat == "PF_B8G8R8A8" && template.Mips.Count == 1 &&
+            last.SizeX == 256 && last.SizeY == 256 && last.IsInline && last.OffsetInFile == 122;
+        if (!nativeBca && (last.SizeX != 1 || last.SizeY != 1))
         {
             throw new InvalidOperationException(
                 $"Texture2D recipe stops at {last.SizeX}x{last.SizeY}. A complete mip chain through 1x1 is required so every texture-quality setting resolves authored pixels.");
@@ -709,9 +721,13 @@ public sealed class TextureCookService
         bool bleedTransparentRgb,
         string pixelFormat,
         string bc7InputLayout,
-        string bc7Quality)
+        string bc7Quality,
+        bool alphaToEquipmentSdf = false,
+        bool greenToEquipmentSdf = false)
     {
         using var source = new Bitmap(sourceImagePath);
+        if (greenToEquipmentSdf && (source.Width > 4096 || source.Height > 4096))
+            throw new InvalidDataException("Equipment SDF source must be no larger than 4096×4096.");
         // Read the PNG once, before any GDI+ draw/copy operation. GDI+ treats
         // alpha as compositing opacity and converts through premultiplied color
         // when an image is copied or resized. That silently turns RGB under
@@ -720,6 +736,25 @@ public sealed class TextureCookService
         // plastic-vs-print detail selector), so every channel must be sampled
         // independently as straight RGBA.
         var sourcePixels = ReadRgba(source);
+        if (greenToEquipmentSdf)
+        {
+            var rgba = new byte[checked(sourcePixels.Length * 4)];
+            for (var i = 0; i < sourcePixels.Length; i++)
+            {
+                var p = sourcePixels[i];
+                rgba[i * 4] = p.R; rgba[i * 4 + 1] = p.G; rgba[i * 4 + 2] = p.B; rgba[i * 4 + 3] = p.A;
+            }
+            var encoded = EquipmentAccentSdfService.Generate(rgba, source.Width, source.Height);
+            sourcePixels = Enumerable.Range(0, 4096).Select(i => new Rgba(encoded[i * 4], encoded[i * 4 + 1], encoded[i * 4 + 2], encoded[i * 4 + 3])).ToArray();
+        }
+        else if (alphaToEquipmentSdf)
+        {
+            // Explicit profile only: never reinterpret existing prepared SDF or color cooks.
+            var silhouette = ResizeRgba(sourcePixels, source.Width, source.Height, 64, 64, false);
+            sourcePixels = EquipmentSdfFromAlpha(silhouette);
+        }
+        var sourceWidth = alphaToEquipmentSdf || greenToEquipmentSdf ? 64 : source.Width;
+        var sourceHeight = alphaToEquipmentSdf || greenToEquipmentSdf ? 64 : source.Height;
         var output = new Dictionary<MipTemplate, byte[]>();
         Rgba[]? previousMip = null;
         var previousWidth = 0;
@@ -733,11 +768,11 @@ public sealed class TextureCookService
             var canContinueMipChain = previousMip is not null &&
                                       previousWidth == mip.SizeX * 2 &&
                                       previousHeight == mip.SizeY * 2 &&
-                                      previousWidth <= source.Width &&
-                                      previousHeight <= source.Height;
+                                      previousWidth <= sourceWidth &&
+                                      previousHeight <= sourceHeight;
             var resizedPixels = canContinueMipChain
                 ? ResizeRgba(previousMip!, previousWidth, previousHeight, mip.SizeX, mip.SizeY, nearest)
-                : ResizeRgba(sourcePixels, source.Width, source.Height, mip.SizeX, mip.SizeY, nearest);
+                : ResizeRgba(sourcePixels, sourceWidth, sourceHeight, mip.SizeX, mip.SizeY, nearest);
             previousMip = resizedPixels;
             previousWidth = mip.SizeX;
             previousHeight = mip.SizeY;
@@ -1005,6 +1040,41 @@ public sealed class TextureCookService
         {
             Array.Copy(current, pixels, current.Length);
         }
+    }
+
+    private static Rgba[] EquipmentSdfFromAlpha(Rgba[] pixels)
+    {
+        var inside = pixels.Select(p => p.A >= 128).ToArray();
+        if (!inside.Any(p => p) || inside.All(p => p))
+            throw new InvalidDataException("HUD icon needs an opaque silhouette on a transparent background. A fully opaque or empty PNG cannot produce a HUD distance field.");
+        for (var i = 0; i < 64; i++)
+            if (inside[i] || inside[63 * 64 + i] || inside[i * 64] || inside[i * 64 + 63])
+                throw new InvalidDataException("Leave a transparent margin around the HUD icon so its distance field is not clipped.");
+        var result = new Rgba[4096];
+        // Only distances within eight pixels affect the encoded range.
+        for (var y = 0; y < 64; y++)
+        for (var x = 0; x < 64; x++)
+        {
+            var index = y * 64 + x;
+            var distanceSquared = 64;
+            for (var dy = -8; dy <= 8; dy++)
+            for (var dx = -8; dx <= 8; dx++)
+            {
+                var xx = x + dx; var yy = y + dy;
+                if (xx < 0 || xx >= 64 || yy < 0 || yy >= 64 || inside[yy * 64 + xx] == inside[index]) continue;
+                distanceSquared = Math.Min(distanceSquared, dx * dx + dy * dy);
+            }
+            var signed = (Math.Sqrt(distanceSquared) - 0.5) * (inside[index] ? 1 : -1);
+            result[index] = new Rgba((byte)Math.Clamp(Math.Round(128 + signed * 127 / 8), 0, 255), 0, 77, 255);
+        }
+        return result;
+    }
+
+    internal static byte[] EquipmentSdfAlphaForRegression(byte[] alpha)
+    {
+        if (alpha.Length != 4096) throw new ArgumentException("Expected 64x64 alpha.", nameof(alpha));
+        return EquipmentSdfFromAlpha(alpha.Select(a => new Rgba(0, 0, 0, a)).ToArray())
+            .SelectMany(p => new[] { p.R, p.G, p.B, p.A }).ToArray();
     }
 
     private readonly record struct Rgba(byte R, byte G, byte B, byte A);

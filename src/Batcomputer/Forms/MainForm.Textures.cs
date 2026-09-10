@@ -1776,7 +1776,13 @@ public sealed partial class MainForm
             AppendLog("Texture import cancelled: experimental profile was not confirmed.");
             return;
         }
+        if (textureKind == EquipmentUiTextureCatalog.ImportKind)
+        {
+            await ImportEquipmentIconPairAsync(projectRoot, dlg.FileName, requestedName, cookPreset);
+            return;
+        }
         var templateJson = cookPreset.TemplateJson;
+        var importProject = _currentProject;
         if (string.IsNullOrWhiteSpace(templateJson) || !File.Exists(templateJson))
         {
             AppendLog("Texture import needs the selected verified Texture2D template in the Generated workspace.");
@@ -1866,8 +1872,14 @@ public sealed partial class MainForm
             if (!cookResult.Status.Equals("created", StringComparison.OrdinalIgnoreCase))
             {
                 AppendLog($"Texture import failed: {cookResult.Error?.Split('\n').FirstOrDefault() ?? cookResult.Status}");
+                if (EquipmentUiTextureCatalog.IsEquipmentIcon(textureKind))
+                    Dialog.Warn(this, "Equipment icon could not be imported", cookResult.Error?.Split('\n').FirstOrDefault() ?? cookResult.Status);
                 return;
             }
+
+            if (EquipmentUiTextureCatalog.IsEquipmentIcon(textureKind) &&
+                (!ReferenceEquals(importProject, _currentProject) || !_projectRootText.Text.Trim().Equals(projectRoot, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException("The active project changed during the icon cook. No texture was added. Return to the original project and retry.");
 
             AppendLog($"Texture import complete: {cookResult.OutputPackagePath}");
 
@@ -1882,12 +1894,24 @@ public sealed partial class MainForm
                 textureKind,
                 cookPreset);
 
-            _currentProject.GeneratedTextures.RemoveAll(t =>
-                t.PackagePath.Equals(entry.PackagePath, StringComparison.OrdinalIgnoreCase));
-            _currentProject.GeneratedTextures.Add(entry);
-            AutoAssignGeneratedUiIconSlots(_currentProject);
-            RecordChange("Textures", entry.DisplayName, entry.PackagePath, status: "staged");
-            try { (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(_currentProject); } catch { /* best effort */ }
+            if (EquipmentUiTextureCatalog.IsEquipmentIcon(textureKind))
+            {
+                EquipmentIconPairCookService.CheckCollisions([entry.PackagePath], [entry.DisplayName],
+                    importProject!.GeneratedTextures.Select(t => t.PackagePath), importProject.GeneratedTextures.Select(t => t.DisplayName));
+                importProject.GeneratedTextures.Add(entry);
+                try { (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(importProject); }
+                catch { importProject.GeneratedTextures.Remove(entry); throw; }
+                RecordChange("Textures", entry.DisplayName, entry.PackagePath, status: "staged");
+            }
+            else
+            {
+                _currentProject.GeneratedTextures.RemoveAll(t =>
+                    t.PackagePath.Equals(entry.PackagePath, StringComparison.OrdinalIgnoreCase));
+                _currentProject.GeneratedTextures.Add(entry);
+                AutoAssignGeneratedUiIconSlots(_currentProject);
+                RecordChange("Textures", entry.DisplayName, entry.PackagePath, status: "staged");
+                try { (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(_currentProject); } catch { /* best effort */ }
+            }
 
             CopyText(entry.PackagePath, $"Texture ready and package path copied: {entry.PackagePath}");
             RefreshToyboxTiles();
@@ -1896,11 +1920,58 @@ public sealed partial class MainForm
         {
             AppendLog("Texture import failed:");
             AppendLog(ex.ToString());
+            if (EquipmentUiTextureCatalog.IsEquipmentIcon(textureKind))
+                Dialog.Warn(this, "Equipment icon could not be imported", ex.Message);
         }
         finally
         {
             _toyboxPrimaryActionButton.Enabled = true;
         }
+    }
+
+    private async Task ImportEquipmentIconPairAsync(string projectRoot, string sourceImage, string name, TextureCookPreset preset)
+    {
+        var project = _currentProject;
+        if (project is null) return;
+        _toyboxPrimaryActionButton.Enabled = false;
+        try
+        {
+            var basePackage = TexturePackagePathFromUserName(preset.TemplateJson, name,
+                NextTextureSlotIndex(project), _modFolderText.Text.Trim(), project.SlotId, EquipmentUiTextureCatalog.ImportKind);
+            var occupiedPackages = project.GeneratedTextures.Select(t => t.PackagePath).ToArray();
+            var occupiedNames = project.GeneratedTextures.Select(t => t.DisplayName).ToArray();
+            var outputParent = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureImports",
+                MakeSafePackageBaseName(project.SlotId), $"{MakeSafeTextureToken(name)}_{Guid.NewGuid():N}");
+            AppendLog($"Equipment icon: cooking '{name}' as BCA artwork and a generated SDF…");
+            var entries = await Task.Run(() => EquipmentIconPairCookService.Cook(projectRoot, sourceImage,
+                basePackage, name, outputParent, occupiedPackages, occupiedNames));
+            if (!ReferenceEquals(project, _currentProject) ||
+                !projectRoot.Equals(_projectRootText.Text.Trim(), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The project changed during the icon cook. No recipes were added. Return to the intended project and import again.");
+            EquipmentIconPairCookService.CheckCollisions(entries.Select(t => t.PackagePath), entries.Select(t => t.DisplayName),
+                project.GeneratedTextures.Select(t => t.PackagePath), project.GeneratedTextures.Select(t => t.DisplayName));
+            project.GeneratedTextures.AddRange(entries);
+            try { (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(project); }
+            catch
+            {
+                foreach (var entry in entries) project.GeneratedTextures.Remove(entry);
+                throw;
+            }
+            foreach (var entry in entries)
+            {
+                RecordChange("Textures", entry.DisplayName, entry.PackagePath, status: "staged");
+                AppendLog($"  {entry.DisplayName}: {entry.PackagePath}");
+            }
+            RefreshToyboxTiles();
+            Dialog.Info(this, "Equipment icon ready",
+                "Created BCA artwork and a generated SDF from your PNG.\n\nOpen Equipment and match each texture to the slot's Suggested: BCA or Suggested: SDF label, then Use this game asset and Save equipment.\n\nThe generated SDF still needs an in-game HUD check. Both outputs have their own saved source and cook recipe.");
+        }
+        catch (Exception ex)
+        {
+            AppendLog("Equipment icon import failed: " + ex.Message);
+            Dialog.Warn(this, "Equipment icon could not be imported", ex.Message + "\n\nNo partial icon pair was added to the project.");
+        }
+        finally { _toyboxPrimaryActionButton.Enabled = true; }
     }
 
     private async Task<bool> EnsureTextureCookTemplatesAsync(string projectRoot)
@@ -2046,6 +2117,8 @@ public sealed partial class MainForm
 
     private static List<TextureCookPreset> AvailableTextureCookPresets(string projectRoot, string textureKind)
     {
+        if (EquipmentUiTextureCatalog.IsEquipmentIcon(textureKind))
+            TextureCookTemplateService.PrepareFromContentRoot(projectRoot, AppSettings.Current.EffectiveExtractedContentRoot());
         if (IsSurfaceMaskTextureKind(textureKind))
         {
             TextureCookTemplateService.NormalizeNativeMmrTemplate(
@@ -2084,7 +2157,44 @@ public sealed partial class MainForm
             }
         }
 
-        if (IsSuitSelectorIconTextureKind(textureKind))
+        if (textureKind == EquipmentUiTextureCatalog.ImportKind)
+        {
+            if (TextureCookTemplateService.IsTemplateReady(TextureCookTemplateService.TemplateJsonPath(projectRoot,
+                    TextureCookTemplateService.EquipmentAlphaTemplateFolder)))
+                Add("ui-equipment-pair", "White PNG → BCA + generated SDF",
+                    TextureCookTemplateService.TemplateJsonPath(projectRoot, TextureCookTemplateService.EquipmentColorTemplateFolder),
+                    256, 256, "PF_B8G8R8A8", TextureProfileSafety.Experimental,
+                    "One white icon with a black outline on a transparent background, with empty margins. Creates a 256px BCA preserving color/alpha and a 64px SDF from the alpha silhouette. Match the output to the equipment slot's suggested type. SDF rendering still needs an in-game check.");
+        }
+        else if (textureKind == EquipmentUiTextureCatalog.AccentKind)
+        {
+            Add(EquipmentUiTextureCatalog.AccentProfile, "White + green artwork → equipment SDF",
+                TextureCookTemplateService.TemplateJsonPath(projectRoot, TextureCookTemplateService.EquipmentAccentTemplateFolder),
+                64, 64, "PF_B8G8R8A8", TextureProfileSafety.Experimental,
+                EquipmentHudIconService.ArtworkHelp + " Choose this cook in Equipment → HUD icon material. Green marks the accent area; the material controls its colour and draws the outline. Do not import a prepared red/blue SDF here.");
+        }
+        else if (textureKind == EquipmentUiTextureCatalog.AlphaKind)
+        {
+            Add("ui-equipment-alpha-to-sdf-64-bgra8", "Equipment HUD · transparent PNG to SDF",
+                TextureCookTemplateService.TemplateJsonPath(projectRoot, TextureCookTemplateService.EquipmentAlphaTemplateFolder),
+                64, 64, "PF_B8G8R8A8", TextureProfileSafety.Experimental,
+                "Converts the PNG alpha silhouette to a packed HUD distance field. Use a transparent background with an opaque shape and empty margins. RGB colors are not used. Assign to the equipment's SDF texture, then save equipment and build. In-game validation required.");
+        }
+        else if (textureKind == EquipmentUiTextureCatalog.ColorKind)
+        {
+            Add("ui-equipment-bca-256-bgra8", "Equipment color / alpha · 256px BGRA8",
+                TextureCookTemplateService.TemplateJsonPath(projectRoot, TextureCookTemplateService.EquipmentColorTemplateFolder),
+                256, 256, "PF_B8G8R8A8", TextureProfileSafety.Experimental,
+                "Use the original unmarked white icon with a black outline on transparency. This BCA profile preserves RGBA; it does not generate an SDF or interpret green as an accent. For an SDF slot, import the green-marked copy separately as Equipment SDF icon (white + green PNG). Batarang HUD materials use SDF, not BCA. In-game validation required.");
+        }
+        else if (textureKind == EquipmentUiTextureCatalog.SdfKind)
+        {
+            Add(EquipmentUiTextureCatalog.SdfProfile, "Equipment HUD / upgrade SDF · 64px linear BGRA8",
+                TextureCookTemplateService.TemplateJsonPath(projectRoot, TextureCookTemplateService.EquipmentSdfTemplateFolder),
+                64, 64, "PF_B8G8R8A8", TextureProfileSafety.Experimental,
+                "Native gadget SDF layout with seven inline mips. Supply prepared channel-packed SDF artwork, not a color portrait. This cook preserves channels; it does not generate distance fields or convert ordinary PNG artwork. Check the target material and test in game.");
+        }
+        else if (IsSuitSelectorIconTextureKind(textureKind))
         {
             Add(NativeUimdIconCookProfile, "Native 256px BC7 UIMD icon", nativeSuitIconPath, 256, 256, "PF_BC7",
                 TextureProfileSafety.Verified,
@@ -3482,7 +3592,7 @@ public sealed partial class MainForm
     }
 
     internal static bool IsUiTextureKind(string? textureKind) =>
-        !string.IsNullOrWhiteSpace(textureKind) &&
+        !string.IsNullOrWhiteSpace(textureKind) && !EquipmentUiTextureCatalog.IsEquipmentIcon(textureKind) &&
         (textureKind.Contains("ui", StringComparison.OrdinalIgnoreCase) ||
          textureKind.Contains("icon", StringComparison.OrdinalIgnoreCase) ||
          textureKind.Contains("artwork", StringComparison.OrdinalIgnoreCase));

@@ -32,7 +32,7 @@
 
 The development branch adds [independent characters](../guides/custom-characters.md), their default
 and child suits, and an experimental existing-rig mesh importer. The first character/body proofs
-worked in-game; the [release matrix](../guides/release-test-checklist.md) remains necessary.
+worked in-game; broader testing across multiple mods, restarts and co-op is still needed.
 Scripted story casting, new voices, new rigs and arbitrary unlock rules are not provided.
 
 - Custom Red Brick creation. The viewer only previews the game's existing colour options.

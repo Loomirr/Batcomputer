@@ -161,7 +161,23 @@ int32 UBatcomputerRegistryWriterCommandlet::Main(const FString& Params)
     // Legacy suit rows may omit the last two fields. New rows always carry
     // their own type and class so one registry can advertise mixed asset types.
     TArray<FAdditionalRegistryRow> AdditionalRows;
-    if (FParse::Value(*Params, TEXT("AdditionalRows="), AdditionalRowsText))
+    FString AdditionalRowsFile;
+    if (FParse::Value(*Params, TEXT("AdditionalRowsFile="), AdditionalRowsFile))
+    {
+        AdditionalRowsFile.TrimQuotesInline();
+        FString InlineRows;
+        if (FParse::Value(*Params, TEXT("AdditionalRows="), InlineRows) ||
+            !FFileHelper::LoadFileToString(AdditionalRowsText, *AdditionalRowsFile) || AdditionalRowsText.IsEmpty())
+        {
+            UE_LOG(LogBatcomputerRegistryWriter, Error, TEXT("Could not read registry rows input: %s"), *AdditionalRowsFile);
+            return 5;
+        }
+    }
+    else
+    {
+        FParse::Value(*Params, TEXT("AdditionalRows="), AdditionalRowsText);
+    }
+    if (!AdditionalRowsText.IsEmpty())
     {
         AdditionalRowsText.TrimQuotesInline();
         AdditionalRowsText.TrimStartAndEndInline();

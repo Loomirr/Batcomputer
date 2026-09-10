@@ -816,7 +816,6 @@ public sealed partial class MainForm
         ModProjectService.ApplyDerivedFields(mod);
 
         var outRoot = ModBuildRoot(mod.ModId);
-        var trioBase = Path.Combine(outRoot, mod.PackageBaseName);
         var result = new ModInstallResult
         {
             ModName = mod.DisplayName,
@@ -838,10 +837,6 @@ public sealed partial class MainForm
         }
 
         var installed = 0;
-        var trioFilesCopied = 0;
-        var tagsInstalled = false;
-        var registryInstalled = false;
-        var assetRegistryInstalled = false;
         var coreRegistryReady = false;
         try
         {
@@ -873,74 +868,46 @@ public sealed partial class MainForm
             }
             AppendLog($"  shared registry found -> {result.CoreRegistryDestination}");
             result.TrioDestination = LotdkExpandedLayout.ExpandedPaksRoot(gameRoot);
-            var slotDest = result.TrioDestination;
-            ModReleaseStep("Copying the IoStore release files…");
-            Directory.CreateDirectory(slotDest);
-            foreach (var src in expectedTrioPaths)
-            {
-                File.Copy(src, Path.Combine(slotDest, Path.GetFileName(src)), overwrite: true);
-                installed++;
-                trioFilesCopied++;
-            }
-            AppendLog($"  trio → {slotDest}");
-
-            // 2) loose gameplay tags -> LEGOBatmanLotDK/Config/Tags/
-            // GameplayTagsManager scans the project Config/Tags directory at
-            // startup. A Config/Tags file nested in our content-only registry
-            // plugin is not an active tag source.
-            var tagConfigSource = Path.Combine(
-                outRoot,
-                "LooseFiles",
-                PawnTagConfigService.RelativeConfigPath(mod.ModId)
-                    .Replace('/', Path.DirectorySeparatorChar));
-            var installedTagPath = LotdkExpandedLayout.ModGameplayTagsPath(gameRoot, mod.ModId);
+            var changes = expectedTrioPaths.Select(src => new ModInstallTransactionService.Change(
+                src, Path.Combine(result.TrioDestination, Path.GetFileName(src)))).ToList();
+            var tagConfigSource = Path.Combine(outRoot, "LooseFiles",
+                PawnTagConfigService.RelativeConfigPath(mod.ModId).Replace('/', Path.DirectorySeparatorChar));
             result.TagsDestination = LotdkExpandedLayout.GameConfigTagsRoot(gameRoot);
-            ModReleaseStep("Installing the gameplay tags…");
-            if (File.Exists(tagConfigSource))
-            {
-                Directory.CreateDirectory(result.TagsDestination);
-                File.Copy(tagConfigSource, installedTagPath, overwrite: true);
-                installed++;
-                tagsInstalled = File.Exists(installedTagPath);
-                AppendLog($"  {Path.GetFileName(installedTagPath)} → {installedTagPath}");
-            }
-
-            // 3) mod.json -> ue4ss/LOTDKExpanded/Mods/<ModId>/
-            var modJsonSrc = Path.Combine(outRoot, "mod.json");
+            changes.Add(new(tagConfigSource, LotdkExpandedLayout.ModGameplayTagsPath(gameRoot, mod.ModId)));
             result.RegistryDestination = LotdkExpandedLayout.ContentPackDirectory(gameRoot, mod.ModId);
-            ModReleaseStep("Installing the mod registry entry…");
-            if (File.Exists(modJsonSrc))
-            {
-                var packDestination = result.RegistryDestination;
-                Directory.CreateDirectory(result.RegistryDestination);
-                File.Copy(modJsonSrc, Path.Combine(result.RegistryDestination, "mod.json"), overwrite: true);
-                installed++;
-                registryInstalled = true;
-                AppendLog($"  mod.json → {packDestination}");
-            }
+            changes.Add(new(Path.Combine(outRoot, "mod.json"), Path.Combine(result.RegistryDestination, "mod.json")));
 
             var plugin = RegistryPluginService.CreateLayout(outRoot, mod.ModId);
             result.AssetRegistryDestination = LotdkExpandedLayout.RegistryPluginDirectory(gameRoot, plugin.PluginName);
-            ModReleaseStep("Installing the Asset Registry plugin…");
-            if (File.Exists(plugin.DescriptorPath) && File.Exists(plugin.RegistryPath) &&
-                !string.IsNullOrWhiteSpace(result.AssetRegistryDestination))
+            // Include mandatory files explicitly: missing metadata must stop before any replacement.
+            var requiredPluginFiles = new List<string> { plugin.DescriptorPath, plugin.RegistryPath };
+            var builtCharacterGroups = Path.Combine(outRoot, "Stage", "LEGOBatmanLotDK", "Content", "Characters", "MetaData", "Groups", "Mods", mod.ModId);
+            if (Directory.Exists(builtCharacterGroups) && Directory.EnumerateFiles(builtCharacterGroups, "*.uasset").Any())
+                requiredPluginFiles.Add(Path.Combine(plugin.PluginDirectory, "Config", "CharacterSelectSystem.ini"));
+            foreach (var src in requiredPluginFiles.Concat(Directory.Exists(plugin.PluginDirectory)
+                ? Directory.EnumerateFiles(plugin.PluginDirectory, "*", SearchOption.AllDirectories)
+                : Array.Empty<string>()).Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                CopyDirectoryContents(plugin.PluginDirectory, result.AssetRegistryDestination, overwrite: true);
-                installed += Directory.EnumerateFiles(plugin.PluginDirectory, "*", SearchOption.AllDirectories).Count();
-                assetRegistryInstalled = true;
-                // Remove the obsolete plugin-local copy left by an older build.
-                // The authoritative installed file is game Config/Tags above.
-                var legacyPluginTagPath = Path.Combine(result.AssetRegistryDestination, "Config", "Tags", $"{mod.ModId}Tags.ini");
-                if (File.Exists(legacyPluginTagPath))
-                {
-                    File.Delete(legacyPluginTagPath);
-                }
-                AppendLog($"  {plugin.PluginName} -> {result.AssetRegistryDestination}");
+                var relative = Path.GetRelativePath(plugin.PluginDirectory, src);
+                if (relative.Replace('\\', '/').Equals($"Config/Tags/{mod.ModId}Tags.ini", StringComparison.OrdinalIgnoreCase)) continue;
+                changes.Add(new(src, Path.Combine(result.AssetRegistryDestination, relative)));
             }
-
-            result.Status = trioFilesCopied == 3 && tagsInstalled && registryInstalled && coreRegistryReady && assetRegistryInstalled
-                ? ModInstallStatus.Complete
-                : ModInstallStatus.Partial;
+            // Delete obsolete plugin-local tags inside the transaction, so failure restores them too.
+            changes.Add(new(null, Path.Combine(result.AssetRegistryDestination, "Config", "Tags", $"{mod.ModId}Tags.ini")));
+            ModReleaseStep("Installing and verifying the complete release…");
+            var transaction = new ModInstallTransactionService().Install(gameRoot, changes);
+            foreach (var warning in transaction.Warnings) AppendLog("  " + warning);
+            if (!transaction.Success)
+            {
+                result.Status = ModInstallStatus.Failed;
+                result.Detail = transaction.Detail + (transaction.Warnings.Count > 0
+                    ? "\n\n" + string.Join("\n", transaction.Warnings) : "");
+                AppendLog(result.Detail);
+                return result;
+            }
+            installed = changes.Count(change => change.Source is not null);
+            AppendLog($"  complete release verified: trio, tags, mod.json and {plugin.PluginName}");
+            result.Status = ModInstallStatus.Complete;
             string previousIdCleanupError = "";
             if (result.Status == ModInstallStatus.Complete && mod.PreviousModIds is { Count: > 0 })
             {
@@ -1600,6 +1567,7 @@ public sealed partial class MainForm
     {
         var mod = ModService.LoadMod(modProjectPath);
         if (mod is null) { AppendLog("Build mod: could not load project."); return false; }
+        using var timing = new OperationTiming("Build " + mod.DisplayName, AppendLog);
         ModProjectService.ApplyDerivedFields(mod);
         ModReleaseStep("Checking selected characters, suits and gameplay tags…");
 
@@ -1684,6 +1652,7 @@ public sealed partial class MainForm
         }
 
         if (tagRows.Count == 0) { AppendLog("Build mod: nothing to build."); return false; }
+        timing.Mark("preflight");
 
         var publishedOutputRoot = ModBuildRoot(mod.ModId);
         var attemptBoundary = Path.Combine(
@@ -1804,6 +1773,7 @@ public sealed partial class MainForm
             var characterRows = CustomCharacterRegistrationService.Generate(stageContent,
                 AppSettings.Current.EffectiveExtractedContentRoot(), mod.ModId, preparedSuits,
                 mappings ?? throw new InvalidDataException("Character registration requires mappings."));
+            timing.Mark("prepare and merge");
             var tagConfigPath = string.Empty;
 
             try
@@ -1840,19 +1810,22 @@ public sealed partial class MainForm
             var validationErrors = ValidateModReleaseStage(mod, manifest, stageContent);
             try
             {
-                var structural = new StageValidationService(stageContent, AppSettings.Current.EffectiveUsmapPath());
-                foreach (var suit in preparedSuits)
+                var mappingsPath = AppSettings.Current.EffectiveUsmapPath();
+                var findings = await Task.Run(() =>
                 {
-                    foreach (var finding in structural.Validate(suit))
+                    var structural = new StageValidationService(stageContent, mappingsPath, projectRoot);
+                    return preparedSuits.SelectMany(suit => structural.Validate(suit)
+                        .Select(finding => (suit.SlotId, Finding: finding))).ToList();
+                });
+                foreach (var (slotId, finding) in findings)
+                {
+                    if (finding.Severity.Equals("ERROR", StringComparison.OrdinalIgnoreCase))
                     {
-                        if (finding.Severity.Equals("ERROR", StringComparison.OrdinalIgnoreCase))
-                        {
-                            validationErrors.Add($"{suit.SlotId}: {finding.Message}");
-                        }
-                        else
-                        {
-                            preflight.Result.AddWarning("staged release", finding.Message, suit.SlotId);
-                        }
+                        validationErrors.Add($"{slotId}: {finding.Message}");
+                    }
+                    else
+                    {
+                        preflight.Result.AddWarning("staged release", finding.Message, slotId);
                     }
                 }
             }
@@ -1879,9 +1852,9 @@ public sealed partial class MainForm
             IReadOnlyList<RegistryPluginService.RegistryRow> registryRows;
             try
             {
-                registryRows = CharacterRegistryBundleService.CreateRows(
+                registryRows = await Task.Run(() => CharacterRegistryBundleService.CreateRows(
                     stageContent, manifestSuits.Select(suit => suit.dcmd), mappings ??
-                    throw new InvalidDataException("A .usmap mappings file is required to read staged character loading bundles.")).Concat(characterRows).ToArray();
+                    throw new InvalidDataException("A .usmap mappings file is required to read staged character loading bundles.")).Concat(characterRows).ToArray());
             }
             catch (Exception ex)
             {
@@ -1890,6 +1863,7 @@ public sealed partial class MainForm
                 AppendLog("Build mod ABORTED: could not prepare Asset Registry loading bundles: " + ex.Message);
                 return false;
             }
+            timing.Mark("validate");
             var registry = await new RegistryPluginService().BuildAsync(
                 outRoot,
                 mod.ModId,
@@ -1911,6 +1885,7 @@ public sealed partial class MainForm
                 }
                 return false;
             }
+            timing.Mark("registry");
             preflight.Result.AddInfo("Asset Registry", $"Verified {registry.Rows.Count} primary-asset row(s).");
             CustomCharacterRegistrationService.WriteRosterConfig(registry.Layout.PluginDirectory, preparedSuits);
             if (string.IsNullOrWhiteSpace(tagConfigPath) || !File.Exists(tagConfigPath))
@@ -1984,6 +1959,7 @@ public sealed partial class MainForm
             }
 
             await PublishModBuildAttemptAsync(outRoot, publishedOutputRoot, attemptBoundary);
+            timing.Mark("pack and publish");
             retocAttemptOutputs = null;
             var publishedTrioBase = Path.Combine(publishedOutputRoot, mod.PackageBaseName);
             AppendLog($"Build mod '{mod.DisplayName}' COMPLETE — installable trio for {mergedSuits} suit(s):");
@@ -2043,6 +2019,7 @@ public sealed partial class MainForm
         NativeSuitProject authoringSuit,
         SuitProjectService projectService)
     {
+        using var timing = new OperationTiming("Prepare " + authoringSuit.DisplayName, AppendLog);
         PackagePreparationStage? preparationStage = null;
         try
         {
@@ -2089,6 +2066,7 @@ public sealed partial class MainForm
                 throw new InvalidOperationException(textureStageError);
             }
             StageGeneratedMaterialsIntoContentRoot(suit, contentRoot);
+            timing.Mark("stage and materials");
             StageGeneratedDcmdIntoContentRoot(
                 suit,
                 contentRoot,
@@ -2110,6 +2088,7 @@ public sealed partial class MainForm
 
             await Task.Run(() => CustomEquipmentService.Generate(suit, contentRoot,
                 line => AppendLog("    equipment: " + line)));
+            timing.Mark("metadata and equipment");
 
             // Grafting can replace the stage from the donor, so material bindings must
             // be applied after the last possible stage rebuild.

@@ -268,20 +268,43 @@ public sealed class ToolMaterialLibraryService
     public bool ImportIntoProject(NativeSuitProject project, string packagePath)
     {
         var package = UnrealPathUtil.NormalizePackagePath(packagePath);
-        var entry = LoadAvailable().FirstOrDefault(candidate =>
-            UnrealPathUtil.NormalizePackagePath(candidate.PackagePath)
-                .Equals(package, StringComparison.OrdinalIgnoreCase));
-        if (entry is null)
+        var gate = RepairGate;
+        gate.Wait();
+        try
         {
-            return false;
-        }
+            var entries = LoadCatalog().Materials;
+            MergeSavedSuitMaterials(entries);
+            var entry = entries.FirstOrDefault(candidate =>
+                UnrealPathUtil.NormalizePackagePath(candidate.PackagePath)
+                    .Equals(package, StringComparison.OrdinalIgnoreCase));
+            if (entry is null || !ArchiveMaterialClosureCore(package) || !HasCookedPackageCore(package))
+            {
+                return false;
+            }
 
-        project.GeneratedMaterials ??= new List<GeneratedMaterialEntry>();
-        project.GeneratedMaterials.RemoveAll(candidate =>
-            UnrealPathUtil.NormalizePackagePath(candidate.PackagePath)
-                .Equals(package, StringComparison.OrdinalIgnoreCase));
-        project.GeneratedMaterials.Add(Clone(entry));
-        return true;
+            project.GeneratedMaterials ??= new List<GeneratedMaterialEntry>();
+            project.GeneratedMaterials.RemoveAll(candidate =>
+                UnrealPathUtil.NormalizePackagePath(candidate.PackagePath)
+                    .Equals(package, StringComparison.OrdinalIgnoreCase));
+            project.GeneratedMaterials.Add(Clone(entry));
+            return true;
+        }
+        finally { gate.Release(); }
+    }
+
+    /// <summary>Authoring metadata for role selection, without refreshing unrelated cooked assets.
+    /// Unlike the best-effort browser snapshot, this waits for an active library repair.</summary>
+    internal IReadOnlyList<GeneratedMaterialEntry> LoadAssignmentMetadata()
+    {
+        var gate = RepairGate;
+        gate.Wait();
+        try
+        {
+            var entries = LoadCatalog().Materials;
+            MergeSavedSuitMaterials(entries);
+            return entries.Select(Clone).ToList();
+        }
+        finally { gate.Release(); }
     }
 
     public void Rename(string oldPackagePath, GeneratedMaterialEntry replacement)
@@ -1324,7 +1347,7 @@ public sealed class ToolMaterialLibraryService
         if (string.IsNullOrWhiteSpace(packageBase))
         {
             throw new InvalidOperationException(
-                $"Material dependency '{packagePath}' is missing from the {sourceDescription}.");
+                $"Material dependency '{packagePath}' is missing from the {sourceDescription} (required .uasset and .uexp).");
         }
 
         var missing = new List<string>();

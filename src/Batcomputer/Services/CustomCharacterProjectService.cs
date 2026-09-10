@@ -158,7 +158,7 @@ public static class CustomCharacterProjectService
         var to = Path.GetFullPath(service.ProjectOutputDirectory(target));
         if (from.Equals(to, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Source and new project must differ.");
         foreach (var relative in source.CustomStaticMeshes.Select(mesh => mesh.SourceObjRelativePath)
-                     .Concat(source.SkinnedMeshes.SelectMany(mesh => new[] { mesh.SourceRelativePath, mesh.CacheRelativePath }))
+                     .Concat(source.SkinnedMeshes.Concat(EquipmentSkinnedModelService.Models(source)).SelectMany(mesh => new[] { mesh.SourceRelativePath, mesh.CacheRelativePath }))
                      .Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase))
         {
             var input = Below(from, relative);
@@ -234,7 +234,7 @@ public static class CustomCharacterProjectService
                 if (File.Exists(Path.ChangeExtension(file, ext))) File.Copy(Path.ChangeExtension(file, ext), Path.ChangeExtension(destination, ext), false);
             RepointCopiedPackage(destination, oldRoot, newRoot);
         }
-        foreach (var mesh in target.SkinnedMeshes)
+        foreach (var mesh in target.SkinnedMeshes.Concat(EquipmentSkinnedModelService.Models(target)))
         {
             var cache = Below(directory, mesh.CacheRelativePath);
             var manifestFile = Path.Combine(cache, "validated.json");
@@ -253,15 +253,17 @@ public static class CustomCharacterProjectService
     internal static IReadOnlyList<string> VisualCopyRoots(NativeSuitProject source)
     {
         var items = HeldItemService.Resolve(source.AbilityLoadout);
-        var equipmentParts = source.EquipmentSlots.SelectMany(slot => slot.Custom?.Parts ?? []);
+        var equipmentParts = source.EquipmentSlots.Where(slot => slot.Custom is not null)
+            .SelectMany(slot => EquipmentHudIconService.ActiveCopyParts(slot.Custom!));
         // Weapon geometry is embedded in the JSON recipe. Its materials, including older recipes
         // which no longer list them in GeneratedMaterials, still need independent package closures.
         return source.GeneratedMaterials.Select(material => material.PackagePath)
             .Concat(source.MaterialAssignments.Select(material => material.MiPackagePath))
             .Concat(source.CustomStaticMeshes.SelectMany(mesh => mesh.MaterialSlots.Select(material => material.MaterialPath).Append(mesh.MaterialPath)))
-            .Concat(source.SkinnedMeshes.SelectMany(mesh => mesh.Materials.Select(material => material.MaterialPath)))
+            .Concat(source.SkinnedMeshes.Concat(EquipmentSkinnedModelService.Models(source)).SelectMany(mesh => mesh.Materials.Select(material => material.MaterialPath)))
             .Concat(items.SelectMany(item => (item.CustomModel?.Materials ?? []).Select(material => material.MaterialPath).Append(item.MaterialPackage)))
             .Concat(equipmentParts.SelectMany(part => (part.Model?.Materials ?? []).Select(material => material.MaterialPath).Append(part.ReplacementPackage)))
+            .Concat(source.EquipmentSlots.Select(slot => slot.Custom?.HudIcon?.SdfPackage ?? ""))
             .Append(source.GliderMaterial)
             .Where(package => package.StartsWith(OwnedRoot(source) + "/", StringComparison.Ordinal))
             .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();

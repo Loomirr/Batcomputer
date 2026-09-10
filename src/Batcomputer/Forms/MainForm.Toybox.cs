@@ -3334,7 +3334,7 @@ public sealed partial class MainForm
         if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("customize equipment")) return;
         EnsureProject();
         if (_currentProject is null) { Dialog.Info(this, "Select a suit", "Choose a base suit before creating equipment."); return; }
-        using var workshop = new EquipmentWorkshopForm(existing?.Custom);
+        using var workshop = new EquipmentWorkshopForm(existing?.Custom, _currentProject);
         if (workshop.ShowDialog(this) != DialogResult.OK || workshop.Result is null || workshop.SelectedEquipment is not { } equipment) return;
         if (!new AnimArchetypeGraftService().BaseSupportsEquipment(_currentProject, out _))
         { Dialog.Info(this, "Equipment unavailable", "This gameplay donor cannot carry equipment. Choose a playable combat donor first."); return; }

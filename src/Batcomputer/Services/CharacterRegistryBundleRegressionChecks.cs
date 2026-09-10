@@ -85,6 +85,41 @@ internal static class CharacterRegistryBundleRegressionChecks
         try { CharacterRegistryBundleService.CreateCharacterRowFromMetadata(package, metadata); }
         catch (InvalidDataException) { rejected = true; }
         Check(rejected, "a character with no playable reference cannot pass registry bundle generation");
+        const string owner = "/Game/Mods/Test/Equipment/slot_1";
+        var upgradePackage = EquipmentUpgradeService.Destination(owner, EquipmentUpgradeService.NativeRoot);
+        var otherUpgrade = EquipmentUpgradeService.Destination(owner + "_other", EquipmentUpgradeService.NativeRoot);
+        Check(upgradePackage != otherUpgrade && UnrealPathUtil.AssetName(upgradePackage) != UnrealPathUtil.AssetName(otherUpgrade) &&
+            upgradePackage == EquipmentUpgradeService.Destination(owner, EquipmentUpgradeService.NativeRoot),
+            "upgrade primary IDs are stable and distinct between equipment owners");
+        const string setPath = "/Game/Characters/Equipment/Batarang/Upgrades/DA_Batarang_NumberofBatarangsUpgrade.DA_Batarang_NumberofBatarangsUpgrade";
+        metadata.Data = [new ArrayPropertyData(FName.FromString(asset, "UpgradeSets")) { Value = [Soft("0", setPath)] }];
+        var upgradeRow = CharacterRegistryBundleService.CreateUpgradeRow(upgradePackage, metadata, true);
+        Check(upgradeRow.EffectivePrimaryAssetType == RegistryPluginService.UpgradeRootType &&
+            upgradeRow.EffectiveBundles.Single().Name == RegistryPluginService.MetadataBundle &&
+            upgradeRow.EffectiveBundles.Single().Assets.SequenceEqual([setPath]) && RegistryPluginService.ValidateRows([upgradeRow]).Count == 0,
+            "custom upgrade roots register their native metadata loading bundle under the equipment discovery root");
+        metadata.Data = [];
+        Check(!CharacterRegistryBundleService.CreateUpgradeRow(upgradePackage, metadata, true).EffectiveBundles.Any(),
+            "no-upgrades roots remain valid primary assets with no fabricated dependencies");
+        metadata.Data = [new ArrayPropertyData(FName.FromString(asset, "UpgradeFunctionality")) { Value = [Soft("0", pawn)] }, Soft("UpgradeData", setPath)];
+        var setRow = CharacterRegistryBundleService.CreateUpgradeRow(upgradePackage + "_Set", metadata, false);
+        Check(setRow.EffectivePrimaryAssetType == RegistryPluginService.UpgradeSetType &&
+            setRow.EffectiveBundles.Single(b => b.Name == RegistryPluginService.GameplayBundle).Assets.SequenceEqual([pawn]) &&
+            setRow.EffectiveBundles.Single(b => b.Name == RegistryPluginService.MetadataBundle).Assets.SequenceEqual([setPath]) &&
+            RegistryPluginService.ValidateRows([setRow]).Count == 0,
+            "upgrade sets register functionality classes separately from native purchase metadata");
+        metadata.Data = [Soft("Equipment", pawn), Soft("DeployableCharacterMetaData", native)];
+        var deployable = CharacterRegistryBundleService.CreateEquipmentRow(eta[..eta.LastIndexOf('.')], metadata, true);
+        Check(deployable.EffectiveAssetClass == RegistryPluginService.DeployableEquipmentTaggedAssetClass &&
+            deployable.EffectiveBundles.Single().Assets.SequenceEqual([native, pawn]) && RegistryPluginService.ValidateRows([deployable]).Count == 0,
+            "deployable equipment registers both controlled-pawn metadata and equipment definition using its native class");
+        metadata.Data = [Soft("Equipment", pawn)];
+        rejected = false;
+        try { CharacterRegistryBundleService.CreateEquipmentRow(package, metadata, true); }
+        catch (InvalidDataException) { rejected = true; }
+        Check(rejected, "missing deployable metadata fails instead of silently producing an ordinary equipment row");
+        Check(RegistryPluginService.ValidateRows([upgradeRow with { PackagePath = EquipmentUpgradeService.NativeRoot }]).Count > 0,
+            "upgrade registration cannot overwrite the native upgrade root");
         return results;
     }
 }

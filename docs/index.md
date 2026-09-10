@@ -13,9 +13,8 @@ Batcomputer handles the files and registration needed to package and install you
 
 ## Start here
 
-Testing the development build? Start with [custom characters](guides/custom-characters.md),
-[custom equipment](guides/equipment-workshop.md), or the
-[next-release test checklist](guides/release-test-checklist.md). These features may not be in the current download.
+Using the development build? See the guides for [custom characters](guides/custom-characters.md)
+and [custom equipment](guides/equipment-workshop.md). These features may not be in the current download.
 
 <div class="grid cards" markdown>
 

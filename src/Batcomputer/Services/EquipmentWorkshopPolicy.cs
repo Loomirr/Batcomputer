@@ -15,7 +15,7 @@ internal static class EquipmentWorkshopPolicy
     internal static Access Evaluate(GameDataEquipment? equipment, EquipmentAssetProfile? profile, GameDataDb db)
     {
         var owners = PlayableOwners(equipment, db);
-        if (equipment is null || owners.Count == 0)
+        if (equipment is null)
             return new(false, "No confirmed playable owner. NPC, boss and unverified equipment can only be inspected.", owners);
         if (profile is null)
             return new(false, "Equipment files have not been verified. Wait for inspection or refresh the extraction.", owners);
@@ -25,9 +25,12 @@ internal static class EquipmentWorkshopPolicy
         var skinned = profile.Parts.Where(p => p.AssetClass == "SkeletalMesh").ToArray();
         // Count roles, not references: a skeletal gun can have many static bullets;
         // UE also stores SkeletalMesh and SkinnedAsset for the same body.
-        if (skinned.Any(IsMainBody) || (skinned.Length > 0 && !profile.Parts.Any(p => p.AssetClass == "StaticMesh" && IsMainBody(p))))
-            return new(false, "Skeletal or mixed-body equipment is view-only until skinned-model support is ready. Its icons and projectiles are locked too.", owners);
-        return new(true, "Customize static models and icons. Controls and upgrades stay with the native equipment.", owners);
+        if (owners.Count == 0 && skinned.Length == 0)
+            return new(false, "No confirmed playable owner. NPC and boss equipment can only be inspected.", owners);
+        var provenPistol = equipment.EtaPackage == EquipmentSkinnedModelService.Eta && skinned.Length > 0 && skinned.All(EquipmentSkinnedModelService.IsTested);
+        return new(true, provenPistol ? "Gordon pistol: tested in-game. Weighted FBX on its original rig; native animations retained." : skinned.Length > 0 ?
+            "EXPERIMENTAL · Untested skeletal equipment. Use its original rig and test animations, sockets and gameplay in-game." + (owners.Count == 0 ? " No confirmed playable owner; its abilities may require NPC-specific setup." : "") :
+            "Customize static models and icons. Controls and upgrades stay with the native equipment.", owners);
     }
     private static bool IsMainBody(EquipmentAssetPart part) =>
         part.ExportName.Equals("WeaponMesh", StringComparison.OrdinalIgnoreCase) || part.ExportName.Equals("WeaponMesh_GEN_VARIABLE", StringComparison.OrdinalIgnoreCase);

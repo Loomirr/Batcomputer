@@ -12,6 +12,12 @@ internal static class ReleaseRegressionChecks
     public static int Run(TextWriter output)
     {
         var failures = new List<string>();
+        foreach (var result in ModInstallTransactionRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
+        foreach (var result in QolRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
+        foreach (var result in NativeAssetTextPatchRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
         foreach (var result in CustomCharacterRegressionChecks.Run())
             Check(result.Passed, result.Description, failures, output);
         foreach (var result in CustomCharacterUiRegressionChecks.Run())
@@ -3847,6 +3853,9 @@ internal static class ReleaseRegressionChecks
             regressionMod,
             gameplayNightwingDprd,
             "Nightwing");
+        var nativeEquipmentIsExact = AbilityDependencyService.TryReadDonorRuntimeEquipmentSlots(
+            certifiedNightwingCapePair, GameDataService.Instance.Db.Equipment, out var exactNativeSlots) &&
+            exactNativeSlots.GetValueOrDefault(0) == "Electrorang";
         certifiedNightwingCapePair.EquipmentSlots.Clear();
         certifiedNightwingCapePair.EquipmentSlots.Add(new EquipmentSlotChange
         {
@@ -3927,7 +3936,7 @@ internal static class ReleaseRegressionChecks
             sameStemWrongBehaviorBridgeRejected &&
             retainedAuthoredBehaviorBridgeRejected &&
             equipmentFreeDprd.Equals(gameplayNightwingDprd, StringComparison.OrdinalIgnoreCase) &&
-            nativeEquipmentDprd.Equals(generatedEquipmentDprd, StringComparison.OrdinalIgnoreCase) &&
+            nativeEquipmentDprd.Equals(nativeEquipmentIsExact ? gameplayNightwingDprd : generatedEquipmentDprd, StringComparison.OrdinalIgnoreCase) &&
             foreignEquipmentDprd.Equals(generatedEquipmentDprd, StringComparison.OrdinalIgnoreCase) &&
             generatedEquipmentBehaviorBridgeAccepted &&
             danglingGameplayDprdRejectedForGeneratedBridge &&
@@ -3935,7 +3944,7 @@ internal static class ReleaseRegressionChecks
             pairedGliderKeepsNativeAbilityLoadout &&
             pairedNoEquipmentKeepsGameplayDprd &&
             nonCascadingCloneIdentity,
-            "exact behavior bridges fail closed when donor equipment cannot be inspected, switch changed equipment exclusively to mod-local DPRD, retain ordinary glider AS_Gliding DPRD generation, and emit exact non-cascading mod-local package identities",
+            "exact behavior bridges retain verified native equipment, fail closed when inspection is unavailable, isolate changed equipment, retain ordinary glider DPRD generation, and emit non-cascading identities",
             failures,
             output);
 

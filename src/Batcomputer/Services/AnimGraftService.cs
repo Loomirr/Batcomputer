@@ -1700,15 +1700,16 @@ public sealed class AnimGraftService
 
     // --- Import helpers (mirrors MaterialReplaceService's proven pattern) ---
 
-    private static FPackageIndex EnsureObjectImport(UAsset asset, string packagePath, string objectName, string classPackage, string className)
+    internal static FPackageIndex EnsureObjectImport(UAsset asset, string packagePath, string objectName, string classPackage, string className)
     {
         var packageImport = EnsurePackageImport(asset, packagePath);
         for (var i = 0; i < asset.Imports.Count; i++)
         {
             var import = asset.Imports[i];
-            if (import.ObjectName.ToString() == objectName &&
+            if (import.ObjectName.ToString().Equals(objectName, StringComparison.OrdinalIgnoreCase) &&
                 import.OuterIndex.Index == packageImport.Index &&
-                import.ClassName.ToString() == className)
+                import.ClassName.ToString().Equals(className, StringComparison.OrdinalIgnoreCase) &&
+                import.ClassPackage.ToString().Equals(classPackage, StringComparison.OrdinalIgnoreCase))
             {
                 return FromImportNumber(i + 1);
             }
@@ -1721,7 +1722,10 @@ public sealed class AnimGraftService
         for (var i = 0; i < asset.Imports.Count; i++)
         {
             var import = asset.Imports[i];
-            if (import.ClassName.ToString() == "Package" && import.ObjectName.ToString() == packagePath)
+            // Unreal FNames and package IDs are case-insensitive. A second import
+            // for BlowPipe vs Blowpipe creates duplicate cooked import identities.
+            if (import.ClassName.ToString() == "Package" && import.OuterIndex.IsNull() &&
+                import.ObjectName.ToString().Equals(packagePath, StringComparison.OrdinalIgnoreCase))
             {
                 return FromImportNumber(i + 1);
             }

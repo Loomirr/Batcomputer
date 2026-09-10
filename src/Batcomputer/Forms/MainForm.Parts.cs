@@ -2147,14 +2147,12 @@ public sealed partial class MainForm
             {
                 Section = "",
                 Title = "+ Import custom mesh",
-                Subtitle = "OBJ static attachment",
+                Subtitle = "Static OBJ or skeletal FBX",
                 Accent = Theme.Parts,
                 Dashed = true,
-                OnClick = () => _ = OpenCustomStaticMeshDialogAsync(null),
-                ToolTip = "Imports a project-owned OBJ as a static attachment. Each distinct usemtl name becomes a material slot. Pick a real game socket, then set scale, local XYZ offset, and rotation."
-            },
-            new() { Title = "+ Import skinned mesh", Subtitle = "Weighted FBX · existing rig", Accent = Theme.Parts, Dashed = true,
-                OnClick = () => _ = OpenSkinnedMeshWorkshopAsync(null), ToolTip = SkinnedMeshCookService.Warning }
+                OnClick = () => _ = ChooseCustomMeshImportAsync(),
+                ToolTip = "Choose Static for socket-mounted OBJ parts, or Skeletal for an FBX already weighted to a native game rig."
+            }
         };
         foreach (var skinned in _currentProject?.SkinnedMeshes ?? [])
         {
@@ -3629,50 +3627,7 @@ public sealed partial class MainForm
             return null;
         }
 
-        var candidates = _partIndex.Parts
-            .Where(candidate =>
-                candidate.HasMesh &&
-                candidate.Context.Equals(desiredContext, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        var sameSlot = candidates
-            .Where(candidate => candidate.Slot.Equals(part.Slot, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-        if (sameSlot.Count > 0)
-        {
-            candidates = sameSlot;
-        }
-
-        if (!string.IsNullOrWhiteSpace(part.MeshObjectName))
-        {
-            var exactMesh = candidates
-                .Where(candidate => candidate.MeshObjectName.Equals(part.MeshObjectName, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-            if (exactMesh.Count > 0)
-            {
-                candidates = exactMesh;
-            }
-            else
-            {
-                var exactMeshAnySlot = _partIndex.Parts
-                    .Where(candidate =>
-                        candidate.HasMesh &&
-                        candidate.Context.Equals(desiredContext, StringComparison.OrdinalIgnoreCase) &&
-                        candidate.MeshObjectName.Equals(part.MeshObjectName, StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-                if (exactMeshAnySlot.Count > 0)
-                {
-                    candidates = exactMeshAnySlot;
-                }
-            }
-        }
-
-        return candidates
-            .OrderByDescending(candidate => candidate.CharacterFolder.Equals(part.CharacterFolder, StringComparison.OrdinalIgnoreCase))
-            .ThenByDescending(candidate => candidate.MeshObjectName.Equals(part.MeshObjectName, StringComparison.OrdinalIgnoreCase))
-            .ThenByDescending(candidate => candidate.AnimClassObjectName.Equals(part.AnimClassObjectName, StringComparison.OrdinalIgnoreCase))
-            .ThenBy(candidate => candidate.SourcePackagePath, StringComparer.OrdinalIgnoreCase)
-            .FirstOrDefault();
+        return PartCounterpartService.Find(part, _partIndex.Parts, desiredContext);
     }
 
     private NativeSuitPartRecord? FindExactMeshCounterpartPart(NativeSuitPartRecord part, string desiredContext)
@@ -4965,6 +4920,7 @@ public sealed partial class MainForm
             p.MeshObjectPath.Equals(donor.MeshObjectPath, StringComparison.OrdinalIgnoreCase) &&
             (string.IsNullOrWhiteSpace(donor.Context) || p.Context.Equals(donor.Context, StringComparison.OrdinalIgnoreCase)));
         match ??= partIndex.Parts.FirstOrDefault(p =>
+            string.IsNullOrWhiteSpace(donor.MeshObjectPath) &&
             p.SourcePackagePath.Equals(donor.SourcePackagePath, StringComparison.OrdinalIgnoreCase) &&
             (string.IsNullOrWhiteSpace(donor.Context) || p.Context.Equals(donor.Context, StringComparison.OrdinalIgnoreCase)));
 
@@ -4974,6 +4930,8 @@ public sealed partial class MainForm
         }
 
         var resolved = PartRecipeService.Clone(match);
+        if (donor.Materials is { Count: > 0 }) resolved.Materials = donor.Materials.Select(m => new NativeSuitObjectRef
+            { ObjectName = m.ObjectName, ObjectPath = m.ObjectPath, PackagePath = m.PackagePath, ClassName = m.ClassName }).ToList();
         if (!string.IsNullOrWhiteSpace(donor.SemanticKind)) resolved.SemanticKind = donor.SemanticKind;
         if (!string.IsNullOrWhiteSpace(donor.MeshKind)) resolved.MeshKind = donor.MeshKind;
         if (!string.IsNullOrWhiteSpace(donor.TemplatePackagePath)) resolved.TemplatePackagePath = donor.TemplatePackagePath;
@@ -4989,6 +4947,9 @@ public sealed partial class MainForm
         resolved.RecipeKey = PartRecipeService.BuildRecipeKey(resolved);
         return resolved;
     }
+
+    internal static NativeSuitPartRecord? ResolvePartForReplayForTest(SavedPartGraftDonor donor, NativeSuitPartIndex index) =>
+        ResolveLivePart(donor, index);
 
     /// <summary>
     /// Resolves only an unambiguous donor with the same saved source package, mesh, and context.
@@ -5523,7 +5484,7 @@ public sealed partial class MainForm
                 var result = await RunWithFileLockRetryAsync(
                     () =>
                     {
-                        var graft = new PartGraftService(projectRoot).CreateSelectedPartGraftedStage(
+                        var graft = new PartGraftService(projectRoot, replayPartIndex).CreateSelectedPartGraftedStage(
                             project,
                             playable,
                             cutscene,
@@ -5813,6 +5774,8 @@ public sealed partial class MainForm
                 File.WriteAllText(
                     Path.Combine(graftStage, CompletedGraftStageMarkerName),
                     DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+                File.WriteAllText(Path.Combine(graftStage, "completed-recipe.sha256"),
+                    DeclarativeRecipeFingerprint(project));
             }
 
             // Delete the fail-closed sentinel last. If this step is interrupted, packaging remains
