@@ -54,7 +54,7 @@ public static class ModelPreviewService
 
     private const string GameContentFilePrefix = "LEGOBatmanLotDK/Content/";
 
-    private static DefaultFileProvider MakeProvider(
+    internal static DefaultFileProvider MakeProvider(
         string paksDir,
         string usmapPath,
         IEnumerable<string>? looseContentRoots = null)
@@ -174,6 +174,9 @@ public static class ModelPreviewService
         public string? StagedPlayablePath { get; init; }
         public bool AllowPartMover { get; init; } = true;
         public bool IncludeDefaultHead { get; init; } = true;
+        // Tool-owned callers can export a reusable character into their own preview session.
+        internal string? OutputDirectory { get; init; }
+        internal bool IgnoreSavedLayout { get; init; }
         public IReadOnlyCollection<PreviewRedBrickTint> RedBrickTints { get; init; } = Array.Empty<PreviewRedBrickTint>();
     }
 
@@ -1374,7 +1377,7 @@ public static class ModelPreviewService
         var viewerLayoutRoot = string.IsNullOrWhiteSpace(options.ViewerLayoutProjectRoot)
             ? AppSettings.Current.EffectiveProjectRoot()
             : options.ViewerLayoutProjectRoot!;
-        var viewerPlacements = ViewerLayoutService.Load(viewerLayoutRoot, viewerLayoutKey);
+        var viewerPlacements = options.IgnoreSavedLayout ? new List<SavedPreviewPartPlacement>() : ViewerLayoutService.Load(viewerLayoutRoot, viewerLayoutKey);
         var socketProfiles = RuntimeSocketProfileService.Load();
         if (socketProfiles.Count > 0)
         {
@@ -1601,7 +1604,7 @@ public static class ModelPreviewService
             };
         }
 
-        return BuildPreviewCore(provider, parts, options.AllowPartMover, viewerLayoutKey, options.RedBrickTints);
+        return BuildPreviewCore(provider, parts, options.AllowPartMover, viewerLayoutKey, options.RedBrickTints, options.OutputDirectory);
     }
 
     /// <summary>Exports each mesh to glTF and writes the viewer that loads them into one scene.</summary>
@@ -1665,7 +1668,8 @@ public static class ModelPreviewService
         IReadOnlyList<PreviewPart> parts,
         bool allowPartMover = false,
         string? viewerLayoutKey = null,
-        IReadOnlyCollection<PreviewRedBrickTint>? redBrickTints = null)
+        IReadOnlyCollection<PreviewRedBrickTint>? redBrickTints = null,
+        string? outputDirectory = null)
     {
         _faceMaterial = null;
         _faceBaseline = null;
@@ -1684,7 +1688,7 @@ public static class ModelPreviewService
             ExportMorphTargets = false,
         };
 
-        var previewDir = Path.Combine(NewPreviewRoot(), Guid.NewGuid().ToString("N"));
+        var previewDir = outputDirectory ?? Path.Combine(NewPreviewRoot(), Guid.NewGuid().ToString("N"));
         var exportDir = Path.Combine(previewDir, "export");
         Directory.CreateDirectory(exportDir);
 
@@ -2194,7 +2198,7 @@ public static class ModelPreviewService
     /// keep them inside StaticMaterials structs. Treating the latter as slotless skips native hair,
     /// hats, and props whenever their component does not happen to provide an override.
     /// </summary>
-    private static IReadOnlyList<UObject?> MeshSlotMaterials(UObject mesh)
+    internal static IReadOnlyList<UObject?> MeshSlotMaterials(UObject mesh)
     {
         if (mesh is USkeletalMesh skeletal)
         {
@@ -4167,6 +4171,7 @@ public static class ModelPreviewService
                    $"\"offset\":[{m.Offset.X:0.#####},{m.Offset.Y:0.#####},{m.Offset.Z:0.#####}]," +
                    $"\"slots\":[{slots}]}}";
         })) + "]";
+        File.WriteAllText(Path.Combine(dir, "models.json"), jsonList);
         static string Q(string? v) => v is null ? "null" : System.Text.Json.JsonSerializer.Serialize(v);
         static string F(float v) => v.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
         string UvLayerJson(FaceUvLayer? layer) => layer is null

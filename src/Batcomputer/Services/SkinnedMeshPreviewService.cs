@@ -10,7 +10,9 @@ internal static class SkinnedMeshPreviewService
     {
         SkinnedMeshStageService.ReadManifest(directory, recipe);
         var folder = ModelPreviewService.BuildPreview(AppSettings.Current.GamePaksRoot!, AppSettings.Current.EffectiveUsmapPath()!, recipe.DonorMeshPackage);
-        using var provider = SkinnedMeshCookService.OpenProvider(Path.Combine(SkinnedMeshCookService.SafePath(directory, recipe.CacheRelativePath), "AuditContainers"));
+        var stage = Path.Combine(folder, "Stage", "LEGOBatmanLotDK", "Content");
+        SkinnedMeshStageService.BakeMesh(stage, directory, recipe);
+        using var provider = ModelPreviewService.MakeProvider(AppSettings.Current.EffectiveGamePaksRoot(), AppSettings.Current.EffectiveUsmapPath()!, [stage]);
         var mesh = provider.LoadPackageObject<USkeletalMesh>(recipe.MeshPackage);
         var exporter = new MeshExporter(mesh, new ExporterOptions { MeshFormat = EMeshFormat.Gltf2, LodFormat = ELodFormat.FirstLod, ExportMaterials = false, ExportMorphTargets = false });
         if (!exporter.TryWriteToDir(new DirectoryInfo(Path.Combine(folder, "custom")), out _, out var file)) throw new InvalidDataException("Custom skinned preview could not be exported.");

@@ -156,6 +156,7 @@ public sealed partial class MainForm : AdaptiveForm
         Home,
         Suits,
         Characters,
+        Vehicles,
         Viewer,
     }
 
@@ -586,6 +587,15 @@ public sealed partial class MainForm : AdaptiveForm
         _headerModValue.Text = modName;
         _headerModValue.ForeColor = hasMod ? Theme.Mods : Theme.OnDarkMuted;
         _headerModDetail.Text = modDetail;
+        var vehicles = _workspaceFolder == WorkspaceFolder.Vehicles;
+        if (_suitNameText.Parent is { } nameRow) nameRow.Visible = !vehicles;
+        if (vehicles)
+        {
+            if (_headerSuitCaption is not null) _headerSuitCaption.Text = "VEHICLE LIBRARY";
+            _headerMetaLabel.Text = "Open a vehicle below to edit it. Manage releases from Home.";
+            _toyboxStatusChip.Text = "experimental";
+            return;
+        }
         _toyboxSaveButton.Text = "Save " + CurrentProjectNoun;
         _toyboxToolTip.SetToolTip(_toyboxSaveButton, "Save the current " + CurrentProjectNoun + " project");
         if (_headerSuitCaption is not null) _headerSuitCaption.Text = "CURRENT " + CurrentProjectNoun.ToUpperInvariant();
@@ -611,6 +621,12 @@ public sealed partial class MainForm : AdaptiveForm
         try
         {
             var summaries = ModService.ListMods();
+            if (_workspaceFolder == WorkspaceFolder.Vehicles)
+            {
+                var (selectedVehicleMod, vehicleMod) = ResolveHomeActiveMod(summaries);
+                return selectedVehicleMod is null ? ("No mod selected", "Select a mod from Home", false)
+                    : (selectedVehicleMod.DisplayName, DescribeModContent(vehicleMod), true);
+            }
             var slotId = _currentProject?.SlotId?.Trim() ?? "";
             var projectPath = _currentProject is null || string.IsNullOrWhiteSpace(slotId)
                 ? ""

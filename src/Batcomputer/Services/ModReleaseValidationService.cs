@@ -40,9 +40,9 @@ public sealed class ModReleaseValidationService
         ValidateModIdentity(mod, result);
 
         var enabled = inputs.Where(input => input.Entry.Enabled).ToList();
-        if (enabled.Count == 0)
+        if (enabled.Count == 0 && !mod.Vehicles.Any(e => e.Enabled))
         {
-            result.AddError("mod", "The mod has no enabled suits.");
+            result.AddError("mod", "The mod has no enabled characters, suits or vehicles.");
             return result;
         }
 
@@ -100,7 +100,7 @@ public sealed class ModReleaseValidationService
             ValidateMaterialAssignments(suit, exportContentRoot, generatedRoot, result, suitId);
         }
 
-        foreach (var error in RegistryPluginService.ValidateRows(registryRows))
+        foreach (var error in registryRows.Count == 0 ? [] : RegistryPluginService.ValidateRows(registryRows))
         {
             result.AddError("Asset Registry", error);
         }

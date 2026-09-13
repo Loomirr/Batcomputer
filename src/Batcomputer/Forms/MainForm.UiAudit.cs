@@ -24,12 +24,16 @@ public sealed partial class MainForm
         "Suits - Animations",
         "Suits - Mod notebook",
         "3D viewer",
+        "Vehicles",
     };
 
     internal void SelectUiAuditSurface(string name)
     {
         switch (name)
         {
+            case "Vehicles":
+                SelectWorkspaceFolder(WorkspaceFolder.Vehicles);
+                break;
             case "Home - Mods":
                 SelectHomeWorkspaceSection(HomeWorkspaceSection.Mods);
                 break;

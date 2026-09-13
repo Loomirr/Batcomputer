@@ -13,8 +13,9 @@ Batcomputer handles the files and registration needed to package and install you
 
 ## Start here
 
-Using the development build? See the guides for [custom characters](guides/custom-characters.md)
-and [custom equipment](guides/equipment-workshop.md). These features may not be in the current download.
+Using the development build? See the guides for [custom characters](guides/custom-characters.md),
+[custom equipment](guides/equipment-workshop.md) and [custom vehicles](guides/vehicles.md).
+These features may not be in the current download.
 
 <div class="grid cards" markdown>
 

@@ -19,7 +19,7 @@ internal sealed class SkinnedMeshWorkshopForm : AdaptiveForm
     internal bool RemoveRequested { get; private set; }
 
     internal SkinnedMeshWorkshopForm(string directory, IReadOnlyList<SkinnedMeshStageService.Target> targets,
-        IReadOnlyList<string> components, SkinnedMeshImport recipe, bool existing)
+        IReadOnlyList<string> components, SkinnedMeshImport recipe, bool existing, bool vehicle = false)
     {
         _directory = directory; _working = recipe.Clone();
         Text = "Batcomputer — Skinned mesh workshop (experimental)"; StartPosition = FormStartPosition.CenterParent;
@@ -28,7 +28,7 @@ internal sealed class SkinnedMeshWorkshopForm : AdaptiveForm
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 3, Padding = new Padding(16) };
         root.ColumnStyles.Add(new(SizeType.Absolute, 430)); root.ColumnStyles.Add(new(SizeType.Percent, 100));
         root.RowStyles.Add(new(SizeType.Absolute, 115)); root.RowStyles.Add(new(SizeType.Percent, 100)); root.RowStyles.Add(new(SizeType.Absolute, 76)); Controls.Add(root);
-        var intro = new Label { Text = "EXISTING-RIG SKINNED MESHES\n\n" + SkinnedMeshCookService.Warning, Dock = DockStyle.Fill, ForeColor = Theme.OnDarkMuted, Padding = new Padding(4) };
+        var intro = new Label { Text = vehicle ? "VEHICLE BODY\n\nKeep the donor rig and wheel pivots. Import a weighted FBX; assign a cooked material to every slot." : "EXISTING-RIG SKINNED MESHES\n\n" + SkinnedMeshCookService.Warning, Dock = DockStyle.Fill, ForeColor = Theme.OnDarkMuted, Padding = new Padding(4) };
         root.Controls.Add(intro, 0, 0); root.SetColumnSpan(intro, 2);
         var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Theme.CardBg, Padding = new Padding(12) }; root.Controls.Add(scroll, 0, 1);
         var fields = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1 }; fields.ColumnStyles.Add(new(SizeType.Percent, 100)); scroll.Controls.Add(fields);
@@ -50,7 +50,7 @@ internal sealed class SkinnedMeshWorkshopForm : AdaptiveForm
         Add("3  Materials (use the Materials / Textures toyboxes)", _materials, 180);
         _hidden.BackColor = Theme.PanelBg; _hidden.ForeColor = Theme.OnDark;
         foreach (var component in components.Where(c => c != recipe.Component && c != "CharacterMesh0")) _hidden.Items.Add(component, recipe.HiddenComponents.Contains(component));
-        Add("4  Hide existing visual components (optional)", _hidden, 105);
+        if (!vehicle) Add("4  Hide existing visual components (optional)", _hidden, 105);
         Add("", Button("Refresh deformation preview", async (_, _) => await PreviewAsync()), 40);
         if (existing) Add("", Button("Remove replacement / restore native", (_, _) => { if (!_busy) { RemoveRequested = true; Close(); } }), 40);
         root.Controls.Add(_viewer, 1, 1);

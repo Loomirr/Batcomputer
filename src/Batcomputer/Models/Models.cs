@@ -341,6 +341,7 @@ public sealed class NativeSuitModProject
     public List<string> PreviousModIds { get; set; } = new();
 
     public List<ModSuitEntry> Suits { get; set; } = new();
+    public List<ModVehicleEntry> Vehicles { get; set; } = new();
 }
 
 /// <summary>

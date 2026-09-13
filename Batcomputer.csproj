@@ -59,6 +59,7 @@
     <EmbeddedResource Include="Assets\Mayhem.ico" Condition="Exists('Assets\Mayhem.ico')" />
     <!-- Offline three.js preview runtime; see licenses/three.js-LICENSE.txt. -->
     <EmbeddedResource Include="Web\preview\*.js" />
+    <EmbeddedResource Include="Web\preview\VehicleWorkshop.html" />
     <EmbeddedResource Include="Tools\SkinnedMesh\import_mesh.py" />
     <!-- Shipped game-data catalogs and runtime socket calibration profiles. -->
     <None Update="gamedata\**\*.json"

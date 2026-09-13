@@ -48,7 +48,8 @@ internal static class CustomCharacterUiRegressionChecks
                     MainForm.DescribeProjectCounts(0, 0) == "no content",
                     "mod presentation distinguishes definitions, suit variants, missing projects and empty selections"));
                 using var split = new SplitContainer { Width = 2000, Height = 700, FixedPanel = FixedPanel.Panel2 };
-                _ = split.Handle;
+                // These assertions measure layout, not painting. An unparented native handle
+                // can make SplitContainer repaint an invalid DC during a headless collapse.
                 foreach (var dpi in new[] { 96, 144, 192 })
                 {
                     split.Panel2Collapsed = true;

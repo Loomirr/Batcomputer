@@ -271,14 +271,14 @@ public sealed partial class MainForm
         var (summary, _) = ResolveHomeActiveMod(mods);
         if (summary is null)
         {
-            Dialog.Info(this, "Build mod", "Create or select a mod first. A mod can contain characters, suits, or a whole collection.");
+            Dialog.Info(this, "Build mod", "Create or select a mod first. A mod can contain characters, suits and vehicles.");
             return;
         }
 
         var mod = ModService.LoadMod(summary.Path);
-        if (mod?.Suits.Any(entry => entry.Enabled) != true)
+        if (mod?.Suits.Any(entry => entry.Enabled) != true && mod?.Vehicles.Any(entry => entry.Enabled) != true)
         {
-            Dialog.Info(this, "Build mod", "Add at least one enabled character or suit to the active mod before building it.");
+            Dialog.Info(this, "Build mod", "Add at least one enabled character, suit or vehicle to the active mod before building it.");
             return;
         }
 
@@ -291,7 +291,7 @@ public sealed partial class MainForm
         var mods = ModService.ListMods().ToList();
         var (activeSummary, activeMod) = ResolveHomeActiveMod(mods);
         var activeSuitCount = EnabledModSuitCount(activeMod?.Suits);
-        var activeContentCount = activeSuitCount;
+        var activeContentCount = activeSuitCount + (activeMod?.Vehicles.Count(e => e.Enabled) ?? 0);
         var hasActiveMod = activeSummary is not null && activeMod is not null;
         var hasBuild = hasActiveMod && BuildManifestService.FindMissingOrEmptyFiles(
             ExpectedModTrioPaths(
@@ -313,7 +313,7 @@ public sealed partial class MainForm
             Chips = new List<(string, Color)>
             {
                 (hasActiveMod ? "mod selected" : "no mod selected", hasActiveMod ? Theme.Research : Theme.Warn),
-                (DescribeModContent(activeMod, enabledOnly: true), activeSuitCount > 0 ? Theme.Parts : Theme.OnDarkMuted),
+                (DescribeModContent(activeMod, enabledOnly: true), activeContentCount > 0 ? Theme.Parts : Theme.OnDarkMuted),
                 (hasInstalledRelease ? "installed" : hasBuild ? "built; not installed" : "not built", hasInstalledRelease ? Theme.Good : hasBuild ? Theme.Warn : Theme.Warn),
             },
             Workflow = new[]
@@ -356,7 +356,7 @@ public sealed partial class MainForm
                 {
                     Section = SectionRelease,
                     Title = "Add content first",
-                    Subtitle = "enable a character or suit to build this mod",
+                    Subtitle = "enable a character, suit or vehicle",
                     Accent = Theme.Base,
                     Dashed = true,
                     OnClick = () => EditModSuits(modPath),
@@ -486,7 +486,7 @@ public sealed partial class MainForm
         {
             Section = SectionMods,
             Title = "＋ New mod",
-            Subtitle = "bundle characters and suits",
+            Subtitle = "bundle characters, suits and vehicles",
             Accent = Theme.Gold,
             Dashed = true,
             OnClick = CreateModFlow,
@@ -549,6 +549,12 @@ public sealed partial class MainForm
             }
         }
 
+        var savedVehicles = VehicleService.List();
+        foreach (var entry in mod.Vehicles)
+        {
+            var summary = savedVehicles.FirstOrDefault(v => v.Id == entry.VehicleId);
+            suits.Add(("Vehicle · " + (summary?.Name ?? entry.VehicleId + " (missing)") + (entry.Enabled ? "" : " (disabled)"), entry.VehicleId));
+        }
         var buildDir = ModBuildRoot(modId);
         var built = Directory.Exists(buildDir);
 
@@ -561,6 +567,7 @@ public sealed partial class MainForm
         switch (dlg.Chosen)
         {
             case ModDetailsDialog.ModAction.EditSuits: EditModSuits(modProjectPath); break;
+            case ModDetailsDialog.ModAction.EditVehicles: EditModVehicles(modProjectPath); break;
             case ModDetailsDialog.ModAction.Rename: RenameMod(modProjectPath); break;
             case ModDetailsDialog.ModAction.ChangeId: ChangeModId(modProjectPath); break;
             case ModDetailsDialog.ModAction.Build: BuildMod(modProjectPath); break;
@@ -574,6 +581,7 @@ public sealed partial class MainForm
     {
         var menu = new System.Windows.Forms.ContextMenuStrip();
         menu.Items.Add("Manage content (add / remove)…", null, (_, _) => EditModSuits(modProjectPath));
+        menu.Items.Add("Manage vehicles…", null, (_, _) => EditModVehicles(modProjectPath));
         menu.Items.Add("Rename mod…", null, (_, _) => RenameMod(modProjectPath));
         menu.Items.Add("Change Mod ID…", null, (_, _) => ChangeModId(modProjectPath));
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
@@ -875,7 +883,11 @@ public sealed partial class MainForm
             result.TagsDestination = LotdkExpandedLayout.GameConfigTagsRoot(gameRoot);
             changes.Add(new(tagConfigSource, LotdkExpandedLayout.ModGameplayTagsPath(gameRoot, mod.ModId)));
             result.RegistryDestination = LotdkExpandedLayout.ContentPackDirectory(gameRoot, mod.ModId);
-            changes.Add(new(Path.Combine(outRoot, "mod.json"), Path.Combine(result.RegistryDestination, "mod.json")));
+            // Vehicle-only content is discovered by the plugin registry, not the suit runtime.
+            // Keep its receipt outside mod.json to avoid an invalid empty-suit runtime manifest.
+            var hasRuntimeSuits = VehicleProjectService.RuntimeSuitManifestRequired(outRoot);
+            changes.Add(new(Path.Combine(outRoot, "mod.json"), Path.Combine(result.RegistryDestination, hasRuntimeSuits ? "mod.json" : "vehicle-content.json")));
+            changes.Add(new(null, Path.Combine(result.RegistryDestination, hasRuntimeSuits ? "vehicle-content.json" : "mod.json")));
 
             var plugin = RegistryPluginService.CreateLayout(outRoot, mod.ModId);
             result.AssetRegistryDestination = LotdkExpandedLayout.RegistryPluginDirectory(gameRoot, plugin.PluginName);
@@ -906,7 +918,7 @@ public sealed partial class MainForm
                 return result;
             }
             installed = changes.Count(change => change.Source is not null);
-            AppendLog($"  complete release verified: trio, tags, mod.json and {plugin.PluginName}");
+            AppendLog($"  complete release verified: trio, tags, {(hasRuntimeSuits ? "mod.json" : "vehicle-content.json")} and {plugin.PluginName}");
             result.Status = ModInstallStatus.Complete;
             string previousIdCleanupError = "";
             if (result.Status == ModInstallStatus.Complete && mod.PreviousModIds is { Count: > 0 })
@@ -1088,7 +1100,7 @@ public sealed partial class MainForm
 
             AddRequired(
                 Path.Combine(outRoot, "mod.json"),
-                $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/Mods/{mod.ModId}/mod.json");
+                $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/Mods/{mod.ModId}/{(VehicleProjectService.RuntimeSuitManifestRequired(outRoot) ? "mod.json" : "vehicle-content.json")}");
             AddRequired(
                 Path.Combine(
                     outRoot,
@@ -1280,6 +1292,17 @@ public sealed partial class MainForm
             if (missing.Count > 0)
                 result.AddError("character registration", CustomCharacterRegistrationService.MissingDonorMessage(nativeContent, missing));
         }
+        try
+        {
+            var vehicles = VehicleService.Enabled(mod);
+            VehicleProjectService.ValidateInstalledCollisions(mod, vehicles, EffectiveGameContentPacksFolder(), result);
+            foreach (var vehicle in vehicles)
+            {
+                VehicleAssetService.Validate(vehicle, VehicleService.DirectoryFor(vehicle), AppSettings.Current.EffectiveExtractedContentRoot());
+                result.AddWarning("vehicle", VehicleAssetService.Warning, vehicle.Id);
+            }
+        }
+        catch (Exception ex) { result.AddError("vehicle", ex.Message); }
         AppendLog($"Build check: {(result.Passed ? "passed" : "failed")} ({result.ErrorCount} error(s), {result.WarningCount} warning(s)).");
         foreach (var finding in result.Findings.Where(f => !f.Severity.Equals("INFO", StringComparison.OrdinalIgnoreCase)))
         {
@@ -1299,7 +1322,7 @@ public sealed partial class MainForm
         }
         ModProjectService.ApplyDerivedFields(mod);
         List<ModSuitEntry> enabled;
-        try { enabled = CustomCharacterProjectService.ExpandMembers(mod.Suits, ModService, new SuitProjectService(_projectRootText.Text.Trim())); }
+        try { enabled = ExpandModMembers(mod); }
         catch (Exception ex) { Dialog.Error(this, "Character dependencies", ex.Message); return; }
         var preflight = ValidateModReleaseAuthoring(mod, enabled);
         ReleasePreflightForm.Show(this, mod.DisplayName, preflight.Result);
@@ -1431,7 +1454,7 @@ public sealed partial class MainForm
         try
         {
             progress.SetStep("Building mod release");
-            ModReleaseStep("Reading the mod’s characters and suits…");
+            ModReleaseStep("Reading the mod’s selected content…");
             built = await BuildModAsync(modProjectPath);
             if (built)
             {
@@ -1569,19 +1592,19 @@ public sealed partial class MainForm
         if (mod is null) { AppendLog("Build mod: could not load project."); return false; }
         using var timing = new OperationTiming("Build " + mod.DisplayName, AppendLog);
         ModProjectService.ApplyDerivedFields(mod);
-        ModReleaseStep("Checking selected characters, suits and gameplay tags…");
+        ModReleaseStep("Checking selected content and gameplay tags…");
 
         List<ModSuitEntry> enabled;
-        try { enabled = CustomCharacterProjectService.ExpandMembers(mod.Suits, ModService, new SuitProjectService(_projectRootText.Text.Trim())); }
+        try { enabled = ExpandModMembers(mod); }
         catch (Exception ex)
         {
             var failure = new ModReleaseValidationService.Result(); failure.AddError("character dependencies", ex.Message);
             _lastModReleaseFailure = new ModReleaseFailure(mod.DisplayName, failure);
             AppendLog("Build stopped: " + ex.Message); return false;
         }
-        if (enabled.Count == 0)
+        if (enabled.Count == 0 && !mod.Vehicles.Any(e => e.Enabled))
         {
-            AppendLog("Build mod: no enabled characters or suits.");
+            AppendLog("Build mod: no enabled characters, suits or vehicles.");
             return false;
         }
 
@@ -1598,6 +1621,12 @@ public sealed partial class MainForm
         var tagRows = new List<PawnTagConfigService.TagRow>();
         var stEntries = new Dictionary<string, string>(StringComparer.Ordinal);
         var manifestSuits = new List<ModManifestSuit>();
+        var vehicles = VehicleService.Enabled(mod);
+        foreach (var vehicle in vehicles)
+        {
+            tagRows.AddRange(VehicleAssetService.Tags(vehicle));
+            foreach (var text in VehicleAssetService.Text(vehicle)) stEntries.Add(text.Key, text.Value);
+        }
 
         foreach (var entry in enabled)
         {
@@ -1770,6 +1799,15 @@ public sealed partial class MainForm
                 }
             }
 
+            var vehicleRows = new List<RegistryPluginService.RegistryRow>();
+            foreach (var vehicle in vehicles)
+            {
+                ModReleaseStep("Preparing vehicle " + vehicle.DisplayName + "…");
+                var vehicleDirectory = VehicleService.DirectoryFor(vehicle);
+                var nativeVehicleContent = AppSettings.Current.EffectiveExtractedContentRoot();
+                vehicleRows.AddRange(await Task.Run(() => VehicleAssetService.Stage(vehicle, vehicleDirectory,
+                    nativeVehicleContent, stageContent, mod.ModId, projectRoot, AppendLog)));
+            }
             var characterRows = CustomCharacterRegistrationService.Generate(stageContent,
                 AppSettings.Current.EffectiveExtractedContentRoot(), mod.ModId, preparedSuits,
                 mappings ?? throw new InvalidDataException("Character registration requires mappings."));
@@ -1804,6 +1842,7 @@ public sealed partial class MainForm
                 string_table = stObjectPath,
                 build_id = $"{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}",
                 suits = manifestSuits,
+                vehicles = vehicles.Select(v => new ModManifestVehicle { vehicle_id = v.Id, pawn_tag = VehicleProjectService.PawnTag(v), owner_tag = v.OwnerTag, metadata = VehicleProjectService.Metadata(v), blueprint = VehicleProjectService.Blueprint(v), progress_tag = VehicleProjectService.ProgressTag(v), display_name = v.DisplayName }).ToList(),
             };
 
             ModReleaseStep("Validating the combined release…");
@@ -1852,9 +1891,9 @@ public sealed partial class MainForm
             IReadOnlyList<RegistryPluginService.RegistryRow> registryRows;
             try
             {
-                registryRows = await Task.Run(() => CharacterRegistryBundleService.CreateRows(
+                registryRows = await Task.Run(() => (manifestSuits.Count == 0 ? Array.Empty<RegistryPluginService.RegistryRow>() : CharacterRegistryBundleService.CreateRows(
                     stageContent, manifestSuits.Select(suit => suit.dcmd), mappings ??
-                    throw new InvalidDataException("A .usmap mappings file is required to read staged character loading bundles.")).Concat(characterRows).ToArray());
+                    throw new InvalidDataException("A .usmap mappings file is required to read staged character loading bundles."))).Concat(characterRows).Concat(vehicleRows).ToArray());
             }
             catch (Exception ex)
             {
@@ -1900,7 +1939,7 @@ public sealed partial class MainForm
             AppendLog("  registry verification: " + registry.VerificationLine);
 
             File.WriteAllText(modJsonPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
-            AppendLog($"  mod.json: {manifestSuits.Count} suit(s) -> {modJsonPath}");
+            AppendLog($"  release receipt: {manifestSuits.Count} character/suit project(s), {vehicles.Count} vehicle(s) -> {modJsonPath}");
 
             var trioBase = Path.Combine(outRoot, mod.PackageBaseName);
             var expectedTrioPaths = new[] { ".pak", ".ucas", ".utoc" }
@@ -1962,10 +2001,10 @@ public sealed partial class MainForm
             timing.Mark("pack and publish");
             retocAttemptOutputs = null;
             var publishedTrioBase = Path.Combine(publishedOutputRoot, mod.PackageBaseName);
-            AppendLog($"Build mod '{mod.DisplayName}' COMPLETE — installable trio for {mergedSuits} suit(s):");
+            AppendLog($"Build mod '{mod.DisplayName}' COMPLETE — installable trio for {mergedSuits} character/suit project(s) + {vehicles.Count} vehicle(s):");
             AppendLog($"  {publishedTrioBase}.pak / .ucas / .utoc");
             AppendLog($"  {mod.ModId}Tags.ini is staged for LEGOBatmanLotDK/Config/Tags; mod.json is under {publishedOutputRoot}");
-            AppendLog($"  Install: trio -> ~mods/Expanded, tags -> Config/Tags, mod.json -> ue4ss/{LotdkExpandedLayout.ModuleId}/Mods/{mod.ModId}/");
+            AppendLog($"  Install: trio -> ~mods/Expanded, tags -> Config/Tags, {(manifestSuits.Count == 0 ? "vehicle-content.json" : "mod.json")} -> ue4ss/{LotdkExpandedLayout.ModuleId}/Mods/{mod.ModId}/");
             RefreshWorkspaceAfterModChange();
             return true;
         }
@@ -2596,6 +2635,18 @@ public sealed partial class MainForm
         public string string_table { get; set; } = "";
         public string build_id { get; set; } = "";
         public List<ModManifestSuit> suits { get; set; } = new();
+        public List<ModManifestVehicle> vehicles { get; set; } = new();
+    }
+
+    private sealed class ModManifestVehicle
+    {
+        public string vehicle_id { get; set; } = "";
+        public string display_name { get; set; } = "";
+        public string pawn_tag { get; set; } = "";
+        public string owner_tag { get; set; } = "";
+        public string metadata { get; set; } = "";
+        public string blueprint { get; set; } = "";
+        public string progress_tag { get; set; } = "";
     }
 
     private sealed class ModManifestSuit

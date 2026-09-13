@@ -59,6 +59,8 @@ nav:
       - Character animations: guides/animations.md
       - Suit abilities: guides/abilities.md
       - Custom equipment: guides/equipment-workshop.md
+      - Custom vehicles (experimental): guides/vehicles.md
+      - Vehicle summon and parked models: guides/vehicle-summon-models.md
       - Custom static meshes: guides/custom-meshes.md
       - Skinned meshes (experimental): guides/skeletal-mesh-proof.md
       - Build, test, and share: guides/build-test-share.md

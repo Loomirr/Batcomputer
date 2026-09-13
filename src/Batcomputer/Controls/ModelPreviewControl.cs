@@ -32,6 +32,16 @@ public sealed class ModelPreviewControl : UserControl
 
     /// <summary>Raised when the in-viewer part mover asks the host to persist an alignment.</summary>
     public event EventHandler<PreviewPlacementSaveRequestedEventArgs>? PlacementSaveRequested;
+    internal event Action<string>? VehicleWorkshopMessageReceived;
+    internal async Task ShowVehicleRidersAsync(string json)
+    {
+        if (_web?.CoreWebView2 is { } core) await core.ExecuteScriptAsync("window.vehicleWorkshop?.loadRiders(" + json + ")");
+    }
+    internal async Task<bool> RequestVehicleSettingsAsync()
+    {
+        if (_web?.CoreWebView2 is not { } core) return false;
+        return await core.ExecuteScriptAsync("Boolean(window.vehicleWorkshop?.ready && (vehicleWorkshop.openSettings(), true))") == "true";
+    }
 
     public ModelPreviewControl()
     {
@@ -171,7 +181,10 @@ public sealed class ModelPreviewControl : UserControl
             web.CoreWebView2.Settings.AreDevToolsEnabled = false;
             web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
             web.CoreWebView2.WebMessageReceived += (_, message) =>
-                HandleWebMessage(message.WebMessageAsJson);
+            {
+                if (message.Source.StartsWith($"https://{_virtualHost}/", StringComparison.OrdinalIgnoreCase))
+                    HandleWebMessage(message.WebMessageAsJson);
+            };
             web.DefaultBackgroundColor = Theme.WindowBg;
             _browserProcessId = browserProcessId;
             _ready = true;
@@ -187,6 +200,17 @@ public sealed class ModelPreviewControl : UserControl
 
     private void HandleWebMessage(string json)
     {
+        if (json.Length < 256_000 && IsHandleCreated && !IsDisposed)
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(json);
+                if (document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String &&
+                    type.GetString() is "vehicleWorkshopSave" or "vehicleWorkshopReady" or "vehicleWorkshopError" or "vehicleWorkshopSettings" or "vehicleWorkshopCopyMaterial" or "vehicleWorkshopRiders")
+                    BeginInvoke(() => { if (!IsDisposed) VehicleWorkshopMessageReceived?.Invoke(json); });
+            }
+            catch (JsonException) { /* Ignore malformed viewer messages. */ }
+        }
         if (PreviewPlacementSaveRequestedEventArgs.TryParse(json, out var args) &&
             IsHandleCreated && !IsDisposed)
         {

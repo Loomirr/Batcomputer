@@ -585,6 +585,7 @@ public sealed partial class MainForm
         tabs.Controls.Add(CreateWorkspaceFolderButton(WorkspaceFolder.Home, "Home", Theme.Gold, "Home.png"));
         tabs.Controls.Add(CreateWorkspaceFolderButton(WorkspaceFolder.Suits, "Suits", Theme.Base, "Suits.png"));
         tabs.Controls.Add(CreateWorkspaceFolderButton(WorkspaceFolder.Characters, "Characters", Theme.Materials));
+        tabs.Controls.Add(CreateWorkspaceFolderButton(WorkspaceFolder.Vehicles, "Vehicles", Theme.Gliders));
         tabs.Controls.Add(CreateWorkspaceFolderButton(WorkspaceFolder.Viewer, "3D viewer", Theme.Gliders, "3D.gif"));
         return strip;
     }
@@ -785,12 +786,13 @@ public sealed partial class MainForm
 
             // Reset every layout fact on every switch. Incremental span changes were the source
             // of Home progressively shrinking after selecting its subcategories.
-            _toyboxBodyLayout.SetColumn(_toyboxWorkspaceSplit, isHome ? 1 : 2);
-            _toyboxBodyLayout.SetColumnSpan(_toyboxWorkspaceSplit, isHome ? 2 : 1);
-            _toyboxWorkspaceSplit.Panel2Collapsed = isHome || !matchesProjectKind;
+            _toyboxBodyLayout.SetColumn(_toyboxWorkspaceSplit, folder == WorkspaceFolder.Vehicles ? 0 : isHome ? 1 : 2);
+            _toyboxBodyLayout.SetColumnSpan(_toyboxWorkspaceSplit, folder == WorkspaceFolder.Vehicles ? 3 : isHome ? 2 : 1);
+            _toyboxWorkspaceSplit.Panel2Collapsed = isHome || folder == WorkspaceFolder.Vehicles || !matchesProjectKind;
 
             var selectedCategory = _toyboxCategoryCombo.SelectedItem?.ToString() ?? "Home";
-            if (isHome)
+            if (folder == WorkspaceFolder.Vehicles) SelectComboValue(_toyboxCategoryCombo, "Home");
+            else if (isHome)
             {
                 var homeCategory = HomeCategoryForSection(_homeWorkspaceSection);
                 if (!selectedCategory.Equals(homeCategory, StringComparison.OrdinalIgnoreCase))
@@ -857,6 +859,8 @@ public sealed partial class MainForm
 
     private void UpdateToyboxChips()
     {
+        _toyboxSaveButton.Visible = _workspaceFolder != WorkspaceFolder.Vehicles;
+        _toyboxPackageButton.Visible = _workspaceFolder != WorkspaceFolder.Vehicles;
         var hasBase = HasCurrentSuitBase();
         // The dot is drawn by the pill, so the text is just the label now.
         _toyboxStatusChip.Text = hasBase ? "base set" : "no base yet";
@@ -2176,7 +2180,7 @@ public sealed partial class MainForm
         var hasActiveMod = activeSummary is not null && activeMod is not null;
         var includedSuitCount = activeEntries.Count;
         var activeSuitCount = EnabledModSuitCount(activeEntries);
-        var activeContentCount = activeSuitCount;
+        var activeContentCount = activeSuitCount + (activeMod?.Vehicles.Count(e => e.Enabled) ?? 0);
         var currentSlot = _slotIdText.Text.Trim();
         var currentSuitIsInActiveMod = hasActiveMod && activeEntries.Any(entry => entry.Enabled &&
             string.Equals(entry.SuitId, currentSlot, StringComparison.OrdinalIgnoreCase));
@@ -2232,7 +2236,7 @@ public sealed partial class MainForm
         const string SectionMod = "MODS";
         const string SectionCharacters = "2. CHARACTERS";
         const string SectionSuits = "3. SUITS";
-        const string SectionBuild = "4. BUILD MOD";
+        const string SectionBuild = "5. BUILD MOD";
         const string SectionSavedSuits = "SAVED SUITS";
         var tiles = new List<VirtualTilePanel.Tile>();
 
@@ -2306,6 +2310,7 @@ public sealed partial class MainForm
                     MenuFactory = () => BuildSuitTileMenu(captured),
                 });
             }
+            AddVehicleTiles(tiles, "4. VEHICLES");
             ShowVirtualTiles(tiles, hero: hero);
             return;
         }
@@ -2380,13 +2385,14 @@ public sealed partial class MainForm
             });
         }
 
+        AddVehicleTiles(tiles, "4. VEHICLES");
         if (activeContentCount == 0)
         {
             tiles.Add(new VirtualTilePanel.Tile
             {
                 Section = SectionBuild,
                 Title = "Add content first",
-                Subtitle = $"{modName} needs a character or suit before it can build",
+                Subtitle = $"{modName} needs a character, suit or vehicle",
                 Accent = Theme.Gold,
                 Dashed = true,
                 OnClick = () => StartNewSuitInMod(modPath),
@@ -2398,7 +2404,7 @@ public sealed partial class MainForm
             {
                 Section = SectionBuild,
                 Title = $"Build {TrimMiddle(modName, 20)}",
-                Subtitle = "build and install selected characters + suits",
+                Subtitle = "build and install selected content",
                 Accent = Theme.Gold,
                 OnClick = () => BuildMod(modPath),
             });
@@ -2520,6 +2526,12 @@ public sealed partial class MainForm
 
         ClearToyboxTiles();
         UpdateToyboxChips();
+        if (_workspaceFolder == WorkspaceFolder.Vehicles)
+        {
+            SetHomeInspectorCollapsed(true);
+            RefreshVehicleWorkspaceTiles();
+            return;
+        }
         var category = _toyboxCategoryCombo.SelectedItem?.ToString();
         var type = _toyboxTypeCombo.SelectedItem?.ToString();
 

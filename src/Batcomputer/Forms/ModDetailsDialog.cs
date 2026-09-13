@@ -9,7 +9,7 @@ namespace Batcomputer;
 /// </summary>
 public sealed class ModDetailsDialog : AdaptiveForm
 {
-    public enum ModAction { None, EditSuits, Rename, ChangeId, Build, Install, OpenOutput, Delete }
+    public enum ModAction { None, EditSuits, Rename, ChangeId, Build, Install, OpenOutput, Delete, EditVehicles }
 
     /// <summary>What the user picked. <see cref="ModAction.None"/> when they just closed it.</summary>
     public ModAction Chosen { get; private set; } = ModAction.None;
@@ -108,7 +108,7 @@ public sealed class ModDetailsDialog : AdaptiveForm
 
         // --- suits -------------------------------------------------------------
         y += 8;
-        body.Controls.Add(SectionLabel("CHARACTERS & SUITS IN THIS MOD", pad, y, w));
+        body.Controls.Add(SectionLabel("CONTENT IN THIS MOD", pad, y, w));
         y += 22;
 
         var list = new ListView
@@ -151,7 +151,7 @@ public sealed class ModDetailsDialog : AdaptiveForm
         var footer = new Panel
         {
             Dock = DockStyle.Bottom,
-            Height = 104,
+            Height = 144,
             BackColor = Theme.SlateDark,
         };
         footer.Paint += (_, e) =>
@@ -177,6 +177,8 @@ public sealed class ModDetailsDialog : AdaptiveForm
             "Build the pak trio, config and StringTable");
         AddAction(footer, "Install to game", pad + 158, 56, 150, ModAction.Install, false,
             "Copy the built mod into the game's ~mods folder");
+        AddAction(footer, "Manage vehicles", pad, 98, 150, ModAction.EditVehicles, false,
+            "Add, enable or disable vehicles in this mod");
 
         var close = new Button { Text = "Close", Width = 92, Height = 32, Top = 56, DialogResult = DialogResult.Cancel };
         close.Left = ClientSize.Width - pad - close.Width;

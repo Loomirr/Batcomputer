@@ -12,6 +12,8 @@ internal static class ReleaseRegressionChecks
     public static int Run(TextWriter output)
     {
         var failures = new List<string>();
+        foreach (var result in VehicleRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
         foreach (var result in ModInstallTransactionRegressionChecks.Run())
             Check(result.Passed, result.Description, failures, output);
         foreach (var result in QolRegressionChecks.Run())

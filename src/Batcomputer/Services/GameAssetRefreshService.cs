@@ -176,6 +176,7 @@ public sealed class GameAssetRefreshService
         ViewerBaseGameRedBrickPaletteService.RetocFilter,
     }.Concat(HeldItemFilters).Concat(HeldItemEffectService.ExtractionFilters).Concat(CharacterDependencyAbilityFilters)
         .Concat(EquipmentAssetService.ExtractionFilters)
+        .Concat(VehicleAssetService.ExtractionFilters)
         .Concat(TextureCookTemplateService.RetocFilters.Where(filter =>
             !filter.StartsWith(CharacterGadgetFilter, StringComparison.OrdinalIgnoreCase)))
         .ToArray();
@@ -802,7 +803,7 @@ public sealed class GameAssetRefreshService
             required.StartsWith(Normalize(filter), StringComparison.OrdinalIgnoreCase));
     }
 
-    private static async Task<ProcessResult> RunRetocAsync(
+    internal static async Task<ProcessResult> RunRetocAsync(
         string retoc,
         string paksRoot,
         string outputRoot,
@@ -861,7 +862,7 @@ public sealed class GameAssetRefreshService
             SplitLines(stderr));
     }
 
-    private sealed record ProcessResult(int ExitCode, List<string> OutputLines, List<string> ErrorLines);
+    internal sealed record ProcessResult(int ExitCode, List<string> OutputLines, List<string> ErrorLines);
 
     private sealed class ValidationResult
     {

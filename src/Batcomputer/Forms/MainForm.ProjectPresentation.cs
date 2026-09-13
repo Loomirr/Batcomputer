@@ -29,6 +29,8 @@ public sealed partial class MainForm
             else if (summary.IsCharacter) characters++;
             else suits++;
         }
-        return DescribeProjectCounts(characters, suits, missing);
+        var description = DescribeProjectCounts(characters, suits, missing);
+        var vehicles = mod.Vehicles.Count(e => !enabledOnly || e.Enabled);
+        return vehicles == 0 ? description : (description == "no content" ? "" : description + " + ") + $"{vehicles} vehicle{(vehicles == 1 ? "" : "s")}";
     }
 }
