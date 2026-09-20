@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.0.0-beta.1 — Batcomputer 1.0 Beta
+
+This is a prerelease. Back up projects and saves. Mayhem/Both builds require updated LOTDKExpanded
+with integrated character modes API 1; no standalone helper is bundled. Follow the
+[migration instructions](../guides/character-modes.md) when upgrading the framework.
 
 - [Character workshop](../guides/character-workshop.md): complete assembly inspection, native
   offsets, separate gliders, custom-part gizmos, preview UV controls and textured GLB exports.

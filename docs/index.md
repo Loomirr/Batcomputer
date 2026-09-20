@@ -7,7 +7,7 @@ Batcomputer handles the files and registration needed to package and install you
 ![Batcomputer's mod workspace](assets/screenshots/home-mods.jpg){ .bc-doc-shot loading=lazy }
 
 !!! info "Public beta"
-    The current build is **0.9.0-beta.10**. Suit creation and packaging work in-game, but the project
+    The release candidate is **1.0.0-beta.1 — Batcomputer 1.0 Beta**. Suit creation and packaging work in-game, but the project
     remains in public beta. Back up your projects, and include copied diagnostics when reporting a
     repeatable problem.
 

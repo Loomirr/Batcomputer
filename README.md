@@ -4,7 +4,7 @@ Batcomputer is a Windows modding tool for *LEGO Batman: Legacy of the Dark Knigh
 Build suits, customize equipment, and create new playable characters using assets from your own
 copy of the game. Pick a base, make your changes, and build a mod to try in-game.
 
-> **Current release:** `0.9.0-beta.10`
+> **Release candidate:** Batcomputer 1.0 Beta (`1.0.0-beta.1`)
 > **Documentation:** [loomirr.github.io/Batcomputer](https://loomirr.github.io/Batcomputer/)
 
 This repository contains Batcomputer only. It does not contain game files, extracted assets, Oodle,

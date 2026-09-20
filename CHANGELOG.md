@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 1.0.0-beta.1 — 2026-09-20
+
+**Batcomputer 1.0 Beta.** This is a prerelease, not a stable 1.0 release. Back up editable projects
+and saves before upgrading. Mayhem/Both character builds require the updated LOTDKExpanded runtime
+with integrated character modes API 1; the editor and character mod ZIPs do not include that DLL.
+Move any old `ue4ss/Mods/LOTDKModeAccess` folder outside Mods before using the updated framework.
+The integrated runtime passed local checks but still needs its fresh in-game acceptance run.
 
 - Removes the bundled standalone Mode Access DLL. Character-mode configuration is handled by the
   separately installed, updated LOTDKExpanded runtime. Mayhem/Both builds verify the installed
