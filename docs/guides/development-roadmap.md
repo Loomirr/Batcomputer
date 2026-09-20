@@ -4,15 +4,15 @@ The next release is mostly about testing and fixing bugs. Custom characters, ext
 
 These are the main areas still getting attention.
 
-## Immediate test order
+## Current release status
 
-1. Finish the character viewer: custom-part gizmos are user-tested; keyboard-focus fixes for W/E/R and F now have headless regression coverage. Keep native parts read-only.
+1. Character viewer: custom-part gizmos are user-tested; keyboard-focus fixes for W/E/R and F have regression coverage. Native parts remain read-only. Character/suit labels and initial Home population are now covered by local checks.
 2. Skinned import reliability: verify the short temporary cook workspace against user logs, retain useful errors and per-bone rig reports, then retest the affected users' FBXs. A successful cook does not make an incompatible rig safe.
 3. Native Joker and Harley suits: the additional-suit tests now pass in-game after the retained Default donor gates were mapped to the current HTV/BTAS progression entries. Keep checking first-hover previews, switching, native gadgets/gliding and cutscene face/material behavior on future builds.
 4. Editable sharing now passes independent export/import/edit/rebuild checks for a custom-material Joker suit and a rigged-mesh suit. Relative mesh caches and material closures are included, with source/identity checks. Vehicle-specific sharing and generated-texture recooking still need broader acceptance coverage. Imported custom animation libraries are explicitly blocked until their transfer is supported.
-5. Face replacements: the native component-preservation checks pass for Batman, Joker and Harley; the new Batman face test pack still needs a voiced cutscene test.
-6. Voice mismatch: paired-cape adapters now preserve the gameplay donor's dialogue voice instead of inheriting the visual scaffold's voice. Rebuild affected suits and check their gameplay speech. A native voice-family picker and individual-line overrides remain future work; scripted dialogue and combat audio have separate routing.
-7. Before release: test one rebuilt vehicle through hover, parked preview, summon, driving, seats, lights and boost, then smoke-test a clean portable build.
+5. Face replacements: native component-preservation checks pass for Batman, Joker and Harley. The Batman selected-suit face-animation test also passed in-game.
+6. Voice mismatch: the Nightwing paired-cape dialogue test passed in-game. Adapters preserve the gameplay donor's dialogue voice instead of the visual scaffold's voice. Rebuild affected suits. A native voice-family picker and individual-line overrides remain future work; scripted dialogue and combat audio have separate routing.
+7. Release checks: the full configured regression suite, clean portable publish, published-executable checks and documentation build passed. Tested vehicle workflows passed except the deferred Retro/Talia build-up model. A clean install/upgrade on another user's machine remains a useful release-candidate check.
 
 ## Characters and suits
 

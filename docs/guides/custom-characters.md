@@ -44,5 +44,5 @@ Do not install a proof/test mod and a new mod using the same character/pawn iden
 - Scripted story cutscene casting is **not supported** for new characters. Compatible cutscene Blueprint assets are still generated as part of the normal metadata/loading structure; this does not grant a story role.
 - New voices, dialogue, mission permissions, new skeletons, and unlock challenges aren't supported yet.
 - Variants start unlocked. Custom character symbols are supported separately from portraits and suit icons; rebuild the character definition and its mod after changing the symbol. The default vehicle and native upgrade-menu behavior remain donor-based.
-- Choose Normal, Mayhem or Both in [Character identity & modes](character-modes.md). This is separate from the visual base; Mayhem requires the installed DLC and compatible mode-access helper.
+- Choose Normal, Mayhem or Both in [Character identity & modes](character-modes.md). This is separate from the visual base; Mayhem requires the installed DLC and updated LOTDKExpanded runtime, not a separate helper DLL.
 - Abilities and equipment work the same way as they do for suits. The extra VFX/status-effect experiments are still on hold because of crashes.

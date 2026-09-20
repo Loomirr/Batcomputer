@@ -1406,10 +1406,10 @@ public sealed partial class MainForm
             {
                 var projects = inputs.Select(i => i.Project).OfType<NativeSuitProject>().ToArray();
                 _ = CharacterModeAccessService.Render(projects);
-                if (CharacterModeAccessService.RequiresHelper(projects))
+                if (CharacterModeAccessService.RequiresModeRuntime(projects))
                 {
-                    CharacterModeAccessService.ValidateBundledHelper();
-                    result.AddWarning("game modes", "Experimental Mayhem/Both access includes a build-guarded UE4SS helper. Requires the Mayhem DLC and in-game verification.");
+                    CharacterModeAccessService.ValidateInstalledRuntime();
+                    result.AddWarning("game modes", "Mayhem/Both requires the updated LOTDKExpanded character-mode runtime and owned Mayhem DLC. No separate Mode Access DLL is included.");
                 }
             }
             catch (Exception ex) { result.AddError("game modes", ex.Message); }

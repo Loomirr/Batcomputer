@@ -2,12 +2,17 @@
 
 ## Unreleased
 
+- Removes the bundled standalone Mode Access DLL. Character-mode configuration is handled by the
+  separately installed, updated LOTDKExpanded runtime. Mayhem/Both builds verify the installed
+  capability and reject legacy helper-bearing output until rebuilt. Runtime/Lua source now lives
+  with the LOTDKExpanded project instead of the editor repository.
+
 - Fixes the empty Home library on first launch; saved content loads without switching tabs.
   The viewer's My library separates character definitions from suits with labeled, bordered rows
   and searchable project IDs.
 
 - Adds Joker/Harley DLC suit support, refreshed attachment discovery, custom character symbols,
-  and explicit Normal/Mayhem/Both character policies with the compatible mode-access helper.
+  and explicit Normal/Mayhem/Both character policies through the updated LOTDKExpanded runtime.
 - Modernizes the character workshop: assembly inspection, separate glider display, native
   attachment placement, custom-part gizmos and keyboard shortcuts, preview UV selection,
   detail normals, compatible Red Brick previews, and improved textured GLB export.
@@ -22,7 +27,7 @@
 
 - Refreshes the README and Pages guides with the custom-character and equipment workflows, clearer icon instructions, and generic character examples. README guide links now open the documentation site.
 
-- Equipment icon rows now distinguish direct HUD SDF inputs, material SDF inputs, upgrade variants and BCA color artwork. Selection help explains which cook belongs in each binding and keeps unverified HUD conversion behavior explicit.
+- Equipment icon rows distinguish direct HUD SDF inputs, material SDF inputs, upgrade variants and BCA color artwork. Selection help explains which cook belongs in each binding; tested HUD workflows do not establish compatibility with every native icon binding.
 
 - Adds an editable texture path plus a workspace-wide UI-cook picker to the Equipment workshop, including safe staging of referenced cooks from other saved projects. Equipment icons have separate transparent-PNG-to-SDF, prepared SDF, and color/alpha BCA profiles. HUD conversion validates the alpha silhouette; BCA retains the native single-mip layout. These profiles need in-game visual validation. Clarifies that cooking alone does not assign an equipment icon.
 

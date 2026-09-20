@@ -23,6 +23,11 @@ Batcomputer/
 
 ## Files to back up
 
+The portable editor contains no LOTDKExpanded or standalone Mode Access DLL. Those game-side
+features come from the separately installed LOTDK UE4SS framework. Batcomputer retains only its
+configuration writer and installed-runtime checks. Its local `Runtime/` state directory is unrelated
+to the old helper source folder.
+
 Back up:
 
 - `Batcomputer.settings.json`

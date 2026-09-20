@@ -20,7 +20,7 @@
     <DefaultItemExcludes>$(DefaultItemExcludes);artifacts\**;Generated\**</DefaultItemExcludes>
   </PropertyGroup>
   <ItemGroup>
-    <None Update="Data\ModeAccess\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <!-- Character modes are provided by the installed LOTDKExpanded runtime, not a bundled DLL. -->
     <PackageReference Include="BCnEncoder.Net" Version="2.3.0" />
     <PackageReference Include="CUE4Parse-Conversion" Version="1.2.2.202607" />
     <PackageReference Include="Microsoft.Bcl.Memory" Version="10.0.10" />
@@ -160,6 +160,8 @@
   <!-- NuGet supplies WebView2 XML API documentation next to the app by default. It is
        useful while developing but is not a runtime dependency or user document. -->
   <Target Name="CleanPortablePublish" AfterTargets="Publish">
+    <Error Condition="Exists('$(PublishDir)Data\ModeAccess\main.dll') or Exists('$(PublishDir)LOTDKExpanded.dll') or Exists('$(PublishDir)Runtime\ModeAccess\main.dll')"
+           Text="Stale game-runtime DLL found in Batcomputer publish output. Publish to a clean folder; install LOTDKExpanded through the UE4SS framework instead." />
     <ItemGroup>
       <PortableWebViewDocumentation Include="$(PublishDir)Microsoft.Web.WebView2.*.xml" />
     </ItemGroup>

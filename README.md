@@ -65,6 +65,11 @@ Batcomputer/
 The default workspace stays beside `Batcomputer.exe`. Settings can move the workspace or the large
 extracted game dump to another drive.
 
+Batcomputer does not bundle LOTDKExpanded or a standalone Mode Access DLL. Install the current
+LOTDK UE4SS framework separately. Normal/Mayhem/Both character settings write per-mod configuration
+for the integrated LOTDKExpanded runtime; Mayhem/Both builds verify its installed capability.
+The `Runtime/` workspace directory above is local tool state, not a game-runtime distribution.
+
 ## First run
 
 Setup asks for the game Paks folder, mappings, and other local paths. When UE 5.6 is configured,

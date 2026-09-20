@@ -80,7 +80,7 @@ public sealed class CharacterIdentityDialog : AdaptiveForm
                 "\r\n\r\n" + (ownerId is null ? "Independent roster entry with its own default suit. The native gameplay donor remains separate." :
                     "A separate suit for this character. Build Mod includes its required default character automatically.") +
                 "\r\n\r\nGAME MODES\r\n" + (ownerId is null ? ModeAvailability.ToString() : "Inherited from the saved character") +
-                (ownerId is null && ModeAvailability != CharacterModeAvailability.Normal ? "\r\nIncludes the experimental Mode Access helper. Mayhem requires the DLC. In-game testing required." : "") + "\r\n\r\n" + note;
+                (ownerId is null && ModeAvailability != CharacterModeAvailability.Normal ? "\r\nRequires updated LOTDKExpanded with integrated character modes, plus owned Mayhem DLC. No separate helper DLL." : "") + "\r\n\r\n" + note;
         }
         _name.TextChanged += (_, _) => RefreshIdentity();
         _id.TextChanged += (_, _) => { if (_suggestingId) return; _idEdited = true; RefreshIdentity(); };

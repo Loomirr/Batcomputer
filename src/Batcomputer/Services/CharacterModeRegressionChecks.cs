@@ -17,9 +17,9 @@ internal static class CharacterModeRegressionChecks
         child.CustomCharacter.ModeAvailability = CharacterModeAvailability.Normal;
         var config = CharacterModeAccessService.Render([owner, child]);
         Check(config.Contains("Pawns.Playable.ModeTest=both") && !config.Contains("Other=") && !config.Contains("=normal"), "build reads the definition, not stale child copies");
-        Check(CharacterModeAccessService.RequiresHelper([owner, child]), "Both requires the helper");
+        Check(CharacterModeAccessService.RequiresModeRuntime([owner, child]), "Both requires integrated runtime capability");
         owner.CustomCharacter.ModeAvailability = CharacterModeAvailability.Normal;
-        Check(!CharacterModeAccessService.RequiresHelper([owner, child]), "legacy normal-only mods do not require a new runtime");
+        Check(!CharacterModeAccessService.RequiresModeRuntime([owner, child]), "legacy normal-only mods do not require a new runtime");
         var originalTag = owner.PawnTag; var originalSlot = owner.SlotId;
         owner.CustomCharacter.ModeAvailability = CharacterModeAvailability.Mayhem;
         CustomCharacterProjectService.ApplyIdentity(owner);
@@ -49,43 +49,25 @@ internal static class CharacterModeRegressionChecks
         Directory.CreateDirectory(scratch);
         try
         {
-            var incomplete = Path.Combine(scratch, "IncompleteBundle");
-            Directory.CreateDirectory(incomplete);
-            foreach (var name in new[] { "main.dll", "LICENSE.txt", "THIRD-PARTY-NOTICES.txt", "README.md" })
-                File.WriteAllText(Path.Combine(incomplete, name), "fixture");
-            CharacterModeAccessService.ValidateBundledHelper(incomplete);
-            File.WriteAllText(Path.Combine(incomplete, "README.md"), "");
-            bool emptyGuideRejected = false;
-            try { CharacterModeAccessService.ValidateBundledHelper(incomplete); } catch (FileNotFoundException) { emptyGuideRejected = true; }
-            Check(emptyGuideRejected, "preflight rejects an empty bundled guide before packaging");
-            File.WriteAllText(Path.Combine(incomplete, "README.md"), "fixture");
-            File.Delete(Path.Combine(incomplete, "THIRD-PARTY-NOTICES.txt"));
-            bool noticesRejected = false;
-            try { CharacterModeAccessService.ValidateBundledHelper(incomplete); } catch (FileNotFoundException) { noticesRejected = true; }
-            Check(noticesRejected, "preflight rejects missing redistribution notices even when the DLL exists");
-            var plugin = Path.Combine(scratch, "RegistryPlugins", "Test");
-            if (File.Exists(CharacterModeAccessService.BundledHelper))
-            {
-                CharacterModeAccessService.Stage(scratch, plugin, [owner, child]);
-                var dependencies = CharacterModeAccessService.DependencyFiles(scratch);
-                Check(dependencies.Count == 5 && dependencies.All(d => File.Exists(d.Source)) &&
-                    dependencies.All(d => d.Relative.StartsWith("Binaries/Win64/ue4ss/Mods/LOTDKModeAccess/")), "release includes the helper and enable marker");
-                Check(File.ReadAllText(Path.Combine(plugin,"Config",CharacterModeAccessService.PolicyName)).Contains("ModeTest=both"), "release carries the character policy");
-                File.AppendAllText(dependencies[0].Source, "tampered");
-                bool tamperRejected = false;
-                try { CharacterModeAccessService.DependencyFiles(scratch); } catch (InvalidDataException) { tamperRejected = true; }
-                Check(tamperRejected, "changed helper is rejected before install/export");
-                File.Delete(Path.Combine(scratch, CharacterModeAccessService.MarkerName));
-                bool receiptRejected = false;
-                try { CharacterModeAccessService.DependencyFiles(scratch); } catch (InvalidDataException) { receiptRejected = true; }
-                Check(receiptRejected, "missing dependency receipt is rejected");
-            }
-            else Check(false, "bundled helper exists for integration checks");
-            var missing = Path.Combine(scratch, "MissingHelper", "Config");Directory.CreateDirectory(missing);
-            File.WriteAllText(Path.Combine(missing, CharacterModeAccessService.PolicyName), config);
-            bool missingRejected = false;
-            try { CharacterModeAccessService.DependencyFiles(Path.GetDirectoryName(missing)!); } catch (InvalidDataException) { missingRejected = true; }
-            Check(missingRejected, "Mayhem/Both policy cannot be exported without its helper");
+            var module = Path.Combine(scratch, "LOTDKExpanded");
+            Directory.CreateDirectory(Path.Combine(module, "dlls"));
+            File.WriteAllText(Path.Combine(module,"dlls","main.dll"),"fixture");
+            var hash=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(Path.Combine(module,"dlls","main.dll"))));
+            File.WriteAllText(Path.Combine(module,"capabilities.json"),JsonSerializer.Serialize(new CharacterModeAccessService.RuntimeCapability(1,hash)));
+            CharacterModeAccessService.ValidateInstalledRuntime(module);
+            Check(true,"integrated runtime capability and DLL hash match");
+            File.AppendAllText(Path.Combine(module,"dlls","main.dll"),"changed");
+            bool rejectedRuntime=false;
+            try { CharacterModeAccessService.ValidateInstalledRuntime(module); } catch(InvalidDataException) { rejectedRuntime=true; }
+            Check(rejectedRuntime,"mismatched integrated runtime is rejected");
+            var plugin=Path.Combine(scratch,"RegistryPlugins","Test");
+            CharacterModeAccessService.Stage(scratch,plugin,[owner,child]);
+            Check(File.ReadAllText(Path.Combine(plugin,"Config",CharacterModeAccessService.PolicyName)).Contains("ModeTest=both"),"release carries character mode policy");
+            Check(CharacterModeAccessService.DependencyFiles(scratch).Count==0,"character release includes no standalone runtime DLL");
+            File.WriteAllText(Path.Combine(scratch,"mode-access-dependency.json"),"{}");
+            bool oldRejected=false;
+            try { CharacterModeAccessService.DependencyFiles(scratch); } catch(InvalidDataException) { oldRejected=true; }
+            Check(oldRejected,"old standalone-helper releases require rebuilding");
         }
         finally { Directory.Delete(scratch, recursive: true); }
         return result;
