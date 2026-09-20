@@ -15,13 +15,15 @@ internal sealed class SkinnedMeshWorkshopForm : AdaptiveForm
     private readonly CancellationTokenSource _cancel = new();
     private SkinnedMeshImport _working;
     private bool _busy;
+    private readonly bool _existing;
+    private readonly List<Control> _actions = [];
     internal SkinnedMeshImport? Result { get; private set; }
     internal bool RemoveRequested { get; private set; }
 
     internal SkinnedMeshWorkshopForm(string directory, IReadOnlyList<SkinnedMeshStageService.Target> targets,
         IReadOnlyList<string> components, SkinnedMeshImport recipe, bool existing, bool vehicle = false)
     {
-        _directory = directory; _working = recipe.Clone();
+        _directory = directory; _working = recipe.Clone(); _existing = existing;
         Text = "Batcomputer — Skinned mesh workshop (experimental)"; StartPosition = FormStartPosition.CenterParent;
         ClientSize = new Size(1280, 860); MinimumSize = new Size(1020, 740); AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = Theme.WindowBg; ForeColor = Theme.OnDark; Font = Theme.Body;
@@ -37,7 +39,8 @@ internal sealed class SkinnedMeshWorkshopForm : AdaptiveForm
             int row = fields.RowCount++; fields.RowStyles.Add(new(SizeType.Absolute, 26)); fields.Controls.Add(new Label { Text = label, AutoSize = true, ForeColor = Theme.Parts, Margin = new Padding(0, 5, 0, 0) }, 0, row);
             row = fields.RowCount++; fields.RowStyles.Add(new(SizeType.Absolute, height)); fields.Controls.Add(control, 0, row);
         }
-        Button Button(string title, EventHandler action) { var b = new Button { Text = title, Dock = DockStyle.Fill }; Theme.StyleDarkButton(b); b.Click += action; return b; }
+        Button Button(string title, EventHandler action, bool allowWhileBusy = false) { var b = new Button { Text = title, Dock = DockStyle.Fill }; Theme.StyleDarkButton(b); b.Click += action; if (!allowWhileBusy) _actions.Add(b); return b; }
+        _actions.AddRange([_name, _scale, _materials, _hidden]);
         foreach (var target in targets) _target.Items.Add(target);
         _target.SelectedItem = targets.FirstOrDefault(t => t.Component == recipe.Component) ?? targets.FirstOrDefault();
         _target.Enabled = !existing; _name.Text = recipe.Name; _scale.Value = Math.Clamp((decimal)recipe.ImportScale, _scale.Minimum, _scale.Maximum);
@@ -57,7 +60,7 @@ internal sealed class SkinnedMeshWorkshopForm : AdaptiveForm
         var footer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, Padding = new Padding(0, 12, 0, 0) };
         footer.ColumnStyles.Add(new(SizeType.Percent, 100)); footer.ColumnStyles.Add(new(SizeType.Absolute, 120)); footer.ColumnStyles.Add(new(SizeType.Absolute, 185));
         _save = Button("Use skinned mesh", (_, _) => Save()); Theme.StyleGoldButton(_save);
-        var cancel = Button("Cancel", (_, _) => { if (_busy) { _cancel.Cancel(); _status.Text = "Cancelling the cook…"; } else Close(); });
+        var cancel = Button("Cancel", (_, _) => { if (_busy) { _cancel.Cancel(); _status.Text = "Cancelling the current operation…"; } else Close(); }, allowWhileBusy: true);
         footer.Controls.Add(_status, 0, 0); footer.Controls.Add(cancel, 1, 0); footer.Controls.Add(_save, 2, 0);
         root.Controls.Add(footer, 0, 2); root.SetColumnSpan(footer, 2);
         _status.Text = "Rig preparation is external. Baking requires the UE 5.6 installation configured in Settings.";
@@ -68,6 +71,17 @@ internal sealed class SkinnedMeshWorkshopForm : AdaptiveForm
         FormClosed += (_, _) => _cancel.Dispose();
     }
     private void Status(string message) { if (!IsDisposed && IsHandleCreated) BeginInvoke(() => { if (!IsDisposed) _status.Text = message; }); }
+    private void SetBusy(bool busy, string? message = null)
+    {
+        _busy = busy;
+        foreach (var action in _actions) action.Enabled = !busy;
+        _target.Enabled = !busy && !_existing && string.IsNullOrEmpty(_working.CacheRelativePath);
+        _save.Enabled = !busy && !string.IsNullOrEmpty(_working.CacheRelativePath);
+        if (message is not null) _status.Text = message;
+        // Cancel closes once the worker has stopped; do not offer another import
+        // with the same already-cancelled lifetime token.
+        if (!busy && _cancel.IsCancellationRequested) Close();
+    }
     private void Fill() { _materials.Rows.Clear(); foreach (var m in _working.Materials) _materials.Rows.Add(m.SourceMaterialName, m.MaterialPath); _save.Enabled = !_busy && !string.IsNullOrEmpty(_working.CacheRelativePath); }
     private SkinnedMeshImport Read()
     {
@@ -87,13 +101,13 @@ internal sealed class SkinnedMeshWorkshopForm : AdaptiveForm
             var request = Read(); request.ImportScale = (float)_scale.Value;
             if (_target.SelectedItem is not SkinnedMeshStageService.Target target) throw new InvalidDataException("Select a compatible native component.");
             request.Component = target.Component; request.DonorMeshPackage = target.DonorMesh;
-            _busy = true; _save.Enabled = false; _target.Enabled = false;
+            SetBusy(true, "Importing and validating the FBX…");
             var imported = await Task.Run(() => SkinnedMeshCookService.ImportAsync(_directory, source, request, Status, _cancel.Token));
             _working = imported; Fill(); _status.Text = "Cook validated. Assign materials, inspect the mesh, then save.";
         }
         catch (OperationCanceledException) { _status.Text = "Import cancelled. Previous working mesh was not replaced."; }
         catch (Exception ex) { _status.Text = ex.Message; Dialog.Error(this, "Skinned mesh was not imported", ex.Message); }
-        finally { _busy = false; _save.Enabled = !string.IsNullOrEmpty(_working.CacheRelativePath); _target.Enabled = string.IsNullOrEmpty(_working.CacheRelativePath); }
+        finally { SetBusy(false); }
         if (!_cancel.IsCancellationRequested && !string.IsNullOrEmpty(_working.CacheRelativePath)) await PreviewAsync();
     }
     private async Task ExportAsync()
@@ -101,18 +115,18 @@ internal sealed class SkinnedMeshWorkshopForm : AdaptiveForm
         if (_busy || _target.SelectedItem is not SkinnedMeshStageService.Target target) return;
         using var picker = new FolderBrowserDialog { Description = "Choose a folder for the native reference mesh and skeleton" };
         if (picker.ShowDialog(this) != DialogResult.OK) return;
-        _busy = true;
+        SetBusy(true, "Exporting the native mesh and rig…");
         try { var file = await Task.Run(() => SkinnedMeshCookService.ExportReference(target.DonorMesh, Path.Combine(picker.SelectedPath, "Reference-" + DateTime.Now.ToString("yyyyMMdd-HHmmss")))); _status.Text = "Reference exported: " + file; }
         catch (Exception ex) { Dialog.Error(this, "Reference export failed", ex.Message); }
-        finally { _busy = false; }
+        finally { SetBusy(false); }
     }
     private async Task PreviewAsync()
     {
         if (_busy || string.IsNullOrEmpty(_working.CacheRelativePath)) return;
-        _busy = true;
-        try { var recipe = Read(); var folder = await Task.Run(() => SkinnedMeshPreviewService.Create(_directory, recipe)); await _viewer.ShowFolderAsync(folder); _status.Text = "Pose-check preview. Slot colors identify regions; final game shaders are not simulated."; }
+        SetBusy(true, "Preparing the deformation preview…");
+        try { var recipe = Read(); var folder = await Task.Run(() => SkinnedMeshPreviewService.Create(_directory, recipe)); if (!_cancel.IsCancellationRequested) { await _viewer.ShowFolderAsync(folder); _status.Text = "Pose-check preview. Slot colors identify regions; final game shaders are not simulated."; } else _status.Text = "Preview cancelled. Saved mesh unchanged."; }
         catch (Exception ex) { _status.Text = "Preview: " + ex.Message; }
-        finally { _busy = false; }
+        finally { SetBusy(false); }
     }
     private void Save()
     {

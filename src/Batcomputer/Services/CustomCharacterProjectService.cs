@@ -21,6 +21,7 @@ public static class CustomCharacterProjectService
         var identity = project.CustomCharacter;
         if (identity is null)
             return PawnTagConfigService.CharacterOwnerMismatchError(project.PawnTag, donorPawnTag);
+        if (!Enum.IsDefined(identity.ModeAvailability)) return "The character's game-mode availability is invalid. Reopen Character identity.";
         if (!IsIdentifier(identity.CharacterId) || !IsIdentifier(identity.VariantId) ||
             string.IsNullOrWhiteSpace(identity.DefinitionSlotId))
             return "The custom character identity is incomplete. Create it through Characters, or choose a saved character as the suit's base.";
@@ -107,7 +108,8 @@ public static class CustomCharacterProjectService
         {
             IsDefinition = definition, CharacterId = characterId, VariantId = variantId,
             DefinitionSlotId = definition ? project.SlotId : definitionSlotId,
-            SymbolPackage = definition ? "" : source?.CustomCharacter?.SymbolPackage ?? ""
+            SymbolPackage = definition ? "" : source?.CustomCharacter?.SymbolPackage ?? "",
+            ModeAvailability = source?.CustomCharacter?.ModeAvailability ?? CharacterModeAvailability.Normal
         };
         var stem = $"CC_{characterId}_{variantId}";
         var root = $"/Game/Mods/{stem}/Characters";

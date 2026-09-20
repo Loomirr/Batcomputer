@@ -344,7 +344,8 @@ public sealed partial class MainForm
         }
 
         var warning = profile.MissingRegions.Count == 0
-            ? "This keeps the gameplay donor's animation class and runtime behavior, and replaces only CharacterMesh0's native mesh."
+            ? "This changes the body mesh, not the gameplay donor. Switching Minifig/Smallfig can disable size-specific takedowns. " +
+              "Use Ability workshop > Takedowns to test matching animations; counters and grabs may still need alignment work."
             :
                 $"This body intentionally has no {string.Join(", ", profile.MissingRegions).ToLowerInvariant()}.\n\n" +
                 string.Join("\n", profile.Warnings) +

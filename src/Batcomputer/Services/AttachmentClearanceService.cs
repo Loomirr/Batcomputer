@@ -12,8 +12,14 @@ internal static class AttachmentClearanceService
 {
     private const string BeltDonor = "/Game/Characters/Minifig/Batman/BP_Batman_LBM_Cutscene";
     internal static string? BoneForSlot(string slot) => slot.ToLowerInvariant() switch
-    { "hip" or "offset_hip" => "Spine_01", "shoulder" or "offset_neck" => "Neck", _ => null };
-    internal static float DefaultForSlot(string slot) => BoneForSlot(slot) switch { "Spine_01" => 4.3f, "Neck" => 3f, _ => 0 };
+    {
+        "hip" or "offset_hip" => "Spine_01",
+        "shoulder" or "offset_neck" or "torso" or "torso2" or "collar" or "cape" => "Neck",
+        _ => null,
+    };
+    // Newly supported regions opt in explicitly; loading an older chest/cape must not raise its head.
+    internal static float DefaultForSlot(string slot) => slot.ToLowerInvariant() switch
+    { "hip" or "offset_hip" => 4.3f, "shoulder" or "offset_neck" => 3f, _ => 0 };
     internal static float Clearance(CustomStaticMeshImport mesh)
     {
         float value = mesh.BodyClearance ?? DefaultForSlot(mesh.Target);
@@ -34,7 +40,7 @@ internal static class AttachmentClearanceService
         {
             var donor = graft.Playable ?? graft.Cutscene;
             if (donor is null) continue;
-            var bone = BoneForSlot(graft.Slot) ?? (graft.Slot is "Torso" or "Cape" or "Collar" ? "Neck" : null);
+            var bone = BoneForSlot(graft.Slot);
             if (bone is null) continue;
             var package = string.IsNullOrWhiteSpace(donor.TemplatePackagePath) ? donor.SourcePackagePath : donor.TemplatePackagePath;
             var asset = EquipmentAssetService.Read(extracted, package, mappings);

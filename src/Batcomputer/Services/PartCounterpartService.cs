@@ -14,7 +14,20 @@ internal static class PartCounterpartService
             .ThenByDescending(p => p.Slot.Equals(selected.Slot, StringComparison.OrdinalIgnoreCase))
             .ThenByDescending(p => p.CharacterFolder.Equals(selected.CharacterFolder, StringComparison.OrdinalIgnoreCase))
             .ThenBy(p => p.SourcePackagePath, StringComparer.OrdinalIgnoreCase).FirstOrDefault();
-        if (match is null) return null;
+        if (match is null)
+        {
+            // Some shared static hair/hat meshes only occur on playable NPCs. They
+            // do not need a second mesh or rig for cutscenes. Reuse the exact donor
+            // recipe for the other target role; the graft service validates its
+            // component shell. Keep the source context truthful for saved replay.
+            // This fallback must never apply to skeletal hair, capes or gliders.
+            if ((role.Equals("playable", StringComparison.OrdinalIgnoreCase) || role.Equals("cutscene", StringComparison.OrdinalIgnoreCase)) &&
+                selected.HasMesh && selected.MeshKind.Equals("StaticMesh", StringComparison.OrdinalIgnoreCase) &&
+                selected.ComponentClass.Contains("StaticMeshComponent", StringComparison.OrdinalIgnoreCase) &&
+                PartRecipeService.SemanticKind(selected) is "Hair" or "Hat" or "Head")
+                return PartRecipeService.Clone(selected);
+            return null;
+        }
         var result = PartRecipeService.Clone(match);
         result.Materials = PartRecipeService.Clone(selected).Materials;
         result.RecipeKey = PartRecipeService.BuildRecipeKey(result);

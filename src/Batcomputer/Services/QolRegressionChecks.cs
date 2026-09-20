@@ -8,6 +8,22 @@ internal static class QolRegressionChecks
     internal static IEnumerable<(bool Passed, string Description)> Run()
     {
         var results = new List<(bool, string)>();
+        var characterEntry = new CharacterCatalogService.Entry("Moon Knight", CharacterCatalogService.Source.CustomSuit,
+            "", "character.json", true, "moonknight", "MoonKnight");
+        var suitEntry = characterEntry with { IsCharacter = false, ProjectId = "moonknight_white" };
+        results.Add((CharacterBrowserList.EntryLabel(characterEntry) == "CHARACTER · MoonKnight" &&
+            CharacterBrowserList.EntryLabel(suitEntry) == "SUIT · moonknight_white",
+            "viewer library distinguishes character definitions from suit variants with stable IDs"));
+        var noise = new TextureDecodeService.Decoded([
+            new(0, 255, 255, 255), new(255, 0, 255, 255),
+            new(255, 0, 255, 255), new(0, 255, 255, 255)], 2, 2);
+        var filteredNoise = TextureDecodeService.PrefilterNormalNoise(noise, 2, 2, 2);
+        results.Add((filteredNoise.Width == 1 && filteredNoise.Height == 1 &&
+            filteredNoise.Pixels[0].r == 127 && filteredNoise.Pixels[0].g == 127 &&
+            noise.Width == 2 && noise.Pixels[0].r == 0,
+            "micro-normal minification averages linear channels without changing the source texture"));
+        results.Add((ReferenceEquals(noise, TextureDecodeService.PrefilterNormalNoise(noise, 64, 64, 1)),
+            "micro-normal prefilter preserves full detail when the target has sufficient resolution"));
         var ui = new Thread(() =>
         {
             using var editor = new TextBox(); using var display = new TextBox();
@@ -39,6 +55,24 @@ internal static class QolRegressionChecks
         advancedCape.MeshPackagePath += "_Advanced"; advancedCape.MeshObjectName += "_Advanced";
         results.Add((PartCounterpartService.Find(nativeCape, [advancedCape], "cutscene")?.MeshObjectName == "SK_CAPE_TwoHole_Advanced",
             "native cape pairing retains its matching Advanced cutscene rig"));
+        var hair = new NativeSuitPartRecord { Context = "playable", Slot = "Head", SemanticKind = "Hair", ComponentClass = "StaticMeshComponent", TemplateComponentClass = "StaticMeshComponent",
+            MeshKind = "StaticMesh", MeshPackagePath = "/Game/Characters/Attachments/Hair/PonyTail/SM_HAIR_PonyTail", MeshObjectName = "SM_HAIR_PonyTail",
+            MeshObjectPath = "/Game/Characters/Attachments/Hair/PonyTail/SM_HAIR_PonyTail.SM_HAIR_PonyTail", SourcePackagePath = "/Game/Characters/BP_Quest",
+            Materials = [new() { PackagePath = "/Game/MI_Ponytail", ObjectPath = "/Game/MI_Ponytail.MI_Ponytail" }] };
+        var counterpart = PartCounterpartService.Find(hair, [hair], "cutscene");
+        results.Add((counterpart?.MeshObjectPath == hair.MeshObjectPath && counterpart.Context == "playable" && !ReferenceEquals(counterpart, hair),
+            "playable-only static hair uses its exact source recipe for the cutscene target"));
+        var savedHair = MainForm.PartToDonorForTest(counterpart, "cutscene")!;
+        var hairReplay = MainForm.ResolvePartForReplayForTest(savedHair, new NativeSuitPartIndex { Parts = [hair] });
+        results.Add((savedHair.Context == "playable" && hairReplay?.MeshObjectPath == hair.MeshObjectPath && hairReplay.Materials[0].PackagePath == "/Game/MI_Ponytail",
+            "shared hair roundtrip retains source context, mesh and material for the other target role"));
+        var skeletalHair = PartRecipeService.Clone(hair); skeletalHair.MeshKind = "SkeletalMesh"; skeletalHair.ComponentClass = "SkeletalMeshComponent";
+        results.Add((PartCounterpartService.Find(skeletalHair, [skeletalHair], "cutscene") is null && PartCounterpartService.Find(hair, [hair], "unknown") is null,
+            "static head fallback does not manufacture skeletal or unknown-role counterparts"));
+        results.Add((MainForm.HasEnabledModContent(new() { Vehicles = [new() { VehicleId = "OnlyCar", Enabled = true }] }),
+            "vehicle-only mod is buildable without an open suit or suit entries"));
+        results.Add((!MainForm.HasEnabledModContent(null) && !MainForm.HasEnabledModContent(new()) && !MainForm.HasEnabledModContent(new() { Vehicles = [new() { Enabled = false }] }),
+            "empty or disabled-only mods are not marked buildable"));
         var recipe = new NativeSuitProject(); var before = MainForm.DeclarativeRecipeFingerprint(recipe);
         results.Add((before == MainForm.DeclarativeRecipeFingerprint(JsonSerializer.Deserialize<NativeSuitProject>(JsonSerializer.Serialize(recipe))!), "material stage fingerprint survives recipe serialization"));
         recipe.Changes.Add(new());

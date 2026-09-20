@@ -1,0 +1,7 @@
+GLTFExporter.js and SkeletonUtils.js are the unmodified classic-script helpers
+from Three.js r128, matching the bundled preview runtime.
+
+https://raw.githubusercontent.com/mrdoob/three.js/r128/examples/js/exporters/GLTFExporter.js
+https://raw.githubusercontent.com/mrdoob/three.js/r128/examples/js/utils/SkeletonUtils.js
+
+License: MIT; see three.js-LICENSE.txt in this directory.

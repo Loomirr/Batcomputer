@@ -592,7 +592,7 @@ public sealed partial class MainForm : AdaptiveForm
         if (vehicles)
         {
             if (_headerSuitCaption is not null) _headerSuitCaption.Text = "VEHICLE LIBRARY";
-            _headerMetaLabel.Text = "Open a vehicle below to edit it. Manage releases from Home.";
+            _headerMetaLabel.Text = "Open a vehicle to edit it. Build packages the selected mod.";
             _toyboxStatusChip.Text = "experimental";
             return;
         }
@@ -624,7 +624,7 @@ public sealed partial class MainForm : AdaptiveForm
             if (_workspaceFolder == WorkspaceFolder.Vehicles)
             {
                 var (selectedVehicleMod, vehicleMod) = ResolveHomeActiveMod(summaries);
-                return selectedVehicleMod is null ? ("No mod selected", "Select a mod from Home", false)
+                return selectedVehicleMod is null ? ("No mod selected", "Create or select a mod below", false)
                     : (selectedVehicleMod.DisplayName, DescribeModContent(vehicleMod), true);
             }
             var slotId = _currentProject?.SlotId?.Trim() ?? "";
@@ -2210,6 +2210,7 @@ public sealed partial class MainForm : AdaptiveForm
     private void SetDefaults()
     {
         _projectRootText.Text = AppSettings.Current.EffectiveProjectRoot();
+        _projectService = new SuitProjectService(_projectRootText.Text.Trim());
         _descriptionText.Text = "Custom native suit.";
         _suitNameText.Text = NoSuitTitle;
         _modFolderText.Text = NoModSubtitle;
@@ -2218,6 +2219,9 @@ public sealed partial class MainForm : AdaptiveForm
         UpdateSelectedPartLabels();
         AppendLog("Ready. Step 1: pick a base playable + cutscene, then \"Use as base\".");
         LoadPartIndexAndRefreshGrid(logIfMissing: false);
+        // BuildLayout populated Home before its workspace path was assigned. Refresh the local
+        // library now, including when no extracted part index exists yet.
+        RefreshToyboxTiles();
     }
 
     private void DeriveOutputs()

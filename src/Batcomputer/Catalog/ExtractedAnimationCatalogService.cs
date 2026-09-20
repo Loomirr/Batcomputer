@@ -30,6 +30,7 @@ public static class ExtractedAnimationCatalogService
 
     public static void Invalidate()
     {
+        ExtractedAttachmentMeshCatalogService.Invalidate();
         lock (CacheGate)
         {
             _cachedContentRoot = "";

@@ -16,6 +16,7 @@ internal static class SkinnedMeshPreviewService
         var mesh = provider.LoadPackageObject<USkeletalMesh>(recipe.MeshPackage);
         var exporter = new MeshExporter(mesh, new ExporterOptions { MeshFormat = EMeshFormat.Gltf2, LodFormat = ELodFormat.FirstLod, ExportMaterials = false, ExportMorphTargets = false });
         if (!exporter.TryWriteToDir(new DirectoryInfo(Path.Combine(folder, "custom")), out _, out var file)) throw new InvalidDataException("Custom skinned preview could not be exported.");
+        SkinnedGlbExportService.CorrectFile(file, mesh);
         File.Copy(file, Path.Combine(folder, "custom.glb"));
         File.WriteAllText(Path.Combine(folder, "index.html"), Viewer);
         return folder;

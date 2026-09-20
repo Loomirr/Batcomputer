@@ -150,6 +150,7 @@ public static class CustomEquipmentService
                 // Parse the emitted asset immediately. Broken cooked exports stop the build.
                 var reread = EquipmentAssetService.Read(contentRoot, package, mappings);
                 if (reread.Exports.Count != asset.Exports.Count) throw new InvalidDataException("Equipment clone export count changed: " + package);
+                RequirePropertyLayoutRoundtrip(asset, reread, package);
                 foreach (var edit in recipe.Parts.Where(p => p.OwnerPackage == source))
                 {
                     var expectedExport = asset.Exports.OfType<NormalExport>().Single(e => e.ObjectName.ToString() == RenamedObject(edit.ExportName, redirects));
@@ -181,6 +182,35 @@ public static class CustomEquipmentService
             log($"Custom equipment '{recipe.Name}': {profile.OwnedGraph.Count} isolated equipment assets, {recipe.Parts.Count} customized bindings; upgrade chain staged.");
         }
     }
+
+    // Parsing can succeed with a truncated CDO after a schema mismatch. Check every normal
+    // export, including unedited effects such as BatSwarmAOE, not just customized bindings.
+    internal static void RequirePropertyLayoutRoundtrip(UAsset expected, UAsset actual, string package)
+    {
+        if (expected.Exports.Count != actual.Exports.Count)
+            throw new InvalidDataException("Equipment clone export count changed: " + package);
+        for (var index = 0; index < expected.Exports.Count; index++)
+        {
+            if (expected.Exports[index] is not NormalExport source) continue;
+            if (actual.Exports[index] is not NormalExport written ||
+                source.ObjectName.ToString() != written.ObjectName.ToString() ||
+                !PropertyLayout(source).SequenceEqual(PropertyLayout(written), StringComparer.Ordinal))
+                throw new InvalidDataException($"Equipment property layout changed while writing {package}, export {source.ObjectName}. " +
+                    "Refresh game assets and current mappings, then rebuild. This output cannot be packaged safely. " +
+                    (actual.Exports[index] is NormalExport parsed
+                        ? "Missing/changed: " + string.Join(", ", PropertyLayout(source).Except(PropertyLayout(parsed)).Take(8)) +
+                          "; unexpected: " + string.Join(", ", PropertyLayout(parsed).Except(PropertyLayout(source)).Take(8))
+                        : "The export could not be parsed."));
+        }
+    }
+
+    private static IEnumerable<string> PropertyLayout(NormalExport export) =>
+        // Compare declared export fields. Unversioned zero masks legitimately omit
+        // inner struct values (zero vectors and material GUIDs, for example). Customized
+        // nested references and HUD parameter values have their own checks above.
+        export.Data.Select(property => property.Name + "|" + property.GetType().FullName +
+            (property is StructPropertyData structure ? "|" + structure.StructType : ""))
+            .Order(StringComparer.Ordinal);
 
     private static string StagedPath(string root, string package)
     {

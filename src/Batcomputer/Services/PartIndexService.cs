@@ -7,11 +7,11 @@ namespace Batcomputer;
 
 public sealed class PartIndexService
 {
-    // v5 adds source records from sibling Game Feature DLC mounts. Treat older caches as stale so
-    // a user's first launch after updating cannot keep an index that silently omits owned DLC.
-    public const int CurrentIndexSchemaVersion = 5;
+    // v7 also records the mappings revision: fixing an outdated .usmap must invalidate
+    // recipes parsed with it, even when the extraction stays in the same directory.
+    public const int CurrentIndexSchemaVersion = 7;
 
-    private static readonly string[] CharacterRigFolders = { "Minifig", "Smallfig" };
+    private static readonly string[] CharacterRigFolders = { "Minifig", "Smallfig", "Playables" };
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -62,7 +62,7 @@ public sealed class PartIndexService
             ? FindDefaultExtractedContentRoot()
             : AppSettings.NormalizeContentRoot(sourceContentRoot.Trim());
         // Preserve the legacy diagnostic field for existing part-index readers while the scan
-        // itself now covers both supported character rigs.
+        // itself covers base-game, smallfig and Villain Mode playable folders.
         var legacyMinifigRoot = Path.Combine(contentRoot, "Characters", "Minifig");
         var characterRoots = EnumerateCharacterRigRoots(contentRoot);
 
@@ -73,6 +73,7 @@ public sealed class PartIndexService
             SourceMinifigRoot = legacyMinifigRoot,
             MappingsPath = FindDefaultMappingsPath()
         };
+        index.MappingsRevision = CaptureMappingsRevision(index.MappingsPath);
 
         Directory.CreateDirectory(PartIndexOutputRoot);
 
@@ -82,7 +83,7 @@ public sealed class PartIndexService
             index.Errors.Add(new NativeSuitPartScanError
             {
                 Uasset = Path.Combine(contentRoot, "Characters"),
-                Error = "No extracted Minifig or Smallfig character root was found, including under AdditionalContent."
+                Error = "No extracted Minifig, Smallfig or Playables character root was found, including under AdditionalContent."
             });
             SavePartIndex(index);
             return index;
@@ -160,7 +161,9 @@ public sealed class PartIndexService
             // Smallfig visual automatically builds the multi-rig index instead of silently omitting
             // its cape, head, and face recipes. A same-schema index from a different extract is
             // stale too: its donor paths and recipes must never be replayed against the active dump.
-            return IsCurrentIndex(index, FindDefaultExtractedContentRoot()) ? index : null;
+            return IsCurrentIndex(index, FindDefaultExtractedContentRoot()) &&
+                index!.MappingsRevision is { } revision &&
+                revision == CaptureMappingsRevision(FindDefaultMappingsPath()) ? index : null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -171,6 +174,13 @@ public sealed class PartIndexService
     }
 
     internal static bool IsCurrentIndexForTest(NativeSuitPartIndex? index) => IsCurrentIndex(index);
+
+    internal static string? CaptureMappingsRevision(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return "none";
+        var info = new FileInfo(Path.GetFullPath(path));
+        return info.Exists ? info.FullName.ToUpperInvariant() + "|" + info.Length + "|" + info.LastWriteTimeUtc.Ticks : null;
+    }
 
     private static bool IsCurrentIndex(NativeSuitPartIndex? index) =>
         index is not null && index.SchemaVersion >= CurrentIndexSchemaVersion;
@@ -235,7 +245,7 @@ public sealed class PartIndexService
             .ToList();
     }
 
-    private static List<NativeSuitPartRecord> ExtractParts(JsonElement root, string assetPath, string contentRoot)
+    internal static List<NativeSuitPartRecord> ExtractParts(JsonElement root, string assetPath, string contentRoot)
     {
         var output = new List<NativeSuitPartRecord>();
         if (!root.TryGetProperty("Exports", out var exportsElement) ||

@@ -14,7 +14,7 @@ public sealed class CustomStaticMeshImportDialog : AdaptiveForm
     private readonly NumericUpDown _rotationYaw = Number(0m, -360m, 360m, 2, 1m);
     private readonly NumericUpDown _rotationRoll = Number(0m, -360m, 360m, 2, 1m);
     private readonly CheckBox _hideBaseHead = new();
-    private readonly CheckBox _nativeClearance = new() { Text = "Use native belt / shoulder clearance", AutoSize = true };
+    private readonly CheckBox _nativeClearance = new() { Text = "Use default clearance", AutoSize = true };
     private readonly NumericUpDown _clearance = Number(0m, 0m, 30m, 3, .1m);
 
     public string SourceObjPath => _source.Text.Trim();
@@ -185,14 +185,20 @@ public sealed class CustomStaticMeshImportDialog : AdaptiveForm
         fields.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         fields.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         fields.Controls.Add(_nativeClearance, 1, 12); fields.SetColumnSpan(_nativeClearance, 2);
-        AddNumberRow(fields, 13, "Body clearance", _clearance, "Bone-space clearance, separate from this mesh's XYZ placement. Hip moves Spine_01; Shoulder moves Neck. Zero disables this attachment's contribution. Existing native clearance is preserved.");
-        var clearanceNote = new Label { AutoSize = true, MaximumSize = new Size(620, 0), Text = "Hip / belt: native 4.3. Shoulder / neck: native armour 3.0. These adjust the body bones in gameplay and cutscenes, not just the accessory position.", ForeColor = Theme.OnDarkMuted, Font = Theme.Caption };
+        AddNumberRow(fields, 13, "Body clearance", _clearance, "Bone-space clearance for gameplay and cutscenes, not mesh translation. Zero adds no clearance; it does not remove native clearance. Multiple parts use the largest clearance, not a sum. The viewer does not yet simulate this bone offset.");
+        var clearanceNote = new Label { AutoSize = true, MaximumSize = new Size(620, 0), ForeColor = Theme.OnDarkMuted, Font = Theme.Caption };
         fields.Controls.Add(clearanceNote, 0, 14); fields.SetColumnSpan(clearanceNote, 3);
         void SyncClearance()
         {
             bool supported = AttachmentClearanceService.BoneForSlot(AttachmentSlot.Id) is not null;
             _nativeClearance.Enabled = supported; _clearance.Enabled = supported && !_nativeClearance.Checked;
             if (_nativeClearance.Checked) _clearance.Value = (decimal)AttachmentClearanceService.DefaultForSlot(AttachmentSlot.Id);
+            clearanceNote.Text = AttachmentClearanceService.BoneForSlot(AttachmentSlot.Id) switch
+            {
+                "Neck" => "Neck clearance · raises the head for this attachment. Uses the largest clearance; preview does not simulate it yet.",
+                "Spine_01" => "Hip clearance · makes room for the belt. Uses the largest clearance; preview does not simulate it yet.",
+                _ => "This slot has no supported body-bone clearance. Use the mesh placement controls above.",
+            };
         }
         _target.SelectedIndexChanged += (_, _) => SyncClearance(); _nativeClearance.CheckedChanged += (_, _) => SyncClearance(); SyncClearance();
 

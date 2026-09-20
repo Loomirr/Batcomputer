@@ -11,8 +11,10 @@ A vehicle can have more than one visible model. Importing the driving body does 
 
 This covers the active parked car, not every display stand or thumbnail in the game.
 
-!!! warning "Preparation guide, not an available importer"
-    Custom summon and equipped-actor meshes are being tested separately. The current vehicle workshop does not have a summon-model import field. Finish the [normal driving-model workflow](vehicles.md) first. Do not import a summon FBX into its driving-body slot.
+!!! warning "Development importer"
+    In the development build, use **Body & setup → Assembly model** for a summon FBX. Finish the [normal driving-model workflow](vehicles.md) first. The assembly import requires the chosen donor's separate summon skeleton; do not put it in the driving-body slot. The build-up animation and parked appearance still need an in-game check.
+
+**Use matching body materials** is on by default and matches slots by their original names, not their order. Turn it off to keep materials assigned in the assembly importer. **Use native assembly** removes the replacement from the vehicle recipe but keeps its imported source files. Custom bone-count build-up rigs are not supported by this importer yet.
 
 ## Keep a second model copy
 

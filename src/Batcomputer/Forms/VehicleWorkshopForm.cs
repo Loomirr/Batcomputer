@@ -77,7 +77,9 @@ internal sealed class VehicleWorkshopForm : AdaptiveForm
             }
             else if (root.GetProperty("type").GetString() == "vehicleWorkshopSettings") await OpenSettings(json);
             else if (root.GetProperty("type").GetString() == "vehicleWorkshopCopyMaterial") await CopyMaterial(json);
+            else if (root.GetProperty("type").GetString() == "vehicleWorkshopSurface") await ChangeSurface(json);
             else if (root.GetProperty("type").GetString() == "vehicleWorkshopRiders") await PrepareRiders();
+            else if (root.GetProperty("type").GetString() == "vehicleWorkshopToybox") await ChooseToyboxPart(json);
             else if (root.GetProperty("type").GetString() == "vehicleWorkshopError") _status.Text = "Preview: " + root.GetProperty("error").GetString();
         }
         catch (Exception ex) { _status.Text = "Placements were not applied: " + ex.Message; }
@@ -102,7 +104,7 @@ internal sealed class VehicleWorkshopForm : AdaptiveForm
     {
         if (json.Length > 256_000) throw new InvalidDataException("Placement message is too large.");
         using var doc = JsonDocument.Parse(json); var root = doc.RootElement;
-        if (root.GetProperty("type").GetString() is not ("vehicleWorkshopSave" or "vehicleWorkshopSettings" or "vehicleWorkshopCopyMaterial") || root.GetProperty("session").GetString() != scene.Session || root.GetProperty("vehicleId").GetString() != source.Id)
+        if (root.GetProperty("type").GetString() is not ("vehicleWorkshopSave" or "vehicleWorkshopSettings" or "vehicleWorkshopCopyMaterial" or "vehicleWorkshopToybox" or "vehicleWorkshopSurface") || root.GetProperty("session").GetString() != scene.Session || root.GetProperty("vehicleId").GetString() != source.Id)
             throw new InvalidDataException("Stale vehicle workshop session.");
         var edits = JsonSerializer.Deserialize<List<VehicleComponentTransform>>(root.GetProperty("transforms").GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? throw new InvalidDataException("Missing placements.");
         if (edits.Count > scene.Parts.Count + source.Transforms.Count || edits.Any(e => e is null)) throw new InvalidDataException("Unexpected placement data.");
@@ -145,6 +147,24 @@ internal sealed class VehicleWorkshopForm : AdaptiveForm
         }
         VehicleProjectService.ValidateIdentity(result); return result;
     }
+    private async Task ChooseToyboxPart(string json)
+    {
+        if (_scene is null || _busy) return;
+        using var doc = JsonDocument.Parse(json); var root = doc.RootElement;
+        var path = root.GetProperty("meshPackage").GetString() ?? "";
+        var target = root.GetProperty("targetComponent").GetString() ?? "";
+        if (!_scene.ToyboxCatalog.Any(c => c.Path == path)) throw new InvalidDataException("Choose a part from the installed toybox.");
+        if (target.Length > 0 && !_scene.Parts.Any(p => p.Id == target && p.CanDisable)) throw new InvalidDataException("Only a decorative mesh can be replaced.");
+        var next = ReadPlacementMessage(_source, _scene, json);
+        var added = target.Length == 0 || next.ToyboxParts.Any(p => p.Component == target && p.Added);
+        if (target.Length == 0) target = "BC_Part_" + Guid.NewGuid().ToString("N")[..12] + "_GEN_VARIABLE";
+        next.ToyboxParts.RemoveAll(p => p.Component == target);
+        next.ToyboxParts.Add(new() { Component = target, MeshPackage = path, Added = added });
+        next.MaterialOverrides.RemoveAll(p => p.Component == target);
+        next.DisabledParts.Remove(target);
+        VehicleProjectService.ValidateIdentity(next);
+        _source = next; await Reload();
+    }
     private async Task CopyMaterial(string json)
     {
         if (_scene is null || _busy) return;
@@ -159,8 +179,8 @@ internal sealed class VehicleWorkshopForm : AdaptiveForm
             var projectRoot = AppSettings.Current.EffectiveProjectRoot();
             var path = await VehicleMaterialCatalogService.PrepareCopySource(projectRoot, package, Path.Combine(_folder, "MaterialSources", Guid.NewGuid().ToString("N")), _cancel.Token);
             _cancel.Token.ThrowIfCancellationRequested();
-            var name = "MI_" + _source.Id + "_Copy_" + Guid.NewGuid().ToString("N")[..6];
-            using var wizard = new MaterialWizard(projectRoot, "Vehicle_" + _source.Id, name);
+            var name = VehicleMaterialService.SlotName(_source, slot, component!) + "_" + Guid.NewGuid().ToString("N")[..6];
+            using var wizard = new MaterialWizard(projectRoot, "Vehicle_" + _source.Id + "/Materials", name);
             wizard.PrefillBase(path, name, editInPlace: false);
             if (wizard.ShowDialog(this) != DialogResult.OK || wizard.ResultMiPackagePath is not { Length: > 0 } output) { _status.Text = "Material copy cancelled. Vehicle edits are still open."; return; }
             new ToolMaterialLibraryService(projectRoot).Register([new GeneratedMaterialEntry { DisplayName = UnrealPathUtil.AssetName(output), Kind = "Material", PackagePath = output, SourceMaterialPackagePath = package, ParentMaterialPath = wizard.ResultParentMaterialPath ?? "", CreatedUtc = DateTime.UtcNow.ToString("O") }]);
@@ -169,6 +189,51 @@ internal sealed class VehicleWorkshopForm : AdaptiveForm
             await Reload();
         }
         catch (OperationCanceledException) { }
+        finally { _busy = false; if (_cancel.IsCancellationRequested) Close(); }
+    }
+
+    private async Task ChangeSurface(string json)
+    {
+        if (_scene is null || _busy) return;
+        using var doc = JsonDocument.Parse(json); var root = doc.RootElement;
+        var component = root.GetProperty("surfaceComponent").GetString() ?? "";
+        var slot = root.GetProperty("surfaceSlot").GetInt32();
+        var part = _scene.Parts.SingleOrDefault(p => p.Id == component);
+        var surface = part?.Materials.SingleOrDefault(m => m.Slot == slot) ?? throw new InvalidDataException("Choose a valid surface.");
+        var next = ReadPlacementMessage(_source, _scene, json);
+        var package = next.MaterialOverrides.FirstOrDefault(m => m.Component == component && m.Slot == slot)?.MaterialPath ?? surface.Package;
+        var action = root.GetProperty("surfaceAction").GetString();
+        if (action is not ("copy" or "edit")) throw new InvalidDataException("Choose edit or create a copy.");
+        if (action == "edit" && !VehicleMaterialService.Owned(next, package)) throw new InvalidDataException("Create a vehicle-owned copy before editing this material.");
+        var finish = root.GetProperty("surfaceFinish").GetString() ?? "";
+        VehiclePaletteColor? paint = null;
+        if (finish != "Original")
+        {
+            var hex = root.GetProperty("surfaceColor").GetString() ?? "";
+            if (!System.Text.RegularExpressions.Regex.IsMatch(hex, "^#[0-9a-fA-F]{6}$") || !VehiclePaintService.ValidFinish(finish)) throw new InvalidDataException("Invalid surface color or finish.");
+            var rgb = ColorTranslator.FromHtml(hex);
+            static float Linear(byte v) => v <= 10 ? v / 255f / 12.92f : MathF.Pow((v / 255f + .055f) / 1.055f, 2.4f);
+            paint = new() { Slot = slot, Finish = finish, R = Linear(rgb.R), G = Linear(rgb.G), B = Linear(rgb.B) };
+        }
+        else if (component == "body" && !next.MaterialOverrides.Any(m => m.Component == component && m.Slot == slot))
+            paint = next.Palette.FirstOrDefault(p => p.Slot == slot);
+        _source = next; _busy = true;
+        try
+        {
+            var projectRoot = AppSettings.Current.EffectiveProjectRoot();
+            _status.Text = "Saving vehicle material…";
+            var source = await VehicleMaterialCatalogService.PrepareCopySource(projectRoot, package, Path.Combine(_folder, "MaterialSources", Guid.NewGuid().ToString("N")), _cancel.Token);
+            _cancel.Token.ThrowIfCancellationRequested();
+            var output = await Task.Run(() => VehicleMaterialService.Publish(projectRoot, next, slot, component, source, action == "edit" ? package : null, paint));
+            next.MaterialOverrides.RemoveAll(m => m.Component == component && m.Slot == slot);
+            if (component == "body" && next.Model is { } model)
+            {
+                model.Materials.Single(m => m.Slot == slot).MaterialPath = output;
+                next.Palette.RemoveAll(p => p.Slot == slot);
+            }
+            else next.MaterialOverrides.Add(new() { Component = component, Slot = slot, MaterialPath = output });
+            _source = next; await Reload();
+        }
         finally { _busy = false; if (_cancel.IsCancellationRequested) Close(); }
     }
 }

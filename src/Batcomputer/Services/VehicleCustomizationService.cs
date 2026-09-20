@@ -11,17 +11,27 @@ internal static class VehicleCustomizationService
 {
     internal sealed record MaterialChoice(string Path, string Name, string Source, string Family)
     {
+        public VehiclePaletteColor? Paint { get; init; }
         public bool Vehicle => VehicleMaterialCatalogService.IsVehicle(Path);
         public bool Part => VehicleMaterialCatalogService.IsPart(Path);
     }
     internal static string Family(string path) => path.Contains("/UI/", StringComparison.OrdinalIgnoreCase) ? "UI shader · not recommended" : path.Contains("VehicleLight", StringComparison.OrdinalIgnoreCase) ? "Vehicle glow" : path.Contains("Rubber", StringComparison.OrdinalIgnoreCase) ? "Rubber" : path.Contains("Metal", StringComparison.OrdinalIgnoreCase) ? "Metal" : path.Contains("Transp", StringComparison.OrdinalIgnoreCase) || path.Contains("Glass", StringComparison.OrdinalIgnoreCase) ? "Glass / transparent" : path.Contains("/Vehicles/", StringComparison.OrdinalIgnoreCase) ? "Vehicle surface" : "Surface";
     internal static IReadOnlyList<MaterialChoice> Catalog(string projectRoot) => new ToolMaterialLibraryService(projectRoot).LoadMetadataSnapshot()
-        .Select(m => new MaterialChoice(m.PackagePath, m.DisplayName.Length > 0 ? m.DisplayName : UnrealPathUtil.AssetName(m.PackagePath), "Generated", Family(m.PackagePath)))
+        .Select(m => new MaterialChoice(m.PackagePath, m.DisplayName.Length > 0 ? m.DisplayName : UnrealPathUtil.AssetName(m.PackagePath), "Generated", m.VehiclePaint is { } p ? PaintFamily(p.Finish) : Family(m.SourceMaterialPackagePath.Length > 0 ? m.SourceMaterialPackagePath : m.PackagePath)) { Paint = m.VehiclePaint })
         .Concat(GameDataService.Instance.AssetsOfClass("MaterialInstanceConstant").Select(m => new MaterialChoice(m.Path, UnrealPathUtil.AssetName(m.Path), "Base game", Family(m.Path))))
         .DistinctBy(m => m.Path, StringComparer.OrdinalIgnoreCase).OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase).ToArray();
 
-    internal static IEnumerable<StructPropertyData> Seats(UAsset asset) => asset.Exports.OfType<NormalExport>().Single(e => e.ObjectName.ToString() == "RideableComponent")
-        .Data.OfType<ArrayPropertyData>().Single(p => p.Name.ToString() == "Seats").Value.OfType<StructPropertyData>();
+    internal static string PaintFamily(string finish) => finish == "Metallic" ? "Metal" : finish == "Transparent" ? "Glass / transparent" : finish;
+
+    internal static IEnumerable<StructPropertyData> Seats(UAsset asset)
+    {
+        var component = asset.Exports.FirstOrDefault(e => e.ObjectName.ToString() == "RideableComponent");
+        if (component is null) return [];
+        if (component is not NormalExport parsed ||
+            parsed.Data.OfType<ArrayPropertyData>().FirstOrDefault(p => p.Name.ToString() == "Seats") is not { } seats)
+            throw new InvalidDataException("Seats could not be read from this driving base. Select a .usmap from the current game build in Setup, then refresh the game assets. No vehicle has been built.");
+        return seats.Value.OfType<StructPropertyData>();
+    }
     private static string SeatName(StructPropertyData seat) => seat.Value.OfType<NamePropertyData>().Single(p => p.Name.ToString() == "SeatSocketName").Value.ToString();
     internal static bool IsSeat(string id) => id is "seat:SeatDriver" or "seat:SeatPassenger";
     internal static IReadOnlyList<VehicleAssetService.Component> SeatComponents(UAsset asset) => Seats(asset).Select(seat =>
@@ -107,5 +117,16 @@ internal static class VehicleCustomizationService
             component.Data.OfType<ObjectPropertyData>().Single(p => p.Name.ToString() == "StaticMesh").Value = FPackageIndex.FromRawIndex(0);
         }
     }
-    private static string BodyComponent(UAsset asset) => asset.Exports.OfType<NormalExport>().Any(e => e.ObjectName.ToString() == "SkeletalMeshComponent") ? "SkeletalMeshComponent" : "SkeletalMesh1_GEN_VARIABLE";
+    // Tumbler's menu has both a driving skeletal component and its poseable child.
+    // Attach added parts to the same skeletal parent as its native lamp components.
+    internal static string BodyComponent(UAsset asset) => new[] { "SkeletalMeshComponent", "SkeletalMesh1_GEN_VARIABLE", "SkeletalMesh", "SkeletalMesh_GEN_VARIABLE" }.FirstOrDefault(name => asset.Exports.OfType<NormalExport>().Any(e => e.ObjectName.ToString() == name))
+        ?? asset.Exports.OfType<NormalExport>().Single(e => e.Data.OfType<ObjectPropertyData>().Any(d => d.Name.ToString() == "SkeletalMesh")).ObjectName.ToString();
+
+    internal static VehicleProject DisplayEdits(UAsset asset, VehicleProject project)
+    {
+        var copy = project.Clone(); var names = asset.Exports.Select(e => e.ObjectName.ToString()).ToHashSet(StringComparer.Ordinal);
+        copy.MaterialOverrides.RemoveAll(m => m.Component != "body" && !names.Contains(m.Component));
+        copy.DisabledParts.RemoveAll(id => !names.Contains(id));
+        return copy;
+    }
 }

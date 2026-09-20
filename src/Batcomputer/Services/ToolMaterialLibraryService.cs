@@ -1084,6 +1084,7 @@ public sealed class ToolMaterialLibraryService
 
     private static GeneratedMaterialEntry Clone(GeneratedMaterialEntry entry) => new()
     {
+        VehiclePaint = entry.VehiclePaint is { } paint ? new() { Slot = paint.Slot, Finish = paint.Finish, R = paint.R, G = paint.G, B = paint.B } : null,
         DisplayName = entry.DisplayName,
         Kind = entry.Kind,
         PackagePath = entry.PackagePath,
@@ -1120,6 +1121,20 @@ public sealed class ToolMaterialLibraryService
         {
             return archivedRoot;
         }
+    }
+
+    // Sharing must inspect the closure without registering, repairing or archiving source files.
+    internal IReadOnlyDictionary<string, string> EditablePackageFiles(string package)
+    {
+        var files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in ResolveMaterialDependencyClosure(package, preferLiveSource: false))
+        {
+            var source = ResolvePackageBase(p);
+            ValidateClosurePackageBase(source, p, "editable archive source");
+            foreach (var ext in CookedPackageExtensions)
+                if (File.Exists(source + ext)) files[source + ext] = p["/Game/".Length..] + ext;
+        }
+        return files;
     }
 
     private IReadOnlyList<string> ResolveMaterialDependencyClosure(

@@ -1850,7 +1850,7 @@ public sealed class AnimArchetypeGraftService
             {
                 if (string.IsNullOrWhiteSpace(ResolveDependencyUasset(extractedRoot, stagedRoot, grantPackage)))
                 {
-                    error = $"{UnrealPathUtil.AssetName(abilitySetPackage)} grants an unresolved gameplay asset: {grantPackage}";
+                    error = MissingGameplayDependencyMessage(abilitySetPackage, grantPackage, extractedRoot);
                     return false;
                 }
             }
@@ -2019,6 +2019,12 @@ public sealed class AnimArchetypeGraftService
         }
         return true;
     }
+
+    internal static string MissingGameplayDependencyMessage(string abilitySetPackage, string grantPackage, string extractedRoot) =>
+        $"{UnrealPathUtil.AssetName(abilitySetPackage)} grants an unresolved gameplay asset: {grantPackage}. " +
+        "It is missing from the staged release and active extraction. In Settings, run Full character extraction " +
+        "using the installed game's current mappings, then rebuild the suit and mod. " +
+        "Do not remove the ability to bypass this check. Active Content root: " + extractedRoot;
 
     private static string ResolveDependencyUasset(
         string extractedRoot,

@@ -59,6 +59,14 @@ LEGOface recipe onto SuperheroFace, or the reverse, simply because both assets a
 
 ## Faces
 
+Replacing a standard face should preserve the native animated component instead of deleting it
+and adding a static-looking replacement. Rebuild older projects after updating Batcomputer and
+test a voiced cutscene that uses the selected suit. Fixed-costume story scenes do not validate
+the replacement; incompatible face rigs still require compatible materials.
+
+For preview UV controls, face layers and exported materials, see the
+[character workshop](character-workshop.md).
+
 The face mesh and material topology must agree. Face helpers group hard-to-read parameters into
 eyes, brows, lids, lashes, mouth/lower-face, and related regions.
 

@@ -31,7 +31,8 @@ internal static class CharacterCatalogService
     /// <param name="Name">Display name, e.g. "Batman 1989".</param>
     /// <param name="ObjectPath">Blueprint path to hand to the preview builder (empty for custom suits).</param>
     /// <param name="ProjectPath">Suit project json, for custom suits.</param>
-    public sealed record Entry(string Name, Source Origin, string ObjectPath, string? ProjectPath = null);
+    public sealed record Entry(string Name, Source Origin, string ObjectPath, string? ProjectPath = null,
+        bool IsCharacter = false, string ProjectId = "", string CharacterId = "");
 
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
@@ -243,7 +244,7 @@ internal static class CharacterCatalogService
                     project.DisplayName,
                     Source.CustomSuit,
                     string.Empty,
-                    project.Path))
+                    project.Path, project.IsCharacter, project.SlotId, project.CharacterId))
                 .OrderBy(entry => entry.Name, StringComparer.OrdinalIgnoreCase)
                 .ToList();
         }

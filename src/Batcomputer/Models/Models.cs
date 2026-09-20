@@ -403,6 +403,7 @@ public sealed class NativeBodyProfile
 
 public sealed class GeneratedMaterialEntry
 {
+    public VehiclePaletteColor? VehiclePaint { get; set; }
     public string DisplayName { get; set; } = "";
     public string Kind { get; set; } = "Material"; // Material | Face
     public string PackagePath { get; set; } = "";
@@ -765,6 +766,7 @@ public sealed class NativeSuitPartIndex
     public string SourceContentRoot { get; set; } = "";
     public string SourceMinifigRoot { get; set; } = "";
     public string? MappingsPath { get; set; }
+    public string? MappingsRevision { get; set; }
     public int AssetsFound { get; set; }
     public int AssetsParsed { get; set; }
     public int AssetsWithParts { get; set; }

@@ -1,6 +1,13 @@
 # Custom vehicles (experimental)
 
-Make a separate selectable vehicle with a custom body, materials and editable attachment points. The current development build uses the **1995 Batman Forever Batmobile** as its driving base. Other donor rigs are not supported by this editor yet.
+Make a separate selectable vehicle with a custom body, materials and editable attachment points. Choose the driving base before importing a model.
+
+| Driving base | Workshop support |
+| --- | --- |
+| 1995 Batman Forever | Headlight, rear/accent and light-surface controls |
+| 1997 Batman & Robin, Talia sports car | Headlight beam color and placement |
+| 1989 Batmobile, 2005 Tumbler | Experimental; light controllers stay native |
+| Batmobeast | Experimental; requires Party Pack DLC for the creator and players; light controllers stay native |
 
 Start with the driving model. A LEGO build-up model is a separate asset with a different rig; see [summon and parked models](vehicle-summon-models.md) after the car drives correctly.
 
@@ -9,15 +16,23 @@ Start with the driving model. A LEGO build-up model is a separate asset with a d
 
 ## 1. Get the reference
 
-Configure the game files, mappings and UE 5.6 in [Settings](../getting-started/setup.md), then run a current full extraction if the vehicle donor files are missing.
+Configure the game files, mappings and UE 5.6 in [Settings](../getting-started/setup.md). After the first full extraction, **Refresh game assets → Add vehicle driving bases (quick)** adds missing donor files to the active extract without rebuilding the character indexes.
 
 1. Open **Vehicles → + New vehicle**.
-2. In the workshop, open **Setup / body**. Set the name and owning character. Renaming keeps the vehicle's saved ID.
-3. Open **Body materials → Import / edit rigged FBX…**.
+2. In the workshop, open **Body & setup**. Set the name and owning character. Renaming keeps the vehicle's saved ID.
+3. Open **Body & materials → Import / edit rigged FBX…**.
 4. Choose **Export native reference + rig (GLB)…**. Import that GLB into Blender as the donor reference.
 5. Save your own `.blend` copy. Keep the donor in a separate reference collection and do not export its geometry with the custom model.
 
 Keep the donor's bone names, hierarchy, rest transforms and scale. Fit the mesh to the rig, not the rig to the mesh. Do not use automatic bone reorientation on the reference.
+
+If an older exported GLB has displaced wheel bones or reversed bone rotations, export a fresh reference with the current tool. The corrected export keeps the native rest pose and mesh geometry; rotating bones by hand is not a substitute.
+
+### Motion preview
+
+Open **Motion** below the workshop viewport to play or scrub a canopy or launcher clip. Native clips are available for the Forever, 1989 and Tumbler bases. Wheel spin, steering and suspension tests appear when the rig has the matching bones. These are visual checks, not a simulation of game physics. Motion is never saved into the vehicle; **Rest** returns to the normal editing pose.
+
+Check wheel pivots, tire clearance, canopy travel and parts attached to moving bones. The new driving bases still need in-game handling and animation tests with your model.
 
 ## 2. Fit the car in Blender
 
@@ -65,6 +80,8 @@ In Pose Mode, test one wheel, the steering wheel and the canopy separately. A wh
 
 Give areas that need different materials separate material slots: body paint, glass, tires, metal, lenses and accents. Slots describe surfaces; vertex groups describe how those surfaces move. They do different jobs.
 
+The exact slot names `LEGO_Solid`, `LEGO_Metallic` and `LEGO_Transparent` suggest the corresponding native shaders on a new import. These shaders use LEGO color data, not Blender's material color. Assign a color in **Body & materials** if a slot needs a particular hue.
+
 For a lens that should inherit native light behavior, use a **lens-only material slot**, entirely weighted to `Body`. Helpful names include:
 
 | Suggested slot name | Workshop role |
@@ -84,6 +101,8 @@ Export only the custom mesh and its complete donor armature as a **binary FBX**.
 
 Use unit and axis settings that preserve the donor rest pose. A GLB-to-Blender-to-FBX round trip can change bone axes or introduce an extra root; looking correct in the viewport is not enough. Import a small trial first. Batcomputer checks the cooked hierarchy and rest transforms against the actual game rig. If that fails, fix the export rather than renaming bones or moving the rig until it passes. **FBX unit correction** is for a known unit mismatch, not a general alignment slider.
 
+When a cooked rig comparison fails, check `rig-comparison.json` beside the import logs. It lists the expected and actual parent and rest transform for each bone.
+
 Back in the import window:
 
 1. Choose **Import / replace weighted FBX…** and wait for validation.
@@ -95,27 +114,57 @@ Back in the import window:
 
 ## 6. Finish in the 3D workshop
 
-- **Materials:** click a surface and choose its slot. The picker includes Generated, Vehicle materials, Vehicle part materials and Base game. Use **Copy / recolor…** for a private editable material. Glass and emission require suitable shaders; a flat color is not a substitute.
+- **Materials:** click a surface, then **Change selected surface…**. Choose **Edit material** or **Create a copy**, set the color, and choose LEGO solid, metallic or transparent. **Keep current shader** preserves the current material; changing finish replaces its shader. **Choose from library…** opens Generated, Vehicle materials, Vehicle part materials and Base game. Base-game materials cannot be edited directly.
+- **Body paint:** open **Body & setup → Body & materials**, select a slot and choose **Set slot color…**. New colors use **Solid** native LEGO paint. Choose **Metallic** or **Transparent** in **Paint finish** when appropriate. **Use slot material** removes the color override.
 - **Light surfaces:** select the lens slot and its **Light behavior**, or use **Use named light slots**, then review the assignments. This reuses existing native lamp controllers, not a new lighting system.
 - **Assembly:** position decorative parts and native light sources. Lens/glow geometry and the beam source are separate, so check both when moving a lamp. Preview hiding is not the same as removing a part from the build.
 - **Seats:** enable **Seated figures** and position driver/passenger. The preview uses native seated poses for The Batman 2025 and default Catwoman. It does not simulate driving hand adjustments, entry/exit or cape movement.
-- **Weapons:** position the native launcher and grapple attachment markers. These move the existing attachment points; they do not add weapon slots or change damage.
-- **Boost:** position and rotate the boost/exhaust outlet. The Forever marker uses the effect's local +Z direction. It shares the native outlet behavior; independent boost-color authoring is not implemented.
+- **Hardpoints:** position the native launcher, grapple and boost/exhaust markers. These move existing attachment points; they do not add weapon slots or change damage. The Forever boost marker uses the effect's local +Z direction. Independent boost-color authoring is not implemented.
 
 The workshop uses vehicle axes: **X = forward/back, Y = left/right, Z = up/down**. Part axes rotate with the selected part. Materials and glow are approximate previews; check final appearance in-game.
 
 Choose **Save vehicle** to keep the workshop edits.
 
+### Native paint and older vehicles
+
+Older simple-color recipes keep their existing appearance. **Upgrade simple colors…** converts those overrides to native solid LEGO paint without changing their saved RGB values. Review glass and metal slots afterward. Run **Full refresh** if the build reports a missing native paint template or palette.
+
+New body imports get separate, editable copies of their assigned native materials, named for the car and slot—for example `MI_Slot0_70sBatmobile`. Existing custom assignments are kept. Reimporting does not overwrite edited copies. For an older car, use **Body & setup → Body & materials → Make editable copies** to convert its base assignments and color overrides.
+
+Material saves update the generated library immediately; **Save vehicle** keeps the assignment. Editing an existing material affects every surface using it. Create a copy when only the selected slot should change. Generated paint copies include their own color swatches, so recoloring one does not recolor another.
+
+To change a headlight, open **Lights**, select **Headlight beam 1** or **2**, and use **Beam color** and the position/rotation controls. Bulb/glow meshes are separate from the light cast onto the road. A marker labeled **reference** is only a socket, not an editable lamp controller; changing a decorative mesh's material does not create a functional headlight or brake light.
+
+Native paint uses the game's LEGO shader families and a private color swatch. The solid finish retains the native **Supports RedBrick Tinting** permutation. This is experimental: check appearance and Red Brick effects in-game before sharing a release. The preview is approximate, and retaining a shader setting does not prove every runtime effect works. **Flat** remains available for the older simple-color shader.
+
+### Vehicle menu icon
+
+Open **Body & setup → Menu icon → Import PNG…**. Use a **512 × 340 PNG** with a transparent background and some padding around the car. This is a color thumbnail, not an equipment SDF. Batcomputer cooks all mip levels and assigns it to the vehicle's selection-menu entry.
+
+**Use donor icon** restores the original thumbnail. Save the vehicle and rebuild its mod after changing the icon. This does not change a 3D parked or display model.
+
 ## 7. Add it to a mod
 
-Select the target mod, open **Vehicles → Manage vehicles in mod**, check the vehicle and choose **Save selection**. A saved vehicle that is not enabled in the mod will not be packaged. A saved custom-character owner is included automatically when needed.
+On **Vehicles**, create or select the target mod, choose its vehicles and save the selection. The tab separates vehicles enabled in that mod from the rest of the library. A saved vehicle that is not enabled will not be packaged. A saved custom-character owner is included automatically when needed.
+
+**Build selected mod** packages the enabled vehicles. A vehicle-only mod does not need a suit entry or an open suit project.
 
 Build through the normal [build and sharing flow](build-test-share.md). Install the complete release bundle, including its registry plugin and tag configuration—not just the `.pak` file.
 
-Check selection, steering, wheel rotation, boost, firing/grapple, both seats, canopy movement and returning to the Batcave. Restart with the vehicle equipped. Also verify that the original donor still works. Keep source art and vehicle project files for later edits; avoid shipping extracted native reference files as authoring samples.
+Check the thumbnail, selection, steering, wheel rotation, boost, firing/grapple, both seats, canopy movement and returning to the Batcave. For native paint, compare Red Brick effects on and off against the original donor. Restart with the vehicle equipped. Also verify that the original donor still works. Keep source art and vehicle project files for later edits; avoid shipping extracted native reference files as authoring samples.
 
 ## Driving versus parked and summon appearance
 
 The normal body import changes the driving model and vehicle menu model. The active car parked in the Batcave can use a separate summon mesh, so replacing the body does not cover every presentation actor. A shelf/display car or 2D thumbnail can be another asset again.
 
-The grouped summon/parked replacement is a separate experiment, not a second import button in the current workshop. Read [summon and parked models](vehicle-summon-models.md) for the preparation flow and current limits.
+The development build has a separate **Body & setup → Assembly model** import. It requires the selected donor's summon rig, not its driving skeleton. Read [summon and parked models](vehicle-summon-models.md) for the preparation flow and current limits.
+
+## Parts toybox and vehicle size
+
+Open **+ Parts toybox** to search the installed vehicle and shared light-piece meshes. This lists static meshes; animated weapons and other skeletal parts need their own setup.
+
+- **Add a piece:** creates a movable, non-colliding decorative attachment. Select its surfaces to choose, copy or recolor materials. Adding a light-shaped mesh does not add a brake/headlight controller.
+- **Choose replacement shape:** changes a selected native decorative mesh while keeping its existing controller and position. This is the route for changing a working lamp's shape. Its material overrides reset; native light-data compatibility still matters.
+- **Remove part from mod:** hides the piece without removing the donor's controller graph. Undo or restore brings it back.
+
+**Body & setup → Vehicle → Size %** scales the body, wheel geometry and attached parts together. It also applies to the menu and parked model. This control is experimental: check tire contact, suspension, collision, character size, seat placement and summon animations in game. It does not retune the donor's handling or author new collision shapes. Keep the FBX rig at its original scale.

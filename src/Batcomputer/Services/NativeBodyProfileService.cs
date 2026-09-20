@@ -426,6 +426,7 @@ public sealed class NativeBodyProfileService
 
     internal static void EnsureMinimalSchema(UAsset asset, string schemaName, string modulePath)
     {
+        NativeBlueprintSchemaService.EnsureParents(asset);
         var mappings = asset.Mappings;
         if (mappings is null || mappings.Schemas.ContainsKey(schemaName))
         {

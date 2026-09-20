@@ -13,6 +13,20 @@ internal static class DcmdReferenceRegressionChecks
               NativeMetadataDonorService.CanonicalProgressTag("") == "",
             "retired Batman donor resolves to the game's defined TheBatman2025 unlock; other and custom tags stay unchanged",
             failures, output);
+        foreach (var (oldTag, expected) in new[] {
+            ("GameProgress.Definitions.Characters.Joker", "GameProgress.Definitions.Characters.Joker.HTV"),
+            ("GameProgress.Definitions.Characters.Harley.Default", "GameProgress.Definitions.Characters.Harley.BTAS"),
+            ("GameProgress.Definitions.Characters.Joker.Nurse", "GameProgress.Definitions.Characters.Joker.Nurse"),
+            ("GameProgress.Definitions.Characters.Harley.PunkRock", "GameProgress.Definitions.Characters.Harley.PunkRock"),
+            ("GameProgress.Definitions.Characters.Joker.CustomSuit", "GameProgress.Definitions.Characters.Joker.CustomSuit") })
+        {
+            Check(NativeMetadataDonorService.CanonicalProgressTag(oldTag) == expected &&
+                  NativeMetadataDonorService.CanonicalProgressTag(oldTag.ToLowerInvariant()).Equals(expected, StringComparison.OrdinalIgnoreCase),
+                $"DLC progress canonicalization preserves exact variant identity: {oldTag}", failures, output);
+            var saved = System.Text.Json.JsonSerializer.Serialize(new NativeSuitProject { ProgressTag = oldTag });
+            Check(SuitProjectService.LoadProjectContents(saved)?.ProgressTag == expected,
+                $"saved suit load repairs only known retired DLC gates: {oldTag}", failures, output);
+        }
         const string serializedRobinCutscene =
             "/Game/Characters/Minifig/Robin_DickGrayson/BP_Robin_1966_Default_Cutscene";
         const string guessedRobinCutscene =

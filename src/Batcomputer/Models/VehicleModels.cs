@@ -11,7 +11,11 @@ public sealed class VehicleProject
     // Required for a custom owner; its default character is included with the vehicle.
     public string OwnerCharacterProjectPath { get; set; } = "";
     public string DonorId { get; set; } = "batmobile1995";
+    public float SizeMultiplier { get; set; } = 1;
     public SkinnedMeshImport? Model { get; set; }
+    public SkinnedMeshImport? SummonModel { get; set; }
+    public bool MatchBuildUpToBody { get; set; } = true;
+    public VehicleIconImport? MenuIcon { get; set; }
     public List<VehicleComponentTransform> Transforms { get; set; } = [];
     public List<VehiclePaletteColor> Palette { get; set; } = [];
     public List<VehicleMaterialOverride> MaterialOverrides { get; set; } = [];
@@ -19,6 +23,7 @@ public sealed class VehicleProject
     public List<VehicleLightSettings> Lights { get; set; } = [];
     public VehicleRgbColor? AccentColor { get; set; }
     public List<VehicleLightSurface> LightSurfaces { get; set; } = [];
+    public List<VehicleToyboxPart> ToyboxParts { get; set; } = [];
     public VehicleProject Clone() => JsonSerializer.Deserialize<VehicleProject>(JsonSerializer.Serialize(this))!;
 }
 
@@ -29,11 +34,27 @@ public sealed class VehicleLightSurface
     public string Role { get; set; } = "";
 }
 
+/// <summary>A native visual mesh, either attached to Body or replacing a donor endpoint.</summary>
+public sealed class VehicleToyboxPart
+{
+    public string Component { get; set; } = "";
+    public string MeshPackage { get; set; } = "";
+    public bool Added { get; set; }
+}
+
 public sealed class VehicleRgbColor
 {
     public int R { get; set; }
     public int G { get; set; }
     public int B { get; set; }
+}
+
+public sealed class VehicleIconImport
+{
+    public string PackagePath { get; set; } = "";
+    public string CacheRelativePath { get; set; } = "";
+    public string SourceSha256 { get; set; } = "";
+    public Dictionary<string, string> Files { get; set; } = [];
 }
 
 /// <summary>Actual spotlight sources, not the decorative bulb/glow meshes. Colors are sRGB bytes.</summary>
@@ -79,6 +100,8 @@ public sealed class VehicleComponentTransform
 /// <summary>Optional simple body colors, stored in linear space like native material parameters.</summary>
 public sealed class VehiclePaletteColor
 {
+    // Absent in older recipes: preserve their already-tested simple material.
+    public string Finish { get; set; } = "Flat";
     public int Slot { get; set; }
     public float R { get; set; }
     public float G { get; set; }

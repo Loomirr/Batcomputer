@@ -173,6 +173,7 @@ public sealed class MaterialGenService
 
     public sealed class GenRequest
     {
+        public string? OutputContentRoot { get; set; }
         public string BaseUassetPath { get; set; } = "";
         public string OutputPackagePath { get; set; } = ""; // e.g. /Game/Mods/MyMod/Materials/MI_MySuit_Body
         // Parameter name -> texture object path (e.g. /Game/Mods/MyMod/Textures/T_MySuit_BC)
@@ -218,7 +219,7 @@ public sealed class MaterialGenService
                 return result;
             }
 
-            var exportContentRoot = AppSettings.Current.EffectiveExportContentRoot();
+            var exportContentRoot = request.OutputContentRoot ?? AppSettings.Current.EffectiveExportContentRoot();
             var outputBase = PackagePathToBasePath(exportContentRoot, outputPackagePath);
             Directory.CreateDirectory(Path.GetDirectoryName(outputBase)!);
 

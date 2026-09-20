@@ -67,6 +67,7 @@ public sealed class ModelPreviewForm : AdaptiveForm
             await _web.EnsureCoreWebView2Async(env);
             _web.CoreWebView2.Settings.AreDevToolsEnabled = false;
             _web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+            ModelPreviewControl.ConfigureCharacterExportDownloads(_web, this, () => _virtualHost, () => !IsDisposed);
             _web.CoreWebView2.WebMessageReceived += (_, message) => SaveViewerPlacement(message.WebMessageAsJson);
             _web.DefaultBackgroundColor = Theme.WindowBg;
             if (_folder is not null)

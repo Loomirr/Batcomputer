@@ -1,0 +1,49 @@
+/* Shared workshop chrome. Geometry and project changes remain in VehicleWorkshop.js. */
+:root{--bg:#171a20;--panel:#20242c;--line:#353b46;--muted:#acb5c4;--gold:#ffda43}
+body{font-family:'Segoe UI Variable','Segoe UI',sans-serif}
+header{height:68px;padding:12px 18px;background:#1d2027;gap:10px}
+header strong{font-size:18px;font-weight:600}.eyebrow{font-size:9px;letter-spacing:1.8px}
+.workflow{display:none}#title{max-width:none}#apply{padding:10px 19px}
+button,input,select{border-radius:7px;background:#2b303a;transition:background .12s,border-color .12s}
+button:hover{background:#363e4b}button:disabled{opacity:.48}button:focus-visible{outline-offset:2px}
+main{height:calc(100vh - 104px);grid-template-columns:230px minmax(280px,1fr) 290px;gap:1px;background:var(--line)}
+aside,aside:last-child{border:0}aside:first-child{background:#1e222a}
+.pad{padding:16px 12px 10px}.subhead{font-size:10px;letter-spacing:1.4px}
+.search{background:#171b22;border-color:#343b47;padding:9px 10px}
+#counts{font-size:10px;line-height:1.5}#parts{padding:0 8px 14px;scrollbar-width:thin}
+.group{position:sticky;top:0;background:#1e222af5;padding:12px 6px 8px;margin:3px 0;font-size:10px;letter-spacing:.7px;z-index:1}
+.part{padding:10px 9px;border-radius:7px;border-left:2px solid transparent;font-size:12px}
+.part.active{background:#ffda4312;border-color:transparent;border-left-color:var(--gold);color:#fff0b0}
+.part small{font-size:10px;line-height:1.5}.badge{font-size:9px;margin:2px 0 0 5px}
+#viewport{background:radial-gradient(ellipse at 50% 40%,#343e4d,#161a22)}
+.toolbar{top:14px;left:14px;right:auto;max-width:calc(100% - 28px);background:#1c2029ed;border:1px solid #46505e70;border-radius:10px;padding:5px;box-shadow:0 4px 20px #0003}
+.toolbar button,.toolbar select{border-color:transparent;background:transparent;font-size:11px;padding:7px}
+.toolbar button.active{background:#ffda4319;color:var(--gold);border-color:#ffda4330}
+.axis-legend{top:72px;left:19px;font-size:10px;text-shadow:0 1px 4px #000}
+.viewbar{left:14px;bottom:14px;right:14px;gap:5px}.viewbar button{font-size:10px;background:#222833ed;border-color:#46505e80}
+#inspector{padding:18px 16px;scrollbar-width:thin}h2{font-size:17px;font-weight:600}#detail{font-size:11px;margin:7px 0 17px}
+.buttons button{font-size:11px;padding:8px}.triple{gap:7px}.triple input{background:#191e26;border-color:#3a4351;font-variant-numeric:tabular-nums}
+fieldset{margin-bottom:20px}legend{font-size:10px;letter-spacing:1px}.note{font-size:11px}details{padding:14px 0}summary{font-size:11px}
+.slot{background:#191e263d;padding:10px 8px}.slot+.slot{margin-top:5px}.slot strong{font-size:11px}.path{line-height:1.5}
+footer{height:36px;padding:9px 16px;background:#1d2027;font-size:10px}
+#workshopNav{display:grid;grid-template-columns:1fr 1fr;gap:5px;padding:12px 10px 0}
+#workshopNav button{text-align:left;padding:9px;font-size:11px;background:transparent;border-color:transparent}
+#workshopNav button.active{background:#ffda4312;color:var(--gold);border-color:#ffda432a}
+#viewState{display:flex;gap:7px;align-items:center;font-size:11px;color:var(--muted);margin-right:6px}
+#viewState::before{content:'';width:6px;height:6px;border-radius:50%;background:#92bea6}
+#viewState.dirty::before{background:var(--gold)}#expandView{font-size:11px}
+body.expanded main{grid-template-columns:0 minmax(280px,1fr) 0;gap:0}body.expanded aside{visibility:hidden;overflow:hidden}
+.empty-parts{padding:22px 10px;color:var(--muted);font-size:12px;line-height:1.6}
+.library-filters{flex-wrap:wrap}.material-card{background:#292e38;border-color:#3b4351}.material-card.active{background:#ffda4310}
+@media(max-width:1100px){main{grid-template-columns:200px minmax(230px,1fr) 254px}header{padding:10px 12px}#inspector{padding:14px 11px}.toolbar{gap:2px}.toolbar button,.toolbar select{padding:6px}#viewState{font-size:10px}.axis-legend{top:70px}}
+@media(max-width:820px){main{grid-template-columns:170px minmax(180px,1fr) 224px}header strong{font-size:15px}#viewState{display:none}header{gap:5px}header button{font-size:11px;padding:7px}#apply{padding:8px}#inspector{padding:12px 9px}#workshopNav{grid-template-columns:1fr}.axis-legend{top:103px;font-size:9px}.toolbar{right:10px;left:10px}.viewbar{gap:3px}.viewbar button{padding:6px}}
+@media(prefers-reduced-motion:reduce){button,input,select{transition:none}}
+/* Compact, surface-first material editing. */
+#surfaceEditor { width: min(540px, calc(100vw - 48px)); height: fit-content; max-height: calc(100vh - 48px); padding: 0; }
+.surface-editor { padding: 22px; display: grid; gap: 16px; }
+.surface-editor header { display: flex; align-items: center; justify-content: space-between; }
+.surface-editor h2, .surface-editor p { margin: 0; }
+.surface-editor label { display: grid; grid-template-columns: 70px 1fr; gap: 12px; align-items: center; }
+.surface-editor select { width: 100%; }
+.surface-editor input[type=color] { width: 100%; height: 38px; }
+.surface-editor .actions { display: flex; gap: 8px; flex-wrap: wrap; }

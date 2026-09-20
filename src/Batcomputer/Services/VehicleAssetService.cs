@@ -22,9 +22,9 @@ internal static class VehicleAssetService
     internal const string NativePlinth = "/Game/LEGOGameplay/Mechanics/Batcave/VehiclePurchase/VehiclePlinthActors/Batman/BP_VehiclePlinth_Batmobile_BatmanForever";
     internal const string NativeProgress = "/Game/GameProgress/PROG_Vehicles";
     internal const string PaletteTemplate = "/Game/Characters/Attachments/Hair/MI_Black";
-    internal const string Warning = "Experimental vehicle editor. Batman Forever driving rig only. Seat offsets need in-game testing; collision, handling and summon assembly stay native.";
+    internal const string Warning = "Experimental vehicle editor. Seat offsets need in-game testing; collision and handling stay native.";
     internal static readonly string[] RequiredPackages = [NativeBlueprint, NativeMesh, NativePhysics, NativeSkeleton, NativeMetadata, NativeUi, NativeMenu, NativePlinth, NativeProgress];
-    internal static IEnumerable<string> ExtractionFilters => RequiredPackages.Select(p => "Content/" + p[6..]);
+    internal static IEnumerable<string> ExtractionFilters => VehicleDonorService.ExtractionFilters.Concat(VehiclePaintService.ExtractionFilters);
     internal static readonly string[] NativeOwners = ["Pawns.Playable.Batman", "Pawns.Playable.BatGirl", "Pawns.Playable.CatWoman", "Pawns.Playable.Gordon", "Pawns.Playable.Nightwing", "Pawns.Playable.RobinDickGrayson", "Pawns.Playable.TaliaAlGhul", "Pawns.Playable.PoisonIvy"];
     internal sealed record Component(string Name, string Kind, string Attachment, VehicleComponentTransform Transform)
     { public override string ToString() => Name.Replace("_GEN_VARIABLE", ""); }
@@ -35,27 +35,35 @@ internal static class VehicleAssetService
     internal static void Validate(VehicleProject p, string directory, string nativeContent)
     {
         VehicleProjectService.ValidateIdentity(p);
-        var missing = RequiredPackages.Where(package => {
-            var file = ExtractedPackagePathService.ResolvePackageUasset(nativeContent, package);
-            return file is null || !File.Exists(file) || !File.Exists(Path.ChangeExtension(file, ".uexp"));
-        }).ToArray();
-        Require(missing.Length == 0, "Vehicle donor files are missing. Run Full refresh with this version of Batcomputer.\n" + string.Join("\n", missing));
+        var donor = VehicleDonorService.Get(p);
+        var NativeMesh = donor.Mesh; var NativeSkeleton = donor.Skeleton; var NativeBlueprint = donor.Blueprint;
+        VehicleIconService.Validate(p, directory);
+        var missing = donor.MissingPackages(nativeContent);
+        Require(missing.Length == 0, donor.UnavailableMessage + "\n" + string.Join("\n", missing));
         if (p.Model is { } model)
         {
             Require(model.DonorMeshPackage == NativeMesh && model.SkeletonPackage == NativeSkeleton && model.Component == "SkeletalMeshComponent" && model.MeshPackage == VehicleProjectService.Mesh(p), "Vehicle model identity or donor rig changed. Reimport using the vehicle workshop.");
             SkinnedMeshStageService.ValidateRecipe(model); SkinnedMeshStageService.ReadManifest(directory, model);
             Require(model.HiddenComponents.Count == 0, "Vehicle body imports cannot hide driving components.");
         }
-        var components = Components(nativeContent).Select(c => c.Name).ToHashSet(StringComparer.Ordinal);
-        foreach (var t in p.Transforms) Require(components.Contains(t.Component) || VehicleSocketService.IsEditable(t.Component), "Not an editable vehicle component: " + t.Component);
+        ValidateSummon(p, directory, nativeContent);
+        var components = Components(nativeContent, p).Select(c => c.Name).ToHashSet(StringComparer.Ordinal);
+        foreach (var t in p.Transforms) Require(components.Contains(t.Component) || VehicleSocketService.IsEditable(t.Component) || p.ToyboxParts.Any(a => a.Added && a.Component == t.Component), "Not an editable vehicle component: " + t.Component);
         var staticParts = Read(nativeContent, NativeBlueprint).Exports.OfType<NormalExport>().Where(e => e.GetExportClassType()?.ToString() == "StaticMeshComponent").Select(e => e.ObjectName.ToString()).ToHashSet(StringComparer.Ordinal);
+        VehicleToyboxService.ValidateAssets(p, staticParts);
+        staticParts.UnionWith(p.ToyboxParts.Where(t => t.Added).Select(t => t.Component));
         foreach (var id in p.DisabledParts) Require(staticParts.Contains(id), "Only decorative static-mesh parts can be disabled: " + id);
-        // The verified Forever donor has one material slot on each of its 50 decorative meshes.
-        foreach (var edit in p.MaterialOverrides) Require(edit.Component == "body" ? edit.Slot < (p.Model?.Materials.Count ?? 10) : staticParts.Contains(edit.Component) && edit.Slot == 0, "Invalid vehicle material target: " + edit.Component);
+        var bodySlots = p.Model?.Materials.Count ?? (p.MaterialOverrides.Any(m => m.Component == "body") ? NativeMaterialCount(NativeMesh) : 0);
+        foreach (var edit in p.MaterialOverrides) Require(edit.Component == "body" ? edit.Slot < bodySlots : staticParts.Contains(edit.Component) && (edit.Slot == 0 || p.ToyboxParts.Any(t => t.Component == edit.Component)), "Invalid vehicle material target: " + edit.Component);
     }
-    internal static IReadOnlyList<Component> Components(string nativeContent)
+    private static int NativeMaterialCount(string mesh)
     {
-        var bp = Read(nativeContent, NativeBlueprint);
+        using var provider = ModelPreviewService.MakeProvider(AppSettings.Current.EffectiveGamePaksRoot(), AppSettings.Current.EffectiveUsmapPath()!);
+        return ModelPreviewService.MeshSlotMaterials(provider.LoadPackageObject<CUE4Parse.UE4.Assets.Exports.SkeletalMesh.USkeletalMesh>(mesh)).Count;
+    }
+    internal static IReadOnlyList<Component> Components(string nativeContent, VehicleProject? project = null)
+    {
+        var bp = Read(nativeContent, VehicleDonorService.Get(project ?? new()).Blueprint);
         return bp.Exports.OfType<NormalExport>().Where(IsDecorative).Select(e => new Component(e.ObjectName.ToString(), e.GetExportClassType()!.ToString(),
             e.Data.OfType<NamePropertyData>().FirstOrDefault(p => p.Name.ToString() == "AttachSocketName")?.Value.ToString() ?? "parent component", ReadTransform(e))).Concat(VehicleCustomizationService.SeatComponents(bp)).OrderBy(c => c.Name).ToArray();
     }
@@ -88,6 +96,11 @@ internal static class VehicleAssetService
     internal static IReadOnlyList<RegistryPluginService.RegistryRow> Stage(VehicleProject p, string directory, string nativeContent, string content, string modId, string projectRoot, Action<string> log)
     {
         Validate(p, directory, nativeContent);
+        p = VehicleToyboxService.BuildRecipe(p);
+        var donor = VehicleDonorService.Get(p);
+        var NativeMesh = donor.Mesh; var NativeSkeleton = donor.Skeleton; var NativeBlueprint = donor.Blueprint; var NativePhysics = donor.Physics;
+        var NativeMetadata = donor.Metadata; var NativeUi = donor.Ui; var NativeMenu = donor.Menu; var NativePlinth = donor.Plinth;
+        VehicleIconService.Stage(p, directory, content);
         var root = VehicleProjectService.ContentRoot(p);
         var ui = root + "/UI/DA_UI_" + p.Id; var menu = root + "/UI/BP_Menu_" + p.Id; var plinth = root + "/UI/BP_Plinth_" + p.Id;
         void Save(UAsset a, string package)
@@ -103,6 +116,12 @@ internal static class VehicleAssetService
         {
             foreach (var color in p.Palette)
             {
+                if (color.Finish != "Flat")
+                {
+                    VehiclePaintService.Stage(nativeContent, p, color, Save);
+                    model.Materials[color.Slot].MaterialPath = root + "/Materials/MI_Color_" + color.Slot;
+                    continue;
+                }
                 var material = Read(nativeContent, PaletteTemplate);
                 var values = material.Exports.OfType<NormalExport>().SelectMany(e => EquipmentAssetService.Properties(e.Data))
                     .Where(p => p.Path.Contains("VectorParameterValues", StringComparison.Ordinal)).Select(p => p.Property).OfType<LinearColorPropertyData>().ToArray();
@@ -112,12 +131,32 @@ internal static class VehicleAssetService
                 CustomEquipmentService.Rename(material, new Dictionary<string, string> { [PaletteTemplate] = package }); Save(material, package);
                 model.Materials[color.Slot].MaterialPath = package;
             }
+            // A surface chosen from the workshop library must also reach the summon mesh.
+            // Apply it to the staged recipe before matching the assembly's slot names below.
+            foreach (var edit in p.MaterialOverrides.Where(m => m.Component == "body"))
+                model.Materials[edit.Slot].MaterialPath = edit.MaterialPath;
             var library = new ToolMaterialLibraryService(projectRoot);
             foreach (var material in model.Materials.Select(m => m.MaterialPath).Distinct(StringComparer.OrdinalIgnoreCase))
                 if (material.Contains("/Mods/", StringComparison.OrdinalIgnoreCase) && !File.Exists(SkinnedMeshCookService.SafePath(content, material[6..] + ".uasset")))
                     library.CopyMaterialClosureToContentRoot(material, content);
             Require(!File.Exists(SkinnedMeshCookService.SafePath(content, model.MeshPackage[6..] + ".uasset")), "Another mod member already owns this vehicle mesh: " + model.MeshPackage);
             SkinnedMeshStageService.BakeMesh(content, directory, model);
+        }
+        var summon = p.SummonModel?.Clone();
+        if (summon is not null)
+        {
+            // Match by original material name, never by slot order (assembly meshes can reorder slots).
+            if (model is not null && p.MatchBuildUpToBody)
+                foreach (var slot in summon.Materials)
+                {
+                    var bodySlot = model.Materials.SingleOrDefault(m => m.SourceMaterialName == slot.SourceMaterialName);
+                    if (bodySlot is not null) slot.MaterialPath = bodySlot.MaterialPath;
+                }
+            var library = new ToolMaterialLibraryService(projectRoot);
+            foreach (var material in summon.Materials.Select(m => m.MaterialPath).Distinct(StringComparer.OrdinalIgnoreCase))
+                if (material.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase) && !File.Exists(SkinnedMeshCookService.SafePath(content, material[6..] + ".uasset")))
+                    library.CopyMaterialClosureToContentRoot(material, content);
+            SkinnedMeshStageService.BakeMesh(content, directory, summon);
         }
         var meshPackage = model?.MeshPackage;
         if (p.Transforms.Any(t => VehicleSocketService.IsEditable(t.Component)) || p.LightSurfaces.Count > 0)
@@ -141,9 +180,19 @@ internal static class VehicleAssetService
         }
         var redirects = new Dictionary<string, string> { [NativeBlueprint] = VehicleProjectService.Blueprint(p), [NativeMetadata] = VehicleProjectService.Metadata(p), [NativeUi] = ui, [NativeMenu] = menu, [NativePlinth] = plinth, [NativeProgress] = VehicleProjectService.Progress(p) };
         if (meshPackage is not null) redirects[NativeMesh] = meshPackage;
+        if (summon is not null) redirects[summon.DonorMeshPackage] = summon.MeshPackage;
         foreach (var source in new[] { NativeBlueprint, NativeMetadata, NativeUi, NativeMenu, NativePlinth })
         {
             var a = Read(nativeContent, source); CustomEquipmentService.Rename(a, redirects);
+            SkinnedMeshStageService.RedirectImports(a, redirects);
+            if (model is not null || summon is not null)
+                foreach (var component in a.Exports.OfType<NormalExport>())
+                {
+                    var reference = component.Data.OfType<ObjectPropertyData>().FirstOrDefault(d => d.Name.ToString() == "SkeletalMesh");
+                    var package = reference is null ? "" : EquipmentAssetService.Reference(a, reference)?.Package;
+                    if (package == model?.MeshPackage || package == summon?.MeshPackage)
+                        component.Data.RemoveAll(d => d.Name.ToString() == "OverrideMaterials");
+                }
             if (source == NativeMetadata)
             {
                 Require(NativeAssetTextPatch.SetGameplayTag(a, "PawnTag", VehicleProjectService.PawnTag(p)), "Missing vehicle tag");
@@ -154,16 +203,19 @@ internal static class VehicleAssetService
             }
             if (source == NativeUi)
             {
+                if (p.MenuIcon is not null) Require(NativeAssetTextPatch.SetSoftObject(a, "MenuIcon", VehicleIconService.Package(p)), "Missing vehicle menu icon binding");
                 Require(NativeAssetTextPatch.SetGameplayTag(a, "PawnTag", VehicleProjectService.PawnTag(p)), "Missing UI tag");
                 Require(NativeAssetTextPatch.SetStringTableText(a, "Description", StringTableGenService.ObjectPathFor(modId), "Vehicle." + p.Id + ".Description"), "Missing vehicle description");
                 Require(NativeAssetTextPatch.SetStringTableText(a, "LockedDescription", StringTableGenService.ObjectPathFor(modId), "Vehicle." + p.Id + ".Locked"), "Missing vehicle lock text");
             }
             if (source == NativeBlueprint)
             {
+                VehicleToyboxService.Apply(a, p);
                 if (model is not null)
                 {
-                    var body = a.Exports.OfType<NormalExport>().Single(e => e.ObjectName.ToString() == "SkeletalMeshComponent");
-                    Require(!body.Data.Any(d => d.Name.ToString() == "PhysicsAssetOverride"), "Vehicle physics donor changed.");
+                    var body = a.Exports.OfType<NormalExport>().SingleOrDefault(e => e.ObjectName.ToString() == VehicleCustomizationService.BodyComponent(a));
+                    Require(body is not null, "Missing vehicle driving body.");
+                    body!.Data.RemoveAll(d => d.Name.ToString() == "PhysicsAssetOverride");
                     var reference = SwordCombatService.Obj(a, NativePhysics, UnrealPathUtil.AssetName(NativePhysics), "/Script/Engine", "PhysicsAsset");
                     body.Data.Add(new ObjectPropertyData(new FName(a, "PhysicsAssetOverride")) { Value = reference }); body.CreateBeforeSerializationDependencies.Add(reference);
                 }
@@ -175,12 +227,22 @@ internal static class VehicleAssetService
             }
             if (source == NativeMenu)
             {
+                VehicleToyboxService.Apply(a, p);
                 // The display actor has decorative meshes, but no gameplay light sources.
-                ApplyTransforms(a, p.Transforms.Where(t => !VehicleCustomizationService.IsSeat(t.Component) && !VehicleLightService.IsSource(t.Component)));
-                VehicleCustomizationService.Apply(a, p);
+                ApplyTransforms(a, p.Transforms.Where(t => !VehicleCustomizationService.IsSeat(t.Component) && !VehicleLightService.IsSource(t.Component) && a.Exports.Any(e => e.ObjectName.ToString() == t.Component)));
+                VehicleCustomizationService.Apply(a, VehicleCustomizationService.DisplayEdits(a, p));
                 VehicleLightService.ApplyAccent(a, p.AccentColor, gameplay: false);
                 VehicleLightSurfaceService.Apply(a, p);
             }
+            if (source == NativePlinth)
+            {
+                VehicleToyboxService.Apply(a, p);
+                var display = VehicleCustomizationService.DisplayEdits(a, p);
+                // A plinth has a different native component graph; only added-part offsets apply.
+                ApplyTransforms(a, p.Transforms.Where(t => p.ToyboxParts.Any(part => part.Added && part.Component == t.Component)));
+                VehicleCustomizationService.Apply(a, display);
+            }
+            if (source == NativeBlueprint || source == NativeMenu || source == NativePlinth) VehicleScaleService.Apply(a, p);
             Save(a, redirects[source]);
         }
         var prog = Read(nativeContent, NativeProgress); var raw = prog.Exports.OfType<RawExport>().Single();
@@ -188,11 +250,15 @@ internal static class VehicleAssetService
         var staged = Read(content, VehicleProjectService.Metadata(p));
         Require(NativeAssetTextPatch.GetGameplayTag(staged, "PawnTag") == VehicleProjectService.PawnTag(p) && NativeAssetTextPatch.GetGameplayTag(staged, "OwningCharacter") == p.OwnerTag, "Vehicle identity did not survive staging.");
         var bp = Read(content, VehicleProjectService.Blueprint(p));
+        VehicleToyboxService.Verify(bp, p);
+        VehicleToyboxService.Verify(Read(content, menu), p);
+        VehicleToyboxService.Verify(Read(content, plinth), p);
         VehicleCustomizationService.Verify(bp, p);
         VehicleLightService.Verify(bp, p.Lights);
         VehicleLightService.VerifyAccent(bp, p.AccentColor, gameplay: true);
         VehicleLightService.VerifyAccent(Read(content, menu), p.AccentColor, gameplay: false);
-        VehicleCustomizationService.Verify(Read(content, menu), p);
+        var displayAsset = Read(content, menu);
+        VehicleCustomizationService.Verify(displayAsset, VehicleCustomizationService.DisplayEdits(displayAsset, p));
         VehicleLightSurfaceService.Verify(bp, p);
         VehicleLightSurfaceService.Verify(Read(content, menu), p);
         var materialLibrary = new ToolMaterialLibraryService(projectRoot);
@@ -212,8 +278,18 @@ internal static class VehicleAssetService
             Require(System.Text.Json.JsonSerializer.Serialize(actual) == System.Text.Json.JsonSerializer.Serialize(transform), "Vehicle transform did not survive staging: " + transform.Component);
         }
         log($"Vehicle '{p.DisplayName}': separate entry, acquired by default; {p.Transforms.Count} attachment edits. " + Warning);
+        if (p.SizeMultiplier != 1) log($"Experimental vehicle size: {p.SizeMultiplier:P0}. Check tire contact, suspension, seats, summon and collisions in game.");
         return [new(VehicleProjectService.Metadata(p), "PawnMetaData", "/Script/DinnerPawnMetaData.DinnerVehiclePawnMetaData", GameplayBundleAssets: [ObjectPath(VehicleProjectService.Blueprint(p), true)]),
             new(VehicleProjectService.Progress(p), RegistryPluginService.ProgressDefinitionPrimaryAssetType, RegistryPluginService.ProgressDefinitionClass)];
+    }
+    private static void ValidateSummon(VehicleProject project, string directory, string nativeContent)
+    {
+        if (project.SummonModel is not { } model) return;
+        var donor = VehicleDonorService.Get(project);
+        Require(model.DonorMeshPackage == donor.SummonMesh && model.SkeletonPackage == donor.SummonSkeleton && model.MeshPackage == VehicleProjectService.Mesh(project) + "_Summon", "The assembly model must use this driving base's summon rig.");
+        Require(ExtractedPackagePathService.ResolvePackageUasset(nativeContent, donor.SummonMesh) is not null, "Extract this driving base's summon model before building.");
+        SkinnedMeshStageService.ValidateRecipe(model); SkinnedMeshStageService.ReadManifest(directory, model);
+        Require(model.HiddenComponents.Count == 0, "Assembly imports cannot hide driving components.");
     }
     internal static byte[] CreateProgress(UAsset a, byte[] source, string tag)
     {

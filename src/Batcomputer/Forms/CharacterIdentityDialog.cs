@@ -8,12 +8,15 @@ public sealed class CharacterIdentityDialog : AdaptiveForm
     private readonly Label _validation = CharacterMenuStyle.Label("");
     private readonly Button _save = new();
     private bool _idEdited, _suggestingId;
+    private readonly ComboBox _modes = new() { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
+    public CharacterModeAvailability ModeAvailability => (CharacterModeAvailability)Math.Max(0, _modes.SelectedIndex);
     public string DisplayNameValue => _name.Text.Trim();
     public string TechnicalId => _id.Text.Trim();
     public string DescriptionValue => _description.Text.Trim();
 
     public CharacterIdentityDialog(string title, string idLabel, string initialName = "", string initialId = "",
-        string description = "", bool lockedId = false, string note = "", string? ownerId = null)
+        string description = "", bool lockedId = false, string note = "", string? ownerId = null,
+        CharacterModeAvailability modeAvailability = CharacterModeAvailability.Normal)
     {
         Text = "Batcomputer — " + title; ClientSize = new Size(860, 610); MinimumSize = new Size(680, 550);
         AutoScaleMode = AutoScaleMode.Dpi; StartPosition = FormStartPosition.CenterParent;
@@ -27,8 +30,8 @@ public sealed class CharacterIdentityDialog : AdaptiveForm
         body.ColumnStyles.Add(new(SizeType.Percent, 56)); body.ColumnStyles.Add(new(SizeType.Percent, 44)); root.Controls.Add(body, 0, 1);
         var edit = CharacterMenuStyle.Card(); edit.Margin = new Padding(0, 0, 12, 0); body.Controls.Add(edit, 0, 0);
         var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true }; edit.Controls.Add(scroll);
-        var fields = CharacterMenuStyle.Grid(1, 7); fields.Dock = DockStyle.Top; fields.Height = 370;
-        foreach (var height in new[] { 24, 44, 44, 44, 28, 98, 88 }) fields.RowStyles.Add(new(SizeType.Absolute, height));
+        var fields = CharacterMenuStyle.Grid(1, 9); fields.Dock = DockStyle.Top; fields.Height = 440;
+        foreach (var height in new[] { 24, 44, 44, 44, 28, 98, 24, 40, 88 }) fields.RowStyles.Add(new(SizeType.Absolute, height));
         scroll.Controls.Add(fields);
         _name.Text = initialName; _id.Text = initialId; _id.ReadOnly = lockedId; _id.MaxLength = 64;
         _idEdited = lockedId || initialId.Length > 0;
@@ -41,7 +44,12 @@ public sealed class CharacterIdentityDialog : AdaptiveForm
         fields.Controls.Add(CharacterMenuStyle.Label(idLabel, Theme.Caption), 0, 2);
         fields.Controls.Add(CharacterMenuStyle.Input(_id), 0, 3);
         fields.Controls.Add(CharacterMenuStyle.Label("DESCRIPTION · OPTIONAL", Theme.Eyebrow), 0, 4);
-        fields.Controls.Add(CharacterMenuStyle.Input(_description), 0, 5); fields.Controls.Add(_validation, 0, 6);
+        fields.Controls.Add(CharacterMenuStyle.Input(_description), 0, 5);
+        _modes.Items.AddRange(["Normal", "Mayhem", "Both"]);
+        _modes.SelectedIndex = Enum.IsDefined(modeAvailability) ? (int)modeAvailability : 0;
+        _modes.Enabled = ownerId is null;
+        fields.Controls.Add(CharacterMenuStyle.Label(ownerId is null ? "GAME MODES · EXPERIMENTAL" : "GAME MODES · INHERITED FROM CHARACTER", Theme.Eyebrow), 0, 6);
+        fields.Controls.Add(_modes, 0, 7); fields.Controls.Add(_validation, 0, 8);
         var detail = CharacterMenuStyle.Card(); body.Controls.Add(detail, 1, 0);
         var right = CharacterMenuStyle.Grid(1, 3); right.RowStyles.Add(new(SizeType.Absolute, 32));
         right.RowStyles.Add(new(SizeType.Absolute, 26)); right.RowStyles.Add(new(SizeType.Percent, 100)); detail.Controls.Add(right);
@@ -70,11 +78,14 @@ public sealed class CharacterIdentityDialog : AdaptiveForm
             _preview.Text = $"{(ownerId is null ? "CHARACTER OWNER" : "SUIT OWNER")}\r\n{owner}\r\n\r\nPAWN TAG\r\n" +
                 (valid ? $"Pawns.Playable.{owner}.{TechnicalId}" : "Enter a valid ID to preview") +
                 "\r\n\r\n" + (ownerId is null ? "Independent roster entry with its own default suit. The native gameplay donor remains separate." :
-                    "A separate suit for this character. Build Mod includes its required default character automatically.") + "\r\n\r\n" + note;
+                    "A separate suit for this character. Build Mod includes its required default character automatically.") +
+                "\r\n\r\nGAME MODES\r\n" + (ownerId is null ? ModeAvailability.ToString() : "Inherited from the saved character") +
+                (ownerId is null && ModeAvailability != CharacterModeAvailability.Normal ? "\r\nIncludes the experimental Mode Access helper. Mayhem requires the DLC. In-game testing required." : "") + "\r\n\r\n" + note;
         }
         _name.TextChanged += (_, _) => RefreshIdentity();
         _id.TextChanged += (_, _) => { if (_suggestingId) return; _idEdited = true; RefreshIdentity(); };
+        _modes.SelectedIndexChanged += (_, _) => RefreshIdentity();
         RefreshIdentity();
-        scroll.ClientSizeChanged += (_, _) => fields.Height = Math.Max(scroll.ClientSize.Height, 370 * DeviceDpi / 96);
+        scroll.ClientSizeChanged += (_, _) => fields.Height = Math.Max(scroll.ClientSize.Height, 440 * DeviceDpi / 96);
     }
 }

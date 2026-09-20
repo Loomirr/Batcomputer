@@ -17,18 +17,51 @@ public sealed partial class MainForm
     }
     private void RefreshVehicleWorkspaceTiles()
     {
-        var tiles = new List<VirtualTilePanel.Tile>(); AddVehicleTiles(tiles, "VEHICLES");
-        ShowVirtualTiles(tiles, hero: new VirtualTilePanel.HeroModel { Overline = "VEHICLE WORKSPACE", Title = "Vehicles", Subtitle = "Separate selection · rigged body · materials · lights and attachments", ThumbAccent = Theme.Gliders });
-    }
-    private void AddVehicleTiles(List<VirtualTilePanel.Tile> tiles, string section)
-    {
-        tiles.Add(new() { Section = section, Title = "＋ New vehicle", Subtitle = "Batman Forever driving base", Accent = Theme.Gliders, Dashed = true, OnClick = () => EditVehicle() });
         var (active, mod) = ResolveHomeActiveMod(ModService.ListMods());
-        if (active is not null) tiles.Add(new() { Section = section, Title = "Manage vehicles in mod", Subtitle = active.DisplayName, Accent = Theme.Gliders, OnClick = () => EditModVehicles(active.Path) });
-        foreach (var summary in VehicleService.List())
+        var saved = VehicleService.List();
+        var tiles = new List<VirtualTilePanel.Tile>();
+        tiles.Add(new() { Section = "WORKSPACE", Title = "＋ New vehicle", Subtitle = "Start in the 3D workshop", Accent = Theme.Gliders, Dashed = true, OnClick = () => EditVehicle() });
+        tiles.Add(new() { Section = "WORKSPACE", Title = active is null ? "Create a mod" : "Change selected mod", Subtitle = active?.DisplayName ?? "Vehicles can ship on their own", Accent = Theme.Gold, OnClick = active is null ? CreateModFlow : ChooseVehicleMod });
+        if (active is not null)
+        {
+            tiles.Add(new() { Section = "WORKSPACE", Title = "Choose vehicles for mod", Subtitle = "Add, enable or remove", Accent = Theme.Gliders, OnClick = () => EditModVehicles(active.Path) });
+            tiles.Add(new() { Section = "WORKSPACE", Title = "Build selected mod", Subtitle = active.DisplayName, Accent = Theme.Gold, OnClick = BuildActiveModFromWorkspace });
+            tiles.Add(new() { Section = "WORKSPACE", Title = "Mod details & output", Subtitle = "Install, rename, release files", Accent = Theme.OnDarkMuted, OnClick = () => OpenModDetails(active.Path, active.ModId) });
+        }
+        AddVehicleTiles(tiles, "VEHICLE LIBRARY", includeActions: false);
+        ShowVirtualTiles(tiles, hero: new VirtualTilePanel.HeroModel {
+            Overline = "VEHICLE WORKSPACE", Title = active?.DisplayName ?? "Your vehicle library",
+            Subtitle = saved.Count == 0 ? "Create a vehicle, fit its body in the workshop, then add it to a mod." : "Open a vehicle to edit its body, materials, lights, seats and hardpoints.",
+            ThumbAccent = Theme.Gliders, Badge = "EXPERIMENTAL", BadgeColor = Theme.Warn,
+            Chips = [(saved.Count + " saved vehicles", Theme.Gliders), ((mod?.Vehicles.Count(v => v.Enabled) ?? 0) + " enabled in selected mod", Theme.Gold), ("No suit required for native owners", Theme.OnDarkMuted)] });
+    }
+    private void ChooseVehicleMod()
+    {
+        using var dialog = new AdaptiveDialogForm { Text = "Select mod", ClientSize = new Size(520, 190), MinimumSize = new Size(400, 190), StartPosition = FormStartPosition.CenterParent, BackColor = Theme.WindowBg, ForeColor = Theme.OnDark, Font = Theme.Body, Padding = new Padding(16) };
+        var choices = new ThemedDropDown { Dock = DockStyle.Top };
+        foreach (var mod in ModService.ListMods()) choices.Items.Add(new VehicleModChoice(mod));
+        choices.SelectedItem = choices.Items.Cast<VehicleModChoice>().FirstOrDefault(m => m.Mod.Path == _homeActiveModProjectPath);
+        var select = new Button { Text = "Select mod", Width = 130, DialogResult = DialogResult.OK }; Theme.StyleGoldButton(select);
+        var create = new Button { Text = "New mod…", Width = 120, DialogResult = DialogResult.Retry }; Theme.StyleDarkButton(create);
+        dialog.Controls.Add(choices); dialog.Controls.Add(DialogActionFooter.Create(select, create)); dialog.AcceptButton = select;
+        var result = dialog.ShowDialog(this);
+        if (result == DialogResult.OK && choices.SelectedItem is VehicleModChoice selected) SelectHomeMod(selected.Mod.Path);
+        else if (result == DialogResult.Retry) CreateModFlow();
+    }
+    private sealed record VehicleModChoice(ModProjectService.ModSummary Mod) { public override string ToString() => Mod.DisplayName + " · " + Mod.ModId; }
+    private void AddVehicleTiles(List<VirtualTilePanel.Tile> tiles, string section, bool includeActions = true)
+    {
+        if (includeActions) tiles.Add(new() { Section = section, Title = "＋ New vehicle", Subtitle = "Choose a driving base", Accent = Theme.Gliders, Dashed = true, OnClick = () => EditVehicle() });
+        var (active, mod) = ResolveHomeActiveMod(ModService.ListMods());
+        if (includeActions && active is not null) tiles.Add(new() { Section = section, Title = "Manage vehicles in mod", Subtitle = active.DisplayName, Accent = Theme.Gliders, OnClick = () => EditModVehicles(active.Path) });
+        var search = includeActions ? "" : CurrentToyboxSearch();
+        var library = VehicleService.List().Where(v => (v.Name + " " + v.Owner + " " + v.Id).Contains(search, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(v => mod?.Vehicles.Any(e => e.VehicleId == v.Id) == true ? 0 : 1).ToArray();
+        foreach (var summary in library)
         {
             var entry = mod?.Vehicles.FirstOrDefault(e => e.VehicleId == summary.Id);
-            tiles.Add(new() { Section = section, Title = summary.Name, Subtitle = summary.Error.Length > 0 ? "Unreadable project · click for details" : summary.Owner.Split('.').Last() + " · " + (entry is null ? "not in selected mod" : entry.Enabled ? "in mod · enabled" : "in mod · disabled"),
+            tiles.Add(new() { Section = includeActions ? section : entry is null ? "AVAILABLE VEHICLES" : "IN SELECTED MOD", Title = summary.Name, Subtitle = summary.Error.Length > 0 ? "Unreadable project · click for details" : summary.Owner.Split('.').Last() + " · " + (entry is null ? "not in selected mod" : entry.Enabled ? "in mod · enabled" : "in mod · disabled"),
+                ToolTip = summary.Error.Length > 0 ? summary.Error : summary.Name + "\nID: " + summary.Id + "\nOpen: 3D workshop\nRight-click: mod membership",
                 Accent = summary.Error.Length > 0 ? Theme.Warn : Theme.Gliders, OnClick = () => EditVehicle(summary.Path), MenuFactory = () => {
                     var menu = new ContextMenuStrip(); menu.Items.Add("Edit vehicle…", null, (_, _) => EditVehicle(summary.Path));
                     if (active is not null && summary.Error.Length == 0) menu.Items.Add(entry is null ? "Add to " + active.DisplayName : "Remove from " + active.DisplayName, null, (_, _) => {
@@ -38,6 +71,7 @@ public sealed partial class MainForm
                     }); return menu;
                 } });
         }
+        if (!includeActions && library.Length == 0) tiles.Add(new() { Section = section, Title = search.Length > 0 ? "No matching vehicles" : "No saved vehicles yet", Subtitle = search.Length > 0 ? "Try a name, owner or vehicle ID" : "Start with New vehicle above", Accent = Theme.OnDarkMuted });
     }
     private void EditModVehicles(string modPath)
     {

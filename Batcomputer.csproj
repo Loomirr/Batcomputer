@@ -20,6 +20,7 @@
     <DefaultItemExcludes>$(DefaultItemExcludes);artifacts\**;Generated\**</DefaultItemExcludes>
   </PropertyGroup>
   <ItemGroup>
+    <None Update="Data\ModeAccess\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <PackageReference Include="BCnEncoder.Net" Version="2.3.0" />
     <PackageReference Include="CUE4Parse-Conversion" Version="1.2.2.202607" />
     <PackageReference Include="Microsoft.Bcl.Memory" Version="10.0.10" />
@@ -60,6 +61,8 @@
     <!-- Offline three.js preview runtime; see licenses/three.js-LICENSE.txt. -->
     <EmbeddedResource Include="Web\preview\*.js" />
     <EmbeddedResource Include="Web\preview\VehicleWorkshop.html" />
+    <EmbeddedResource Include="Web\preview\VehicleWorkshop.css" />
+    <EmbeddedResource Include="Web\preview\CharacterWorkshop.css" />
     <EmbeddedResource Include="Tools\SkinnedMesh\import_mesh.py" />
     <!-- Shipped game-data catalogs and runtime socket calibration profiles. -->
     <None Update="gamedata\**\*.json"

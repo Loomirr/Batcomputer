@@ -17,6 +17,7 @@ using CUE4Parse_Conversion.Meshes;
 using CUE4Parse_Conversion.Materials;
 using CUE4Parse_Conversion.Animations;
 using CUE4Parse.UE4.Assets.Exports.Animation;
+using CUE4Parse.UE4.Assets.Exports.Material;
 
 namespace Batcomputer;
 
@@ -242,7 +243,9 @@ public static class ModelPreviewService
         Vector3? SourceObjRotation = null,
         string? CustomMeshId = null,
         string? DisplayName = null,
-        IReadOnlyList<CustomStaticMeshMaterialSlot>? SourceObjMaterialSlots = null);
+        IReadOnlyList<CustomStaticMeshMaterialSlot>? SourceObjMaterialSlots = null,
+        bool DisplayBeside = false, bool InitiallyHidden = false,
+        string? AnchorBone = null, string? BoneOffsetsJson = null);
 
     /// <summary>
     /// The SCS is the Blueprint's real component hierarchy. Component templates themselves often
@@ -741,6 +744,41 @@ public static class ModelPreviewService
             .ToList();
     }
 
+    internal static bool IsPreviewGlider(string component, string path) =>
+        component.Contains("Glid", StringComparison.OrdinalIgnoreCase) || path.Contains("Glid", StringComparison.OrdinalIgnoreCase);
+
+    private static string? PreviewAnchorBone(string component, string? socket)
+    {
+        if (AttachBoneFor(component, socket) is { } head) return head;
+        if (string.IsNullOrWhiteSpace(socket)) return null;
+        if (socket.Contains("Pelvis", StringComparison.OrdinalIgnoreCase) || socket.Contains("Hip", StringComparison.OrdinalIgnoreCase)) return "Pelvis";
+        return socket.EndsWith("_Socket", StringComparison.OrdinalIgnoreCase) ? socket[..^7] : socket;
+    }
+
+    private static string ReadPreviewBoneOffsets(DefaultFileProvider provider, string blueprint)
+    {
+        var offsets = "[]";
+        foreach (var path in ResolveVisualBlueprintSourcePaths(provider, blueprint).Reverse())
+        {
+            try
+            {
+                foreach (var manager in provider.LoadPackage(path).GetExports()
+                             .Where(e => e.ExportType.Contains("LocationAttachmentManagerComponent", StringComparison.Ordinal)))
+                {
+                    if (!HasProperty(manager, "PermanentOffsetData")) continue;
+                    // CUE4Parse decodes the native InstancedStructs, including their FTransform.
+                    using var document = JsonDocument.Parse(Newtonsoft.Json.JsonConvert.SerializeObject(manager));
+                    if (document.RootElement.TryGetProperty("Properties", out var properties) &&
+                        properties.TryGetProperty("PermanentOffsetData", out var data))
+                        offsets = data.GetRawText(); // An explicit child array replaces its inherited array.
+                }
+            }
+            catch (Exception ex) { Console.WriteLine($"  attachment offsets unavailable for {path}: {ex.Message.Split('\n')[0]}"); }
+        }
+        Console.WriteLine($"  native permanent bone offsets: {offsets}");
+        return offsets;
+    }
+
     private static AttachmentPlacement? ResolveBodyAttachmentPlacement(
         RuntimeSocketProfileService.ProfileSet socketProfiles,
         string? bodyMeshPath,
@@ -998,7 +1036,6 @@ public static class ModelPreviewService
             .ToList();
 
         var layoutKey = ViewerLayoutService.SuitKey(project);
-        ViewerLayoutService.ImportLegacyIfEmpty(projectRoot, layoutKey, project.PreviewPartPlacements);
 
         return BuildPreviewCharacter(
             paksDir,
@@ -1377,7 +1414,6 @@ public static class ModelPreviewService
         var viewerLayoutRoot = string.IsNullOrWhiteSpace(options.ViewerLayoutProjectRoot)
             ? AppSettings.Current.EffectiveProjectRoot()
             : options.ViewerLayoutProjectRoot!;
-        var viewerPlacements = options.IgnoreSavedLayout ? new List<SavedPreviewPartPlacement>() : ViewerLayoutService.Load(viewerLayoutRoot, viewerLayoutKey);
         var socketProfiles = RuntimeSocketProfileService.Load();
         if (socketProfiles.Count > 0)
         {
@@ -1385,6 +1421,8 @@ public static class ModelPreviewService
         }
         using var provider = MakeProvider(paksDir, usmapPath, looseContentRoots);
         var resolvedComponents = ResolveVisualBlueprintComponents(provider, bpPath);
+        var boneOffsetsJson = ReadPreviewBoneOffsets(provider,
+            string.IsNullOrWhiteSpace(options.StagedPlayablePath) ? bpPath : options.StagedPlayablePath);
         var stagedComponents = string.IsNullOrWhiteSpace(options.StagedPlayablePath)
             ? Array.Empty<ResolvedBlueprintComponent>()
             : ResolveVisualBlueprintComponents(provider, options.StagedPlayablePath).ToArray();
@@ -1484,22 +1522,13 @@ public static class ModelPreviewService
                 continue;
             }
             var componentName = component.Key;
-            if (component.Hidden)
-            {
-                Console.WriteLine($"  {componentName}: hidden by Blueprint component state");
-                continue;
-            }
             if ((!IncludeNeutralFacePreview && IsFaceComponent(componentName, path)) ||
                 options.HiddenComponents.Any(hidden => SameComponent(hidden, componentName)) ||
                 options.AdditionalParts.Any(extra => extra.ReplaceExisting && SameComponent(extra.ComponentName, componentName)))
             {
                 continue;
             }
-            // The glide cape (Torso slot) is only shown while gliding - skip it for the standing look.
-            if (path!.Contains("Glide", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
+            var glider = IsPreviewGlider(componentName, path!);
             // The character's real look lives in the component's override materials (e.g.
             // MI_Batman_89_EOM), not in the base mesh's own material slots.
             var inferredAttachment = InferAttachment(componentName, path);
@@ -1521,7 +1550,9 @@ public static class ModelPreviewService
                 Transform: ComposeTransforms(attachmentPlacement?.SocketTransform, component.Transform),
                 Attachment: attachment,
                 AttachmentOffset: attachmentPlacement?.Offset,
-                UsesRuntimeSocketCalibration: attachmentPlacement?.UsesRuntimeCalibration == true));
+                UsesRuntimeSocketCalibration: attachmentPlacement?.UsesRuntimeCalibration == true,
+                DisplayBeside: glider, InitiallyHidden: component.Hidden && !glider,
+                AnchorBone: PreviewAnchorBone(componentName, attachment?.SocketName)));
         }
 
         foreach (var extra in options.AdditionalParts)
@@ -1562,7 +1593,9 @@ public static class ModelPreviewService
                 SourceObjRotation: extra.SourceObjRotation,
                 CustomMeshId: extra.CustomMeshId,
                 DisplayName: extra.DisplayName,
-                SourceObjMaterialSlots: extra.SourceObjMaterialSlots));
+                SourceObjMaterialSlots: extra.SourceObjMaterialSlots,
+                DisplayBeside: IsPreviewGlider(extra.ComponentName, extra.MeshPath),
+                AnchorBone: PreviewAnchorBone(extra.ComponentName, attachment.SocketName)));
             if (stagedComponent?.Transform is { } transform)
             {
                 Console.WriteLine($"  {extra.ComponentName}: staged component transform -> "
@@ -1589,18 +1622,12 @@ public static class ModelPreviewService
             }
             // Imported meshes own their transform in the suit project. A generic viewer-only
             // nudge would make the preview disagree with the mesh that gets baked for the game.
-            var adjustment = !string.IsNullOrWhiteSpace(part.CustomMeshId) || IsFaceComponent(part.ComponentName, part.MeshPath)
-                ? null
-                : viewerPlacements
-                    .FirstOrDefault(placement => SameComponent(placement.Component, part.ComponentName))
-                    ?? options.PlacementOverrides
-                        .FirstOrDefault(placement => SameComponent(placement.Component, part.ComponentName))
-                    ?? DefaultStaticHairHeadAdjustment(part);
             parts[i] = part with
             {
                 MaterialPaths = materialPaths.Count == 0 ? null : materialPaths,
                 MaterialFallbacks = materialFallbacks.Count == 0 ? null : materialFallbacks,
-                Adjustment = adjustment,
+                Adjustment = null, // Native placement is authoritative; legacy preview nudges are ignored.
+                BoneOffsetsJson = boneOffsetsJson,
             };
         }
 
@@ -1844,6 +1871,7 @@ public static class ModelPreviewService
                     };
                     if (ex.TryWriteToDir(new DirectoryInfo(exportDir), out _, out var saved))
                     {
+                        if (mesh is USkeletalMesh skeletal) SkinnedGlbExportService.CorrectFile(saved, skeletal);
                         var name = $"model{i}.glb";
                         var destGlb = Path.Combine(previewDir, name);
                         File.Copy(saved, destGlb, overwrite: true);
@@ -1977,6 +2005,10 @@ public static class ModelPreviewService
     private readonly record struct PlacedModel(
         string File, Vector3 Offset, List<SlotShading> Slots, bool IsBody, bool IsFace = false, bool IsHead = false)
     {
+        public bool DisplayBeside { get; init; }
+        public bool InitiallyHidden { get; init; }
+        public string? AnchorBone { get; init; }
+        public string? BoneOffsetsJson { get; init; }
         /// <summary>Authored component transform from the BP, converted into glTF space.</summary>
         public PreviewComponentTransform? Transform { get; init; }
         /// <summary>True when the model is placed with a captured CharacterMesh0 socket transform.</summary>
@@ -3378,6 +3410,33 @@ public static class ModelPreviewService
         string previewDir,
         PreviewMaterialFallback? fallback = null)
     {
+        var shading = ResolveSlotSurface(provider, material, previewDir, fallback);
+        // Apply eligibility after every surface path, including solid-colour attachments and cloth.
+        if (material is null) return shading;
+        var parameters = new CMaterialParams2();
+        try { if (material is UMaterialInterface native) native.GetParams(parameters, EMaterialFormat.AllLayers); }
+        catch { /* Fall back to explicitly serialized instance parameters below. */ }
+        string? mask = null;
+        foreach (var name in new[] { "ColourMask", "ColorMask", "CT" })
+        {
+            mask = ExportFallbackSourceTexture(fallback, [name], previewDir);
+            if (mask is not null) break;
+            var texture = FindFallbackTexture(provider, fallback, name)
+                ?? parameters.Textures.GetValueOrDefault(name) as UTexture2D ?? FindTextureParam(material, name, 0);
+            // Dummy white/black defaults do not prove palette support and tinting them destroys ink.
+            if (texture is null || texture.Name.Contains("Dummy", StringComparison.OrdinalIgnoreCase)) continue;
+            mask = ExportTexture(texture, previewDir, isNormal: false);
+            if (mask is not null) break;
+        }
+        return shading with { ColourMask = mask };
+    }
+
+    private static SlotShading ResolveSlotSurface(
+        DefaultFileProvider provider,
+        UObject? material,
+        string previewDir,
+        PreviewMaterialFallback? fallback = null)
+    {
         if (material is null)
         {
             return new SlotShading(null, null, null, null);
@@ -3442,7 +3501,7 @@ public static class ModelPreviewService
             : sourceBaseColour ?? ExportBaseColourTexture(fallbackBaseColour ?? FindBaseColourTexture(material, 0), previewDir);
         var normal = ExportFallbackSourceTexture(
                          fallback,
-                         new[] { "DNRM_Pristine", "DNRM", "HeadLowerUnder NML", "NRM" },
+                         new[] { "DNRM_Pristine", "DNRM", "HeadLowerUnder NML" },
                          previewDir,
                          isNormal: true)
                      ?? ExportTexture(
@@ -3452,13 +3511,9 @@ public static class ModelPreviewService
                      ?? ExportSlot(material, "DNRM_Pristine", previewDir, isNormal: true)
                      ?? ExportSlot(material, "DNRM", previewDir, isNormal: true)
                      ?? ExportSlot(material, "HeadLowerUnder NML", previewDir, isNormal: true);
-        // The DNRM parameter is the material's authored normal map. Only fall back to the baked
-        // base normal when it is absent; combining both UV spaces in the preview changes the
-        // lighting on atlas materials such as Electric's body.
-        if (normal is null)
-        {
-            normal = BakeNoisedNrm(provider, material, previewDir);
-        }
+        // Decal normals use the atlas UV; structural LEGO normals use UV0. Never flatten the
+        // structural map into the decal map: body atlases can put the same detail on another limb.
+        var structuralNormal = ResolveStructuralNormal(provider, material, fallback, previewDir);
         var mmr = ExportMmrSlot(material, previewDir)
                   ?? ExportFallbackMmrSlot(provider, fallback, previewDir);
         // Prefer the material's explicit colour-mask parameters. CT remains a legacy fallback for
@@ -3482,6 +3537,7 @@ public static class ModelPreviewService
             normal,
             mmr,
             fallbackColour ?? colour,
+            Nrm2: structuralNormal,
             ColourMask: colourMask);
     }
 
@@ -3608,14 +3664,11 @@ public static class ModelPreviewService
             return null;
         }
 
-        var normal = ExportFallbackSourceTexture(fallback, ["DNRM_Pristine", "DNRM", "NRM"], previewDir, isNormal: true)
-                     ?? ExportTexture(FindFallbackTexture(provider, fallback, "DNRM_Pristine", "DNRM", "NRM"), previewDir, isNormal: true)
+        var normal = ExportFallbackSourceTexture(fallback, ["DNRM_Pristine", "DNRM"], previewDir, isNormal: true)
+                     ?? ExportTexture(FindFallbackTexture(provider, fallback, "DNRM_Pristine", "DNRM"), previewDir, isNormal: true)
                      ?? ExportSlot(material, "DNRM_Pristine", previewDir, isNormal: true)
                      ?? ExportSlot(material, "DNRM", previewDir, isNormal: true);
-        if (normal is null)
-        {
-            normal = BakeNoisedNrm(provider, material, previewDir);
-        }
+        var structuralNormal = ResolveStructuralNormal(provider, material, fallback, previewDir);
         var mmr = ExportMmrSlot(material, previewDir)
                   ?? ExportFallbackMmrSlot(provider, fallback, previewDir);
         var ao = ExportRaoAoSlot(material, previewDir);
@@ -3627,6 +3680,7 @@ public static class ModelPreviewService
             normal,
             mmr,
             colour,
+            Nrm2: structuralNormal,
             Ao: ao,
             Roughness: 0.36f);
     }
@@ -3653,8 +3707,10 @@ public static class ModelPreviewService
         }
     }
 
-    /// <summary>Micro-surface noise normal shared by every part material (tiled 6.9x in M_TPAGE).</summary>
-    private const string MicroNoisePath = "/Game/Characters/Textures/Shared/T_Noise_Norm_SEB_N";
+    private static string? ResolveStructuralNormal(DefaultFileProvider provider, UObject material, PreviewMaterialFallback? fallback, string previewDir) =>
+        ExportFallbackSourceTexture(fallback, ["NRM"], previewDir, isNormal: true)
+        ?? ExportTexture(FindFallbackTexture(provider, fallback, "NRM"), previewDir, isNormal: true)
+        ?? BakeNoisedNrm(provider, material, previewDir);
 
     /// <summary>
     /// Exports the material's base "NRM" (UV0 space) with the micro-surface noise overlay baked in.
@@ -3663,23 +3719,47 @@ public static class ModelPreviewService
     /// </summary>
     private static string? BakeNoisedNrm(DefaultFileProvider provider, UObject material, string previewDir)
     {
-        var baseNrm = FindTextureParam(material, "NRM", 0);
+        // Cooked master defaults can live in CachedExpressionData rather than MIC property
+        // arrays. Use the same resolved parameter view as the material exporter for those.
+        var parameters = new CMaterialParams2();
+        if (material is UMaterialInterface nativeMaterial)
+        {
+            try { nativeMaterial.GetParams(parameters, EMaterialFormat.AllLayers); }
+            catch (Exception ex)
+            {
+                // A bad optional inherited texture must not prevent the rest of the character loading.
+                Console.WriteLine($"    inherited normal parameters unavailable for {material.Name}: {ex.Message.Split('\n')[0]}");
+            }
+        }
+        var baseNrm = parameters.Textures.GetValueOrDefault("NRM") as UTexture2D
+            ?? FindTextureParam(material, "NRM", 0);
         if (baseNrm is null)
         {
             return null;
         }
-        var rel = "textures/" + MakeSafeName(baseNrm.Name) + "_noised.png";
+        // Preserve inherited material choices, including an explicit disabled micro-detail switch.
+        // The tiled preview is an approximation of the native shader, not a cooked shader export.
+        var microEnabled = parameters.Switches.TryGetValue("MicroDetailSystem_On/Off", out var enabled)
+            ? enabled : FindStaticSwitch(material, "MicroDetailSystem_On/Off") == true;
+        var noise = microEnabled ? parameters.Textures.GetValueOrDefault("MicroNoise") as UTexture2D
+            ?? FindTextureParam(material, "MicroNoise", 0) : null;
+        var strength = Math.Clamp(parameters.Scalars.TryGetValue("Micro Detail Intensity", out var intensity)
+            ? intensity : FindScalarParam(material, "Micro Detail Intensity", 0) ?? 1f, 0f, 4f);
+        // Approximate the primary micro channel, not the older TPAGE shader's coarse fixed tiling.
+        var tile = Math.Clamp(parameters.Scalars.GetValueOrDefault("1Red_Noise_Scale", 6.9f), .1f, 512f);
+        strength *= Math.Clamp(parameters.Scalars.GetValueOrDefault("1Red_Noise_Strength", 1f), 0f, 4f);
+        var key = "filtered-v2|" + baseNrm.GetPathName() + "|" + noise?.GetPathName() + "|" + strength.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            + "|" + tile.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key)))[..12];
+        var rel = "textures/" + MakeSafeName(baseNrm.Name) + "_surface_" + hash + ".png";
         var dest = Path.Combine(previewDir, rel.Replace('/', Path.DirectorySeparatorChar));
         if (File.Exists(dest))
         {
             return rel;
         }
-        UTexture2D? noise = null;
-        try { noise = provider.LoadPackageObject(MicroNoisePath) as UTexture2D; }
-        catch { /* overlay-less bake still better than nothing */ }
-        if (TextureDecodeService.TryBakeNoisedNormal(baseNrm, noise, tile: 6.9f, dest))
+        if (TextureDecodeService.TryBakeNoisedNormal(baseNrm, noise, tile, dest, strength))
         {
-            Console.WriteLine($"    base NRM + micro noise: {baseNrm.Name}");
+            Console.WriteLine($"    UV0 LEGO normal: {baseNrm.Name}; micro: {noise?.Name ?? "disabled/unavailable"}, strength {strength:0.###}, tile {tile:0.###}");
             return rel;
         }
         return null;
@@ -4025,6 +4105,8 @@ public static class ModelPreviewService
 
                 return new(file, offset, slots, isBody, isFace, isHead)
                 {
+                    DisplayBeside = part.DisplayBeside, InitiallyHidden = part.InitiallyHidden,
+                    AnchorBone = part.AnchorBone, BoneOffsetsJson = part.BoneOffsetsJson,
                     Transform = part.Transform,
                     UsesRuntimeSocketCalibration = part.UsesRuntimeSocketCalibration,
                     ComponentName = part.ComponentName,
@@ -4115,7 +4197,7 @@ public static class ModelPreviewService
         string? viewerLayoutKey = null,
         IReadOnlyCollection<PreviewRedBrickTint>? redBrickTints = null)
     {
-        foreach (var js in new[] { "three.min.js", "GLTFLoader.js", "OrbitControls.js" })
+        foreach (var js in new[] { "three.min.js", "GLTFLoader.js", "OrbitControls.js", "TransformControls.js", "SkeletonUtils.js", "GLTFExporter.js", "CharacterExport.js", "CharacterNormals.js", "CharacterAssembly.js", "CharacterMeshEditor.js", "CharacterWorkshopShell.js", "CharacterWorkshop.js", "CharacterWorkshop.css" })
         {
             var bytes = EmbeddedAssets.ReadBytes($"preview/{js}")
                         ?? throw new FileNotFoundException($"embedded viewer asset missing: {js}");
@@ -4153,15 +4235,14 @@ public static class ModelPreviewService
                 ? "[0,0,0]"
                 : $"[{F(m.Adjustment.OffsetX)},{F(m.Adjustment.OffsetY)},{F(m.Adjustment.OffsetZ)}]";
             var isCustomStaticMesh = !string.IsNullOrWhiteSpace(m.CustomMeshId);
-            var movable = !isCustomStaticMesh && !m.IsBody && !m.IsHead && !m.IsFace &&
-                          !string.IsNullOrWhiteSpace(m.ComponentName) &&
-                          !m.ComponentName.StartsWith("__", StringComparison.Ordinal);
+            var movable = false; // Only the project-aware custom-mesh editor may author placement.
             var customMesh = !isCustomStaticMesh
                 ? "null"
                 : $"{{\"id\":{Q(m.CustomMeshId)},\"scale\":{F(m.CustomMeshScale)}," +
                   $"\"offset\":[{F(m.CustomMeshOffset?.X ?? 0f)},{F(m.CustomMeshOffset?.Y ?? 0f)},{F(m.CustomMeshOffset?.Z ?? 0f)}]," +
                   $"\"rotation\":[{F(m.CustomMeshRotation?.X ?? 0f)},{F(m.CustomMeshRotation?.Y ?? 0f)},{F(m.CustomMeshRotation?.Z ?? 0f)}]}}";
             return $"{{\"file\":\"{m.File}\",\"base\":\"{baseName}\",\"body\":{(m.IsBody ? "true" : "false")},\"isface\":{(m.IsFace ? "true" : "false")},\"ishead\":{(m.IsHead ? "true" : "false")}," +
+                    $"\"beside\":{(m.DisplayBeside ? "true" : "false")},\"hidden\":{(m.InitiallyHidden ? "true" : "false")},\"anchor\":{Q(m.AnchorBone)},\"boneOffsets\":{m.BoneOffsetsJson ?? "[]"}," +
                     $"{transform}," +
                     $"\"part\":{Q(m.ComponentName)},\"label\":{Q(m.DisplayName)},\"move\":{(movable ? "true" : "false")},\"custom\":{(isCustomStaticMesh ? "true" : "false")},\"mesh\":{customMesh},\"adj\":{adjustment}," +
                    $"\"fgroups\":{fg},\"mouth\":{Q(m.MouthTex)},\"mhide\":{(m.MouthHidden ? "true" : "false")}," +
@@ -4251,7 +4332,6 @@ public static class ModelPreviewService
         }
 
         var bodyHasColourMask = models
-            .Where(model => IsBodyMeshParent(model.ComponentName))
             .SelectMany(model => model.Slots)
             .Any(slot => HasExportedPng(dir, slot.ColourMask));
         var eligibleTints = bodyHasColourMask
@@ -4321,18 +4401,27 @@ public static class ModelPreviewService
   .panel-dragging{opacity:.92}
   #err{position:absolute;left:12px;bottom:12px;color:#f0c230;font-size:12px;line-height:1.5;font-family:Consolas,monospace}
   canvas{display:block}
-</style></head><body>
+</style><link rel="stylesheet" href="CharacterWorkshop.css"></head><body>
 <div id="hud"><b>Preview</b> — drag to orbit, scroll to zoom</div>
 <div id="err"></div>
 <script src="three.min.js"></script>
 <script src="GLTFLoader.js"></script>
 <script src="OrbitControls.js"></script>
+<script src="CharacterNormals.js"></script>
+<script src="CharacterAssembly.js"></script>
+<script src="TransformControls.js"></script>
+<script src="CharacterMeshEditor.js"></script>
+<script src="CharacterWorkshopShell.js"></script>
+<script src="CharacterWorkshop.js"></script>
+<script src="SkeletonUtils.js"></script>
+<script src="GLTFExporter.js"></script>
+<script src="CharacterExport.js"></script>
 <script src="models.js"></script>
 <script>
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x1a1d22);
 const camera=new THREE.PerspectiveCamera(45,innerWidth/innerHeight,0.1,100000);
-const renderer=new THREE.WebGLRenderer({antialias:true});
-renderer.setPixelRatio(devicePixelRatio);renderer.setSize(innerWidth,innerHeight);
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));renderer.setSize(innerWidth,innerHeight);
 renderer.outputEncoding=THREE.sRGBEncoding;
 // The game renders through UE's ACES filmic tonemapper - without it saturated colours (the face
 // print's nougat tint) come out light and candy-like instead of the in-game deep brown.
@@ -4361,10 +4450,12 @@ const root=new THREE.Group();scene.add(root);
 const loader=new THREE.GLTFLoader();const models=window.PREVIEW_MODELS||[];
 const texLoader=new THREE.TextureLoader();
 const diag=[];
-function say(s){diag.push(s);document.getElementById('err').innerHTML=diag.join('<br>');}
+function say(s){diag.push(s);if(diag.length>200)diag.shift();document.getElementById('err').textContent=diag.join('\n');
+  if(/error|failed/i.test(s)){if(characterWorkshop)characterWorkshop.reportError(s);else document.body.classList.add('cw-load-error');}}
 const partStates=new Map();
 const redBrickMaskMaterials=[];
 const materialEditorEntries=[];
+let characterWorkshop=null;
 function makePanelDraggable(panel,handle){
   if(!panel||!handle)return;
   handle.classList.add('panel-drag-handle');handle.title='Drag to move this panel';
@@ -4376,6 +4467,7 @@ function makePanelDraggable(panel,handle){
   const stop=e=>{if(!drag)return;drag=null;panel.classList.remove('panel-dragging');
     try{handle.releasePointerCapture(e.pointerId);}catch(_){}};
   handle.addEventListener('pointerdown',e=>{if(e.button!==0)return;
+    if(panel.closest('#character-workshop'))return;
     const rect=panel.getBoundingClientRect();
     panel.style.left=rect.left+'px';panel.style.top=rect.top+'px';panel.style.right='auto';panel.style.bottom='auto';
     drag={x:e.clientX,y:e.clientY,left:rect.left,top:rect.top};panel.classList.add('panel-dragging');
@@ -4536,6 +4628,7 @@ function applyMaterialEditorEntry(entry){
   if(entry.kind==='face')m.visible=original.visible!==false&&!!enabled.base;
   else m.map=enabled.base?original.map:null;
   m.normalMap=enabled.normal?original.normalMap:null;
+  if(m.userData.structuralNormal)m.userData.structuralNormal.enabled.value=enabled.normal?1:0;
   m.roughnessMap=enabled.mmr?original.roughnessMap:null;
   m.metalnessMap=enabled.mmr?original.metalnessMap:null;
   m.roughness=enabled.mmr?original.roughness:0.5;
@@ -4619,7 +4712,7 @@ function buildPartMover(){
   const actions=document.createElement('div');actions.className='actions';
   const reset=document.createElement('button');reset.type='button';reset.textContent='↺';reset.title='Reset alignment';
    reset.onclick=()=>{setPartAdjustment(select.value,[0,0,0]);sync();};actions.appendChild(reset);
-  const save=document.createElement('button');save.type='button';save.className='save';save.textContent='Save';
+  const save=document.createElement('button');save.type='button';save.className='save';save.textContent='Save preview alignment';
    save.disabled=!window.PREVIEW_CAN_SAVE_PLACEMENTS||!window.PREVIEW_LAYOUT_KEY;
    save.onclick=()=>{const state=partStates.get(select.value);if(!state)return;
       postToHost({type:'save-placement',layout:window.PREVIEW_LAYOUT_KEY,component:state.component,
@@ -4637,106 +4730,25 @@ function buildPartMover(){
     uvSelect.value=String(state.uvChannel);uvSelect.disabled=state.uvs.length<2;}
   select.onchange=sync;sync();document.body.appendChild(panel);
 }
+function buildPartUvPicker(){
+  const parts=[...partStates.values()].filter(state=>state.uvs.length);if(!parts.length)return;
+  const panel=document.createElement('div');panel.id='partuv';
+  const label=document.createElement('label');label.textContent='Part UV set · preview only';panel.appendChild(label);
+  const select=document.createElement('select');select.setAttribute('aria-label','UV part');
+  parts.forEach(state=>{const option=document.createElement('option');option.value=state.component;option.textContent=state.label||state.component;select.appendChild(option);});
+  panel.appendChild(select);
+  const uv=document.createElement('select');uv.setAttribute('aria-label','Preview UV set');panel.appendChild(uv);
+  function sync(){const state=partStates.get(select.value);if(!state)return;uv.innerHTML='';
+    state.uvs.forEach(channel=>{const option=document.createElement('option');option.value=channel;option.textContent='UV '+channel;uv.appendChild(option);});
+    uv.value=state.uvChannel;uv.disabled=state.uvs.length<2;}
+  select.onchange=sync;uv.onchange=()=>setPartUv(select.value,Number(uv.value));
+  const reset=document.createElement('button');reset.textContent='Reset UV';reset.onclick=()=>{const state=partStates.get(select.value);setPartUv(select.value,state.defaultUv);sync();};
+  panel.appendChild(reset);sync();document.body.appendChild(panel);
+}
 function buildCustomMeshMover(){
-  const parts=[...partStates.values()].filter(state=>state.custom&&state.customId&&state.authored);
-  if(!parts.length)return;
-  const panel=document.createElement('div');panel.id='meshmove';
-  panel.title='Custom mesh changes are local to the selected attachment socket. Offsets use Unreal centimeters.';
-  const label=document.createElement('label');label.textContent='Custom mesh';panel.appendChild(label);
-  const select=document.createElement('select');
-  parts.forEach(state=>{const option=document.createElement('option');option.value=state.component;
-    option.textContent=state.label||state.component;select.appendChild(option);});
-  select.disabled=parts.length===1;panel.appendChild(select);
-  const inputs={};
-  [['Scale','scale',.1],['X offset (cm)','x',.1],['Y offset (cm)','y',.1],['Z offset (cm)','z',.1],
-   ['Pitch','pitch',1],['Yaw','yaw',1],['Roll','roll',1]].forEach(([title,key,step])=>{
-    const row=document.createElement('div');row.className='axis';
-    const rowLabel=document.createElement('span');rowLabel.textContent=title;row.appendChild(rowLabel);
-    const input=document.createElement('input');input.type='number';input.step=String(step);input.dataset.key=key;
-    row.appendChild(input);panel.appendChild(row);inputs[key]=input;
-  });
-  const actions=document.createElement('div');actions.className='actions';
-  const turn=document.createElement('button');turn.type='button';turn.textContent='Turn around 180°';
-  turn.title='Fix a mirrored-looking print by turning the OBJ front toward the character camera. This changes saved Yaw, so preview and game stay identical.';
-  const save=document.createElement('button');save.type='button';save.className='save';save.textContent='Bake to game';
-  save.disabled=!window.PREVIEW_CAN_SAVE_PLACEMENTS||!window.PREVIEW_LAYOUT_KEY;
-  save.title='Rebuild the game mesh using these saved values. Preview changes are saved automatically.';
-  const readTransform=()=>{const number=key=>Number(inputs[key].value)||0;return {
-    scale:number('scale'),offset:[number('x'),number('y'),number('z')],rotation:[number('pitch'),number('yaw'),number('roll')]};};
-  const postTransform=(type,state,transform=readTransform())=>{if(!state||!state.authored)return;
-    postToHost({type,layout:window.PREVIEW_LAYOUT_KEY,component:state.component,customId:state.customId,
-      transform});};
-  save.onclick=()=>{const state=partStates.get(select.value);if(!state||!state.authored)return;
-    postTransform('save-custom-mesh',state);
-    save.textContent='Saving...';save.disabled=true;};
-  turn.onclick=()=>{
-    const yaw=Number(inputs.yaw.value)||0;
-    inputs.yaw.value=String(((yaw+180+540)%360)-180);
-    inputs.yaw.dispatchEvent(new Event('input',{bubbles:true}));
-  };
-  actions.appendChild(turn);actions.appendChild(save);panel.appendChild(actions);
-  function sync(){const state=partStates.get(select.value);if(!state||!state.authored)return;
-    const transform=state.liveTransform||state.authored;
-    inputs.scale.value=Number(transform.scale||1).toFixed(3);
-    inputs.x.value=Number((transform.offset||[])[0]||0).toFixed(3);
-    inputs.y.value=Number((transform.offset||[])[1]||0).toFixed(3);
-    inputs.z.value=Number((transform.offset||[])[2]||0).toFixed(3);
-    inputs.pitch.value=Number((transform.rotation||[])[0]||0).toFixed(1);
-    inputs.yaw.value=Number((transform.rotation||[])[1]||0).toFixed(1);
-    inputs.roll.value=Number((transform.rotation||[])[2]||0).toFixed(1);
-    applyCustomMeshPreview(state);
-  }
-  let draftTimer=0;
-  Object.values(inputs).forEach(input=>input.oninput=()=>{
-    const state=partStates.get(select.value);if(!state)return;applyCustomMeshPreview(state);
-    const transform=readTransform();state.liveTransform=transform;
-    save.textContent='Bake to game';save.disabled=!window.PREVIEW_CAN_SAVE_PLACEMENTS||!window.PREVIEW_LAYOUT_KEY;
-    window.clearTimeout(draftTimer);draftTimer=window.setTimeout(()=>postTransform('save-custom-mesh-draft',state,transform),550);
-  });
-  window.addEventListener('pagehide',()=>{const state=partStates.get(select.value);if(state)postTransform('save-custom-mesh-draft',state);},{once:true});
-  select.onchange=sync;sync();document.body.appendChild(panel);
-  const partPanel=document.getElementById('partmove');
-  if(partPanel)partPanel.style.top=(panel.offsetHeight+26)+'px';
-  function applyCustomMeshPreview(state){
-    if(!state.customGeometry||!state.authored)return;
-    const number=key=>Number(inputs[key].value)||0;
-    const saved=state.authored;
-    const ratio=number('scale')/Math.max(.0001,Number(saved.scale)||1);
-    const delta=ueToGltfRotation(number('pitch'),number('yaw'),number('roll'))
-      .multiply(ueToGltfRotation(Number((saved.rotation||[])[0])||0,Number((saved.rotation||[])[1])||0,Number((saved.rotation||[])[2])||0).invert());
-    const oldOffset=ueToGltfPosition(saved.offset||[]);
-    const newOffset=ueToGltfPosition([number('x'),number('y'),number('z')]);
-    state.customGeometry.forEach(entry=>{
-      const position=entry.mesh.geometry.attributes.position;
-      const normal=entry.mesh.geometry.attributes.normal;
-      for(let i=0;i<entry.position.length;i+=3){
-        temp.set(entry.position[i],entry.position[i+1],entry.position[i+2]).sub(oldOffset).multiplyScalar(ratio).applyQuaternion(delta).add(newOffset);
-        position.setXYZ(i/3,temp.x,temp.y,temp.z);
-      }
-      position.needsUpdate=true;
-      if(normal&&entry.normal){
-        for(let i=0;i<entry.normal.length;i+=3){
-          temp.set(entry.normal[i],entry.normal[i+1],entry.normal[i+2]).applyQuaternion(delta).normalize();
-          normal.setXYZ(i/3,temp.x,temp.y,temp.z);
-        }
-        normal.needsUpdate=true;
-      }
-      entry.mesh.geometry.computeBoundingBox();entry.mesh.geometry.computeBoundingSphere();
-    });
-  }
-}
-const temp=new THREE.Vector3();
-function ueToGltfPosition(values){
-  // Custom mesh offsets are authored in Unreal centimeters; preview geometry is in glTF meters.
-  return new THREE.Vector3(Number(values[0])||0,Number(values[2])||0,-(Number(values[1])||0)).multiplyScalar(.01);
-}
-function ueToGltfRotation(pitch,yaw,roll){
-  const rad=Math.PI/180;
-  const ue=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),yaw*rad)
-    .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),pitch*rad))
-    .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),roll*rad));
-  const basis=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),-Math.PI/2);
-  return basis.clone().multiply(ue).multiply(basis.clone().invert());
+  window.characterMeshEditor=window.BatcomputerCharacterMeshEditor({THREE,scene,root,camera,renderer,controls,states:partStates,
+    post:postToHost,layout:window.PREVIEW_LAYOUT_KEY,canSave:!!(window.PREVIEW_CAN_SAVE_PLACEMENTS&&window.PREVIEW_LAYOUT_KEY),
+    onSelect:component=>characterWorkshop?.selectComponent(component)});
 }
 // CUE4Parse writes textures as loose .png beside the .glb rather than embedding them, so the base
 // colour map is applied here from the path the exporter reported.
@@ -4960,7 +4972,7 @@ function dress(g,info){
           if(tintState.palette)setRedBrickPalette(tintState.palette);
           sh.vertexShader=sh.vertexShader
             .replace('#include <common>','#include <common>\nvarying vec2 vColourMaskUv;')
-            .replace('#include <uv_vertex>','#include <uv_vertex>\nvColourMaskUv=vUv;');
+            .replace('#include <uv_vertex>','#include <uv_vertex>\nvColourMaskUv=uv;');
           sh.fragmentShader=sh.fragmentShader
             .replace('#include <common>','#include <common>\nuniform sampler2D redBrickMaskMap;varying vec2 vColourMaskUv;uniform float redBrickEnabled;uniform vec3 redBrickPrimary;uniform vec3 redBrickSecondary;uniform vec3 redBrickTertiary;')
             .replace('#include <map_fragment>',
@@ -4972,6 +4984,10 @@ function dress(g,info){
               'diffuseColor.rgb=mix(diffuseColor.rgb,redBrickColour,redBrickEnabled*redBrickWeight);');
         };
         m.customProgramCacheKey=()=> 'viewer-base-red-brick';
+      }
+      if(!info.isface&&s.nrm2&&o.geometry.attributes.aUv0){
+        const detail=tex(s.nrm2,false);
+        window.BatcomputerCharacterNormals(THREE,m,detail);
       }
       // MMR is exported repacked into ORM order (roughness->green, metalness->blue) so one texture
       // drives both maps the way three.js samples them. The scene has an environment map, so the
@@ -5017,7 +5033,9 @@ function dress(g,info){
         materialEditorEntries.push({
           label:part+' - material '+(li+1),material:m,
           enabled:{base:true,normal:true,mmr:true,ao:true},
-          available:{base:!!m.map,normal:!!m.normalMap,mmr:!!(m.roughnessMap||m.metalnessMap),ao:!!m.aoMap},
+          details:[s.nrm?{label:'Decal N',name:textureLeaf(s.nrm),path:s.nrm}:null,
+            s.nrm2?{label:'LEGO N',name:textureLeaf(s.nrm2),path:s.nrm2}:null].filter(Boolean),
+          available:{base:!!m.map,normal:!!(m.normalMap||m.userData.structuralNormal),mmr:!!(m.roughnessMap||m.metalnessMap),ao:!!m.aoMap},
           original:{map:m.map,normalMap:m.normalMap,roughnessMap:m.roughnessMap,metalnessMap:m.metalnessMap,
             aoMap:m.aoMap,roughness:m.roughness,metalness:m.metalness}
         });
@@ -5314,7 +5332,7 @@ function buildExpressionUi(){
   if(names.indexOf('Neutral')>=0){sel.value='Neutral';applyExpression('Neutral',+sl.value);}
 }
 function frameAll(){
-  const box=new THREE.Box3().setFromObject(root);
+  const box=window.BatcomputerVisibleBounds(THREE,[root]);
   if(box.isEmpty()){say('frame: scene is EMPTY - nothing was added');return;}
   const size=box.getSize(new THREE.Vector3());const center=box.getCenter(new THREE.Vector3());
   root.position.sub(center);
@@ -5361,30 +5379,38 @@ Promise.all(models.map(load)).then(loaded=>{
           const position=o.isMesh&&o.geometry&&o.geometry.attributes.position;
           if(!position)return;
           const normal=o.geometry.attributes.normal;
-          state.customGeometry.push({mesh:o,position:Float32Array.from(position.array),normal:normal?Float32Array.from(normal.array):null});
+          const tangent=o.geometry.attributes.tangent;
+          state.customGeometry.push({mesh:o,position:Float32Array.from(position.array),normal:normal?Float32Array.from(normal.array):null,
+            tangent:tangent?Float32Array.from(tangent.array):null});
         });
       }
       setPartUv(x.m.part,selectedUv);
     }
     root.add(x.scene);
   });
+  window.BatcomputerCharacterAssembly(THREE,loaded);
   // Frame the scene BEFORE anything optional runs: frameAll is what positions the camera, so if
   // a later step throws the camera is left at the origin - inside the character, which reads as a
   // "stuck camera" with no error on screen.
   frameAll();
-  buildPartMover();
+  // Native alignment is read-only. Only buildCustomMeshMover exposes authored edits.
+  buildPartUvPicker();
   buildCustomMeshMover();
   buildRedBrickTintUi();
   buildMaterialEditor();
   applyDefaultPanelLayout();
+  characterWorkshop=window.BatcomputerCharacterWorkshop({THREE,scene,camera,controls,renderer,loaded,root,complete:loaded.length===models.length,
+    onSurfaceSelected:material=>{const index=materialEditorEntries.findIndex(entry=>materialEditorMaterial(entry)===material);
+      const picker=document.querySelector('#matedit select');if(index>=0&&picker){picker.value=String(index);picker.dispatchEvent(new Event('change'));}}});
+  scene.background=null;
 }).catch(e=>say('Scene error: '+(e&&e.stack||e&&e.message||e)));
 addEventListener('error',e=>say('Script error: '+(e&&e.message||e)));
 addEventListener('unhandledrejection',e=>say('Promise error: '+(e&&e.reason&&e.reason.message||e&&e.reason||e)));
 // Calibration aid: arrows move the face piece in 0.004 steps and report the total, so the right
 // permanent offset can be read straight off the HUD instead of guessed.
-addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+addEventListener('resize',()=>{if(characterWorkshop){characterWorkshop.resize();return;}camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
 let skinFixFrame=0;
-(function loop(){requestAnimationFrame(loop);controls.update();renderer.render(scene,camera);
+(function loop(){requestAnimationFrame(loop);controls.update();if(characterWorkshop)characterWorkshop.update();window.characterMeshEditor?.update();renderer.render(scene,camera);
   // Once the face has actually been drawn, swap its band materials (see forceSkinningRecompile).
   if(faceBandMats.length&&!skinningFixed&&++skinFixFrame>2){faceDrawn=true;forceSkinningRecompile();}
   // Project the face onto the head a few frames in, when the skeleton and world

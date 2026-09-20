@@ -73,7 +73,7 @@ internal static class HeldItemService
         ? ["Status.BlockItemGA", "Status.InCombat", "Abilities.Combat.MeleeAttack"] : ["Status.BlockItemGA"];
     internal static bool Persistent(HeldWeaponVisibility mode) => mode is HeldWeaponVisibility.Always or HeldWeaponVisibility.OutsideCombat;
     internal static bool ValidPackage(string path) => !string.IsNullOrWhiteSpace(path) && path.StartsWith('/') &&
-        path.Split('/').Skip(1).All(p => p.Length > 0 && p.All(c => char.IsLetterOrDigit(c) || c == '_')) &&
+        path.Split('/').Skip(1).All(p => p.Length > 0 && p.All(c => char.IsLetterOrDigit(c) || c is '_' or '-')) &&
         ExtractedPackagePathService.IsContentPackagePath(path);
     internal static IReadOnlyList<string> Validate(IReadOnlyList<HeldItemSettings> items)
     {

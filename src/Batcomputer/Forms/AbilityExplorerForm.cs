@@ -217,7 +217,7 @@ public sealed class AbilityExplorerForm : AdaptiveForm
                 RebuildTree();
             }
         };
-        var heldItems = new Button { Text = "Held items…  ·  add / edit / remove", Dock = DockStyle.Fill, Margin = new Padding(0, 5, 8, 0) };
+        var heldItems = new Button { Text = "Held items…", Dock = DockStyle.Fill, Margin = new Padding(0, 5, 8, 0) };
         Theme.StyleDarkButton(heldItems);
         heldItems.Click += (_, _) => {
             using var editor = new HeldItemsForm(HeldItemService.Resolve(_working));
@@ -225,9 +225,39 @@ public sealed class AbilityExplorerForm : AdaptiveForm
             _working.HeldItems = editor.Result.Select(i => i.Clone()).ToList(); _resetToDonor = false;
             _search.Clear(); _view.SelectedIndex = 0; RebuildTree();
         };
-        layout.Controls.Add(heldItems, 0, 4);
+        var extraTools = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
+        extraTools.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50)); extraTools.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        extraTools.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        extraTools.Controls.Add(heldItems, 0, 0);
+        var takedowns = new Button { Text = "Takedowns…", Name = "takedown-presets", Dock = DockStyle.Fill, Margin = new Padding(0, 5, 8, 0) };
+        Theme.StyleDarkButton(takedowns);
+        var menu = new ContextMenuStrip();
+        foreach (var preset in Enum.GetValues<TakedownProfileService.Preset>())
+        {
+            var item = menu.Items.Add(TakedownProfileService.Label(preset));
+            item.Click += (_, _) => ApplyTakedowns(preset);
+        }
+        takedowns.Click += (_, _) => menu.Show(takedowns, new Point(0, takedowns.Height));
+        FormClosed += (_, _) => menu.Dispose();
+        extraTools.Controls.Add(takedowns, 1, 0);
+        layout.Controls.Add(extraTools, 0, 4);
         layout.Controls.Add(swordSettings, 1, 4);
         return card;
+    }
+
+    private void ApplyTakedowns(TakedownProfileService.Preset preset)
+    {
+        if (!Dialog.Confirm(this, "Takedown animations", TakedownProfileService.Label(preset) +
+            "\n\nChanges this melee set's main and existing end-of-encounter takedown grants only. " +
+            "Counters, grabs, movement, equipment and the fighting style stay unchanged. " +
+            "The selected animations must match the body size; cross-character use needs an in-game test. " +
+            "Applying another fighting-style bundle may replace these edits.", confirmText: "Use takedowns")) return;
+        try
+        {
+            TakedownProfileService.Apply(_working, _catalog, preset);
+            _resetToDonor = false; _search.Clear(); _view.SelectedIndex = 0; RebuildTree();
+        }
+        catch (Exception ex) { Dialog.Error(this, "Takedowns were not changed", ex.Message); }
     }
 
     private Control BuildMain()

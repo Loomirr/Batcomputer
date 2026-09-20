@@ -88,6 +88,11 @@ public sealed partial class MainForm
     /// </summary>
     private async Task BuildModForCurrentSuitAsync()
     {
+        if (UsesSelectedModBuild(_workspaceFolder))
+        {
+            BuildActiveModFromWorkspace();
+            return;
+        }
         if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("build the current project’s mod"))
         {
             return;
@@ -162,6 +167,13 @@ public sealed partial class MainForm
 
     private void InstallModForCurrentSuit()
     {
+        if (UsesSelectedModBuild(_workspaceFolder))
+        {
+            var (selected, _) = ResolveHomeActiveMod(ModService.ListMods());
+            if (selected is null) Dialog.Info(this, "Install mod", "Create or select a mod first.");
+            else InstallMod(selected.Path);
+            return;
+        }
         if (BlockSynchronousEditWhileLoadedProjectRestores("Installing the current project’s mod"))
         {
             return;
@@ -276,7 +288,7 @@ public sealed partial class MainForm
         }
 
         var mod = ModService.LoadMod(summary.Path);
-        if (mod?.Suits.Any(entry => entry.Enabled) != true && mod?.Vehicles.Any(entry => entry.Enabled) != true)
+        if (!HasEnabledModContent(mod))
         {
             Dialog.Info(this, "Build mod", "Add at least one enabled character, suit or vehicle to the active mod before building it.");
             return;
@@ -284,6 +296,12 @@ public sealed partial class MainForm
 
         BuildMod(summary.Path);
     }
+
+    private static bool UsesSelectedModBuild(WorkspaceFolder workspace) =>
+        workspace is WorkspaceFolder.Home or WorkspaceFolder.Vehicles;
+
+    internal static bool HasEnabledModContent(NativeSuitModProject? mod) =>
+        mod?.Suits.Any(entry => entry.Enabled) == true || mod?.Vehicles.Any(entry => entry.Enabled) == true;
 
     /// <summary>Build-focused rail screen for the currently active mod workspace.</summary>
     private void RefreshBuildModTiles()
@@ -370,6 +388,14 @@ public sealed partial class MainForm
                 Accent = Theme.Research,
                 OnClick = () => OpenModDetails(modPath, modId),
             });
+            tiles.Add(new VirtualTilePanel.Tile
+            {
+                Section = SectionRelease,
+                Title = "Export editable copy",
+                Subtitle = "share projects, sources, materials and vehicle settings",
+                Accent = Theme.Info,
+                OnClick = () => ExportEditableMod(modPath),
+            });
             if (hasBuild)
             {
                 tiles.Add(new VirtualTilePanel.Tile
@@ -402,6 +428,14 @@ public sealed partial class MainForm
                 OnClick = CreateModFlow,
             });
         }
+        tiles.Add(new VirtualTilePanel.Tile
+        {
+            Section = SectionMods,
+            Title = "Import editable mod",
+            Subtitle = "open a creator archive without replacing your projects",
+            Accent = Theme.Info,
+            OnClick = ImportEditableMod,
+        });
 
         // Keep the build workspace consistent with Home and duplicate detection: every saved mod
         // remains selectable, including older projects beyond the first screenful.
@@ -490,6 +524,14 @@ public sealed partial class MainForm
             Accent = Theme.Gold,
             Dashed = true,
             OnClick = CreateModFlow,
+        });
+        tiles.Add(new VirtualTilePanel.Tile
+        {
+            Section = SectionMods,
+            Title = "Import editable mod",
+            Subtitle = "open a creator archive without replacing your projects",
+            Accent = Theme.Info,
+            OnClick = ImportEditableMod,
         });
 
         try
@@ -584,6 +626,7 @@ public sealed partial class MainForm
         menu.Items.Add("Manage vehicles…", null, (_, _) => EditModVehicles(modProjectPath));
         menu.Items.Add("Rename mod…", null, (_, _) => RenameMod(modProjectPath));
         menu.Items.Add("Change Mod ID…", null, (_, _) => ChangeModId(modProjectPath));
+        menu.Items.Add("Export editable creator copy…", null, (_, _) => ExportEditableMod(modProjectPath));
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         menu.Items.Add("Build mod (trio + config + StringTable)", null, (_, _) => BuildMod(modProjectPath));
         menu.Items.Add("Install mod to game", null, (_, _) => InstallMod(modProjectPath));
@@ -591,6 +634,69 @@ public sealed partial class MainForm
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         menu.Items.Add("Delete mod (keeps projects)", null, (_, _) => DeleteMod(modProjectPath));
         return menu;
+    }
+
+    private async void ExportEditableMod(string modProjectPath)
+    {
+        var mod = ModService.LoadMod(modProjectPath);
+        if (mod is null) { Dialog.Error(this, "Export editable mod", "The selected mod project could not be read."); return; }
+        using var picker = new SaveFileDialog
+        {
+            Title = "Export editable mod",
+            Filter = "Batcomputer editable mod (*.batcomputer-mod.zip)|*.batcomputer-mod.zip|ZIP archive (*.zip)|*.zip",
+            DefaultExt = "batcomputer-mod.zip",
+            AddExtension = true,
+            FileName = ModProjectService.DeriveModId(mod.ModId) + ".batcomputer-mod.zip",
+            OverwritePrompt = false,
+            RestoreDirectory = true,
+        };
+        if (picker.ShowDialog(this) != DialogResult.OK) return;
+        var projectRoot = _projectRootText.Text.Trim();
+        Enabled = false;
+        UseWaitCursor = true;
+        try
+        {
+            var result = await Task.Run(() => new EditableModArchiveService(projectRoot).Export(modProjectPath, picker.FileName));
+            AppendLog($"Editable export: {result.ArchivePath} ({result.Suits} suit(s), {result.Vehicles} vehicle(s), {result.SourceFiles} source file(s)).");
+            Dialog.Info(this, "Editable mod exported", "Created a creator archive with " + result.Suits + " suit(s), " + result.Vehicles + " vehicle(s), and " + result.SourceFiles + " copied source file(s).\n\nNative game assets remain references, so the recipient must set up the same game version and refresh their extraction.");
+        }
+        catch (Exception ex)
+        {
+            AppendLog("Editable export failed: " + ex.Message);
+            Dialog.Error(this, "Could not export editable mod", ex.Message);
+        }
+        finally { Enabled = true; UseWaitCursor = false; }
+    }
+
+    private async void ImportEditableMod()
+    {
+        using var picker = new OpenFileDialog
+        {
+            Title = "Import editable Batcomputer mod",
+            Filter = "Batcomputer editable mod (*.batcomputer-mod.zip;*.zip)|*.batcomputer-mod.zip;*.zip",
+            CheckFileExists = true,
+            RestoreDirectory = true,
+        };
+        if (picker.ShowDialog(this) != DialogResult.OK) return;
+        var projectRoot = _projectRootText.Text.Trim();
+        Enabled = false;
+        UseWaitCursor = true;
+        try
+        {
+            var result = await Task.Run(() => new EditableModArchiveService(projectRoot).Import(picker.FileName));
+            _homeActiveModProjectPath = result.ModProjectPath;
+            AppendLog($"Editable import: {result.ModId} ({result.Suits} suit(s), {result.Vehicles} vehicle(s)); copied {result.SourceFiles} source file(s).");
+            AppendLog("  Imported project: " + result.ModProjectPath);
+            AppendLog("  Copied source files: " + result.SourceFolder);
+            Dialog.Info(this, "Editable mod imported", "Imported " + result.ModId + " without overwriting existing projects. Review its bases and materials, then rebuild before installing.\n\nNative donor references are intentionally refreshed from this workspace's current extraction.");
+            RefreshWorkspaceAfterModChange();
+        }
+        catch (Exception ex)
+        {
+            AppendLog("Editable import failed: " + ex.Message);
+            Dialog.Error(this, "Could not import editable mod", ex.Message);
+        }
+        finally { Enabled = true; UseWaitCursor = false; }
     }
 
     private void CreateModFlow()
@@ -624,17 +730,18 @@ public sealed partial class MainForm
         }
 
         var mod = new NativeSuitModProject { ModId = modId, DisplayName = name.Trim() };
-        var picked = PickSuits(modId, alreadyIn: new HashSet<string>(StringComparer.OrdinalIgnoreCase));
-        if (picked is null)
+        if (_workspaceFolder != WorkspaceFolder.Vehicles)
         {
-            return; // cancelled
+            var picked = PickSuits(modId, alreadyIn: new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+            if (picked is null) return;
+            AddSuitEntries(mod, picked);
         }
-        AddSuitEntries(mod, picked);
 
         var saved = ModService.SaveMod(mod);
         _homeActiveModProjectPath = saved;
         AppendLog($"Created mod '{mod.DisplayName}' ({modId}) with {DescribeModContent(mod)}: {saved}");
         RefreshWorkspaceAfterModChange();
+        if (_workspaceFolder == WorkspaceFolder.Vehicles) EditModVehicles(saved);
     }
 
     private void RenameMod(string modProjectPath)
@@ -905,6 +1012,8 @@ public sealed partial class MainForm
                 changes.Add(new(src, Path.Combine(result.AssetRegistryDestination, relative)));
             }
             // Delete obsolete plugin-local tags inside the transaction, so failure restores them too.
+            foreach (var dependency in CharacterModeAccessService.DependencyFiles(outRoot))
+                changes.Add(new(dependency.Source, Path.Combine(gameRoot, dependency.Relative.Replace('/', Path.DirectorySeparatorChar))));
             changes.Add(new(null, Path.Combine(result.AssetRegistryDestination, "Config", "Tags", $"{mod.ModId}Tags.ini")));
             ModReleaseStep("Installing and verifying the complete release…");
             var transaction = new ModInstallTransactionService().Install(gameRoot, changes);
@@ -1097,6 +1206,8 @@ public sealed partial class MainForm
                 var source = trioBase + extension;
                 AddRequired(source, $"{ArchiveRoot}/LEGOBatmanLotDK/Content/Paks/~mods/Expanded/{Path.GetFileName(source)}");
             }
+            foreach (var dependency in CharacterModeAccessService.DependencyFiles(outRoot))
+                AddRequired(dependency.Source, $"{ArchiveRoot}/LEGOBatmanLotDK/{dependency.Relative}");
 
             AddRequired(
                 Path.Combine(outRoot, "mod.json"),
@@ -1121,9 +1232,9 @@ public sealed partial class MainForm
                     $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{plugin.PluginName}/{relative}"));
             }
         }
-        catch (FileNotFoundException ex)
+        catch (Exception ex) when (ex is FileNotFoundException or InvalidDataException)
         {
-            var missing = string.IsNullOrWhiteSpace(ex.FileName) ? ex.Message : ex.FileName;
+            var missing = ex is FileNotFoundException file && !string.IsNullOrWhiteSpace(file.FileName) ? file.FileName : ex.Message;
             Dialog.Warn(this, "Zip mod",
                 "This mod needs a complete successful build before it can be archived.\n\nMissing:\n" + missing);
             return;
@@ -1291,6 +1402,17 @@ public sealed partial class MainForm
             var missing = CustomCharacterRegistrationService.MissingDonorFiles(nativeContent);
             if (missing.Count > 0)
                 result.AddError("character registration", CustomCharacterRegistrationService.MissingDonorMessage(nativeContent, missing));
+            try
+            {
+                var projects = inputs.Select(i => i.Project).OfType<NativeSuitProject>().ToArray();
+                _ = CharacterModeAccessService.Render(projects);
+                if (CharacterModeAccessService.RequiresHelper(projects))
+                {
+                    CharacterModeAccessService.ValidateBundledHelper();
+                    result.AddWarning("game modes", "Experimental Mayhem/Both access includes a build-guarded UE4SS helper. Requires the Mayhem DLC and in-game verification.");
+                }
+            }
+            catch (Exception ex) { result.AddError("game modes", ex.Message); }
         }
         try
         {
@@ -1300,6 +1422,8 @@ public sealed partial class MainForm
             {
                 VehicleAssetService.Validate(vehicle, VehicleService.DirectoryFor(vehicle), AppSettings.Current.EffectiveExtractedContentRoot());
                 result.AddWarning("vehicle", VehicleAssetService.Warning, vehicle.Id);
+                if (VehicleDonorService.Get(vehicle).RequiredDlc is { } dlc)
+                    result.AddWarning("vehicle", "This vehicle requires " + dlc + " for anyone installing the mod.", vehicle.Id);
             }
         }
         catch (Exception ex) { result.AddError("vehicle", ex.Message); }
@@ -1927,6 +2051,7 @@ public sealed partial class MainForm
             timing.Mark("registry");
             preflight.Result.AddInfo("Asset Registry", $"Verified {registry.Rows.Count} primary-asset row(s).");
             CustomCharacterRegistrationService.WriteRosterConfig(registry.Layout.PluginDirectory, preparedSuits);
+            CharacterModeAccessService.Stage(outRoot, registry.Layout.PluginDirectory, preparedSuits);
             if (string.IsNullOrWhiteSpace(tagConfigPath) || !File.Exists(tagConfigPath))
             {
                 preflight.Result.AddError("Gameplay tags", $"The generated loose tag file for '{mod.ModId}' is missing.");

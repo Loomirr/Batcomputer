@@ -12,6 +12,14 @@ internal static class CustomCharacterUiRegressionChecks
             try
             {
                 // Test code-built controls only; no shown windows, desktop interaction or game.
+                using var browser = new CharacterBrowserList { Size = new Size(260, 300) };
+                var browserEntry = new CharacterCatalogService.Entry("BatGirl ArkhamKnight", CharacterCatalogService.Source.Playable, "/Game/Fixture/BP");
+                browser.Items.Add(browserEntry); browser.SelectedIndex = 0;
+                using var browserBitmap = new Bitmap(260, 300);
+                browser.DrawToBitmap(browserBitmap, new Rectangle(0, 0, 260, 300));
+                results.Add((browser.ItemHeight >= browser.Font.Height + Theme.Caption.Height + 16 &&
+                    ReferenceEquals(browser.SelectedItem, browserEntry) && CharacterBrowserList.DisplayName(browserEntry.Name) == "Bat Girl Arkham Knight",
+                    "character browser paints two-line rows while retaining original catalogue identities and readable labels"));
                 using var identity = new CharacterIdentityDialog("Character identity", "Character ID (fixed)", "Moon Knight", "MoonKnight", lockedId: true,
                     note: "Pawns.Playable.MoonKnight.MoonKnight\nUnlocked by default; owner and IDs remain fixed.");
                 _ = identity.Handle; identity.ClientSize = new Size(680, 550); identity.PerformLayout();
@@ -19,6 +27,11 @@ internal static class CustomCharacterUiRegressionChecks
                 results.Add((boxes.Length == 4 && boxes.All(box => box.Width >= 180 && box.Height >= (box.Multiline ? 50 : box.PreferredHeight)) && boxes.Single(box => box.Text == "MoonKnight").ReadOnly,
                     "character identity fields remain usable at minimum width and permanent IDs are read-only"));
                 using var create = new CharacterIdentityDialog("New suit", "Suit ID", "Unhooded", ownerId: "MoonKnight");
+                using var symbol = new CharacterSymbolDialog("Moon Knight", "");
+                _ = symbol.Handle; symbol.PerformLayout();
+                results.Add((Descendants(symbol).OfType<Button>().Any(b => b.Name == "import-symbol") &&
+                    Descendants(symbol).OfType<Button>().Any(b => b.Name == "reset-symbol") && symbol.SymbolPngBase64 == "",
+                    "character symbol editor exposes import and reset without mutating the saved identity"));
                 var idBox = (TextBox)typeof(CharacterIdentityDialog).GetField("_id", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(create)!;
                 var preview = (TextBox)typeof(CharacterIdentityDialog).GetField("_preview", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(create)!;
                 results.Add((create.TechnicalId == "Unhooded" && preview.Text.Contains("Pawns.Playable.MoonKnight.Unhooded"),

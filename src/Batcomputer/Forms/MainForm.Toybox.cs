@@ -860,7 +860,7 @@ public sealed partial class MainForm
     private void UpdateToyboxChips()
     {
         _toyboxSaveButton.Visible = _workspaceFolder != WorkspaceFolder.Vehicles;
-        _toyboxPackageButton.Visible = _workspaceFolder != WorkspaceFolder.Vehicles;
+        _toyboxPackageButton.Visible = true;
         var hasBase = HasCurrentSuitBase();
         // The dot is drawn by the pill, so the text is just the label now.
         _toyboxStatusChip.Text = hasBase ? "base set" : "no base yet";
@@ -872,7 +872,14 @@ public sealed partial class MainForm
         SetHeaderCommandState(_toyboxSaveButton, hasOpenSuit, isPrimary: false,
             readyHint: "Save the current suit project",
             unavailableHint: "Create or open a suit before saving.");
-        SetHeaderCommandState(_toyboxPackageButton, hasOpenSuit && hasBase, isPrimary: true,
+        if (UsesSelectedModBuild(_workspaceFolder))
+        {
+            var (summary, mod) = ResolveHomeActiveMod(ModService.ListMods());
+            SetHeaderCommandState(_toyboxPackageButton, HasEnabledModContent(mod), isPrimary: true,
+                readyHint: "Build selected mod: " + summary?.DisplayName,
+                unavailableHint: "Select a mod and add an enabled character, suit or vehicle.");
+        }
+        else SetHeaderCommandState(_toyboxPackageButton, hasOpenSuit && hasBase, isPrimary: true,
             readyHint: "Build and install the current suit's mod",
             unavailableHint: "Set a visual base and gameplay donor before building a mod.");
         RefreshHeaderMeta();

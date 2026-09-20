@@ -98,6 +98,7 @@ public sealed class GameAssetRefreshService
         "Global/Collectables/MetaData/RedBrickEffects/GameplayAbilities/Characters/GA_RedBrickAbility_CharacterCombat",
         "Global/Collectables/Pickups/GA_HidePickupsForPlayer",
         "Global/Conversations/Blueprints/GA_ConversationAbility_Radial",
+        "Global/Conversations/Blueprints/GA_ConversationAbility_PartyMoveTo",
         "Global/DinnerActivities/PhotofitChase/GA_PhotofitArrest_Radial",
         "Global/GameplayCuesShared/GC_AddAimInfluence",
         "Global/WeatherSystem/GA_LightningElectrocution",
@@ -552,6 +553,62 @@ public sealed class GameAssetRefreshService
         string contentRoot,
         IEnumerable<string> pluginAssets) => CountDlcCharacterBlueprints(contentRoot, pluginAssets);
 
+    internal sealed record VehicleBaseUpdate(string ContentRoot, IReadOnlyList<string> Added, IReadOnlyList<VehicleDonorService.Donor> StillUnavailable, IReadOnlyList<string> Logs);
+
+    /// <summary>
+    /// Quick, additive update of the active extract: extracts only the driving-base packages it is missing (base game and
+    /// installed DLC) into that same extract. No new dump, no settings change, no index rebuild.
+    /// </summary>
+    internal static async Task<VehicleBaseUpdate> AddMissingVehicleBasesAsync(string activeContentRoot, CancellationToken cancellationToken, IProgress<Progress>? progress = null)
+    {
+        var settings = AppSettings.Current;
+        var retoc = settings.EffectiveRetocExePath();
+        var paksRoot = settings.EffectiveGamePaksRoot();
+        if (!File.Exists(retoc)) throw new FileNotFoundException("retoc.exe was not found. Open Setup and select it.", retoc);
+        if (!Directory.Exists(paksRoot)) throw new DirectoryNotFoundException($"Game Paks folder was not found: {paksRoot}");
+        var contentRoot = Path.GetFullPath(activeContentRoot);
+        var outputRoot = Directory.GetParent(contentRoot)?.Parent?.FullName;
+        if (!Directory.Exists(contentRoot) || outputRoot is null || !string.Equals(Path.GetFileName(Path.GetDirectoryName(contentRoot)), "LEGOBatmanLotDK", StringComparison.OrdinalIgnoreCase))
+            throw new DirectoryNotFoundException("Run a full asset refresh first: no usable extracted LEGOBatmanLotDK\\Content folder is active.");
+
+        var missing = VehicleDonorService.All.SelectMany(d => d.Required.Concat([d.SummonMesh, d.SummonSkeleton]))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(package => !VehicleDonorService.PackageComplete(contentRoot, package))
+            .ToArray();
+        var logs = new List<string>();
+        if (missing.Length == 0)
+            return new(contentRoot, [], [], ["Every vehicle driving base is already extracted."]);
+
+        var dlcRoot = DlcRootForPaksRoot(paksRoot);
+        string? mount = null;
+        try
+        {
+            var input = paksRoot;
+            if (CountIoStoreContainers(dlcRoot) > 0)
+            {
+                progress?.Report(new Progress(3, "Preparing", "Mounting base-game script data with DLC containers…"));
+                mount = CreateCombinedContainerMount(paksRoot, dlcRoot, outputRoot);
+                input = mount;
+            }
+            for (var i = 0; i < missing.Length; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var filter = VehicleDonorService.ExtractionFilter(missing[i]);
+                progress?.Report(new Progress(5 + i * 90 / missing.Length, "Extracting", filter));
+                var command = await RunRetocAsync(retoc, input, outputRoot, filter, cancellationToken);
+                if (command.ExitCode != 0)
+                    throw new InvalidOperationException($"retoc failed for '{filter}' (exit {command.ExitCode}).\n" + string.Join(Environment.NewLine, command.ErrorLines.Concat(command.OutputLines).TakeLast(8)));
+                logs.Add("Extracted " + filter);
+            }
+        }
+        finally
+        {
+            TryDeleteCombinedContainerMount(mount);
+        }
+        var added = missing.Where(package => VehicleDonorService.PackageComplete(contentRoot, package)).ToArray();
+        return new(contentRoot, added, VehicleDonorService.All.Where(d => !d.IsAvailable(contentRoot)).ToArray(), logs);
+    }
+
     public static IReadOnlyList<string> FiltersFor(RefreshProfile profile) => profile switch
     {
         RefreshProfile.AllCharacterAssets => AllCharacterFilters,
@@ -982,16 +1039,12 @@ public sealed class GameAssetRefreshService
                 "The installed game build may not match Batcomputer's material catalog.");
         }
 
-        var missingDependencyPackages = CharacterDependencyAbilitySentinelPackages
-            .Where(package => !File.Exists(Path.Combine(
-                contentRoot,
-                package.Replace('/', Path.DirectorySeparatorChar) + ".uasset")))
-            .ToList();
+        var missingDependencyPackages = MissingCharacterDependencyFiles(contentRoot);
         if (missingDependencyPackages.Count > 0)
         {
             throw new InvalidDataException(
                 $"retoc completed, but {missingDependencyPackages.Count} serialized character-dependency " +
-                "ability package(s) were not extracted: " +
+                "ability file(s) were not extracted or were empty: " +
                 string.Join(", ", missingDependencyPackages.Select(package => "/Game/" + package)) + ". " +
                 "The previous extracted dump remains active. Verify the original game Content\\Paks folder and retry the refresh.");
         }
@@ -1006,6 +1059,15 @@ public sealed class GameAssetRefreshService
                 "Verify the original game Content\\Paks folder and retry with the updated full-character or developer profile.");
         result.Logs.Add("Custom-character registration donors verified: character group + PROG_Characters (complete asset/uexp pairs).");
     }
+
+    internal static IReadOnlyList<string> MissingCharacterDependencyFiles(string contentRoot) =>
+        CharacterDependencyAbilitySentinelPackages
+            .SelectMany(package => new[] { ".uasset", ".uexp" }.Select(extension => package + extension))
+            .Where(relative =>
+            {
+                var path = Path.Combine(contentRoot, relative.Replace('/', Path.DirectorySeparatorChar));
+                return !File.Exists(path) || new FileInfo(path).Length == 0;
+            }).ToArray();
 
     private static string? FindContentRoot(string outputRoot, bool requireCharacters = true)
     {

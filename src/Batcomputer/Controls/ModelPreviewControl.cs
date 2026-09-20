@@ -12,6 +12,23 @@ namespace Batcomputer;
 /// </summary>
 public sealed class ModelPreviewControl : UserControl
 {
+    internal async Task NotifyCustomMeshDraftAsync(string component, PreviewCustomMeshTransform transform, string? error = null)
+    {
+        if (_web?.CoreWebView2 is not { } core) return;
+        var data = JsonSerializer.Serialize(new { scale = transform.Scale,
+            offset = new[] { transform.OffsetX, transform.OffsetY, transform.OffsetZ },
+            rotation = new[] { transform.RotationPitch, transform.RotationYaw, transform.RotationRoll } });
+        try { await core.ExecuteScriptAsync($"window.characterMeshEditor?.draftResult({JsonSerializer.Serialize(component)},{data},{JsonSerializer.Serialize(error)})"); }
+        catch (Exception ex) { Debug.WriteLine("Preview draft acknowledgement: " + ex.Message); }
+    }
+
+    internal async Task NotifyCustomMeshBakeFailedAsync(string error)
+    {
+        if (_web?.CoreWebView2 is not { } core) return;
+        try { await core.ExecuteScriptAsync($"window.characterMeshEditor?.bakeFailed({JsonSerializer.Serialize(error)})"); }
+        catch (Exception ex) { Debug.WriteLine("Preview bake acknowledgement: " + ex.Message); }
+    }
+
     private string _virtualHost = "preview.batcomputer";
     private WebView2? _web;
     private readonly Label _message = new()
@@ -33,6 +50,7 @@ public sealed class ModelPreviewControl : UserControl
     /// <summary>Raised when the in-viewer part mover asks the host to persist an alignment.</summary>
     public event EventHandler<PreviewPlacementSaveRequestedEventArgs>? PlacementSaveRequested;
     internal event Action<string>? VehicleWorkshopMessageReceived;
+    internal static bool IsVehicleWorkshopMessage(string? type) => type is "vehicleWorkshopSave" or "vehicleWorkshopReady" or "vehicleWorkshopError" or "vehicleWorkshopSettings" or "vehicleWorkshopCopyMaterial" or "vehicleWorkshopRiders" or "vehicleWorkshopToybox" or "vehicleWorkshopSurface";
     internal async Task ShowVehicleRidersAsync(string json)
     {
         if (_web?.CoreWebView2 is { } core) await core.ExecuteScriptAsync("window.vehicleWorkshop?.loadRiders(" + json + ")");
@@ -157,6 +175,44 @@ public sealed class ModelPreviewControl : UserControl
         }
     }
 
+    internal static bool IsCharacterExportDownload(string uri, string host, string path) =>
+        uri.StartsWith($"blob:https://{host}/", StringComparison.OrdinalIgnoreCase) &&
+        Path.GetExtension(path).Equals(".glb", StringComparison.OrdinalIgnoreCase);
+
+    internal static void ConfigureCharacterExportDownloads(WebView2 web, Control owner, Func<string> currentHost, Func<bool> isCurrent)
+    {
+        web.CoreWebView2.DownloadStarting += (_, download) =>
+        {
+            download.Cancel = true;
+            download.Handled = true;
+            if (!IsCharacterExportDownload(download.DownloadOperation.Uri, currentHost(), download.ResultFilePath)) return;
+            var host = currentHost();
+            var deferral = download.GetDeferral();
+            try
+            {
+                owner.BeginInvoke(new Action(() =>
+                {
+                    try
+                    {
+                        if (owner.IsDisposed || host != currentHost() || !isCurrent()) return;
+                        using var dialog = new SaveFileDialog
+                        {
+                            Title = "Export assembled character", Filter = "glTF binary (*.glb)|*.glb",
+                            DefaultExt = "glb", AddExtension = true, OverwritePrompt = true,
+                            FileName = "Character-assembled.glb",
+                        };
+                        if (dialog.ShowDialog(owner) != DialogResult.OK) return;
+                        if (!Path.GetExtension(dialog.FileName).Equals(".glb", StringComparison.OrdinalIgnoreCase)) return;
+                        download.ResultFilePath = dialog.FileName;
+                        download.Cancel = false;
+                    }
+                    finally { deferral.Complete(); }
+                }));
+            }
+            catch (InvalidOperationException) { deferral.Complete(); }
+        };
+    }
+
     private async Task<bool> InitAsync()
     {
         try
@@ -180,6 +236,7 @@ public sealed class ModelPreviewControl : UserControl
             }
             web.CoreWebView2.Settings.AreDevToolsEnabled = false;
             web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+            ConfigureCharacterExportDownloads(web, this, () => _virtualHost, () => ReferenceEquals(web, _web));
             web.CoreWebView2.WebMessageReceived += (_, message) =>
             {
                 if (message.Source.StartsWith($"https://{_virtualHost}/", StringComparison.OrdinalIgnoreCase))
@@ -206,7 +263,7 @@ public sealed class ModelPreviewControl : UserControl
             {
                 using var document = JsonDocument.Parse(json);
                 if (document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String &&
-                    type.GetString() is "vehicleWorkshopSave" or "vehicleWorkshopReady" or "vehicleWorkshopError" or "vehicleWorkshopSettings" or "vehicleWorkshopCopyMaterial" or "vehicleWorkshopRiders")
+                    IsVehicleWorkshopMessage(type.GetString()))
                     BeginInvoke(() => { if (!IsDisposed) VehicleWorkshopMessageReceived?.Invoke(json); });
             }
             catch (JsonException) { /* Ignore malformed viewer messages. */ }

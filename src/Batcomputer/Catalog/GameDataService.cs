@@ -67,13 +67,17 @@ public sealed class GameDataService
     /// (case-insensitive). Powers pickers/browsers: pass
     /// "MaterialInstanceConstant", "Texture2D", "DinnerCharacterMetaData",
     /// "TtPawnUIMetaData", "StaticMesh", etc.
-    /// Material instances and animation assets merge the shipped fallback with compatible assets
-    /// discovered in the active extracted Content tree; other classes use the shipped catalog.
+    /// Materials, animations and character attachment meshes merge the shipped fallback with
+    /// the active extracted Content tree; other classes use the shipped catalog.
     /// </summary>
     public IEnumerable<GameDataAsset> AssetsOfClass(string className)
     {
         var shipped = Db.Assets
             .Where(asset => asset.Class.Equals(className, StringComparison.OrdinalIgnoreCase));
+        if (className.Equals("StaticMesh", StringComparison.OrdinalIgnoreCase) ||
+            className.Equals("SkeletalMesh", StringComparison.OrdinalIgnoreCase))
+            return ExtractedAttachmentMeshCatalogService.MergeWithActiveExtraction(shipped,
+                className.Equals("StaticMesh", StringComparison.OrdinalIgnoreCase) ? "StaticMesh" : "SkeletalMesh");
         if (className.Equals("MaterialInstanceConstant", StringComparison.OrdinalIgnoreCase))
         {
             return ExtractedMaterialCatalogService.MergeWithActiveExtraction(shipped);
@@ -172,6 +176,10 @@ public sealed class GameDataService
     public GameDataAnimSet? CharacterComposite(string familyName, string kind)
     {
         var prefix = kind.Equals("Montage", StringComparison.OrdinalIgnoreCase) ? "MAS_Char_" : "LAS_Char_";
+        var family = FindFamily(familyName);
+        var package = kind.Equals("Montage", StringComparison.OrdinalIgnoreCase) ? family?.MontageAnimSet : family?.LayerAnimSet;
+        if (!string.IsNullOrEmpty(package))
+            return Db.AnimSets.FirstOrDefault(a => a.Package.Equals(package, StringComparison.OrdinalIgnoreCase));
         return FindAnimSet(prefix + familyName);
     }
 
@@ -206,6 +214,7 @@ public sealed class GameDataService
             // compact cooked BP token such as RobinDickGrayson for Robin_DickGrayson.
             var compactFamily = new string(family.Name.Where(char.IsLetterOrDigit).ToArray());
             if (text.Contains($"/Minifig/{family.Name}/", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains($"/Playables/{family.Name}/", StringComparison.OrdinalIgnoreCase) ||
                 text.Contains($"/Smallfig/{family.Name}/", StringComparison.OrdinalIgnoreCase) ||
                 text.Contains($".{family.Name}.", StringComparison.OrdinalIgnoreCase) ||
                 text.Contains($"_{family.Name}_", StringComparison.OrdinalIgnoreCase) ||

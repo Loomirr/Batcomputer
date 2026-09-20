@@ -22,7 +22,7 @@ Close the game before building, then choose **Build mod**:
 
 ![Build Mod workspace](../assets/screenshots/build-mod-workspace.jpg){ .bc-doc-shot loading=lazy }
 
-1. Stages every enabled suit and shared mod asset.
+1. Stages every enabled suit, vehicle and shared mod asset. Vehicle-only mods are supported.
 2. Validates the staged cooked data.
 3. Writes gameplay tags and native Asset Registry data.
 4. Builds the pak/ucas/utoc trio.
@@ -60,11 +60,29 @@ Test at least:
 
 On **Home** → **Build mod**, choose the **Zip _mod name_** tile after a successful build. The archive
 uses game-relative paths
-and starts above `LEGOBatmanLotDK`, so users can extract it into their Steam `common` directory or
+and starts above `LEGOBatmanLotDK`, so users can extract it into the game's installation directory or
 install it with a compatible mod manager.
 
 Suit releases require Loomirr's LOTDK UE4SS. They must not include or overwrite its shared
 `LOTDKExpandedCoreRegistry`.
+
+## Share an editable project
+
+The release ZIP is for players. To let another creator continue editing a mod, select it on
+**Home** → **Build mod** and choose **Export editable copy**. The creator archive contains the
+saved mod, suit and vehicle recipes plus source images, meshes, their project-owned import caches,
+and cooked custom materials with their texture dependencies. Save your edits before exporting.
+Native game assets remain references; the game itself, UE4SS, mappings and saves are not included.
+
+The recipient chooses **Import editable mod**. Import refuses a duplicate Mod ID, suit ID or
+vehicle ID, pawn tag or character package. An existing identical shared material can be reused;
+a different material at the same package path blocks import. Use a clean workspace for a direct handoff, then review the native donors, run a current
+extraction/refresh, and rebuild before installing. The source files are copied into the receiving
+workspace, so later edits do not depend on the sender's folders.
+
+Re-export archives made with the earlier experimental sharing format. Missing source files now
+stop export with an explanation. Imported custom animation libraries are not transferred yet;
+projects referencing them are rejected rather than exported with missing dependencies.
 
 ## Before publishing
 

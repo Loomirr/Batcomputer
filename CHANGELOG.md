@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- Fixes the empty Home library on first launch; saved content loads without switching tabs.
+  The viewer's My library separates character definitions from suits with labeled, bordered rows
+  and searchable project IDs.
+
+- Adds Joker/Harley DLC suit support, refreshed attachment discovery, custom character symbols,
+  and explicit Normal/Mayhem/Both character policies with the compatible mode-access helper.
+- Modernizes the character workshop: assembly inspection, separate glider display, native
+  attachment placement, custom-part gizmos and keyboard shortcuts, preview UV selection,
+  detail normals, compatible Red Brick previews, and improved textured GLB export.
+- Adds editable mod archives for transferring suit/vehicle recipes, source files, import caches
+  and custom material dependencies without distributing extracted native assets.
+- Improves vehicle-only builds, donor selection, material editing, custom icons, attachments,
+  seats and workshop previews. Summon/build-up meshes remain separately authored and experimental.
+- Hardens skinned-mesh cooking with short workspaces and rig checks; improves DLC metadata/schema
+  handling, face replacement, height-specific takedown options and paired-cape donor dialogue.
+- Acceptance testing passed the Nightwing voice/cape and selected-suit face-animation checks.
+  A Retro/Talia test summon mesh remained invisible; other tested vehicle workflows passed.
+
 - Refreshes the README and Pages guides with the custom-character and equipment workflows, clearer icon instructions, and generic character examples. README guide links now open the documentation site.
 
 - Equipment icon rows now distinguish direct HUD SDF inputs, material SDF inputs, upgrade variants and BCA color artwork. Selection help explains which cook belongs in each binding and keeps unverified HUD conversion behavior explicit.

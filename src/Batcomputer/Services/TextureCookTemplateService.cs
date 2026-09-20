@@ -18,6 +18,7 @@ internal static class TextureCookTemplateService
     private const int InlineMipInterRecordBytes = 0x10;
     public const string NativeSuitIconTemplateFolder = "TextureStandaloneTemplate_SuitIconUI_BC7";
     public const string NativeCharacterIconTemplateFolder = "TextureStandaloneTemplate_CharacterIconUI_BC7";
+    public const string VehicleIconTemplateFolder = "TextureStandaloneTemplate_VehicleIcon512x340_BC7";
     public const string NativeMmrTemplateFolder = "TextureStandaloneTemplate_EoMMMR_DXT1";
     public const string NativeFaceDetailColorTemplateFolder = "TextureStandaloneTemplate_FaceDetail256x128_BC7";
     public const string NativeFaceArtTemplateFolder = "TextureStandaloneTemplate_FaceArt512_BC7";
@@ -104,6 +105,12 @@ internal static class TextureCookTemplateService
 
     private static readonly Definition[] Definitions =
     {
+        new(VehicleIconTemplateFolder, "T_UI_IconVeh_Batmobile1995_BatmanForever_BCA.json",
+            "UI/Icons/Vehicles/T_UI_IconVeh_Batmobile1995_BatmanForever_BCA",
+            "/Game/UI/Icons/Vehicles/T_UI_IconVeh_Batmobile1995_BatmanForever_BCA",
+            512, 340, "PF_BC7", 1, 10, 0, 0x78, 0, 1259, 233556, 0,
+            "46E58660011C6FB19DDDBFB99FEFE0551DBFA637339B55D9E9C3162A9DE4C499",
+            "8596B08DA68E5A93431DA3E3AA0AC7E11DB857EBAFE88F1C48E519F1036F9F64", ""),
         new(EquipmentAccentTemplateFolder, "T_UI_IconBatarang_SDF.json", "UI/Icons/Gadgets/T_UI_IconBatarang_SDF",
             "/Game/UI/Icons/Gadgets/T_UI_IconBatarang_SDF", 64, 64, "PF_B8G8R8A8", 4, 7, 0, 123, 0,
             1058, 22091, 0,
@@ -719,6 +726,7 @@ internal static class TextureCookTemplateService
     // import the original world textures; a Full refresh adds the new donor
     // packages and makes each matching profile available automatically.
     private static bool IsOptionalProfileDefinition(Definition definition) =>
+        definition.Folder == VehicleIconTemplateFolder ||
         definition.Folder == EquipmentSdfTemplateFolder ||
         definition.Folder == EquipmentAlphaTemplateFolder || definition.Folder == EquipmentColorTemplateFolder ||
         definition.Folder == EquipmentAccentTemplateFolder ||

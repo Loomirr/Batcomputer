@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- [Character workshop](../guides/character-workshop.md): complete assembly inspection, native
+  offsets, separate gliders, custom-part gizmos, preview UV controls and textured GLB exports.
+- [Editable sharing](../guides/build-test-share.md#share-an-editable-project) transfers mod/suit/
+  vehicle recipes and project-owned dependencies into another creator's workspace.
+- DLC Joker/Harley suit support, refreshed part discovery, custom character symbols and
+  [Normal/Mayhem/Both policies](../guides/character-modes.md).
+- Vehicle-only builds, expanded vehicle authoring and donor choices; build-up models remain
+  experimental and need their own gameplay check.
+- Skinned import/cook hardening, face replacement fixes, height-specific takedown options and
+  corrected paired-cape gameplay-donor dialogue. See the [acceptance notes](../guides/development-roadmap.md#after-this-release)
+  for tested scope and remaining limitations.
+
 - Custom characters have their own editor and default suit, with additional suits grouped under the same character. See [Custom characters](../guides/custom-characters.md).
 - The [equipment workshop](../guides/equipment-workshop.md) supports custom models, model/settings copy and paste, and a shared UI-texture picker. Icon entries distinguish direct SDF inputs, material SDF inputs, upgrade icons, and BCA color textures.
 - The icon guide now starts with a single white PNG and explains conversion and assignment. Automatic SDF conversion still needs in-game validation.

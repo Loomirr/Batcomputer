@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Drawing;
+using Newtonsoft.Json.Linq;
 using UAssetAPI;
 using UAssetAPI.ExportTypes;
 using UAssetAPI.Kismet.Bytecode.Expressions;
@@ -16,6 +17,18 @@ internal static class VehicleLightService
     private static string _mapKey = "";
     private static Usmap? _maps;
     internal static bool IsSource(string id) => id is "H_Light_01_Light_GEN_VARIABLE" or "H_Light_02_Light_GEN_VARIABLE" or "R_Light_01_Light_GEN_VARIABLE" or "R_Light_02_Light_GEN_VARIABLE";
+    internal static bool SupportsBeam(VehicleDonorService.Donor donor, string id) => IsSource(id) && (donor.FullWorkshop || donor.HeadlightEditing && id.StartsWith("H_", StringComparison.Ordinal));
+    internal static VehicleLightSettings ReadDefaults(string id, Newtonsoft.Json.Linq.JToken? properties)
+    {
+        var result = Defaults(id);
+        result.Intensity = properties?["Intensity"]?.Value<float>() ?? result.Intensity;
+        result.Radius = properties?["AttenuationRadius"]?.Value<float>() ?? result.Radius;
+        result.OuterCone = properties?["OuterConeAngle"]?.Value<float>() ?? result.OuterCone;
+        result.R = properties?["LightColor"]?["R"]?.Value<int>() ?? result.R;
+        result.G = properties?["LightColor"]?["G"]?.Value<int>() ?? result.G;
+        result.B = properties?["LightColor"]?["B"]?.Value<int>() ?? result.B;
+        return result;
+    }
     internal static bool IsClass(string? name) => name is "BP_VehicleLight_Player_HeadLight_C" or "BP_VehicleLight_Player_Rearlight_C" or "BP_VehicleLight_Player_RearLight_C";
     internal static Usmap Maps
     {

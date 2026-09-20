@@ -543,12 +543,11 @@ internal static class TextureDecodeService
     }
 
     /// <summary>
-    /// Bakes a normal map with the game's micro-surface noise overlaid, Z rebuilt. The recreated
-    /// shader graphs overlay T_Noise_Norm_SEB_N (tiled <paramref name="tile"/>x, 6.9 in M_TPAGE) over
-    /// the part's base normal - the subtle injection-moulded plastic texture. Both live in the same
-    /// UV space, so the overlay can be baked into one texture offline.
+    /// Approximates the material's primary micro-noise channel over the structural UV normal.
+    /// Uses authored tiling/strength and prefilters sub-texel noise before baking; this is not
+    /// a full reproduction of Unreal's multi-channel, colour-mask-dependent micro-detail shader.
     /// </summary>
-    public static bool TryBakeNoisedNormal(UTexture2D baseNrm, UTexture2D? noise, float tile, string destPath)
+    public static bool TryBakeNoisedNormal(UTexture2D baseNrm, UTexture2D? noise, float tile, string destPath, float noiseStrength = 1f)
     {
         var b = TryDecode(baseNrm);
         if (b is null)
@@ -556,6 +555,7 @@ internal static class TextureDecodeService
             return false;
         }
         var n = noise is null ? null : TryDecode(noise);
+        if (n is not null) n = PrefilterNormalNoise(n, b.Width, b.Height, tile);
 
         static float Overlay(float a, float x) => a < 0.5f ? 2f * a * x : 1f - 2f * (1f - a) * (1f - x);
 
@@ -580,8 +580,8 @@ internal static class TextureDecodeService
                             var nv = y / (float)h * tile % 1f;
                             var np = n.Pixels[Math.Clamp((int)(nv * n.Height), 0, n.Height - 1) * n.Width
                                               + Math.Clamp((int)(nu * n.Width), 0, n.Width - 1)];
-                            rx = Overlay(rx, np.r / 255f);
-                            gy = Overlay(gy, np.g / 255f);
+                            rx = Overlay(rx, Math.Clamp(.5f + (np.r / 255f - .5f) * noiseStrength, 0, 1));
+                            gy = Overlay(gy, Math.Clamp(.5f + (np.g / 255f - .5f) * noiseStrength, 0, 1));
                         }
                         var nx = rx * 2f - 1f;
                         var ny = gy * 2f - 1f;
@@ -608,6 +608,29 @@ internal static class TextureDecodeService
             Console.WriteLine($"    noised normal bake failed for {baseNrm.Name}: {ex.Message.Split('\n')[0]}");
             return false;
         }
+    }
+
+    internal static Decoded PrefilterNormalNoise(Decoded noise, int targetWidth, int targetHeight, float tile)
+    {
+        // Build a small linear-data mip so high-frequency noise is averaged instead of aliased.
+        while (noise.Width > 1 && noise.Height > 1 &&
+               (noise.Width * tile > targetWidth || noise.Height * tile > targetHeight))
+        {
+            var width = Math.Max(1, noise.Width / 2); var height = Math.Max(1, noise.Height / 2);
+            var pixels = new ColorRgba32[width * height];
+            for (var y = 0; y < height; y++)
+            for (var x = 0; x < width; x++)
+            {
+                var a = noise.Pixels[y * 2 * noise.Width + x * 2];
+                var b = noise.Pixels[y * 2 * noise.Width + Math.Min(x * 2 + 1, noise.Width - 1)];
+                var c = noise.Pixels[Math.Min(y * 2 + 1, noise.Height - 1) * noise.Width + x * 2];
+                var d = noise.Pixels[Math.Min(y * 2 + 1, noise.Height - 1) * noise.Width + Math.Min(x * 2 + 1, noise.Width - 1)];
+                pixels[y * width + x] = new ColorRgba32((byte)((a.r + b.r + c.r + d.r) / 4),
+                    (byte)((a.g + b.g + c.g + d.g) / 4), (byte)((a.b + b.b + c.b + d.b) / 4), 255);
+            }
+            noise = new Decoded(pixels, width, height);
+        }
+        return noise;
     }
 
     /// <summary>

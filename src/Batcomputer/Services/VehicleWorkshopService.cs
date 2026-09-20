@@ -37,6 +37,11 @@ internal static class VehicleWorkshopService
         public IReadOnlyList<VehicleLightSurface> LightSurfaces { get; init; } = [];
         public IReadOnlyList<VehicleLightSurfaceService.Surface> LightSurfaceChoices { get; init; } = [];
         public IReadOnlyList<VehicleLightSurfaceService.Role> LightRoles { get; init; } = VehicleLightSurfaceService.Roles;
+        public IReadOnlyList<VehicleToyboxService.Choice> ToyboxCatalog { get; init; } = [];
+        public bool LightControls { get; init; } = true;
+        public float SizeMultiplier { get; init; } = 1;
+        public IReadOnlyList<VehicleAnimationPreviewService.Clip> Animations { get; init; } = [];
+        public IReadOnlyList<VehicleAnimationPreviewService.RigBone> Rig { get; init; } = [];
     }
     private static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     internal static readonly Pose Identity = new([0, 0, 0], [0, 0, 0, 1], [1, 1, 1]);
@@ -76,6 +81,7 @@ internal static class VehicleWorkshopService
     internal static Scene Create(string directory, VehicleProject project, string folder, string session, CancellationToken cancellation = default, Action<string>? progress = null)
     {
         VehicleProjectService.ValidateIdentity(project);
+        var donor = VehicleDonorService.Get(project);
         Directory.CreateDirectory(folder);
         var settings = AppSettings.Current;
         var overlays = new List<string>();
@@ -86,7 +92,7 @@ internal static class VehicleWorkshopService
             var stage = Path.Combine(folder, "Stage", "LEGOBatmanLotDK", "Content");
             SkinnedMeshStageService.BakeMesh(stage, directory, model); overlays.Add(stage);
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            hash.AppendData(System.Text.Encoding.UTF8.GetBytes("vehicle-preview-v1/" + typeof(MeshExporter).Assembly.FullName));
+            hash.AppendData(System.Text.Encoding.UTF8.GetBytes(SkinnedGlbExportService.Revision + "/" + typeof(MeshExporter).Assembly.FullName));
             foreach (var extension in new[] { ".uasset", ".uexp", ".ubulk" })
             {
                 var file = Path.Combine(stage, model.MeshPackage[6..] + extension);
@@ -96,7 +102,7 @@ internal static class VehicleWorkshopService
         }
         progress?.Invoke("Reading the native driving rig and sockets…");
         using var provider = ModelPreviewService.MakeProvider(settings.EffectiveGamePaksRoot(), settings.EffectiveUsmapPath()!, overlays);
-        var body = provider.LoadPackageObject<USkeletalMesh>(VehicleAssetService.NativeMesh);
+        var body = provider.LoadPackageObject<USkeletalMesh>(donor.Mesh);
         var bones = new Dictionary<string, Pose>(StringComparer.OrdinalIgnoreCase);
         var boneWorld = new List<Pose>();
         for (int i = 0; i < body.ReferenceSkeleton.FinalRefBoneInfo.Length; i++)
@@ -107,12 +113,13 @@ internal static class VehicleWorkshopService
             boneWorld.Add(world); bones.Add(info.Name.Text, world);
         }
         var sockets = new Dictionary<string, (Pose Pose, string Bone)>(StringComparer.OrdinalIgnoreCase);
-        foreach (var socket in provider.LoadPackage(VehicleAssetService.NativeSkeleton).GetExports().Where(e => e.ExportType == "SkeletalMeshSocket"))
+        foreach (var socket in provider.LoadPackage(donor.Skeleton).GetExports().Where(e => e.ExportType == "SkeletalMeshSocket"))
         {
             var p = JObject.FromObject(socket)["Properties"]!; var bone = p["BoneName"]!.ToString();
             if (bones.TryGetValue(bone, out var bonePose)) sockets.Add(p["SocketName"]!.ToString(), (Compose(bonePose, SocketPose(p)), bone));
         }
-        var warnings = new List<string>(); var parts = new List<Part>(); var exports = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var warnings = new List<string>();
+        if (!donor.FullWorkshop) warnings.Add(donor.HeadlightEditing ? "Headlight beam colors and positions are editable. Rear/accent controller colors and surface-to-light bindings are not verified on this base yet." : "Light controller editing is not verified on this driving base. Lights retain their native behavior."); var parts = new List<Part>(); var exports = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var primitiveSlots = new Dictionary<string, int[]>(StringComparer.OrdinalIgnoreCase);
         string Export(string package)
         {
@@ -130,6 +137,7 @@ internal static class VehicleWorkshopService
             var exporter = mesh switch { USkeletalMesh sk => new MeshExporter(sk, options), UStaticMesh sm => new MeshExporter(sm, options), _ => throw new InvalidDataException("Not a mesh: " + package) };
             var exportDir = Path.Combine(folder, "MeshExport", exports.Count.ToString());
             if (!exporter.TryWriteToDir(new DirectoryInfo(exportDir), out _, out var file)) throw new InvalidDataException("Mesh preview export failed: " + package);
+            if (mesh is USkeletalMesh skeletal) SkinnedGlbExportService.CorrectFile(file, skeletal);
             File.Copy(file, Path.Combine(folder, name));
             if (package == project.Model?.MeshPackage && bodyCache is not null)
             {
@@ -142,13 +150,13 @@ internal static class VehicleWorkshopService
             exports.Add(package, name); return name;
         }
         var nativeMaterials = Slots(body, null, provider);
-        var bodyPackage = project.Model?.MeshPackage ?? VehicleAssetService.NativeMesh;
-        var bodySlots = project.Model is null ? nativeMaterials : project.Model.Materials.Select(m => new MaterialSlot(m.Slot, m.MaterialPath, "Custom material",
+        var bodyPackage = project.Model?.MeshPackage ?? donor.Mesh;
+        var bodySlots = project.Model is null ? nativeMaterials : project.Model.Materials.Select(m => new MaterialSlot(m.Slot, m.MaterialPath, project.Palette.FirstOrDefault(c => c.Slot == m.Slot)?.Finish ?? "Custom material",
             project.Palette.FirstOrDefault(c => c.Slot == m.Slot) is { } color ? [color.R, color.G, color.B] : null, [])).ToArray();
         parts.Add(new("body", "Vehicle body", "Body", Export(bodyPackage), "", "", false, Identity, new() { Component = "body" }, new() { Component = "body" }, bodySlots,
             "Click a surface to select its material slot. Shared slots affect every piece using that material. Import a body through Setup / body.") { PrimitiveSlots = primitiveSlots[bodyPackage] });
-        var blueprint = provider.LoadPackage(VehicleAssetService.NativeBlueprint).GetExports().Select(JObject.FromObject).ToArray();
-        var editable = VehicleAssetService.Components(settings.EffectiveExtractedContentRoot()).ToDictionary(c => c.Name);
+        var blueprint = provider.LoadPackage(donor.Blueprint).GetExports().Select(JObject.FromObject).ToArray();
+        var editable = VehicleAssetService.Components(settings.EffectiveExtractedContentRoot(), project).ToDictionary(c => c.Name);
         foreach (var component in blueprint.Where(e => editable.ContainsKey(e["Name"]!.ToString())))
         {
             var id = component["Name"]!.ToString(); var p = component["Properties"];
@@ -162,17 +170,25 @@ internal static class VehicleWorkshopService
                 if (sockets.TryGetValue(socketName, out var socket)) { anchor = socket.Pose; bone = socket.Bone; }
                 else { note = "Unresolved native socket; positioning disabled."; warnings.Add(id + ": " + note); }
             }
-            var meshPackage = Package(p?["StaticMesh"]); var file = ""; IReadOnlyList<MaterialSlot> slots = [];
+            var replacement = project.ToyboxParts.FirstOrDefault(t => t.Component == id);
+            var meshPackage = replacement?.MeshPackage ?? Package(p?["StaticMesh"]); var file = ""; IReadOnlyList<MaterialSlot> slots = [];
             if (meshPackage.Length > 0)
             {
-                try { file = Export(meshPackage); slots = Slots(provider.LoadPackageObject(meshPackage), p?["OverrideMaterials"], provider); }
+                try { file = Export(meshPackage); slots = Slots(provider.LoadPackageObject(meshPackage), replacement is null ? p?["OverrideMaterials"] : null, provider); }
                 catch (Exception ex) { note = "Mesh could not be previewed; marker only. " + ex.Message; warnings.Add(id + ": " + note); }
             }
-            var source = VehicleLightService.IsSource(id);
+            var source = VehicleLightService.SupportsBeam(donor, id) && VehicleLightService.IsClass(original.Kind);
             parts.Add(new(id, Label(id), Group(id), file, socketName, bone, note.Length == 0, anchor, original.Transform,
                 project.Transforms.FirstOrDefault(t => t.Component == id) ?? original.Transform, slots,
                 source ? "Actual light beam. Move / rotate with the gizmo. Rear lights keep their native braking response. Bulb and glow meshes are separate parts; preview brightness is approximate." : note)
-                { PrimitiveSlots = primitiveSlots.GetValueOrDefault(meshPackage, []), CanDisable = original.Kind == "StaticMeshComponent", Light = source ? VehicleLightService.Defaults(id) : null });
+                { PrimitiveSlots = primitiveSlots.GetValueOrDefault(meshPackage, []), CanDisable = original.Kind == "StaticMeshComponent", Light = source ? VehicleLightService.ReadDefaults(id, p) : null });
+        }
+        foreach (var added in project.ToyboxParts.Where(t => t.Added))
+        {
+            var mesh = provider.LoadPackageObject<UStaticMesh>(added.MeshPackage); var file = Export(added.MeshPackage);
+            var original = new VehicleComponentTransform { Component = added.Component };
+            parts.Add(new(added.Component, UnrealPathUtil.AssetName(added.MeshPackage), "Toybox attachments", file, "Body", "Body", true, bones["Body"], original,
+                project.Transforms.FirstOrDefault(t => t.Component == added.Component) ?? original, Slots(mesh, null, provider), "Added visual part. No brake/headlight controller or collision is added. Select its surfaces to copy and recolor materials.") { CanDisable = true, PrimitiveSlots = primitiveSlots[added.MeshPackage] });
         }
         foreach (var seat in editable.Values.Where(c => VehicleCustomizationService.IsSeat(c.Name)))
         {
@@ -180,8 +196,8 @@ internal static class VehicleWorkshopService
             parts.Add(new(seat.Name, seat.Attachment == "SeatDriver" ? "Driver seat" : "Passenger seat", "Seating", "", seat.Attachment, socket.Bone, true, socket.Pose, seat.Transform,
                 project.Transforms.FirstOrDefault(t => t.Component == seat.Name) ?? seat.Transform, [], "Seated figures previews native idle poses at this seat. Capes and flight gear are hidden. Runtime mounting, hand IK and entry/exit need an in-game comparison."));
         }
-        var nativeSkeleton = VehicleAssetService.Read(settings.EffectiveExtractedContentRoot(), VehicleAssetService.NativeSkeleton);
-        foreach (var socketName in VehicleSocketService.EditableSockets)
+        var nativeSkeleton = VehicleAssetService.Read(settings.EffectiveExtractedContentRoot(), donor.Skeleton);
+        foreach (var socketName in VehicleSocketService.EditableSockets.Where(sockets.ContainsKey))
         {
             var id = "socket:" + socketName; var socket = sockets[socketName];
             var original = VehicleSocketService.Transform(VehicleSocketService.Socket(nativeSkeleton, socketName), id);
@@ -199,12 +215,13 @@ internal static class VehicleWorkshopService
         // Only show a reference marker when there is no resolved, editable source component.
         foreach (var socket in sockets.Where(s => s.Key.Contains("_Light_", StringComparison.Ordinal) && !parts.Any(p => p.Socket == s.Key && p.Light is not null)))
             parts.Add(new("source:" + socket.Key, Label(socket.Key), "Light sources (reference)", "", socket.Key, socket.Value.Bone, false, socket.Value.Pose,
-                new() { Component = "source:" + socket.Key }, new() { Component = "source:" + socket.Key }, [], "Light-source reference. Runtime light components are not edited in this pass."));
+                new() { Component = "source:" + socket.Key }, new() { Component = "source:" + socket.Key }, [], "Socket reference only. Select a Headlight beam to change its color and position. This socket's rear/accent controller is not supported on this donor yet."));
         progress?.Invoke("Reading material library…");
+        var animations = VehicleAnimationPreviewService.Read(provider, donor, warnings, cancellation);
         var scene = new Scene(project.Id, session, project.DisplayName, parts, nativeMaterials, project.Transforms, warnings)
-        { MaterialCatalog = VehicleMaterialCatalogService.Read(settings.EffectiveProjectRoot(), provider), MaterialOverrides = project.MaterialOverrides, DisabledParts = project.DisabledParts, Lights = project.Lights, AccentColor = project.AccentColor,
-            LightSurfaces = project.LightSurfaces, LightSurfaceChoices = project.Model is null ? [] : VehicleLightSurfaceService.Analyze(provider.LoadPackageObject<USkeletalMesh>(bodyPackage), project) };
-        foreach (var asset in new[] { "three.min.js", "GLTFLoader.js", "OrbitControls.js", "TransformControls.js", "VehicleWorkshop.js", "VehicleRiders.js", "VehicleWorkshop.html" })
+        { Animations = animations, Rig = VehicleAnimationPreviewService.Rig(body), SizeMultiplier = project.SizeMultiplier, ToyboxCatalog = VehicleToyboxService.Catalog(provider), LightControls = donor.FullWorkshop, MaterialCatalog = VehicleMaterialCatalogService.Read(settings.EffectiveProjectRoot(), provider), MaterialOverrides = project.MaterialOverrides, DisabledParts = project.DisabledParts, Lights = project.Lights, AccentColor = project.AccentColor,
+            LightRoles = donor.FullWorkshop ? VehicleLightSurfaceService.Roles : [], LightSurfaces = project.LightSurfaces, LightSurfaceChoices = !donor.FullWorkshop || project.Model is null ? [] : VehicleLightSurfaceService.Analyze(provider.LoadPackageObject<USkeletalMesh>(bodyPackage), project) };
+        foreach (var asset in new[] { "three.min.js", "GLTFLoader.js", "OrbitControls.js", "TransformControls.js", "VehicleWorkshop.js", "VehicleMotion.js", "VehicleRiders.js", "VehicleWorkshop.html", "VehicleWorkshop.css" })
             File.WriteAllBytes(Path.Combine(folder, asset == "VehicleWorkshop.html" ? "index.html" : asset), EmbeddedAssets.ReadBytes("preview/" + asset) ?? throw new FileNotFoundException("Missing vehicle viewer asset: " + asset));
         File.WriteAllText(Path.Combine(folder, "scene.js"), "window.VEHICLE_SCENE=" + JsonSerializer.Serialize(scene, Json) + ";");
         return scene;

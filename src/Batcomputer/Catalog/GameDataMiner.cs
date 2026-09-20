@@ -39,18 +39,21 @@ public sealed class GameDataMiner
         result.Db.GeneratedUtc = DateTime.UtcNow.ToString("o");
 
         var minifigRoot = Path.Combine(_contentRoot, "Characters", "Minifig");
-        var equipmentRoot = Path.Combine(_contentRoot, "Characters", "Equipment");
-        var equipLayerRoot = Path.Combine(_contentRoot, "Animation", "LayerAnimSets", "Equipment");
-        var equipMontageRoot = Path.Combine(_contentRoot, "Animation", "MontageAnimSets", "Equipment");
+        var characterRoots = CharacterContentRootService.Enumerate(_contentRoot);
+        var equipmentRoots = characterRoots.Select(root => Path.Combine(root, "Equipment")).Where(Directory.Exists).ToArray();
+        var equipLayerFiles = AnimationSetRoots("LayerAnimSets")
+            .SelectMany(root => Directory.EnumerateFiles(root, "LAS_Equipment_*.uasset", SearchOption.AllDirectories)).ToArray();
+        var equipMontageFiles = AnimationSetRoots("MontageAnimSets")
+            .SelectMany(root => Directory.EnumerateFiles(root, "MAS_Equipment_*.uasset", SearchOption.AllDirectories)).ToArray();
         var lamAbilityRoot = Path.Combine(_contentRoot, "Characters", "Abilities", "LAMManagedAbilities");
         var lamItemAbilities = Directory.Exists(lamAbilityRoot)
             ? Directory.EnumerateFiles(lamAbilityRoot, "GA_Item_*.uasset").Select(f => Path.GetFileNameWithoutExtension(f)).ToList()
             : new List<string>();
 
         // 1) Equipment layer sets (LAS_Equipment_*) - pure disk enumeration.
-        if (Directory.Exists(equipLayerRoot))
+        if (equipLayerFiles.Length > 0)
         {
-            foreach (var file in Directory.EnumerateFiles(equipLayerRoot, "LAS_Equipment_*.uasset"))
+            foreach (var file in equipLayerFiles)
             {
                 result.Db.EquipmentLayerSets.Add(new GameDataLayerSet
                 {
@@ -61,14 +64,14 @@ public sealed class GameDataMiner
         }
         else
         {
-            result.Warnings.Add($"Equipment layer-set folder not found: {equipLayerRoot}");
+            result.Warnings.Add("No equipment layer animation sets found in the active extraction.");
         }
 
         // Equipment montage sets (MAS_Equipment_*) - the montage half of a gadget's anims.
         var equipMontageSets = new List<GameDataLayerSet>();
-        if (Directory.Exists(equipMontageRoot))
+        if (equipMontageFiles.Length > 0)
         {
-            foreach (var file in Directory.EnumerateFiles(equipMontageRoot, "MAS_Equipment_*.uasset"))
+            foreach (var file in equipMontageFiles)
             {
                 equipMontageSets.Add(new GameDataLayerSet
                 {
@@ -80,7 +83,7 @@ public sealed class GameDataMiner
 
         // 2) One entry per tagged asset, including nested DataAssets folders.
         var equipmentByName = new Dictionary<string, GameDataEquipment>(StringComparer.OrdinalIgnoreCase);
-        if (Directory.Exists(equipmentRoot))
+        foreach (var equipmentRoot in equipmentRoots)
         {
             foreach (var dir in Directory.EnumerateDirectories(equipmentRoot))
             {
@@ -150,9 +153,9 @@ public sealed class GameDataMiner
                 }
             }
         }
-        else
+        if (equipmentRoots.Length == 0)
         {
-            result.Warnings.Add($"Equipment folder not found: {equipmentRoot}");
+            result.Warnings.Add($"No character equipment folders found under {_contentRoot}");
         }
 
         // Index ETA object-name -> gadget so DCMD imports can be resolved to gadgets.
@@ -171,9 +174,14 @@ public sealed class GameDataMiner
         // too (Cluemaster, RasAlGhul, RedHoodOne, Firefly all have one and zero playables),
         // and admitting them offered bases that can never be worn. Of 95 character folders
         // only 11 have any playable class; the 7 in the roster all have >= 10.
-        if (Directory.Exists(minifigRoot))
+        var familyDirectories = characterRoots.SelectMany(root => new[] { "Minifig", "Smallfig", "Playables" }
+            .Select(rig => Path.Combine(root, rig))).Where(Directory.Exists)
+            .SelectMany(root => Directory.EnumerateDirectories(root))
+            .GroupBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.OrderByDescending(dir => Directory.EnumerateFiles(dir, "BP_*_Playable.uasset", SearchOption.AllDirectories).Count()).First()).ToArray();
+        if (familyDirectories.Length > 0)
         {
-            foreach (var dir in Directory.EnumerateDirectories(minifigRoot))
+            foreach (var dir in familyDirectories)
             {
                 var familyName = Path.GetFileName(dir);
                 var archetype = Directory
@@ -276,16 +284,9 @@ public sealed class GameDataMiner
     /// </summary>
     private void MineAnimSets(MineResult result)
     {
-        var animRoot = Path.Combine(_contentRoot, "Animation");
         foreach (var (sub, kind) in new[] { ("MontageAnimSets", "Montage"), ("LayerAnimSets", "Layer") })
+        foreach (var root in AnimationSetRoots(sub))
         {
-            var root = Path.Combine(animRoot, sub);
-            if (!Directory.Exists(root))
-            {
-                result.Warnings.Add($"Anim folder not found: {root}");
-                continue;
-            }
-
             foreach (var file in Directory.EnumerateFiles(root, "*.uasset", SearchOption.AllDirectories))
             {
                 var name = Path.GetFileNameWithoutExtension(file);
@@ -325,6 +326,13 @@ public sealed class GameDataMiner
         result.Db.AnimSets.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
     }
 
+    // The DLC uses AdditionalContent/VillainMode/Animations (plural); do not assume
+    // the base game's Content/Animation layout or silently substitute an NPC composite.
+    private IEnumerable<string> AnimationSetRoots(string name) =>
+        ExtractedPackagePathService.EnumerateMounts(_contentRoot)
+            .SelectMany(mount => Directory.EnumerateDirectories(mount.ContentRoot, name, SearchOption.AllDirectories))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>
     /// Enumerates every .uasset under the content root and records its /Game path
     /// plus top-level export class. This is the "browse anything without
@@ -332,7 +340,8 @@ public sealed class GameDataMiner
     /// </summary>
     private void MineCatalog(MineResult result)
     {
-        foreach (var file in Directory.EnumerateFiles(_contentRoot, "*.uasset", SearchOption.AllDirectories))
+        foreach (var file in ExtractedPackagePathService.EnumerateMounts(_contentRoot)
+                     .SelectMany(mount => Directory.EnumerateFiles(mount.ContentRoot, "*.uasset", SearchOption.AllDirectories)))
         {
             var gamePath = ToGamePath(file);
             var cls = SafeTopLevelClass(file, result);
@@ -347,7 +356,8 @@ public sealed class GameDataMiner
         result.AssetsScanned++;
         try
         {
-            var asset = new UAsset(assetPath, EngineVersion.VER_UE5_6, _mappings, CustomSerializationFlags.SkipPreloadDependencyLoading);
+            var asset = new UAsset(assetPath, EngineVersion.VER_UE5_6, _mappings,
+                CustomSerializationFlags.SkipPreloadDependencyLoading | CustomSerializationFlags.SkipParsingExports);
             foreach (var export in asset.Exports)
             {
                 // Top-level export (not nested under another export).
@@ -383,7 +393,8 @@ public sealed class GameDataMiner
         List<string> names = new();
         try
         {
-            var asset = new UAsset(assetPath, EngineVersion.VER_UE5_6, _mappings, CustomSerializationFlags.SkipPreloadDependencyLoading);
+            var asset = new UAsset(assetPath, EngineVersion.VER_UE5_6, _mappings,
+                CustomSerializationFlags.SkipPreloadDependencyLoading | CustomSerializationFlags.SkipParsingExports);
             foreach (var import in asset.Imports)
             {
                 var name = import.ObjectName.ToString();
@@ -408,7 +419,8 @@ public sealed class GameDataMiner
         List<string> names = new();
         try
         {
-            var asset = new UAsset(assetPath, EngineVersion.VER_UE5_6, _mappings, CustomSerializationFlags.SkipPreloadDependencyLoading);
+            var asset = new UAsset(assetPath, EngineVersion.VER_UE5_6, _mappings,
+                CustomSerializationFlags.SkipPreloadDependencyLoading | CustomSerializationFlags.SkipParsingExports);
             foreach (var name in asset.GetNameMapIndexList())
             {
                 var text = name.ToString();
@@ -469,6 +481,8 @@ public sealed class GameDataMiner
 
     private string ToGamePath(string filePath)
     {
+        var mounted = ExtractedPackagePathService.PackagePathFromFile(_contentRoot, filePath);
+        if (!string.IsNullOrWhiteSpace(mounted)) return mounted;
         var full = Path.GetFullPath(filePath);
         var rel = Path.GetRelativePath(_contentRoot, full).Replace('\\', '/');
         var dot = rel.LastIndexOf('.');

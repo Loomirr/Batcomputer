@@ -2,6 +2,98 @@
 
 ## Using Batcomputer
 
+### Can a custom character have its own symbol?
+
+Yes. Load the character's default definition and open **Characters → Character symbol**.
+Import a square PNG (64–2048 pixels, at most 4 MB) with a transparent background and clear
+margins. Batcomputer uses its silhouette, not its painted colors, and cooks a 64px distance-field
+icon with the native UI emblem material. No painted outline is needed.
+
+The symbol is shared by that character's suits; it does not replace suit portraits or equipment
+icons. The source PNG is embedded in the saved recipe. **Save symbol**, then rebuild the mod.
+**Use default symbol** restores the registration donor's emblem. Test the character-menu symbol
+in-game after installing the complete rebuilt release.
+
+### How do I inspect a part in the character viewer?
+
+The **Character library** has separate My suits, Playable and Cutscene sources. Search by suit
+name, narrow native suits with the character filter, then double-click a row, press Enter or
+choose **Open in workshop**. Filtering keeps your selection when it remains in the results.
+
+Click a part or choose it in the **Character workshop** list. **Focus** (or F) frames it;
+**Isolate** temporarily hides the other pieces. **Whole character** restores their previous
+visibility and frames the assembly. Search the **Assembly** list, or click a surface to select its
+material in the inspector. The inspector groups **Placement**, **Surfaces**, **Face**, and **Scene**
+controls. Camera buttons frame front/back/side/top or three-quarter views; **Clean view** hides
+both sidebars. **Diagnostics** expands the technical log only when needed.
+
+**Scene** provides lighting presets, exposure, a floor grid and supported Red Brick previews.
+Selection, camera, lighting, UV selection, material-map toggles and visibility do not alter your
+saved character. **Surfaces → Part UV set** changes the selected part's preview UV channel.
+Native parts cannot be moved; legacy preview-alignment nudges are ignored. **Bake to game** on a
+custom static mesh updates its authored placement and requires a mod rebuild before testing in-game.
+
+### How do I position an imported custom part with arrows?
+
+Open a saved suit in the workshop, select its imported **custom static mesh**, and use **Placement**.
+**Move (W)**, **Rotate (E)**, and **Scale (R)** control the on-model gizmo. Scale is uniform;
+this does not edit skeletal weights or individual bones. Choose **Local axes** to follow the part,
+or **World axes** to move along the scene axes. In world space, green is up, red is X, and blue
+is depth; the numeric offsets always use the attachment socket's Unreal XYZ in centimeters.
+Movement, rotation and scale have independent snap options. Exact numeric fields remain available.
+Shortcuts work after selecting a part or clicking a tool button. While typing in a field or using
+a dropdown, those controls keep their normal keys; click the 3D viewport to return to shortcuts.
+
+Use **Undo/Redo** (Ctrl+Z / Ctrl+Y outside a text field) or **Reset to loaded**. Reset restores the
+values from when this preview opened, not the original import. **Ghost surrounding parts** and
+**Show attachment origin** help with fitting; neither changes the mod or exported materials.
+Native parts remain read-only, and **Surfaces → Part UV set** and hide/show still work.
+
+Placement drafts auto-save to the project, including undo/reset changes. **Bake to game** waits
+for pending drafts, rebuilds the game mesh and reloads the preview. If a draft fails, use
+**Retry draft save** before baking. Rebuild the mod afterward to test placement in-game.
+History is local to this open preview; it is cleared on reload. Drafts are not an installed mod.
+
+### Which meshes and material effects does the viewer include?
+
+The assembly includes mesh components from the character's visual Blueprint, including gliders.
+Gliders are displayed upright beside the character for inspection, not in their gameplay position.
+Native hidden components start hidden; select one and use **Show part**, or **Show every part**.
+These are visual components, not an exhaustive simulation of dynamically spawned ability actors.
+Native permanent attachment-manager bone offsets are applied to matching preview bones and rigid
+attachments; animation-driven offsets, cloth and runtime-only procedural poses are not simulated.
+The Red Brick preview applies to supported masks on attachment materials as well as the body.
+
+Printed/decal normals and structural LEGO normals use their separate UV channels. Where the
+material enables it, the viewer also reads the inherited micro-noise texture and intensity.
+This is an approximation of the game shader; lighting and fine detail will not be identical
+to Unreal. Reopen the character after updating Batcomputer to regenerate its preview.
+
+### Can a custom chest part make room at the neck?
+
+Yes. Edit the custom static mesh, choose **Chest**, **Second chest**, **Collar**, or **Back attachment / cape**,
+turn off **Use default clearance**, and set **Body clearance**. These regions default to zero so
+existing imports keep their shape. Shoulder/neck retain their 3.0 default; hip/belt retain 4.3.
+
+Clearance uses native body-bone offsets in gameplay and cutscenes, separate from moving the
+accessory mesh. The largest clearance wins; values do not stack. Zero adds no clearance and
+does not remove a native donor's clearance. Rebuild and check in-game: the viewer does not yet
+simulate runtime animations. Its matching rig now previews the staged permanent offsets.
+Arbitrary custom-bone offsets are not exposed by this control.
+
+### Can I export the assembled character to Blender?
+
+Choose **Export GLB…** in the character workshop, then import that file as glTF in Blender.
+It includes the loaded parts at their preview placements, available skinning/rigs and approximate
+PBR materials. Isolation does not remove other parts from the export. Hidden material layers stay
+hidden. Temporary hide/show choices do not change the export. Textures are embedded at up to
+2048px; let the preview finish loading first. Unreal vertex-color masks that are disabled in the
+viewer are omitted from GLB, so Blender does not multiply them into the surface colours.
+
+This is a reference assembly, not a merged rig or a game-ready FBX. Unreal shaders (including
+face effects and the separate LEGO/micro-normal shader layer), animation blueprints, cloth
+physics and gameplay logic are not exported.
+
 ### Do players need Batcomputer?
 
 No. Players need Loomirr's LOTDK UE4SS 0.1.1 or newer and the finished mod. They do not need
@@ -39,6 +131,21 @@ bodies intentionally leave their named regions empty until you add a compatible 
 No. All nine supported body profiles use the game's shared `SKEL_LEGOfig` skeleton. Selecting a
 body changes its root mesh while keeping the gameplay donor's animation class and runtime setup.
 Custom skeleton transfer is not supported.
+
+### Why do takedowns stop after switching Minifig and Smallfig?
+
+The shared skeleton does not make every synchronized animation interchangeable. Native body
+meshes also carry Minifig/Smallfig compatibility tags, while the gameplay donor retains its
+original takedown sequences.
+
+In **Ability workshop → Takedowns**, you can explicitly test **Minifig · Batman takedowns** or
+**Smallfig · Robin takedowns**. Save the loadout and rebuild the mod. These experimental presets
+replace only the selected melee set's main and existing end-of-encounter takedown grants—not
+the fighting style, counters, grabs, movement or equipment. Cross-character behavior and alignment
+still require in-game testing. They do not adapt arbitrary Blender-scaled or custom-rig meshes.
+
+**Restore current melee set's takedowns** reverses these grant edits. Applying a fighting-style
+bundle afterward can replace the takedown selection, so choose the style first.
 
 ### Can I resize the windows?
 

@@ -59,9 +59,14 @@ public sealed class VehicleProjectService(string projectRoot)
         if (p.SchemaVersion != 1) throw new InvalidDataException("This vehicle project needs a different Batcomputer version.");
         if (string.IsNullOrWhiteSpace(p.DisplayName)) throw new InvalidDataException("Give the vehicle a name.");
         if (!Regex.IsMatch(p.OwnerTag ?? "", "^Pawns\\.Playable\\.[A-Za-z][A-Za-z0-9]*$")) throw new InvalidDataException("Choose a character owner, not an individual suit tag.");
-        if (p.DonorId != VehicleAssetService.DonorId) throw new InvalidDataException("This first vehicle editor supports the Batman Forever rig only.");
+        var donor = VehicleDonorService.Get(p);
+        if (!float.IsFinite(p.SizeMultiplier) || p.SizeMultiplier is < .5f or > 2f) throw new InvalidDataException("Vehicle size must be between 50% and 200%.");
         if (p.Transforms is null || p.Palette is null || p.Transforms.Any(t => t is null || t.Component is null) || p.Palette.Any(c => c is null)) throw new InvalidDataException("Incomplete vehicle settings.");
         VehicleCustomizationService.ValidateShape(p);
+        VehicleToyboxService.ValidateShape(p);
+        if ((!donor.FullWorkshop && (p.LightSurfaces.Count > 0 || p.AccentColor is not null)) || p.Lights.Any(l => !VehicleLightService.SupportsBeam(donor, l.Component)))
+            throw new InvalidDataException("Rear/accent controller edits are not verified for this driving base yet. Headlight beams, body paint, decorative parts and seats are editable.");
+        if (p.Palette.Any(c => !VehiclePaintService.ValidFinish(c.Finish))) throw new InvalidDataException("Unknown vehicle paint finish.");
         if (p.Transforms.Select(t => t.Component).Distinct(StringComparer.Ordinal).Count() != p.Transforms.Count) throw new InvalidDataException("Duplicate vehicle component edits.");
         foreach (var t in p.Transforms)
             if (string.IsNullOrWhiteSpace(t.Component) || new[] { t.X, t.Y, t.Z, t.Pitch, t.Yaw, t.Roll, t.ScaleX, t.ScaleY, t.ScaleZ }.Any(v => !float.IsFinite(v)) ||

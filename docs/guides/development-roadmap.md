@@ -4,11 +4,21 @@ The next release is mostly about testing and fixing bugs. Custom characters, ext
 
 These are the main areas still getting attention.
 
+## Immediate test order
+
+1. Finish the character viewer: custom-part gizmos are user-tested; keyboard-focus fixes for W/E/R and F now have headless regression coverage. Keep native parts read-only.
+2. Skinned import reliability: verify the short temporary cook workspace against user logs, retain useful errors and per-bone rig reports, then retest the affected users' FBXs. A successful cook does not make an incompatible rig safe.
+3. Native Joker and Harley suits: the additional-suit tests now pass in-game after the retained Default donor gates were mapped to the current HTV/BTAS progression entries. Keep checking first-hover previews, switching, native gadgets/gliding and cutscene face/material behavior on future builds.
+4. Editable sharing now passes independent export/import/edit/rebuild checks for a custom-material Joker suit and a rigged-mesh suit. Relative mesh caches and material closures are included, with source/identity checks. Vehicle-specific sharing and generated-texture recooking still need broader acceptance coverage. Imported custom animation libraries are explicitly blocked until their transfer is supported.
+5. Face replacements: the native component-preservation checks pass for Batman, Joker and Harley; the new Batman face test pack still needs a voiced cutscene test.
+6. Voice mismatch: paired-cape adapters now preserve the gameplay donor's dialogue voice instead of inheriting the visual scaffold's voice. Rebuild affected suits and check their gameplay speech. A native voice-family picker and individual-line overrides remain future work; scripted dialogue and combat audio have separate routing.
+7. Before release: test one rebuilt vehicle through hover, parked preview, summon, driving, seats, lights and boost, then smoke-test a clean portable build.
+
 ## Characters and suits
 
 The [character editor](custom-characters.md) creates a separate roster entry with its own suits. Multiple characters and mods together, saved selections after restarting, and co-op still need testing.
 
-New voices, scripted story roles, unlock challenges, custom roster emblems, and default-vehicle editing aren't supported yet.
+Custom character symbols are supported and have been tested in-game. New voices, scripted story roles, unlock challenges, and default-vehicle editing aren't supported yet.
 
 ## Abilities and held items
 
@@ -39,5 +49,15 @@ Attachments, material assignments, save/reopen, failed imports, and deformation 
 The frontend stays Batman-only. That's intended.
 
 ## After this release
+
+The September 20 acceptance round passed the Nightwing paired-cape dialogue test, selected-suit
+face-animation test and the tested vehicles' driving/menu workflows. The Movie vehicle's custom
+build-up also worked. One Retro/Talia-rig test had an invisible build-up model; that isolated test
+remains unresolved and is not evidence that every donor/assembly combination works. Vehicle
+summon models remain experimental and must be tested separately from the driving mesh.
+
+Editable sharing has separate-workspace import/rebuild checks, including a rigged-mesh cache.
+Unprovided third-party FBXs, all donor combinations and every multiplayer/story interaction are
+not covered by these checks.
 
 Possible next steps are better character presentation options, more supported equipment, and improvements to skinned-mesh imports. The crash-prone effects need their own tests before coming back.

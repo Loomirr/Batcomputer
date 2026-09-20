@@ -16,6 +16,12 @@ function Require-Directory([string]$Path, [string]$Message) {
 }
 
 function Convert-ToPackagePath([string]$ContentRoot, [string]$UassetPath) {
+    foreach ($mount in $script:ContentMounts) {
+        $prefix = $mount.Root.TrimEnd('\') + '\'
+        if ($UassetPath.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $mount.Package + '/' + ([System.IO.Path]::ChangeExtension($UassetPath.Substring($prefix.Length), $null).TrimEnd('.') -replace '\\', '/')
+        }
+    }
     $contentRootFull = [System.IO.Path]::GetFullPath($ContentRoot).TrimEnd('\')
     $fileFull = [System.IO.Path]::GetFullPath($UassetPath)
     if (-not $fileFull.StartsWith($contentRootFull, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -33,11 +39,7 @@ function Convert-ToPackagePath([string]$ContentRoot, [string]$UassetPath) {
 }
 
 function Convert-PackagePathToContentRelative([string]$PackagePath) {
-    if (-not $PackagePath.StartsWith("/Game/", [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw "Only /Game package paths are supported. Got: $PackagePath"
-    }
-
-    return $PackagePath.Substring(6).Replace("/", "\")
+    return $PackagePath.Substring($PackagePath.IndexOf('/', 1) + 1).Replace("/", "\")
 }
 
 function Read-BinaryTextForSearch([string[]]$Paths) {
@@ -105,6 +107,7 @@ function Get-TemplateKey([string]$Character, [string]$Stem, [string]$Role) {
     $key = $key -replace '_Cutscene$', ''
     $key = $key -replace '_CUT$', ''
     $key = $key -replace '_Batcave$', ''
+    $key = $key -replace '_Default$', ''
     return "$Character/$key"
 }
 
@@ -173,8 +176,30 @@ if ((-not $AllowExternalOutputRoot) -and (-not $resolvedOutputRoot.StartsWith($r
 }
 
 Require-Directory $ExtractedContentRoot "Extracted Content root was not found."
-$minifigRoot = Join-Path $ExtractedContentRoot "Characters\Minifig"
-Require-Directory $minifigRoot "Extracted Minifig root was not found."
+$script:ContentMounts = @([pscustomobject]@{ Root = [System.IO.Path]::GetFullPath($ExtractedContentRoot); Package = '/Game' })
+$plugins = Join-Path (Split-Path $ExtractedContentRoot -Parent) 'Plugins\GameFeatures'
+if (Test-Path -LiteralPath $plugins) {
+    foreach ($plugin in Get-ChildItem -LiteralPath $plugins -Directory) {
+        $pluginContent = Join-Path $plugin.FullName 'Content'
+        if (Test-Path -LiteralPath $pluginContent) {
+            $script:ContentMounts += [pscustomobject]@{ Root = $pluginContent; Package = '/' + $plugin.Name }
+        }
+    }
+}
+$rigRoots = @(foreach ($mount in $script:ContentMounts) {
+    $characterRoots = @(Join-Path $mount.Root 'Characters')
+    $additional = Join-Path $mount.Root 'AdditionalContent'
+    if (Test-Path -LiteralPath $additional) {
+        $characterRoots += @(Get-ChildItem -LiteralPath $additional -Directory -Recurse -Filter 'Characters' | Select-Object -ExpandProperty FullName)
+    }
+    foreach ($characterRoot in $characterRoots) {
+        foreach ($rig in @('Minifig', 'Smallfig', 'Playables')) {
+            $rigRoot = Join-Path $characterRoot $rig
+            if (Test-Path -LiteralPath $rigRoot) { $rigRoot }
+        }
+    }
+})
+if ($rigRoots.Count -eq 0) { throw 'No extracted character rig folders were found.' }
 
 $useJson = (-not $NoJsonExportEnrichment) -and
     (-not [string]::IsNullOrWhiteSpace($JsonExportContentRoot)) -and
@@ -183,7 +208,7 @@ $useJson = (-not $NoJsonExportEnrichment) -and
 New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
 
 $records = @()
-$uassetFiles = Get-ChildItem -LiteralPath $minifigRoot -Recurse -File -Filter "*.uasset"
+$uassetFiles = $rigRoots | ForEach-Object { Get-ChildItem -LiteralPath $_ -Recurse -File -Filter "*.uasset" }
 
 foreach ($uasset in $uassetFiles) {
     $stem = [System.IO.Path]::GetFileNameWithoutExtension($uasset.Name)
@@ -191,9 +216,15 @@ foreach ($uasset in $uassetFiles) {
     $ubulk = [System.IO.Path]::ChangeExtension($uasset.FullName, ".ubulk")
     $packagePath = Convert-ToPackagePath $ExtractedContentRoot $uasset.FullName
     $contentRelative = Convert-PackagePathToContentRelative $packagePath
-    $character = $uasset.DirectoryName.Substring($minifigRoot.Length).TrimStart('\').Split('\')[0]
+    $rigRoot = $rigRoots | Where-Object { $uasset.FullName.StartsWith($_.TrimEnd('\') + '\', [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1
+    $character = $uasset.DirectoryName.Substring($rigRoot.Length).TrimStart('\').Split('\')[0]
     $role = Get-RoleFromStem $stem
     $templateKey = Get-TemplateKey $character $stem $role
+    # Keep a DLC/new Playables family separate from an older NPC with the same stem.
+    $rigPackage = Convert-ToPackagePath $ExtractedContentRoot (Join-Path $rigRoot '_root.uasset')
+    if ($rigPackage -ne '/Game/Characters/Minifig/_root') {
+        $templateKey = $rigPackage.Substring(0, $rigPackage.Length - 6) + '/' + $templateKey
+    }
 
     $searchFiles = @($uasset.FullName)
     if (Test-Path -LiteralPath $uexp -PathType Leaf) {

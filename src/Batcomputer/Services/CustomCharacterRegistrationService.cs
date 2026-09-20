@@ -61,10 +61,13 @@ public static class CustomCharacterRegistrationService
             Require(NativeAssetTextPatch.SetGameplayTag(group, "BaseCharacterTag", CustomCharacterProjectService.Scope(identity)), "Group owner field is missing.");
             Require(NativeAssetTextPatch.SetGameplayTag(group, "DefaultCharacterVariant", definition.PawnTag), "Group default variant is missing.");
             Require(NativeAssetTextPatch.SetStringTableText(group, "DisplayName", StringTableGenService.ObjectPathFor(mod), NameKey(identity.CharacterId)), "Group display name is missing.");
-            if (!string.IsNullOrWhiteSpace(identity.SymbolPackage))
-                Require(NativeAssetTextPatch.SetSoftObject(group, "Symbol", identity.SymbolPackage), "The group emblem must be a supported soft asset reference.");
+            var symbol = CharacterSymbolService.Stage(content, nativeContent, mod, identity);
+            if (!string.IsNullOrWhiteSpace(symbol))
+                Require(NativeAssetTextPatch.SetSoftObject(group, "Symbol", symbol), "The group emblem must be a supported soft asset reference.");
             group.Write(groupFile);
             var check = Read(groupFile, maps);
+            if (!string.IsNullOrWhiteSpace(symbol))
+                Require(NativeAssetTextPatch.GetSoftReference(check, "Symbol")?.PackageName == UnrealPathUtil.NormalizePackagePath(symbol), "Character symbol failed its written reference check.");
             Require(NativeAssetTextPatch.GetGameplayTag(check, "BaseCharacterTag") == CustomCharacterProjectService.Scope(identity) &&
                 NativeAssetTextPatch.GetGameplayTag(check, "DefaultCharacterVariant") == definition.PawnTag, "Character group failed its written identity check.");
 

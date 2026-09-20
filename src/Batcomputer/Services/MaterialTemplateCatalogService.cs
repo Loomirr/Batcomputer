@@ -311,6 +311,25 @@ internal sealed class MaterialTemplateCatalogService
             },
             new()
             {
+                Id = "cape.cloth.two-hole",
+                DisplayName = "Two-hole cloth cape (complete LOD set)",
+                Category = "Capes",
+                Summary = "Native two-hole cape materials for gameplay, cutscenes and both LODs.",
+                Guidance = "For the native TwoHole cape, use LOD0 on slot 0 and LOD1 on slots 1 and 2. Keep the gameplay/cutscene pair for each LOD; do not apply LOD0 to every slot.",
+                AllowedTargetKinds = Kinds(TargetKinds.Cape),
+                CompatibleMeshPackagePaths = Meshes(
+                    "/Game/Characters/Attachments/Cape/TwoHole/SK_CAPE_TwoHole",
+                    "/Game/Characters/Attachments/Cape/TwoHole/SK_CAPE_TwoHole_Advanced"),
+                Outputs = new[]
+                {
+                    new Output("gameplay LOD0", "_LOD0", "/Game/Characters/Attachments/Cape/TwoHole/Materials/MI_CAPE_TwoHole_DarkStoneGrey_LOD0", true),
+                    new Output("cutscene LOD0", "_LOD0_CUT", "/Game/Characters/Attachments/Cape/TwoHole/Materials/MI_CAPE_TwoHole_DarkStoneGrey_CUT_LOD0"),
+                    new Output("gameplay LOD1", "_LOD1", "/Game/Characters/Attachments/Cape/TwoHole/Materials/MI_CAPE_TwoHole_DarkStoneGrey_LOD1"),
+                    new Output("cutscene LOD1", "_LOD1_CUT", "/Game/Characters/Attachments/Cape/TwoHole/Materials/MI_CAPE_TwoHole_DarkStoneGrey_CUT_LOD1"),
+                },
+            },
+            new()
+            {
                 Id = "cape.rubber.one-hole",
                 DisplayName = "Rubber cape / attachment",
                 Category = "Capes",

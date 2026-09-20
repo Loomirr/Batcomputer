@@ -483,6 +483,10 @@ public sealed class ComponentRemoveService
         string componentName,
         Usmap? mappings)
     {
+        // Cinematic bindings address the authored Face component. Preserve that identity
+        // so replacing its visual later does not create an unbound Face_2 component.
+        if (PreserveConstructionNode(componentName))
+            return HideVisualInAsset(role, stageRoot, packagePath, componentName, mappings);
         var fileResult = new ComponentRemoveFileResult
         {
             Role = role,
@@ -667,6 +671,9 @@ public sealed class ComponentRemoveService
         propertyName.Equals("StaticMesh", StringComparison.OrdinalIgnoreCase) ||
         propertyName.Equals("SkeletalMesh", StringComparison.OrdinalIgnoreCase) ||
         propertyName.Equals("SkinnedAsset", StringComparison.OrdinalIgnoreCase);
+
+    internal static bool PreserveConstructionNode(string componentName) =>
+        componentName.Equals("Face", StringComparison.OrdinalIgnoreCase);
 
     private ComponentRemoveFileResult RestoreScsReferencesInAsset(
         string role,
@@ -918,6 +925,7 @@ public sealed class ComponentRemoveService
 
     private static void EnsureMinimalSchema(UAsset asset, string schemaName, string modulePath)
     {
+        NativeBlueprintSchemaService.EnsureParents(asset);
         var mappings = asset.Mappings;
         if (mappings is null || mappings.Schemas.ContainsKey(schemaName))
         {

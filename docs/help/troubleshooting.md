@@ -191,6 +191,11 @@ game texture.
 5. Confirm the intended character family is encoded in the PawnTag.
 6. Rebuild from current post-update donors.
 
+Joker/Harley suits built from the retained `Default` donors can inherit obsolete unlock tags and
+be omitted entirely, even with a valid registry. The updated tool maps those two legacy gates to
+the current native defaults (Joker HTV / Harley BTAS) when reading or saving projects. Rebuild and
+reinstall the full mod, then restart; changing or resetting your save is not required by this fix.
+
 ## A `_Quest` visual returns to the base picker
 
 Quest-only characters are visual bases, not gameplay donors. Select the `_Quest` character as the
@@ -207,11 +212,39 @@ character assets and part index if the `_Quest` Blueprint is not listed.
 Batcomputer blocks mismatched controllers because they can leave both visuals active, use the wrong
 glide pose, or crash the game.
 
+## Hair changes in gameplay but not in cutscenes
+
+Some shared static hair pieces only have a playable donor in the part index. Current builds reuse
+that exact mesh and material for the cutscene target too. For an older project that saved only the
+playable assignment, apply the hair again, save and rebuild. This fallback is limited to static
+head parts; it does not bypass cape/glider compatibility checks.
+
+## Parts are missing after a DLC or mappings update
+
+Use **Refresh game assets** with the DLC installed and current mappings. The parts catalog includes
+the Villain Mode character folders and extracted attachment meshes. Updating or switching the
+`.usmap` now invalidates the old parts index automatically; its first rebuild may take longer.
+If a part is still absent, include its exact asset name in the report. Talia's BatSuit helmet,
+HoodSmall, HoodFringe and HoodFurlined have been checked against the current extraction.
+
+## Vehicle rig rotations do not match the reference
+
+Export a fresh native GLB with the current build. Older exports could reflect bone rotations
+incorrectly even when the visible mesh looked right. Keep the fresh donor's rest pose unchanged.
+If the cooked FBX still fails validation, include `rig-comparison.json` from its import logs with
+the report. See the [vehicle setup guide](../guides/vehicles.md).
+
 ## A window does not fit the display
 
 Resize or maximize the window. Batcomputer's windows and dialogs now adapt to a usable single
 monitor. If controls are still clipped, record the monitor resolution and Windows scaling
 percentage, try a lower scaling value, and include both values with a screenshot in the report.
+
+## Skinned import: filename is too long
+
+If `import.log` reports success but `cook.log` contains `Couldn't save package, filename is too long`, the failure is in Unreal's cook output path, not evidence of a broken FBX rig. Follow-up DeformerGraph missing-package errors can come from that failed save.
+
+The development build cooks in a short, isolated Windows temporary folder and copies the logs and validated mesh back to the project. Reimport the saved FBX after updating. The error dialog now shows the cook error rather than the first startup messages. Failed temporary workspaces are retained; their path is recorded in `cook-workspace.txt` beside the import logs. If even the short folder is rejected, shorten the mesh/package name or use a shorter Windows TEMP path.
 
 ## Access denied while building or installing
 

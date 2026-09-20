@@ -54,6 +54,8 @@ nav:
   - Tutorials:
       - Create your first suit: guides/first-suit.md
       - Custom characters: guides/custom-characters.md
+      - Character game modes: guides/character-modes.md
+      - Character 3D workshop: guides/character-workshop.md
       - Update or repair a suit: guides/update-repair-suit.md
       - Materials, textures, and faces: guides/materials-textures-faces.md
       - Character animations: guides/animations.md

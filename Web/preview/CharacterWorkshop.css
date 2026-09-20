@@ -1,0 +1,69 @@
+:root{color-scheme:dark;--cw-bg:#1b2028;--cw-panel:#242a34;--cw-border:#39414e;--cw-text:#e7ebf1;--cw-muted:#a6afbd;--cw-gold:#ffda43}
+#character-workshop{position:fixed;inset:0;display:grid;grid-template-rows:62px minmax(0,1fr) 36px;background:var(--cw-bg);color:var(--cw-text);font:13px 'Segoe UI',sans-serif}
+#character-workshop *{box-sizing:border-box}
+#character-workshop [hidden]{display:none!important}
+#character-workshop header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 18px;border-bottom:1px solid var(--cw-border);background:#202630}
+#character-workshop header small{display:block;font-size:9px;letter-spacing:2px;color:var(--cw-gold);margin-bottom:3px}
+#character-workshop header strong{font-size:17px;font-weight:600}
+#character-workshop main{display:grid;grid-template-columns:210px minmax(180px,1fr) 290px;min-height:0}
+#character-workshop aside{background:var(--cw-panel);min-width:0;padding:14px;overflow:auto}
+#cw-parts{display:flex;flex-direction:column;gap:12px;border-right:1px solid var(--cw-border)}
+#cw-inspector{border-left:1px solid var(--cw-border)}
+#character-workshop button,#character-workshop select,#character-workshop input{font:inherit;color:var(--cw-text);border:1px solid var(--cw-border);border-radius:6px;background:#1b212b;padding:8px 10px}
+#character-workshop button{cursor:pointer;transition:background .12s,border-color .12s;text-align:left}
+#character-workshop button:hover{background:#343d4b;border-color:#677388}
+#character-workshop button:focus-visible,#character-workshop select:focus-visible,#character-workshop input:focus-visible{outline:2px solid var(--cw-gold);outline-offset:2px}
+#character-workshop button:disabled{opacity:.4;cursor:default}
+#character-workshop button.cw-primary{background:var(--cw-gold);border-color:var(--cw-gold);color:#191c22;font-weight:600}
+.cw-actions,.cw-views{display:flex;gap:6px;flex-wrap:wrap}
+.cw-mesh-actions{display:flex;gap:5px;flex-wrap:wrap;margin:8px 0}
+#meshmove>label{display:flex;align-items:center;justify-content:space-between;gap:6px;margin:8px 0}
+#meshmove>label select{max-width:120px}
+#meshmove .cw-mesh-actions button{font-size:11px;padding:7px}
+#meshmove button.active{border-color:var(--cw-gold);color:var(--cw-gold)}
+#meshmove>select{width:100%;margin:5px 0}
+#meshmove>button.save{display:block;width:100%;margin-top:10px;border-color:var(--cw-gold);color:var(--cw-gold)}
+#meshmove>small{display:block;margin-top:9px;color:var(--cw-muted);font-size:11px;line-height:1.5}
+.cw-section-title{display:flex;justify-content:space-between;letter-spacing:1px;font-size:10px;color:var(--cw-muted)}
+#cw-part-list{flex:1;min-height:70px;overflow:auto;display:flex;flex-direction:column;gap:4px}
+#character-workshop .cw-part{border:1px solid transparent;border-left:3px solid transparent;border-radius:4px;background:transparent;padding:10px;width:100%}
+#character-workshop .cw-part.active{background:#ffda4312;border-left-color:var(--cw-gold)}
+.cw-part strong,.cw-part small{display:block;overflow-wrap:anywhere}.cw-part strong{font-weight:600}.cw-part small{font-size:10px;color:var(--cw-muted);margin-top:4px}
+#cw-viewport{min-width:0;min-height:0;position:relative;overflow:hidden;background:radial-gradient(ellipse at 50% 35%,#364150,#161b24)}
+#cw-viewport canvas{width:100%;height:100%;display:block}
+.cw-views{position:absolute;left:14px;right:14px;top:14px;z-index:1}
+#character-workshop .cw-views button{font-size:11px;padding:6px 9px;background:#202630e8}
+.cw-orbit-hint{position:absolute;bottom:14px;left:14px;right:14px;text-align:center;font-size:10px;color:var(--cw-muted);pointer-events:none}
+#cw-inspector h2{font-size:17px;margin:0 0 5px;overflow-wrap:anywhere}
+.cw-muted,.cw-note{color:var(--cw-muted);font-size:11px;line-height:1.55}
+.cw-note{border-left:2px solid #647084;padding-left:10px;margin:14px 0}
+.cw-tabs{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin:18px 0 8px}
+#character-workshop .cw-tabs button{text-align:center;font-size:11px}
+#character-workshop .cw-tabs button.active{border-color:#a88b2b;color:var(--cw-gold);background:#ffda430b}
+#cw-panel-host>section>label{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:15px 0;font-size:12px}
+#cw-panel-host input[type=range]{width:150px;padding:0;accent-color:var(--cw-gold)}
+#character-workshop #partmove,#character-workshop #partuv,#character-workshop #meshmove,#character-workshop #redbrick,#character-workshop #matedit,#character-workshop #exprwrap{position:static!important;width:100%!important;max-height:none!important;padding:0;margin:14px 0;background:none;border:0;box-shadow:none;font-size:12px;overflow:visible}
+#character-workshop .panel-drag-handle{cursor:default;pointer-events:none}
+#character-workshop #partmove .axis,#character-workshop #meshmove .axis{grid-template-columns:90px minmax(0,1fr);gap:8px;margin:8px 0}
+#character-workshop #matedit .maptoggle{padding:9px 0}
+#character-workshop #matedit .matdetails{padding:8px;font-size:10px}
+#character-workshop #character-tools{position:static;width:100%;max-width:none;padding:0;border:0;box-shadow:none;background:none;font-size:11px}
+#character-tools>strong,#character-tools>select{display:none}
+#character-workshop #character-tools .buttons{display:flex;flex-wrap:wrap;gap:5px}
+#character-workshop #character-tools small{color:var(--cw-muted);font-size:10px;line-height:1.5;display:block;margin-top:10px}
+#character-workshop footer{display:flex;align-items:center;gap:10px;justify-content:space-between;border-top:1px solid var(--cw-border);padding:4px 12px;color:var(--cw-muted);font-size:10px}
+#character-workshop footer span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#character-workshop footer button{padding:4px 8px;font-size:10px}
+.cw-warning{color:var(--cw-gold)}
+#err{display:none;white-space:pre-wrap}
+.cw-load-error:not(.cw-ready) #err{display:block;max-height:60vh;overflow:auto}
+#character-workshop.cw-debug #err{display:block;position:absolute;z-index:5;left:12px;right:12px;bottom:42px;max-height:35%;overflow:auto;margin:0;padding:16px;background:#131820f5;border:1px solid var(--cw-border);border-radius:8px;font-size:11px;white-space:pre-wrap}
+.cw-ready #hud{display:none}
+#character-workshop.cw-hide-parts main{grid-template-columns:0 minmax(180px,1fr) 290px}
+#character-workshop.cw-hide-inspector main{grid-template-columns:210px minmax(180px,1fr) 0}
+#character-workshop.cw-clean main,#character-workshop.cw-hide-parts.cw-hide-inspector main{grid-template-columns:0 minmax(180px,1fr) 0}
+.cw-hide-parts #cw-parts,.cw-hide-inspector #cw-inspector,.cw-clean aside{visibility:hidden;overflow:hidden;padding:0!important;border:0!important}
+@media(max-width:1000px){#character-workshop main{grid-template-columns:170px minmax(160px,1fr) 250px}#character-workshop.cw-hide-parts main{grid-template-columns:0 minmax(160px,1fr) 250px}#character-workshop.cw-hide-inspector main{grid-template-columns:170px minmax(160px,1fr) 0}#character-workshop header{padding:8px 10px}#character-workshop header strong{font-size:14px}#character-workshop header button{font-size:11px;padding:7px}#character-workshop aside{padding:11px}}
+@media(max-width:700px){#character-workshop main{grid-template-columns:145px minmax(160px,1fr) 0}#cw-inspector{position:absolute;right:0;top:62px;bottom:36px;width:min(280px,75vw);z-index:3;box-shadow:-10px 0 30px #0005}#character-workshop.cw-hide-parts main{grid-template-columns:0 minmax(160px,1fr) 0}#character-workshop.cw-hide-inspector main{grid-template-columns:145px minmax(160px,1fr) 0}#character-workshop header small{display:none}#character-workshop header strong{font-size:12px}.cw-actions{gap:3px}.cw-orbit-hint{font-size:9px}}
+@media(prefers-reduced-motion:reduce){#character-workshop button{transition:none}}
+#character-workshop.cw-clean main,#character-workshop.cw-hide-parts.cw-hide-inspector main{grid-template-columns:0 minmax(160px,1fr) 0}

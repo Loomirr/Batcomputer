@@ -12,7 +12,10 @@ public sealed partial class MainForm
     private Label? _viewerStatus;
     private Button? _viewerLoadButton;
     private FlowLayoutPanel? _viewerSources;
-    private string _viewerSource = "My suits";
+    private ThemedDropDown? _viewerFamily;
+    private Label? _viewerCount;
+    private string _viewerFamilySource = "";
+    private string _viewerSource = "My library";
     private List<CharacterCatalogService.Entry> _viewerEntries = new();
     private TableLayoutPanel? _viewerHostLayout;
     private Control? _viewerPanel;
@@ -21,6 +24,7 @@ public sealed partial class MainForm
     private bool _viewerCustomMeshBakeInProgress;
     private readonly SemaphoreSlim _viewerCustomMeshPlacementGate = new(1, 1);
     private int _viewerCustomMeshPlacementRequest;
+    private readonly Dictionary<string, int> _viewerCustomMeshRequests = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Builds the viewer once and hosts it in the dedicated full-width workspace.</summary>
     private void ShowViewerPanel()
@@ -79,26 +83,33 @@ public sealed partial class MainForm
             BackColor = Theme.WindowBg,
             Padding = new Padding(10),
         };
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 250));
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 278));
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
         // --- left: source picker + list ---------------------------------------
         var left = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, BackColor = Color.Transparent,
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 7, BackColor = Theme.PanelBg,
+            Padding = new Padding(10),
         };
+        left.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        left.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        left.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         left.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         left.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         left.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         left.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
+        var heading = new Label { Text = "CHARACTER LIBRARY", AutoSize = true, Font = Theme.Eyebrow,
+            ForeColor = Theme.Gold, Margin = new Padding(2, 6, 0, 14) };
+        left.Controls.Add(heading, 0, 0);
         // Segmented source switch: three flat buttons that behave as one control.
         _viewerSources = new FlowLayoutPanel
         {
             Dock = DockStyle.Top, Height = 30, FlowDirection = FlowDirection.LeftToRight,
             WrapContents = false, BackColor = Color.Transparent, Margin = new Padding(0),
         };
-        foreach (var name in new[] { "My suits", "Playable", "Cutscene" })
+        foreach (var name in new[] { "My library", "Playable", "Cutscene" })
         {
             var b = new Button
             {
@@ -115,31 +126,36 @@ public sealed partial class MainForm
             };
             _viewerSources.Controls.Add(b);
         }
-        left.Controls.Add(_viewerSources, 0, 0);
+        left.Controls.Add(_viewerSources, 0, 1);
         SyncViewerSourceButtons();
 
-        _viewerSearch = new SearchBox { Dock = DockStyle.Top, Height = 28 };
+        _viewerSearch = new SearchBox { Dock = DockStyle.Top, Height = 34, Margin = new Padding(0, 10, 0, 8), AccessibleName = "Search characters and suits" };
         _viewerSearch.TextChanged += (_, _) => RefreshViewerList();
-        left.Controls.Add(_viewerSearch, 0, 1);
+        left.Controls.Add(_viewerSearch, 0, 2);
+        _viewerFamily = new ThemedDropDown { Dock = DockStyle.Top, Height = 34, Placeholder = "All characters", AccessibleName = "Character filter" };
+        _viewerFamily.SelectedIndexChanged += (_, _) => RefreshViewerList();
+        left.Controls.Add(_viewerFamily, 0, 3);
+        _viewerCount = new Label { Dock = DockStyle.Top, Height = 28, Font = Theme.Caption, ForeColor = Theme.OnDarkMuted, TextAlign = ContentAlignment.MiddleLeft };
+        left.Controls.Add(_viewerCount, 0, 4);
 
-        _viewerList = new ListBox
+        _viewerList = new CharacterBrowserList
         {
             Dock = DockStyle.Fill,
             Font = Theme.Body,
             IntegralHeight = false,
         };
-        Theme.StyleListBox(_viewerList);
         _viewerList.DoubleClick += (_, _) => LoadSelectedViewerCharacter();
-        left.Controls.Add(_viewerList, 0, 2);
+        _viewerList.KeyDown += (_, e) => { if (e.KeyCode == Keys.Enter) { e.Handled = e.SuppressKeyPress = true; LoadSelectedViewerCharacter(); } };
+        left.Controls.Add(_viewerList, 0, 5);
 
         _viewerLoadButton = new Button
         {
-            Dock = DockStyle.Top, Height = 32, Text = "View in 3D", FlatStyle = FlatStyle.Flat,
+            Dock = DockStyle.Top, Height = 40, Text = "Open in workshop", FlatStyle = FlatStyle.Flat,
             BackColor = Theme.PanelBg, ForeColor = Theme.Gold, Font = Theme.Body, Margin = new Padding(0, 6, 0, 0),
         };
-        _viewerLoadButton.FlatAppearance.BorderColor = Theme.GoldDim;
+        Theme.StyleGoldButton(_viewerLoadButton);
         _viewerLoadButton.Click += (_, _) => LoadSelectedViewerCharacter();
-        left.Controls.Add(_viewerLoadButton, 0, 3);
+        left.Controls.Add(_viewerLoadButton, 0, 6);
 
         root.Controls.Add(left, 0, 0);
 
@@ -206,6 +222,7 @@ public sealed partial class MainForm
         {
             var on = string.Equals((string)c.Tag!, _viewerSource, StringComparison.Ordinal);
             c.ForeColor = on ? Theme.Gold : Theme.OnDarkMuted;
+            c.BackColor = on ? Theme.CardHi : Theme.PanelBg;
             c.FlatAppearance.BorderColor = on ? Theme.GoldDim : Theme.PanelBg;
         }
     }
@@ -223,11 +240,28 @@ public sealed partial class MainForm
             _ => CharacterCatalogService.Source.CustomSuit,
         };
         var needle = _viewerSearch?.Text?.Trim() ?? string.Empty;
+        if (_viewerFamily is not null) _viewerFamily.Visible = source != CharacterCatalogService.Source.CustomSuit;
+        if (_viewerFamily is not null && _viewerFamilySource != _viewerSource)
+        {
+            _viewerFamilySource = _viewerSource; // Set before selection events recurse.
+            _viewerFamily.Items.Clear();
+            _viewerFamily.Items.Add("All characters");
+            foreach (var family in _viewerEntries.Where(e => e.Origin == source).Select(e => e.Name.Split(' ', 2)[0]).Distinct().OrderBy(n => n))
+                _viewerFamily.Items.Add(family);
+            _viewerFamily.SelectedIndex = 0;
+        }
+        var familyFilter = source != CharacterCatalogService.Source.CustomSuit && _viewerFamily?.SelectedIndex > 0 ? _viewerFamily.SelectedItem?.ToString() : null;
+        var selected = _viewerList.SelectedItem as CharacterCatalogService.Entry;
+        var matches = _viewerEntries.Where(e => e.Origin == source)
+            .Where(e => familyFilter is null || e.Name.Split(' ', 2)[0] == familyFilter)
+            .Where(e => needle.Length == 0 || e.Name.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                CharacterBrowserList.DisplayName(e.Name).Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                e.ProjectId.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                e.CharacterId.Contains(needle, StringComparison.OrdinalIgnoreCase)).ToList();
 
         _viewerList.BeginUpdate();
         _viewerList.Items.Clear();
-        foreach (var e in _viewerEntries.Where(e => e.Origin == source)
-                     .Where(e => needle.Length == 0 || e.Name.Contains(needle, StringComparison.OrdinalIgnoreCase)))
+        foreach (var e in matches)
         {
             _viewerList.Items.Add(e);
         }
@@ -236,12 +270,18 @@ public sealed partial class MainForm
 
         if (_viewerList.Items.Count > 0)
         {
-            _viewerList.SelectedIndex = 0;
+            var retained = selected is null ? -1 : matches.FindIndex(e => e == selected);
+            _viewerList.SelectedIndex = retained >= 0 ? retained : 0;
         }
         else if (source == CharacterCatalogService.Source.CustomSuit)
         {
-            _viewerStatus!.Text = "No suit projects yet - build one under My character.";
+            _viewerStatus!.Text = "No saved characters or suits yet — create one in Characters or Suits.";
         }
+        if (_viewerCount is not null) _viewerCount.Text = matches.Count == 0 ? "No matches · try another filter" :
+            source == CharacterCatalogService.Source.CustomSuit
+                ? $"{matches.Count(e => e.IsCharacter)} characters · {matches.Count(e => !e.IsCharacter)} suits"
+                : $"{matches.Count} entries · double-click to open";
+        if (_viewerLoadButton is not null) _viewerLoadButton.Enabled = matches.Count > 0;
     }
 
     private void LoadSelectedViewerCharacter()
@@ -431,6 +471,7 @@ public sealed partial class MainForm
                 return;
             }
             var placementRequest = ++_viewerCustomMeshPlacementRequest;
+            _viewerCustomMeshRequests[args.LayoutKey + "|" + customMesh.Id] = placementRequest;
             await SaveCustomStaticMeshPlacementAsync(
                 project!,
                 customMesh,
@@ -470,6 +511,11 @@ public sealed partial class MainForm
     {
         if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("save the custom-mesh placement"))
         {
+            if (_viewer is not null && expectedViewerGeneration == _viewerLoadGeneration && args.CustomMeshTransform is { } rejected)
+            {
+                if (args.CustomMeshBakeRequested) await _viewer.NotifyCustomMeshBakeFailedAsync("The project stage is not ready.");
+                else await _viewer.NotifyCustomMeshDraftAsync(args.Component, rejected, "The project stage is not ready.");
+            }
             return;
         }
 
@@ -496,7 +542,7 @@ public sealed partial class MainForm
         await _viewerCustomMeshPlacementGate.WaitAsync();
         try
         {
-            if (!isBake && placementRequest != _viewerCustomMeshPlacementRequest)
+            if (!isBake && placementRequest != _viewerCustomMeshRequests.GetValueOrDefault(args.LayoutKey + "|" + mesh.Id))
             {
                 return;
             }
@@ -512,7 +558,7 @@ public sealed partial class MainForm
                     // cooked mesh still has the prior transform. Establish the fail-closed packaging
                     // sentinel before persisting that newer recipe.
                     await MarkDeclarativeStageIncompleteAsync(project, projectService.ProjectRoot);
-                    if (placementRequest != _viewerCustomMeshPlacementRequest)
+                    if (placementRequest != _viewerCustomMeshRequests.GetValueOrDefault(args.LayoutKey + "|" + mesh.Id))
                     {
                         // A newer draft or Bake request arrived while the marker was being written.
                         // Leave the fail-closed marker in place and let that latest request own the
@@ -523,6 +569,8 @@ public sealed partial class MainForm
                     projectService.SaveProject(project);
                     _viewerProject = project;
                     _viewerStatus!.Text = $"{mesh.DisplayName}: preview transform saved. Use Bake to game before testing it in-game.";
+                    if (_viewer is not null && expectedViewerGeneration == _viewerLoadGeneration)
+                        await _viewer.NotifyCustomMeshDraftAsync(args.Component, transform);
                 }
                 catch (Exception ex)
                 {
@@ -531,6 +579,8 @@ public sealed partial class MainForm
                     // intentionally retained so packaging remains blocked.
                     ApplyViewerCustomMeshTransform(mesh, previousTransform);
                     _viewerStatus!.Text = $"Could not save {mesh.DisplayName}: {ex.Message.Split('\n')[0]}";
+                    if (_viewer is not null && expectedViewerGeneration == _viewerLoadGeneration)
+                        await _viewer.NotifyCustomMeshDraftAsync(args.Component, transform, ex.Message.Split('\n')[0]);
                 }
                 return;
             }
@@ -568,6 +618,8 @@ public sealed partial class MainForm
                     ApplyViewerCustomMeshTransform(mesh, previousTransform);
                 }
                 _viewerStatus!.Text = $"Could not save {mesh.DisplayName}: {ex.Message.Split('\n')[0]}";
+                if (_viewer is not null && expectedViewerGeneration == _viewerLoadGeneration)
+                    await _viewer.NotifyCustomMeshBakeFailedAsync(ex.Message.Split('\n')[0]);
             }
         }
         finally

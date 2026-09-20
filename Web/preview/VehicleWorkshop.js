@@ -2,6 +2,53 @@
 (function () {
   'use strict';
   const data = window.VEHICLE_SCENE, $ = id => document.getElementById(id);
+  let section = 'assembly';
+  const nav = document.createElement('nav'); nav.id = 'workshopNav'; nav.setAttribute('aria-label', 'Workshop sections');
+  document.querySelector('main aside').prepend(nav);
+  const sectionButtons = new Map();
+  for (const [id, label] of [['assembly','Assembly'],['lighting','Lights'],['hardpoints','Hardpoints'],['seating','Seats']]) {
+    const button = document.createElement('button'); button.textContent = label; button.dataset.section = id;
+    button.onclick = () => changeSection(id); nav.appendChild(button); sectionButtons.set(id, button);
+  }
+  nav.append($('paintMode'), $('setup')); $('setup').textContent = 'Body & setup';
+  const surfaceEditor = document.createElement('dialog'); surfaceEditor.id = 'surfaceEditor'; surfaceEditor.setAttribute('aria-label', 'Surface material');
+  surfaceEditor.innerHTML = '<div class="surface-editor"><header><h2>Surface material</h2><button id="closeSurface">Close</button></header><p id="surfaceName" class="path"></p><label>Finish<select id="surfaceFinish"><option value="Original">Keep current shader</option value="Solid">LEGO solid</option><option value="Metallic">LEGO metallic</option><option value="Transparent">LEGO transparent</option><option value="Flat">Simple color (legacy)</option></select></label><label>Color<input id="surfaceColor" type="color" value="#8993a3"></label><p id="surfaceHint" class="muted"></p><div class="actions"><button id="editSurface">Edit material</button><button id="copySurface" class="primary">Create a copy</button><button id="librarySurface">Choose from library…</button></div></div>';
+  document.body.append(surfaceEditor); let surfaceTarget = null;
+  $('closeSurface').onclick = () => surfaceEditor.close();
+  $('surfaceFinish').onchange = () => { $('surfaceColor').disabled = $('surfaceFinish').value === 'Original'; };
+  $('librarySurface').onclick = () => { const target = surfaceTarget; surfaceEditor.close(); if (target) openMaterials(target.id, target.slot); };
+  for (const action of ['edit', 'copy']) $(action + 'Surface').onclick = () => {
+    if (!surfaceTarget) return;
+    surfaceEditor.close();
+    pushHost('vehicleWorkshopSurface', { ...draft(), surfaceComponent: surfaceTarget.id, surfaceSlot: surfaceTarget.slot, surfaceAction: action, surfaceFinish: $('surfaceFinish').value, surfaceColor: $('surfaceColor').value });
+  };
+  function openSurface(id, slot) {
+    if (!ready) return;
+    const part = data.parts.find(p => p.id === id), original = part?.materials.find(m => m.slot === slot);
+    if (!original) return;
+    const current = effectiveSlot(part, original), paint = byPath.get(current.package)?.paint;
+    surfaceTarget = { id, slot }; $('surfaceName').textContent = current.package;
+    const owned = current.package.startsWith('/Game/Mods/Vehicle_' + data.vehicleId + '/Materials/MI_');
+    $('editSurface').disabled = !owned;
+    $('surfaceHint').textContent = owned ? 'Edit updates this material wherever it is used. Create a copy keeps the original. Finish changes replace its shader. Material saves also update the library.' : 'Create a vehicle-owned copy to edit. The base material stays unchanged.';
+    const rgb = paint ? [paint.r, paint.g, paint.b] : current.color;
+    $('surfaceColor').value = rgb ? '#' + new THREE.Color(...rgb).convertLinearToSRGB().getHexString() : '#8993a3';
+    $('surfaceFinish').value = paint?.finish || (['Flat','Solid','Metallic','Transparent'].includes(current.family) && current.color ? current.family : 'Original');
+    $('surfaceFinish').onchange(); surfaceEditor.showModal();
+  }
+  const toyboxButton=document.createElement('button');toyboxButton.textContent='+ Parts toybox';nav.append(toyboxButton);
+  const replaceMesh=document.createElement('button');replaceMesh.textContent='Choose replacement shape…';replaceMesh.style.width='100%';$('partNote').before(replaceMesh);
+  const toybox=document.createElement('dialog');toybox.setAttribute('aria-label','Vehicle parts toybox');
+  toybox.innerHTML='<div class="dialog-layout"><header><h2>Vehicle parts toybox</h2><button data-close>Close</button></header><div class="library-filters"><input aria-label="Find vehicle parts" placeholder="Search mesh or vehicle name…"><select aria-label="Toybox category"><option value="">All pieces</option><option>Light pieces</option><option>Vehicle pieces</option></select></div><p class="muted" style="padding:0 16px" data-note></p><div data-cards style="overflow:auto;flex:1;padding:0 16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;align-content:start"></div><div class="library-footer" data-count></div></div>';
+  document.body.append(toybox);toybox.querySelector('[data-close]').onclick=()=>toybox.close();let toyboxTarget='';
+  function renderToybox(){const query=toybox.querySelector('input').value.toLowerCase(),group=toybox.querySelector('select').value,cards=toybox.querySelector('[data-cards]');cards.replaceChildren();const matches=(data.toyboxCatalog||[]).filter(p=>(!group||p.group===group)&&(p.name+' '+p.path).toLowerCase().includes(query));for(const part of matches.slice(0,160)){const button=document.createElement('button');button.className='material-card';const title=document.createElement('strong'),description=document.createElement('small');title.textContent=part.name;description.textContent=part.path;button.append(title,description);button.onclick=()=>{toybox.close();pushHost('vehicleWorkshopToybox',Object.assign(draft(),{targetComponent:toyboxTarget,meshPackage:part.path}));};cards.append(button);}toybox.querySelector('[data-count]').textContent=matches.length+' installed meshes'+(matches.length>160?' · showing 160; narrow your search':'');}
+  function openToybox(target){if(!ready||riderBusy)return;toyboxTarget=target;toybox.querySelector('[data-note]').textContent=target?'Changes this part’s mesh. Its existing controller and placement stay; material overrides reset.':'Adds a movable, non-colliding visual part. Brake/headlight behavior is not added automatically.';renderToybox();toybox.showModal();toybox.querySelector('input').focus();}
+  toybox.querySelector('input').oninput=renderToybox;toybox.querySelector('select').onchange=renderToybox;toyboxButton.onclick=()=>openToybox('');replaceMesh.onclick=()=>openToybox(selected?.id||'');
+  const viewState = document.createElement('span'); viewState.id = 'viewState'; viewState.setAttribute('aria-live','polite'); $('undo').before(viewState);
+  const expandView = document.createElement('button'); expandView.id = 'expandView'; expandView.textContent = 'Expand view';
+  expandView.setAttribute('aria-pressed','false'); $('undo').before(expandView);
+  expandView.onclick = () => { const expanded = document.body.classList.toggle('expanded'); expandView.textContent = expanded ? 'Show panels' : 'Expand view'; expandView.setAttribute('aria-pressed',String(expanded)); };
+  const help = document.createElement('details'), helpTitle = document.createElement('summary'); helpTitle.textContent = 'Part notes'; help.append(helpTitle); $('partNote').before(help); help.append($('partNote'));
   const rad = Math.PI / 180, clone = x => JSON.parse(JSON.stringify(x));
   const editable = new Map(data.parts.filter(p => p.editable).map(p => [p.id, p]));
   let saved = new Map(data.saved.map(t => [t.component, clone(t)]));
@@ -28,6 +75,7 @@
   for (const [pos, intensity] of [[[4, -3, 7], 1.7], [[-4, 5, 3], .85]]) { const light = new THREE.DirectionalLight(0xe7efff, intensity); light.position.fromArray(pos); scene.add(light); }
   const grid = new THREE.GridHelper(24, 48, 0x485260, 0x303744); grid.rotation.x = Math.PI / 2; grid.material.transparent = true; grid.material.opacity = .35; scene.add(grid);
   const vehicle = new THREE.Group(); scene.add(vehicle);
+  vehicle.scale.setScalar(data.sizeMultiplier || 1);
   const gizmo = new THREE.TransformControls(camera, renderer.domElement); gizmo.setSize(.85); scene.add(gizmo);
   const selectionBox = new THREE.Box3Helper(new THREE.Box3(), 0xffd43b); selectionBox.visible = false; scene.add(selectionBox);
   const loaded = new Map(), modelCache = new Map(), undo = [], redo = [], fields = new Map();
@@ -94,21 +142,32 @@
   function pushHost(type, values) { if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage(Object.assign({ type, vehicleId: data.vehicleId, session: data.session }, values)); }
   function changed(id) { return saved.has(id) || disabled.has(id) || beamSettings.has(id) || id==='body'&&lightSurfaces.size>0 || surfaceRole(id) || accentColor&&id.startsWith('C_') || Array.from(materials.values()).some(m => m.component === id); }
   function partLabel(part) { const role=surfaceRole(part.id);return role?role.label+' · custom lens':part.label; }
-  function updateUi() { $('undo').disabled = !undo.length; $('redo').disabled = !redo.length; $('apply').disabled = !ready||riderBusy; $('setup').disabled=riderBusy;$('paintMode').disabled=riderBusy; $('counts').textContent = editable.size + ' adjustable · ' + materials.size + ' material edits'; $('status').textContent = riderBusy?'Preparing figures · seat edits can continue':snapshot() === initial ? 'Drag to orbit · Click a surface to select its material slot' : 'Unsaved changes · Save vehicle to keep them'; renderList(); updateInspector(); }
-  function effectiveSlot(part, slot) { const override = materials.get(materialKey(part.id, slot.slot)); return override ? { ...slot, package: override.materialPath, color: null, family: byPath.get(override.materialPath)?.family || 'Assigned material', parameters: [] } : slot; }
+  function updateUi() { $('undo').disabled = !undo.length; $('redo').disabled = !redo.length; $('apply').disabled = !ready||riderBusy; $('setup').disabled=riderBusy;$('paintMode').disabled=riderBusy; $('counts').textContent = editable.size + ' adjustable · ' + materials.size + ' material edits'; const dirty = snapshot() !== initial; viewState.textContent = dirty ? 'Unsaved changes' : 'No new changes'; viewState.classList.toggle('dirty',dirty); $('status').textContent = riderBusy?'Preparing figures · seat edits can continue':dirty ? 'Unsaved changes · Save vehicle to keep them' : 'Orbit: drag · Pan: right drag · Zoom: wheel · W/E/R: transform'; sectionButtons.forEach((button,id)=>{button.classList.toggle('active',section===id);button.setAttribute('aria-pressed',String(section===id));}); renderList(); updateInspector(); }
+  function effectiveSlot(part, slot) { const override = materials.get(materialKey(part.id, slot.slot)), packagePath = override?.materialPath || slot.package, choice = byPath.get(packagePath), paint = choice?.paint; return { ...slot, package: packagePath, color: paint ? [paint.r,paint.g,paint.b] : override ? null : slot.color, family: paint?.finish || (override ? choice?.family || 'Assigned material' : slot.family), parameters: override ? [] : slot.parameters }; }
   function materialList(target, slots) {
     target.replaceChildren();
     if (!slots.length) { const note = document.createElement('p'); note.className = 'muted'; note.textContent = 'No mesh material slots.'; target.appendChild(note); return; }
-    slots.forEach(original => { const slot = target.id === 'materials' && selected ? effectiveSlot(selected, original) : original, item = document.createElement('div'); item.className = 'slot'; const title = document.createElement('strong'); title.textContent = 'Slot ' + slot.slot + ' · ' + (slot.color ? 'Flat color override' : slot.family); if (slot.color) { const swatch = document.createElement('span'); swatch.className = 'swatch'; swatch.style.background = '#' + new THREE.Color(...slot.color).convertLinearToSRGB().getHexString(); title.prepend(swatch); } item.appendChild(title); const path = document.createElement('div'); path.className = 'path'; path.textContent = slot.package; item.appendChild(path);
-      if (target.id === 'materials') { const actions = document.createElement('div'); actions.className = 'actions'; const choose = document.createElement('button'); choose.textContent = selectedSlot === slot.slot ? 'Change selected surface…' : 'Choose material…'; choose.onclick = () => openMaterials(selected.id, slot.slot); choose.dataset.slot = slot.slot; const reset = document.createElement('button'); reset.textContent = 'Reset'; reset.disabled = !materials.has(materialKey(selected.id, slot.slot)); reset.onclick = () => { const before = snapshot(); materials.delete(materialKey(selected.id, slot.slot)); repaint(loaded.get(selected.id)); checkpoint(before); }; actions.append(choose, reset); item.appendChild(actions); if (selectedSlot === slot.slot) item.style.borderLeft = '3px solid #ffd43b'; }
+    slots.forEach(original => { const slot = target.id === 'materials' && selected ? effectiveSlot(selected, original) : original, item = document.createElement('div'); item.className = 'slot'; const title = document.createElement('strong'); title.textContent = 'Slot ' + slot.slot + ' · ' + slot.family; if (slot.color) { const swatch = document.createElement('span'); swatch.className = 'swatch'; swatch.style.background = '#' + new THREE.Color(...slot.color).convertLinearToSRGB().getHexString(); title.prepend(swatch); } item.appendChild(title); const path = document.createElement('div'); path.className = 'path'; path.textContent = slot.package; item.appendChild(path);
+      if (target.id === 'materials') { const actions = document.createElement('div'); actions.className = 'actions'; const choose = document.createElement('button'); choose.textContent = selectedSlot === slot.slot ? 'Change selected surface…' : 'Change surface…'; choose.onclick = () => openSurface(selected.id, slot.slot); choose.dataset.slot = slot.slot; const reset = document.createElement('button'); reset.textContent = 'Reset'; reset.disabled = !materials.has(materialKey(selected.id, slot.slot)); reset.onclick = () => { const before = snapshot(); materials.delete(materialKey(selected.id, slot.slot)); repaint(loaded.get(selected.id)); checkpoint(before); }; actions.append(choose, reset); item.appendChild(actions); if (selectedSlot === slot.slot) item.style.borderLeft = '3px solid #ffd43b'; }
       target.appendChild(item); });
   }
   function renderList() {
+    const scroll = $('parts').scrollTop, focused = document.activeElement?.dataset.part;
     const search = $('search').value.toLowerCase(), filter = $('filter').value; $('parts').replaceChildren();
-    const groups = new Map(); for (const p of data.parts) { if (!(partLabel(p) + ' ' + p.label + ' ' + p.id + ' ' + p.socket).toLowerCase().includes(search) || filter === 'editable' && !p.editable || filter === 'changed' && !changed(p.id)) continue; if (!groups.has(p.group)) groups.set(p.group, []); groups.get(p.group).push(p); }
+    const groups = new Map(); for (const p of data.parts) { if (!inSection(p) || !(partLabel(p) + ' ' + p.label + ' ' + p.id + ' ' + p.socket).toLowerCase().includes(search) || filter === 'editable' && !p.editable || filter === 'changed' && !changed(p.id)) continue; if (!groups.has(p.group)) groups.set(p.group, []); groups.get(p.group).push(p); }
     groups.forEach((parts, group) => { const label = document.createElement('div'); label.className = 'group'; label.textContent = group.toUpperCase() + ' / ' + parts.length; $('parts').appendChild(label); for (const p of parts) { const button = document.createElement('button'); button.className = 'part' + (selected && selected.id === p.id ? ' active' : '') + (disabled.has(p.id) ? ' disabled' : ''); button.textContent = partLabel(p); button.dataset.part = p.id; if (changed(p.id)) { const tag = document.createElement('span'); tag.className = 'badge'; tag.textContent = disabled.has(p.id) ? 'REMOVED' : 'EDITED'; button.appendChild(tag); } const sub = document.createElement('small'); sub.textContent = surfaceRole(p.id)?'Custom surface · independent placement':p.socket || (p.id === 'body' ? 'Select surfaces to paint' : p.editable ? 'Component origin' : 'Reference'); button.appendChild(sub); button.onclick = () => select(p.id); $('parts').appendChild(button); } });
+    if (!groups.size) { const empty = document.createElement('p'); empty.className = 'empty-parts'; empty.textContent = 'No matching parts. Try another section or clear the search and filter.'; $('parts').appendChild(empty); }
+    if (focused) Array.from($('parts').querySelectorAll('button')).find(b=>b.dataset.part===focused)?.focus({preventScroll:true});
+    $('parts').scrollTop = scroll;
+  }
+  function inSection(p) { return section === 'assembly' || section === 'lighting' && (/light/i.test(p.group) || p.light || surfaceRole(p.id)) || section === 'hardpoints' && /weapons|grapple|boost|exhaust/i.test(p.group) || section === 'seating' && p.group === 'Seating'; }
+  function changeSection(value) {
+    section = value; $('search').value = ''; $('filter').value = 'all'; $('parts').scrollTop = 0;
+    const first = data.parts.find(p=>inSection(p) && loaded.has(p.id));
+    if (first && (!selected || !inSection(selected))) select(first.id); else updateUi();
   }
   function updateInspector() {
+    replaceMesh.hidden=!selected?.canDisable || !!surfaceRole(selected.id);
     if (!selected) return; const t = current(selected), state = loaded.get(selected.id);
     $('selection').textContent = partLabel(selected); $('detail').textContent = surfaceRole(selected.id)?'Offset from the imported lens center · vehicle axes':(selected.socket ? 'Socket: ' + selected.socket + ' · Bone: ' + selected.bone : 'Vehicle origin') + (selected.id === 'body' ? ' · materials editable, rig locked' : selected.editable ? ' · editable' : ' · reference only');
     fields.forEach((input, name) => { input.value = Number(t[name]).toFixed(3); input.disabled = !selected.editable || (selected.group === 'Seating' || selected.lockScale) && name.startsWith('scale'); });
@@ -121,7 +180,7 @@
       $('surfaceReason').textContent=choice?.reason || (binding?'Uses a native lamp controller. Move its LED part in Assembly. Beam position is separate.':'Choose a lens-only slot. Assigning a role replaces that native LED and removes its old glow piece.');
     }
     beamPanel.hidden = !selected.light;
-    accentPanel.hidden=selected.group!=='Accent lights';$('accentColor').value=accentColor?'#'+new THREE.Color(accentColor.r/255,accentColor.g/255,accentColor.b/255).getHexString():'#d5e9ec';$('resetAccent').disabled=!accentColor;
+    accentPanel.hidden=data.lightControls===false||selected.group!=='Accent lights';$('accentColor').value=accentColor?'#'+new THREE.Color(accentColor.r/255,accentColor.g/255,accentColor.b/255).getHexString():'#d5e9ec';$('resetAccent').disabled=!accentColor;
     if (selected.light) { const beam = beamSettings.get(selected.id) || selected.light; $('beamColor').value='#'+new THREE.Color(beam.r/255,beam.g/255,beam.b/255).getHexString();$('beamIntensity').value=beam.intensity;$('beamRadius').value=beam.radius;$('beamCone').value=beam.outerCone;$('resetBeam').disabled=!beamSettings.has(selected.id);$('beamState').textContent=beamSettings.has(selected.id)?'Custom beam · glow meshes use their own materials':'Native settings unchanged. Values shown are starting values for a custom beam.'; }
     $('fields').style.display = selected.editable ? '' : 'none';
     $('reset').parentElement.style.display = selected.editable ? 'flex' : 'none';
@@ -159,11 +218,11 @@
   $('isolate').onclick = () => { isolate = !isolate; visibility(); };
   $('apply').onclick = () => pushHost('vehicleWorkshopSave', draft());
   const openSettings = () => { if (ready) pushHost('vehicleWorkshopSettings', draft()); }; $('setup').onclick = openSettings;
-  $('assemblyMode').onclick = () => { $('search').value = ''; $('filter').value = 'all'; renderList(); };
-  $('paintMode').onclick = () => { const part = selected?.materials.length ? selected : data.parts.find(p => p.id === 'body'); openMaterials(part.id, selectedSlot ?? part.materials[0]?.slot ?? 0); };
-  $('seatsMode').onclick = () => { $('search').value = 'seat'; $('filter').value = 'all'; select('seat:SeatDriver'); };
+  $('assemblyMode').onclick = () => changeSection('assembly');
+  $('paintMode').onclick = () => { const part = selected?.materials.length ? selected : data.parts.find(p => p.id === 'body'); openSurface(part.id, selectedSlot ?? part.materials[0]?.slot ?? 0); };
+  $('seatsMode').onclick = () => changeSection('seating');
   disableButton.onclick = () => { if (!selected?.canDisable) return; const before = snapshot(); if (disabled.has(selected.id)) disabled.delete(selected.id); else disabled.add(selected.id); visibility(); checkpoint(before); };
-  gizmo.addEventListener('dragging-changed', event => orbit.enabled = !event.value);
+  gizmo.addEventListener('dragging-changed', event => { if(event.value) motion?.rest(); orbit.enabled = !event.value; });
   gizmo.addEventListener('mouseDown', () => { dragBefore = snapshot(); });
   gizmo.addEventListener('objectChange', () => { if (!selected || !selected.editable) return; const state = loaded.get(selected.id), value = fromNode(selected.id, state.node); if (valid(value)) { saved.set(selected.id, value); fields.forEach((input, name) => input.value = value[name].toFixed(3)); } else toNode(state.node, current(selected)); });
   gizmo.addEventListener('mouseUp', () => { if (dragBefore !== null) checkpoint(dragBefore); dragBefore = null; });
@@ -174,7 +233,7 @@
     const rect = renderer.domElement.getBoundingClientRect(); ray.setFromCamera(new THREE.Vector2((e.clientX - rect.left) / rect.width * 2 - 1, -(e.clientY - rect.top) / rect.height * 2 + 1), camera);
     const hits = ray.intersectObject(vehicle, true); for (const hit of hits) { let n = hit.object; while (n && !n.userData.part) n = n.parent; if (n && loaded.get(n.userData.part).node.visible) { const slots = hit.object.userData.materialSlots; select(n.userData.part, slots?.[hit.face?.materialIndex || 0] ?? null); break; } }
   });
-  addEventListener('keydown', e => { if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return; if (e.ctrlKey && ['z', 'y'].includes(e.key.toLowerCase())) { e.preventDefault(); $(e.key.toLowerCase() === 'z' ? 'undo' : 'redo').click(); } else if (!e.ctrlKey && !e.altKey) { if (e.key.toLowerCase() === 'w') modeTo('translate'); if (e.key.toLowerCase() === 'e') modeTo('rotate'); if (e.key.toLowerCase() === 'r') modeTo('scale'); if (e.key.toLowerCase() === 'f') frame(selected && selected.id); } });
+  addEventListener('keydown', e => { if (document.querySelector('dialog[open]') || /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return; if (e.ctrlKey && ['z', 'y'].includes(e.key.toLowerCase())) { e.preventDefault(); $(e.key.toLowerCase() === 'z' ? 'undo' : 'redo').click(); } else if (!e.ctrlKey && !e.altKey) { if (e.key.toLowerCase() === 'w') modeTo('translate'); if (e.key.toLowerCase() === 'e') modeTo('rotate'); if (e.key.toLowerCase() === 'r') modeTo('scale'); if (e.key.toLowerCase() === 'f') frame(selected && selected.id); } });
   function appearance(node, part, parser) {
     let fallback = 0;
     node.traverse(n => { if (!n.isMesh) return; const colors = part.materials;
@@ -193,6 +252,9 @@
       list.forEach((m,i) => { const original=n.userData.baseMaterials[i], override=materials.get(materialKey(state.part.id,n.userData.materialSlots[i]));
         m.color.copy(original.color);m.emissive.copy(original.emissive);m.emissiveIntensity=original.intensity;m.roughness=original.roughness;m.metalness=original.metalness;m.opacity=original.opacity;m.transparent=original.transparent;
         if(override){const family=byPath.get(override.materialPath)?.family || 'Surface';m.color.setHex(family==='Metal'?0xaebaca:family==='Rubber'?0x20242a:family.startsWith('Glass')?0x6b92a5:0x8993a3);m.emissive.setHex(0);m.emissiveIntensity=0;m.metalness=family==='Metal'?.75:.05;m.roughness=family==='Rubber'?.8:.3;m.transparent=family.startsWith('Glass');m.opacity=m.transparent?.45:1;}
+        const slot = state.part.materials.find(s => s.slot === n.userData.materialSlots[i]);
+        const paint = byPath.get(override?.materialPath || slot?.package)?.paint;
+        if(paint){m.color.setRGB(paint.r,paint.g,paint.b);m.metalness=paint.finish==='Metallic'?.75:.05;m.transparent=paint.finish==='Transparent';m.opacity=m.transparent?.42:1;}
         if(state.part.group==='Accent lights'&&accentColor&&(!override||byPath.get(override.materialPath)?.family==='Vehicle glow'))m.emissive.setRGB(accentColor.r/255,accentColor.g/255,accentColor.b/255).convertSRGBToLinear();
         if(n.userData.glow)m.emissiveIntensity=lights?1.3:0;
         if(state.part.id==='body'&&ghostBody){m.transparent=true;m.opacity=.18;m.depthWrite=false;}else m.depthWrite=true;
@@ -202,6 +264,7 @@
     if(state.surfaceProxy) state.surfaceProxy.traverse(n=>{if(n.isMesh){const c=state.part.group==='Accent lights'&&accentColor?new THREE.Color(accentColor.r/255,accentColor.g/255,accentColor.b/255).convertSRGBToLinear():new THREE.Color(state.part.group==='Brake lights'||state.part.group==='Rear lights'?0xff3322:0xa6f5ef);n.material.emissive.copy(c);n.material.emissiveIntensity=lights?1.3:0;}});
   }
   function syncLightSurfaces() {
+    motion?.rest();
     const body=loaded.get('body'); if(!body)return;
     // Restore before rebuilding. Proxies have independent geometry/materials; source GLTF stays intact.
     loaded.forEach(s=>{
@@ -230,6 +293,7 @@
     }
     vehicle.updateMatrixWorld(true);
     visibility();
+    motion?.reanchor();
   }
   function openMaterials(id,slot) {
     if(riderBusy)return;
@@ -249,6 +313,7 @@
   $('materialSearch').oninput=$('materialSource').onchange=()=>{libraryPage=0;libraryChoice=null;$('useMaterial').disabled=true;$('materialPath').textContent='Select a material. Preview shading is approximate.';renderLibrary();};
   $('materialPrevious').onclick=()=>{libraryPage--;renderLibrary();};$('materialNext').onclick=()=>{libraryPage++;renderLibrary();};$('closeMaterials').onclick=()=>$('materialPicker').close();
   $('useMaterial').onclick=()=>{if(!libraryTarget||!libraryChoice)return;const before=snapshot();materials.set(materialKey(libraryTarget.id,libraryTarget.slot),{component:libraryTarget.id,slot:libraryTarget.slot,materialPath:libraryChoice.path});repaint(loaded.get(libraryTarget.id));$('materialPicker').close();checkpoint(before);};
+  let motion = null, bodyModel = null;
   async function load() {
     const loader = new THREE.GLTFLoader();
     for (const part of data.parts) {
@@ -257,13 +322,14 @@
       if (part.file) { if (!modelCache.has(part.file)) modelCache.set(part.file, await loader.loadAsync(part.file)); const gltf = modelCache.get(part.file), model = part.id === 'body' ? gltf.scene : gltf.scene.clone(true);
         // This CUE exporter writes positions as (UE.X, UE.Z, UE.Y), including the handedness
         // change. Swap Y/Z back; a rotation alone mirrors the vehicle and its attachments.
-        model.rotation.x = Math.PI / 2; model.scale.z = -1; appearance(model, part, gltf.parser); node.add(model); }
+        model.rotation.x = Math.PI / 2; model.scale.z = -1; appearance(model, part, gltf.parser); node.add(model); if(part.id === 'body') bodyModel = model; }
       else { const marker = new THREE.Mesh(part.group === 'Seating' ? new THREE.BoxGeometry(.26,.32,.08) : new THREE.OctahedronGeometry(.045), new THREE.MeshBasicMaterial({ color: part.editable ? 0xffd43b : 0x71ccef, wireframe: true })); node.add(marker); if (part.group === 'Light sources (reference)' || part.group === 'Seating') { const arrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), .6, 0x71ccef, .12, .07); node.add(arrow); } }
       const state = { part, anchor, node, hidden: false }; loaded.set(part.id, state); repaint(state);
       if (part.light) { const beam = new THREE.SpotLight(0xffffff,1,24,Math.PI/3,.35,2);const target=new THREE.Object3D();target.position.set(1,0,0);node.add(target,beam);beam.target=target;state.beam=beam;const arrow=new THREE.ArrowHelper(new THREE.Vector3(1,0,0),new THREE.Vector3(),.6,0x71ccef,.12,.07);node.add(arrow);paintBeam(state); }
       if(part.group==='Weapons & grapple'||part.group==='Boost & exhaust')node.add(new THREE.ArrowHelper(new THREE.Vector3().fromArray(part.markerDirection||[1,0,0]).normalize(),new THREE.Vector3(),.8,part.group==='Boost & exhaust'?0x75dfff:0xffa84c,.15,.08));
     }
     ready = true; $('loading').style.display = 'none'; select('body'); syncLightSurfaces(); visibility(); frame();
+    if(bodyModel && window.createVehicleMotion) motion = window.createVehicleMotion({data, vehicle, loaded, bodyModel, viewport:$('viewport'), viewbar:document.querySelector('.viewbar')});
     if (data.warnings.length) $('error').textContent = data.warnings.length + ' preview warnings · see part details';
     pushHost('vehicleWorkshopReady', { parts: loaded.size });
   }
@@ -271,15 +337,15 @@
   async function loadRiders(riders) {
     try {
       if (!riders) return;
-      for(const rider of riders){const state=loaded.get(rider.seat);if(!state)throw new Error('Unknown seat');if(state.rider)continue;state.rider=await window.buildVehicleRider(rider);state.node.add(state.rider);}
+      for(const rider of riders){const state=loaded.get(rider.seat);if(!state)throw new Error('Unknown seat');if(state.rider)continue;state.rider=await window.buildVehicleRider(rider);state.rider.scale.multiplyScalar(1/(data.sizeMultiplier||1));state.node.add(state.rider);}
       ridersLoaded=true;ridersVisible=true;riderButton.classList.add('active');$('status').textContent='Native seated idle poses · placement preview, not live driving IK';
     } catch(error){$('error').textContent='Seated preview: '+error.message;pushHost('vehicleWorkshopError',{error:error.message});}
     finally {riderBusy=false;riderButton.disabled=false;riderButton.textContent='Seated figures';updateUi();}
   }
   function resize() { const rect = $('viewport').getBoundingClientRect(); if (!rect.width || !rect.height) return; renderer.setSize(rect.width, rect.height); camera.aspect = rect.width / rect.height; camera.updateProjectionMatrix(); }
   new ResizeObserver(resize).observe($('viewport')); resize();
-  function tick() { requestAnimationFrame(tick); orbit.update(); if (selected && loaded.has(selected.id)) { selectionBox.box.copy(bounds(selected.id)); selectionBox.visible = selected.editable && loaded.get(selected.id).node.visible; } renderer.render(scene, camera); } tick();
+  function tick() { requestAnimationFrame(tick); orbit.update(); motion?.update(); if (selected && loaded.has(selected.id)) { selectionBox.box.copy(bounds(selected.id)); selectionBox.visible = selected.editable && loaded.get(selected.id).node.visible; } renderer.render(scene, camera); } tick();
   load().catch(error => { $('loading').textContent = 'Preview could not be loaded: ' + error.message; $('error').textContent = 'Nothing was saved'; pushHost('vehicleWorkshopError', { error: error.message }); });
   // Deterministic hooks used by the local, headless interaction checks.
-  window.vehicleWorkshop = { select, fromNode, ueQuaternion, valid, frame, camera, gizmo, openSettings, openMaterials, loadRiders, get ready() { return ready; }, get saved() { return clone(Array.from(saved.values())); }, get draft() { return clone(draft()); }, get loaded() { return loaded; }, get selectedSlot() { return selectedSlot; } };
+  window.vehicleWorkshop = { select, fromNode, ueQuaternion, valid, frame, camera, gizmo, openSettings, openMaterials, loadRiders, get motion() { return motion; }, get ready() { return ready; }, get saved() { return clone(Array.from(saved.values())); }, get draft() { return clone(draft()); }, get loaded() { return loaded; }, get selectedSlot() { return selectedSlot; } };
 })();

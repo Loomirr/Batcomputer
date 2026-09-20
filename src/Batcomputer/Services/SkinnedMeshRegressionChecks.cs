@@ -10,6 +10,20 @@ internal static class SkinnedMeshRegressionChecks
         var results = new List<(bool, string)>();
         void Check(bool pass, string name) => results.Add((pass, name));
         bool Reject(Action action) { try { action(); return false; } catch (InvalidDataException) { return true; } }
+        Check(new[] { "Torso", "Torso2", "Collar", "Cape" }.All(slot =>
+                AttachmentClearanceService.BoneForSlot(slot) == "Neck" &&
+                AttachmentClearanceService.Clearance(new() { Target = slot }) == 0 &&
+                AttachmentClearanceService.Clearance(new() { Target = slot, BodyClearance = 2.5f }) == 2.5f),
+            "custom chest/collar/cape neck clearance is opt-in and preserves legacy zero-clearance recipes");
+        Check(CustomStaticMeshImportService.AttachmentSlots.All(slot =>
+                AttachmentClearanceService.BoneForSlot(slot.Id) == (slot.Id switch
+                {
+                    "Hip" or "Offset_Hip" => "Spine_01",
+                    "Shoulder" or "Offset_Neck" or "Torso" or "Torso2" or "Collar" or "Cape" => "Neck",
+                    _ => null,
+                })) && AttachmentClearanceService.BoneForSlot("Unknown") is null &&
+                AttachmentClearanceService.DefaultForSlot("tOrSo") == 0,
+            "every static attachment slot has an explicit supported clearance bone or none");
         var donorAsset = new UAssetAPI.UAsset { Imports = [], Exports = [] }; donorAsset.ClearNameIndexList();
         var targetAsset = new UAssetAPI.UAsset { Imports = [], Exports = [] }; targetAsset.ClearNameIndexList();
         var owner = SwordCombatService.Obj(donorAsset, "/Game/Characters/BP_Master/BP_CutsceneMinifigCharacter", "BP_CutsceneMinifigCharacter_C", "/Script/Engine", "BlueprintGeneratedClass");

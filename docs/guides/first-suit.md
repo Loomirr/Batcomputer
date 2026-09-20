@@ -49,6 +49,13 @@ donor's animation class, collision, movement, equipment, or other runtime machin
 supported Minifig and Smallfig profile already uses the game's shared `SKEL_LEGOfig` skeleton, so
 there is no separate skeleton step or skeleton selector.
 
+Switching between Minifig and Smallfig can require a matching takedown profile. Use the
+experimental size-appropriate takedown choice, rebuild, and test both combat takedowns and
+end-of-encounter actions. Changing body height alone does not guarantee compatible attacks.
+
+Joker and Harley suits require their current extracted DLC donors. Refresh game assets and
+mappings after a game update before creating or rebuilding those suits.
+
 ![Base character browser](../assets/screenshots/base-character-picker.jpg){ .bc-doc-shot loading=lazy }
 
 ![Gameplay donor browser](../assets/screenshots/gameplay-donor-picker.jpg){ .bc-doc-shot loading=lazy }
@@ -58,6 +65,11 @@ there is no separate skeleton step or skeleton selector.
 ![Native body profile browser](../assets/screenshots/native-body-profiles.jpg){ .bc-doc-shot loading=lazy }
 
 ## 4. Customize the character
+
+Use the [character 3D workshop](character-workshop.md) to inspect the full assembly, preview
+materials and place imported custom parts.
+
+![Saved character definitions and suits use distinct library labels](../assets/screenshots/character-library.png){ loading=lazy }
 
 Use the left navigation:
 

@@ -337,6 +337,31 @@ public sealed partial class MainForm
         }
     }
 
+    private bool _addingVehicleBases;
+    private async Task AddVehicleBasesAsync()
+    {
+        if (_addingVehicleBases) return;
+        _addingVehicleBases = true;
+        using var cancellation = new CancellationTokenSource();
+        using var progressWindow = new AssetRefreshProgressForm(false);
+        progressWindow.CancelRequested += (_, _) => cancellation.Cancel();
+        progressWindow.Show(this);
+        try
+        {
+            var result = await GameAssetRefreshService.AddMissingVehicleBasesAsync(AppSettings.Current.EffectiveExtractedContentRoot(), cancellation.Token,
+                new Progress<GameAssetRefreshService.Progress>(progressWindow.SetProgress));
+            foreach (var line in result.Logs) AppendLog(line);
+            var ready = VehicleDonorService.All.Except(result.StillUnavailable).Select(d => d.Label);
+            var message = $"Added {result.Added.Count} packages.\n\nAvailable driving bases:\n" + string.Join("\n", ready) +
+                (result.StillUnavailable.Count == 0 ? "" : "\n\nStill unavailable:\n" + string.Join("\n", result.StillUnavailable.Select(d => d.UnavailableMessage)));
+            progressWindow.SetFinished("Vehicle driving bases updated.");
+            Dialog.Info(this, "Vehicle driving bases", message);
+        }
+        catch (OperationCanceledException) { AppendLog("Vehicle base update cancelled. Completed extractions are kept."); }
+        catch (Exception ex) { AppendLog("Vehicle base update failed: " + ex.Message); Dialog.Error(this, "Vehicle base update failed", ex.Message); }
+        finally { _addingVehicleBases = false; progressWindow.Close(); }
+    }
+
     private ContextMenuStrip BuildAssetRefreshMenu()
     {
         var menu = new ContextMenuStrip();
@@ -359,6 +384,7 @@ public sealed partial class MainForm
 
             await EnsureTextureCookTemplatesAsync(projectRoot);
         });
+        menu.Items.Add("Add vehicle driving bases (quick)", null, (_, _) => _ = AddVehicleBasesAsync());
         menu.Items.Add("Open active extracted Content", null, (_, _) =>
         {
             var contentRoot = AppSettings.Current.EffectiveExtractedContentRoot();
@@ -1470,14 +1496,15 @@ public sealed partial class MainForm
         var metadataDonor = NativeMetadataDonorService.TryRead(
             project.DcmdTemplate,
             project.PlayableTemplate,
-            project.CutsceneTemplate);
+            project.CutsceneTemplate,
+            out var metadataDonorError);
         if (metadataDonor is null)
         {
             if (requireSuccess && project.DcmdTemplate is not null)
             {
                 throw new InvalidOperationException(
                     "The selected native metadata donor could not be read from the active extraction. " +
-                    "Batcomputer refused to substitute Batman metadata into this release; run a full refresh and rebuild.");
+                    "Batcomputer refused to substitute Batman metadata into this release; run a full refresh and rebuild.\n" + metadataDonorError);
             }
             AppendLog("Native metadata donor could not be read; generating the required DCMD/UIMD from the base Batman metadata.");
         }

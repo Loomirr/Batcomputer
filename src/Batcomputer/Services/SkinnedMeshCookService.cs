@@ -44,6 +44,7 @@ internal static class SkinnedMeshCookService
         { MeshFormat = EMeshFormat.Gltf2, LodFormat = ELodFormat.FirstLod, ExportMaterials = false, ExportMorphTargets = false });
         if (!exporter.TryWriteToDir(new DirectoryInfo(directory), out _, out var saved))
             throw new InvalidDataException("The native reference could not be exported.");
+        SkinnedGlbExportService.CorrectFile(saved, mesh);
         return saved;
     }
 
@@ -75,11 +76,16 @@ internal static class SkinnedMeshCookService
         var sourceCopy = Path.Combine(root, "source.fbx"); File.Copy(source, sourceCopy);
         recipe.SourceRelativePath = Path.Combine(revision, "source.fbx");
         recipe.SourceSha256 = Hash(sourceCopy); recipe.CacheRelativePath = revision;
-        var cookRoot = Path.Combine(root, "CookProject"); Directory.CreateDirectory(Path.Combine(cookRoot, "Config"));
+        // Unreal still checks cooked filenames against MAX_PATH. Keep its transient project
+        // separate from the long, immutable suit/import cache path; logs and validated data stay there.
+        using var workspace = new SkinnedCookWorkspace(recipe.MeshPackage);
+        var cookRoot = workspace.Root; Directory.CreateDirectory(Path.Combine(cookRoot, "Config"));
+        File.WriteAllText(Path.Combine(root, "cook-workspace.txt"), cookRoot);
         var project = Path.Combine(cookRoot, "SkinnedCook.uproject");
         File.WriteAllText(project, JsonSerializer.Serialize(new { FileVersion = 3, EngineAssociation = "5.6", Plugins = new[] {
             new { Name = "PythonScriptPlugin", Enabled = true }, new { Name = "EditorScriptingUtilities", Enabled = true } } }));
-        File.WriteAllText(Path.Combine(cookRoot, "import.json"), JsonSerializer.Serialize(new { source = sourceCopy, scale = recipe.ImportScale, package = recipe.MeshPackage }));
+        var cookSource = Path.Combine(cookRoot, "source.fbx"); File.Copy(sourceCopy, cookSource);
+        File.WriteAllText(Path.Combine(cookRoot, "import.json"), JsonSerializer.Serialize(new { source = cookSource, scale = recipe.ImportScale, package = recipe.MeshPackage }));
         var script = Path.Combine(cookRoot, "import_mesh.py");
         using (var resource = typeof(SkinnedMeshCookService).Assembly.GetManifestResourceStream("Batcomputer.Tools.SkinnedMesh.import_mesh.py")
             ?? throw new InvalidDataException("The bundled skeletal import script is missing."))
@@ -105,8 +111,14 @@ bCookAll=False
 bSkipEditorContent=True
 """);
         string[] common = [project, "-unattended", "-nop4", "-nosplash", "-NullRHI", "-NoSound", "-NoCrashDialog", "-DDC=SkinnedLocalDDC", "-NoZenAutoLaunch"];
+        async Task RunUnreal(string phase, string[] args)
+        {
+            var logFile = Path.Combine(cookRoot, phase + ".log");
+            try { await Run(editor, [.. common, .. args, "-abslog=" + logFile], root, cancellation); }
+            finally { if (File.Exists(logFile)) File.Copy(logFile, Path.Combine(root, phase + ".log"), true); }
+        }
         log("Importing FBX with Unreal (first cook can take several minutes)…");
-        await Run(editor, [.. common, "-run=pythonscript", "-script=" + script, "-abslog=" + Path.Combine(root, "import.log")], root, cancellation);
+        await RunUnreal("import", ["-run=pythonscript", "-script=" + script]);
         var reportPath = Path.Combine(cookRoot, "import-result.json");
         if (!File.Exists(reportPath)) throw new InvalidDataException("Unreal did not produce an import report. See " + Path.Combine(root, "import.log"));
         using var report = JsonDocument.Parse(File.ReadAllText(reportPath));
@@ -114,24 +126,24 @@ bSkipEditorContent=True
         if (slots.Length == 0 || slots.Length > 64 || slots.Distinct(StringComparer.Ordinal).Count() != slots.Length)
             throw new InvalidDataException("Use between 1 and 64 uniquely named material slots.");
         log("Cooking skeletal render buffers…");
-        await Run(editor, [.. common, "-run=Cook", "-TargetPlatform=Windows", "-CookDir=" + Path.Combine(cookRoot, "Content/Mods"),
-            "-NoDefaultMaps", "-NoAlwaysCookMaps", "-SkipEditorContent", "-SkipZenStore", "-abslog=" + Path.Combine(root, "cook.log")], root, cancellation);
+        await RunUnreal("cook", ["-run=Cook", "-TargetPlatform=Windows", "-CookDir=" + Path.Combine(cookRoot, "Content/Mods"),
+            "-NoDefaultMaps", "-NoAlwaysCookMaps", "-SkipEditorContent", "-SkipZenStore"]);
         var cooked = Path.Combine(cookRoot, "Saved/Cooked/Windows/SkinnedCook/Content");
-        var stage = Path.Combine(root, "AuditStage/LEGOBatmanLotDK/Content");
+        var stage = Path.Combine(cookRoot, "AuditStage/LEGOBatmanLotDK/Content");
         var packageBase = recipe.MeshPackage[..recipe.MeshPackage.LastIndexOf('/')];
         var sourceFolder = SafePath(cooked, packageBase[6..]);
         var destFolder = SafePath(stage, packageBase[6..]); Directory.CreateDirectory(destFolder);
         foreach (var file in Directory.EnumerateFiles(sourceFolder, "*", SearchOption.TopDirectoryOnly))
             if (new[] { ".uasset", ".uexp", ".ubulk" }.Contains(Path.GetExtension(file))) File.Copy(file, Path.Combine(destFolder, Path.GetFileName(file)));
-        var container = Path.Combine(root, "AuditContainers"); Directory.CreateDirectory(container);
-        await Run(AppSettings.Current.EffectiveRetocExePath(), ["to-zen", "--version", "UE5_6", Path.Combine(root, "AuditStage"), Path.Combine(container, "SkinnedAudit.utoc")], root, cancellation);
+        var container = Path.Combine(cookRoot, "AuditContainers"); Directory.CreateDirectory(container);
+        await Run(AppSettings.Current.EffectiveRetocExePath(), ["to-zen", "--version", "UE5_6", Path.Combine(cookRoot, "AuditStage"), Path.Combine(container, "SkinnedAudit.utoc")], root, cancellation);
         await Run(AppSettings.Current.EffectiveRetocExePath(), ["verify", Path.Combine(container, "SkinnedAudit.utoc")], root, cancellation);
         log("Validating the cooked skeleton, rest pose and render buffers against the native donor…");
         using (var provider = OpenProvider(container))
         {
             var donor = provider.LoadPackageObject<USkeletalMesh>(recipe.DonorMeshPackage);
             var mesh = provider.LoadPackageObject<USkeletalMesh>(recipe.MeshPackage);
-            ValidateRig(donor, mesh);
+            ValidateRigWithReport(donor, mesh, Path.Combine(root, "rig-comparison.json"), log);
             recipe.SkeletonPackage = UnrealPathUtil.NormalizePackagePath(donor.Skeleton?.ResolvedObject?.GetPathName() ?? "");
             if (!ExtractedPackagePathService.IsContentPackagePath(recipe.SkeletonPackage)) throw new InvalidDataException("The donor has no usable native skeleton.");
         }
@@ -147,30 +159,27 @@ bSkipEditorContent=True
             UnrealPathUtil.NormalizePackagePath(report.RootElement.GetProperty("skeleton").GetString()), slots, files);
         AtomicFileUtil.WriteAllText(Path.Combine(root, "validated.json"), JsonSerializer.Serialize(manifest));
         var previous = recipe.Materials.ToDictionary(m => m.SourceMaterialName, StringComparer.Ordinal);
+        var vehicle = VehicleDonorService.All.Any(d => d.Mesh == recipe.DonorMeshPackage || d.SummonMesh == recipe.DonorMeshPackage);
         recipe.Materials = slots.Select((name, index) => new CustomStaticMeshMaterialSlot { Slot = index, SourceMaterialName = name,
-            StableSlotName = name, MaterialPath = previous.TryGetValue(name, out var old) ? old.MaterialPath : CustomStaticMeshImportService.DefaultMaterialPackagePath }).ToList();
+            StableSlotName = name, MaterialPath = VehiclePaintService.ImportSlotMaterial(name, previous.GetValueOrDefault(name)?.MaterialPath, vehicle) }).ToList();
         log("Validated. Assign a game material to each slot, preview, then save to the suit.");
+        workspace.Complete = true;
         return recipe;
     }
 
     internal static void ValidateRig(USkeletalMesh donor, USkeletalMesh mesh)
+        => ValidateRigWithReport(donor, mesh, null, null);
+
+    private static void ValidateRigWithReport(USkeletalMesh donor, USkeletalMesh mesh, string? reportPath, Action<string>? log)
     {
-        var expected = donor.ReferenceSkeleton; var actual = mesh.ReferenceSkeleton;
-        if (actual.FinalRefBoneInfo.Length != expected.FinalRefBoneInfo.Length)
-            throw new InvalidDataException($"Rig has {actual.FinalRefBoneInfo.Length} bones; donor requires {expected.FinalRefBoneInfo.Length}. Remove exporter helper/leaf bones in Blender; do not rename or rebuild the native rig.");
-        for (int i = 0; i < actual.FinalRefBoneInfo.Length; i++)
+        var comparison = SkinnedRigComparisonService.Compare(SkinnedGlbExportService.Bones(donor.ReferenceSkeleton), SkinnedGlbExportService.Bones(mesh.ReferenceSkeleton));
+        if (reportPath is not null)
         {
-            var bone = actual.FinalRefBoneInfo[i]; int j = Array.FindIndex(expected.FinalRefBoneInfo, b => b.Name.Text == bone.Name.Text);
-            string Parent(CUE4Parse.UE4.Assets.Exports.Animation.FReferenceSkeleton skeleton, int p) => p < 0 ? "" : skeleton.FinalRefBoneInfo[p].Name.Text;
-            if (j < 0 || Parent(actual, bone.ParentIndex) != Parent(expected, expected.FinalRefBoneInfo[j].ParentIndex))
-                throw new InvalidDataException("Bone hierarchy differs from the donor: " + bone.Name.Text);
-            var a = actual.FinalRefBonePose[i]; var b = expected.FinalRefBonePose[j];
-            double translation = Math.Sqrt(Math.Pow(a.Translation.X - b.Translation.X, 2) + Math.Pow(a.Translation.Y - b.Translation.Y, 2) + Math.Pow(a.Translation.Z - b.Translation.Z, 2));
-            double rotation = 1 - Math.Abs(a.Rotation.X * b.Rotation.X + a.Rotation.Y * b.Rotation.Y + a.Rotation.Z * b.Rotation.Z + a.Rotation.W * b.Rotation.W);
-            double scale = new[] { Math.Abs(a.Scale3D.X - b.Scale3D.X), Math.Abs(a.Scale3D.Y - b.Scale3D.Y), Math.Abs(a.Scale3D.Z - b.Scale3D.Z) }.Max();
-            if (!double.IsFinite(translation + rotation + scale) || translation > .001 || rotation > .00001 || scale > .00001)
-                throw new InvalidDataException($"Rest pose/scale mismatch at '{bone.Name}'. Preserve the native rest pose and correct the import scale. Batcomputer will not retarget this rig automatically.");
+            SkinnedRigComparisonService.Write(reportPath, comparison);
+            log?.Invoke($"Rig comparison: {(comparison.Passed ? "PASS" : "FAILED")} — {comparison.ActualBoneCount}/{comparison.ExpectedBoneCount} bones. Per-bone results: {reportPath}");
+            foreach (var error in comparison.Errors) log?.Invoke(error);
         }
+        if (!comparison.Passed) throw new InvalidDataException(comparison.Errors[0] + (reportPath is null ? "" : "\nPer-bone report: " + reportPath));
         if (!mesh.TryConvert(out var converted) || converted.LODs.Count == 0 || converted.LODs[0].NumVerts == 0)
             throw new InvalidDataException("Cooked skeletal render data is empty or unreadable.");
     }
@@ -190,13 +199,32 @@ bSkipEditorContent=True
     internal static string Hash(string path) { using var stream = File.OpenRead(path); return Convert.ToHexString(SHA256.HashData(stream)); }
     private static async Task Run(string exe, IEnumerable<string> arguments, string directory, CancellationToken cancellation)
     {
-        var start = new ProcessStartInfo(exe) { WorkingDirectory = directory, UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        var start = new ProcessStartInfo(exe) { WorkingDirectory = Path.GetTempPath(), UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         using var process = Process.Start(start) ?? throw new IOException("Could not launch " + Path.GetFileName(exe));
         var stdout = process.StandardOutput.ReadToEndAsync(cancellation); var stderr = process.StandardError.ReadToEndAsync(cancellation);
         try { await process.WaitForExitAsync(cancellation); }
         catch (OperationCanceledException) { if (!process.HasExited) process.Kill(entireProcessTree: true); await process.WaitForExitAsync(); throw; }
         var output = await stdout; var errors = await stderr;
-        if (process.ExitCode != 0) throw new InvalidDataException($"{Path.GetFileName(exe)} failed ({process.ExitCode}). Check the import/cook logs in {directory}.\n" + (errors + output)[..Math.Min(1800, errors.Length + output.Length)]);
+        if (process.ExitCode != 0)
+        {
+            var logPath = start.ArgumentList.FirstOrDefault(a => a.StartsWith("-abslog=", StringComparison.OrdinalIgnoreCase))?[8..];
+            var details = logPath is not null && File.Exists(logPath) ? File.ReadAllText(logPath) : errors + "\n" + output;
+            throw new InvalidDataException($"{Path.GetFileName(exe)} failed ({process.ExitCode}).\n" + FailureSummary(details) + $"\nFull logs: {directory}");
+        }
+    }
+
+    internal static string FailureSummary(string output)
+    {
+        var lines = output.Split('\n');
+        var relevant = lines.Select((line, index) => (line, index)).Where(x =>
+            x.line.Contains(": Error:", StringComparison.OrdinalIgnoreCase) ||
+            x.line.Contains("Fatal error", StringComparison.OrdinalIgnoreCase) ||
+            x.line.Contains("Traceback (", StringComparison.Ordinal)).Take(3)
+            .SelectMany(x => lines.Skip(x.index).Take(4)).Distinct().ToArray();
+        var text = string.Join("\n", relevant.Length > 0 ? relevant : lines.Where(l => !string.IsNullOrWhiteSpace(l)).TakeLast(12));
+        if (output.Contains("filename is too long", StringComparison.OrdinalIgnoreCase))
+            text = "Unreal could not cook a file because its path is too long. The FBX does not need re-rigging for this error. Use a shorter temporary cook folder.\n" + text;
+        return text[..Math.Min(2400, text.Length)];
     }
 }

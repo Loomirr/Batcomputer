@@ -15,7 +15,8 @@ public sealed partial class MainForm
         };
         if (current is not null)
         {
-            tiles.Add(new() { Section = "CURRENT CHARACTER", Title = "Character identity", Subtitle = current.PawnTag, Accent = Theme.Materials, OnClick = EditCustomCharacterIdentity });
+            tiles.Add(new() { Section = "CURRENT CHARACTER", Title = "Character identity & modes", Subtitle = current.CustomCharacter!.ModeAvailability + " · " + current.PawnTag, Accent = Theme.Materials, OnClick = EditCustomCharacterIdentity });
+            tiles.Add(new() { Section = "CURRENT CHARACTER", Title = "Character symbol", Subtitle = string.IsNullOrWhiteSpace(current.CustomCharacter.SymbolPngBase64) ? "import a PNG emblem · shared by all suits" : "custom PNG emblem · shared by all suits", Accent = Theme.Materials, OnClick = EditCustomCharacterSymbol });
             tiles.Add(new() { Section = "CURRENT CHARACTER", Title = "＋ Add a suit", Subtitle = "new variant for this character", Accent = Theme.Base, OnClick = () => _ = CreateCharacterSuitAsync(current) });
             tiles.Add(new() { Section = "CURRENT CHARACTER", Title = "Add to a mod / Build", Subtitle = "includes default suit + roster + unlock data", Accent = Theme.Gold,
                 OnClick = () => _ = BuildModForCurrentSuitAsync() });
@@ -51,10 +52,10 @@ public sealed partial class MainForm
     {
         if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("create a character")) return;
         using var dialog = new CharacterIdentityDialog("New character", "Character ID (permanent; e.g. Ragman)",
-            source?.DisplayName ?? "", description: source?.Description ?? "",
+            source?.DisplayName ?? "", description: source?.Description ?? "", modeAvailability: source?.CustomCharacter?.ModeAvailability ?? CharacterModeAvailability.Normal,
             note: "Creates an independent roster entry, unlocked by default. The default suit uses CharacterID.CharacterID. Existing suits and native gameplay donors remain unchanged. Story cutscenes are not supported.");
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
-        await SaveNewCharacterRecipeAsync(source, dialog.DisplayNameValue, dialog.TechnicalId, dialog.TechnicalId, "", dialog.DescriptionValue);
+        await SaveNewCharacterRecipeAsync(source, dialog.DisplayNameValue, dialog.TechnicalId, dialog.TechnicalId, "", dialog.DescriptionValue, dialog.ModeAvailability);
     }
 
     private async Task ChooseCustomCharacterBaseAsync()
@@ -78,7 +79,7 @@ public sealed partial class MainForm
         if (owner.CustomCharacter is not { IsDefinition: true } identity || !BaseEligibilityService.Evaluate(owner).IsReady)
         { Dialog.Warn(this, "Choose a character base first", "Set and save this character's native base before creating its additional suits."); return; }
         using var dialog = new CharacterIdentityDialog("New suit for " + owner.DisplayName, "Suit ID (permanent; e.g. Unmasked)",
-            note: "This copies the current design into a separate suit. Edit its appearance and abilities independently.", ownerId: identity.CharacterId);
+            note: "This copies the current design into a separate suit. Edit its appearance and abilities independently.", ownerId: identity.CharacterId, modeAvailability: identity.ModeAvailability);
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
         await SaveNewCharacterRecipeAsync(owner, dialog.DisplayNameValue, identity.CharacterId, dialog.TechnicalId, owner.SlotId, dialog.DescriptionValue);
     }
@@ -94,7 +95,8 @@ public sealed partial class MainForm
         catch (Exception ex) { Dialog.Error(this, "Character base", ex.Message); }
     }
 
-    private async Task SaveNewCharacterRecipeAsync(NativeSuitProject? source, string name, string ownerId, string variantId, string definitionId, string description)
+    private async Task SaveNewCharacterRecipeAsync(NativeSuitProject? source, string name, string ownerId, string variantId, string definitionId, string description,
+        CharacterModeAvailability? modeAvailability = null)
     {
         if (_creatingCharacterRecipe) { Dialog.Info(this, "Character setup", "Another character is still being prepared. Please wait for it to finish."); return; }
         _creatingCharacterRecipe = true;
@@ -106,6 +108,7 @@ public sealed partial class MainForm
         try
         {
             candidate = CustomCharacterProjectService.CreateRecipe(source, name, ownerId, variantId, definitionId);
+            if (modeAvailability.HasValue) candidate.CustomCharacter!.ModeAvailability = modeAvailability.Value;
             candidate.Description = description;
             if (File.Exists(service.ProjectPathForSlot(candidate.SlotId)) || Directory.Exists(service.ProjectOutputDirectory(candidate)))
                 throw new InvalidDataException("That character/suit ID already has a saved project or output. Choose another ID; no existing project will be overwritten.");
@@ -154,16 +157,45 @@ public sealed partial class MainForm
         RefreshToyboxTiles();
     }
 
+    private void EditCustomCharacterSymbol()
+    {
+        if (BlockSynchronousEditWhileLoadedProjectRestores("editing character symbol") || _currentProject?.CustomCharacter is not { IsDefinition: true } identity) return;
+        try
+        {
+            using var dialog = new CharacterSymbolDialog(_currentProject.DisplayName, identity.SymbolPngBase64);
+            if (dialog.ShowDialog(this) != DialogResult.OK) return;
+            var previous = identity.SymbolPngBase64; var previousPackage = identity.SymbolPackage;
+            identity.SymbolPngBase64 = dialog.SymbolPngBase64;
+            if (dialog.ResetRequested) identity.SymbolPackage = "";
+            try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject); }
+            catch { identity.SymbolPngBase64 = previous; identity.SymbolPackage = previousPackage; throw; }
+            RefreshToyboxTiles();
+            AppendLog("Character symbol saved. Build the mod to apply it to all suits of this character.");
+        }
+        catch (Exception ex) { Dialog.Error(this, "Symbol was not saved", ex.Message); }
+    }
+
     private void EditCustomCharacterIdentity()
     {
         if (BlockSynchronousEditWhileLoadedProjectRestores("editing character identity") || _currentProject?.CustomCharacter is not { } identity) return;
+        var effectiveMode = identity.ModeAvailability;
+        if (!identity.IsDefinition)
+        {
+            try
+            {
+                var service = _projectService ??= new SuitProjectService(_projectRootText.Text.Trim());
+                effectiveMode = service.LoadProject(service.ProjectPathForSlot(identity.DefinitionSlotId))?.CustomCharacter?.ModeAvailability ?? effectiveMode;
+            }
+            catch (Exception ex) { AppendLog("Could not read the character's inherited mode setting: " + ex.Message); }
+        }
         using var dialog = new CharacterIdentityDialog(identity.IsDefinition ? "Character identity" : "Character suit identity",
             identity.IsDefinition ? "Character ID (fixed)" : "Suit ID (fixed)", _currentProject.DisplayName,
             identity.IsDefinition ? identity.CharacterId : identity.VariantId, _currentProject.Description, lockedId: true,
             note: $"{_currentProject.ProgressTag}\nOwner and IDs are fixed to keep saves and child suits valid. Story cutscenes are not supported.",
-            ownerId: identity.IsDefinition ? null : identity.CharacterId);
+            ownerId: identity.IsDefinition ? null : identity.CharacterId, modeAvailability: effectiveMode);
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
         _currentProject.DisplayName = dialog.DisplayNameValue; _currentProject.Description = dialog.DescriptionValue;
+        if (identity.IsDefinition) identity.ModeAvailability = dialog.ModeAvailability;
         CustomCharacterProjectService.ApplyIdentity(_currentProject);
         _suitNameText.Text = _currentProject.DisplayName; _descriptionText.Text = _currentProject.Description;
         try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject); }

@@ -615,6 +615,9 @@ internal static class Program
             return ReleaseRegressionChecks.Run(Console.Out);
         }
 
+        if (args.Length == 2 && args[0].Equals("--verify-dlc-native", StringComparison.OrdinalIgnoreCase))
+            return DlcNativeRegressionChecks.Run(args[1], Console.Out);
+
         if (args.Length >= 1 && args[0].Equals("--verify-registry-writer", StringComparison.OrdinalIgnoreCase))
         {
             var forceBuild = args.Skip(1).Any(argument =>
@@ -847,6 +850,13 @@ internal static class Program
         Theme.ApplyDarkTitleBarsAppWide();
         Animator.Enabled = AppSettings.Current.AnimationsEnabled;
 
+        if (args.Length == 3 && args[0].Equals("--build-vehicle-mod", StringComparison.OrdinalIgnoreCase))
+        {
+            using var context = new HeadlessModBuildContext(args[1], "", args[2]);
+            Application.Run(context);
+            return context.ExitCode;
+        }
+
         if (args.Length >= 4 && args[0].Equals("--rebuild-and-build-mod", StringComparison.OrdinalIgnoreCase))
         {
             // Internal acceptance command: rebuild one suit from its saved declaration and create
@@ -965,7 +975,9 @@ internal static class Program
             Application.Idle -= BeginBuild;
             try
             {
-                var result = await _form.RebuildAndBuildModForCliAsync(
+                var result = string.IsNullOrEmpty(_suitProjectPath)
+                    ? await _form.BuildVehicleModForCliAsync(_projectRoot, _modProjectPath)
+                    : await _form.RebuildAndBuildModForCliAsync(
                     _projectRoot,
                     _suitProjectPath,
                     _modProjectPath);

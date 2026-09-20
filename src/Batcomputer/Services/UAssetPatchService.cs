@@ -69,6 +69,7 @@ public sealed class UAssetPatchService
 
         if (batch.PackageResults.Count > 0 && batch.PackageResults.All(package => package.Success))
         {
+            NativeVoiceService.RestoreAdapterVoice(project, patchedContentRoot);
             AtomicFileUtil.WriteAllText(identityPath, BuildStageIdentity(project));
         }
 
@@ -114,7 +115,12 @@ public sealed class UAssetPatchService
         var sourceCutscene = EffectiveCharacterSourcePackage(project, playable: false);
         var identity = string.Join("\n", new[]
         {
-            "batcomputer-patched-stage-v2",
+            "batcomputer-patched-stage-v4-native-voice",
+            AppSettings.Current.EffectiveExtractedContentRoot(),
+            SourceStamp(AppSettings.Current.EffectiveUsmapPath()),
+            SourceStamp(ExtractedPackagePathService.ResolvePackageUasset(AppSettings.Current.EffectiveExtractedContentRoot(), sourcePlayable)),
+            SourceStamp(ExtractedPackagePathService.ResolvePackageUasset(AppSettings.Current.EffectiveExtractedContentRoot(), sourceCutscene)),
+            SourceStamp(ExtractedPackagePathService.ResolvePackageUasset(AppSettings.Current.EffectiveExtractedContentRoot(), project.DcmdTemplate?.PackagePath ?? "")),
             sourcePlayable,
             sourceCutscene,
             UnrealPathUtil.NormalizePackagePath(project.DcmdTemplate?.PackagePath ?? ""),
@@ -126,6 +132,18 @@ public sealed class UAssetPatchService
             AbilityLoadoutService.ConfigurationFingerprint(project.AbilityLoadout),
         });
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
+    }
+
+    private static string SourceStamp(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return "missing";
+        string Stamp(string file)
+        {
+            var info = new FileInfo(file);
+            return info.Exists ? $"{info.FullName}|{info.Length}|{info.LastWriteTimeUtc.Ticks}" : $"missing:{file}";
+        }
+        return Stamp(path) + (path.EndsWith(".uasset", StringComparison.OrdinalIgnoreCase)
+            ? "|" + Stamp(Path.ChangeExtension(path, ".uexp")) : "");
     }
 
     // Donor family archetype for mod-local clones.

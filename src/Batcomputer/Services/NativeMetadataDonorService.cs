@@ -30,19 +30,25 @@ public static class NativeMetadataDonorService
         TemplateRecord? dcmdTemplate,
         TemplateRecord? playableTemplate = null,
         TemplateRecord? cutsceneTemplate = null)
+        => TryRead(dcmdTemplate, playableTemplate, cutsceneTemplate, out _);
+
+    public static Donor? TryRead(TemplateRecord? dcmdTemplate, TemplateRecord? playableTemplate,
+        TemplateRecord? cutsceneTemplate, out string error)
     {
+        error = "";
         if (dcmdTemplate is null || string.IsNullOrWhiteSpace(dcmdTemplate.PackagePath))
         {
+            error = "No native metadata donor package was selected.";
             return null;
         }
 
         // Projects keep the donor package path, but a game refresh can replace the
-        // extracted directory that originally supplied the file. Prefer the saved
-        // path when it remains valid and otherwise resolve the same package from
-        // the active extracted dump.
+        // extracted directory that originally supplied the file. Always resolve from
+        // the active dump so old and new game builds cannot be mixed.
         var dcmdUasset = ResolveTemplateUasset(dcmdTemplate);
         if (string.IsNullOrWhiteSpace(dcmdUasset) || !File.Exists(dcmdUasset))
         {
+            error = $"Missing donor {dcmdTemplate.PackagePath} in the active extraction: {AppSettings.Current.EffectiveExtractedContentRoot()}";
             return null;
         }
 
@@ -52,6 +58,7 @@ public static class NativeMetadataDonorService
             var uimdPackage = FindPackage(dcmd, "DA_UIMD_");
             if (string.IsNullOrWhiteSpace(uimdPackage))
             {
+                error = $"Cannot resolve the UI metadata referenced by {dcmdTemplate.PackagePath} in the active extraction.";
                 return null;
             }
 
@@ -75,8 +82,9 @@ public static class NativeMetadataDonorService
                 CanonicalProgressTag(ReadGameplayTag(dcmd, "ProgressTag")),
                 icons);
         }
-        catch
+        catch (Exception ex)
         {
+            error = $"Could not read {dcmdTemplate.PackagePath} ({dcmdUasset}) using mappings {AppSettings.Current.EffectiveUsmapPath()}: {ex.GetType().Name}: {ex.Message}";
             return null;
         }
     }
@@ -86,9 +94,18 @@ public static class NativeMetadataDonorService
         // DA_DCMD_Batman_Batman_Playable is a retired donor with the same localized
         // title/icons as TheBatman2025. PROG_Characters and the Batman_Unlock rule
         // define only the latter progression entry. Do not infer aliases by title.
-        return string.Equals(tag, "GameProgress.Definitions.Characters.Batman.Batman", StringComparison.OrdinalIgnoreCase)
-            ? "GameProgress.Definitions.Characters.Batman.TheBatman2025"
-            : tag ?? "";
+        if (string.Equals(tag, "GameProgress.Definitions.Characters.Batman.Batman", StringComparison.OrdinalIgnoreCase))
+            return "GameProgress.Definitions.Characters.Batman.TheBatman2025";
+        // Build 1344350 retains Joker/Harley Default DCMDs with obsolete gates.
+        // PROG_DLC_VMCharacters defines HTV/BTAS instead, matching the native
+        // groups' DefaultCharacterVariant and those variants' own DCMDs. A missing
+        // progress definition causes the roster to skip the suit, not just lock it.
+        // Exact aliases only: do not rewrite other variants or custom unlocks.
+        if (string.Equals(tag, "GameProgress.Definitions.Characters.Joker", StringComparison.OrdinalIgnoreCase))
+            return "GameProgress.Definitions.Characters.Joker.HTV";
+        if (string.Equals(tag, "GameProgress.Definitions.Characters.Harley.Default", StringComparison.OrdinalIgnoreCase))
+            return "GameProgress.Definitions.Characters.Harley.BTAS";
+        return tag ?? "";
     }
 
     /// <summary>
@@ -123,6 +140,10 @@ public static class NativeMetadataDonorService
 
     private static string ResolveTemplateUasset(TemplateRecord template)
     {
+        // Never mix an old saved donor with the new extraction's UI metadata/mappings.
+        // A configured active extraction is authoritative, including missing packages.
+        if (!string.IsNullOrWhiteSpace(AppSettings.Current.EffectiveExtractedContentRoot()))
+            return PackageToUasset(template.PackagePath);
         if (!string.IsNullOrWhiteSpace(template.Uasset) && File.Exists(template.Uasset))
         {
             return template.Uasset;

@@ -4,7 +4,7 @@ using UAssetAPI.Unversioned;
 namespace Batcomputer;
 
 /// <summary>
-/// Loads a .usmap mappings file ONCE per path and caches the instance for reuse.
+/// Loads a .usmap mappings file once per path/file revision and caches it for reuse.
 ///
 /// UAssetAPI's <c>new Usmap(path)</c> opens the file, and the graft/rebuild/material flows
 /// re-loaded the same Dinner.usmap dozens of times - often from concurrent Task.Run threads
@@ -17,25 +17,34 @@ namespace Batcomputer;
 /// </summary>
 internal static class MappingsCache
 {
-    private static readonly ConcurrentDictionary<string, Usmap> Cache =
+    private sealed record Entry(Usmap Mappings, long Length, long WriteTicks, string ContentRoot);
+    private static readonly ConcurrentDictionary<string, Entry> Cache =
         new(StringComparer.OrdinalIgnoreCase);
     private static readonly object LoadLock = new();
 
-    /// <summary>Returns the cached Usmap for <paramref name="path"/>, loading it once if needed.</summary>
+    /// <summary>Returns cached mappings, reloading when an updated dump replaces the file.</summary>
     public static Usmap Load(string path)
     {
-        if (Cache.TryGetValue(path, out var cached))
+        path = Path.GetFullPath(path);
+        // UAssetAPI can augment a dump with schemas loaded from native Blueprints.
+        // Those schemas belong to the extraction, not just to the .usmap filename.
+        var contentRoot = AppSettings.Current.EffectiveExtractedContentRoot();
+        var info = new FileInfo(path);
+        if (Cache.TryGetValue(path, out var cached) && info.Exists && cached.Length == info.Length && cached.WriteTicks == info.LastWriteTimeUtc.Ticks &&
+            cached.ContentRoot.Equals(contentRoot, StringComparison.OrdinalIgnoreCase))
         {
-            return cached;
+            return cached.Mappings;
         }
         lock (LoadLock)
         {
-            if (Cache.TryGetValue(path, out cached))
+            info.Refresh();
+            if (Cache.TryGetValue(path, out cached) && info.Exists && cached.Length == info.Length && cached.WriteTicks == info.LastWriteTimeUtc.Ticks &&
+                cached.ContentRoot.Equals(contentRoot, StringComparison.OrdinalIgnoreCase))
             {
-                return cached;
+                return cached.Mappings;
             }
             var usmap = new Usmap(path);
-            Cache[path] = usmap;
+            Cache[path] = new Entry(usmap, info.Length, info.LastWriteTimeUtc.Ticks, contentRoot);
             return usmap;
         }
     }
