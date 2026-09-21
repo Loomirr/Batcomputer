@@ -50,10 +50,20 @@ public sealed class ModelPreviewControl : UserControl
     /// <summary>Raised when the in-viewer part mover asks the host to persist an alignment.</summary>
     public event EventHandler<PreviewPlacementSaveRequestedEventArgs>? PlacementSaveRequested;
     internal event Action<string>? VehicleWorkshopMessageReceived;
-    internal static bool IsVehicleWorkshopMessage(string? type) => type is "vehicleWorkshopSave" or "vehicleWorkshopReady" or "vehicleWorkshopError" or "vehicleWorkshopSettings" or "vehicleWorkshopCopyMaterial" or "vehicleWorkshopRiders" or "vehicleWorkshopToybox" or "vehicleWorkshopSurface";
+    internal static bool IsVehicleWorkshopMessage(string? type) => type is "vehicleWorkshopSave" or "vehicleWorkshopReady" or "vehicleWorkshopError" or "vehicleWorkshopSettings" or "vehicleWorkshopCopyMaterial" or "vehicleWorkshopRiders" or "vehicleWorkshopToybox" or "vehicleWorkshopSurface" or "vehicleWorkshopLoadPart";
     internal async Task ShowVehicleRidersAsync(string json)
     {
         if (_web?.CoreWebView2 is { } core) await core.ExecuteScriptAsync("window.vehicleWorkshop?.loadRiders(" + json + ")");
+    }
+    internal async Task ShowVehicleWorkshopPartAsync(string component, VehicleWorkshopService.DeferredMesh mesh)
+    {
+        if (_web?.CoreWebView2 is { } core)
+            await core.ExecuteScriptAsync("window.vehicleWorkshop?.loadPart(" + JsonSerializer.Serialize(component) + "," + JsonSerializer.Serialize(mesh) + ")");
+    }
+    internal async Task ShowVehicleWorkshopPartFailedAsync(string component, string error)
+    {
+        if (_web?.CoreWebView2 is { } core)
+            await core.ExecuteScriptAsync("window.vehicleWorkshop?.loadPart(" + JsonSerializer.Serialize(component) + ",null," + JsonSerializer.Serialize(error) + ")");
     }
     internal async Task<bool> RequestVehicleSettingsAsync()
     {

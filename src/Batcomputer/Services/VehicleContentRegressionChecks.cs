@@ -10,7 +10,7 @@ internal static class VehicleContentRegressionChecks
         var results = new List<(bool, string)>();
         void Check(bool value, string description) => results.Add((value, description));
         static bool Rejects(Action action) { try { action(); return false; } catch (InvalidDataException) { return true; } }
-        Check(ModelPreviewControl.IsVehicleWorkshopMessage("vehicleWorkshopSurface") && ModelPreviewControl.IsVehicleWorkshopMessage("vehicleWorkshopToybox") && !ModelPreviewControl.IsVehicleWorkshopMessage("unknown"), "surface and toybox commands reach the desktop workshop host");
+        Check(ModelPreviewControl.IsVehicleWorkshopMessage("vehicleWorkshopSurface") && ModelPreviewControl.IsVehicleWorkshopMessage("vehicleWorkshopToybox") && ModelPreviewControl.IsVehicleWorkshopMessage("vehicleWorkshopLoadPart") && !ModelPreviewControl.IsVehicleWorkshopMessage("unknown"), "surface, toybox and deferred-mesh commands reach the desktop workshop host");
         Check(VehicleMaterialService.SlotName(new() { DisplayName = "70s Batmobile" }, 0) == "MI_Slot0_70sBatmobile", "vehicle material copies use readable car and slot names");
         Check(!VehicleMaterialService.Owned(new(), "/Game/Characters/MI_Black") && !VehicleMaterialService.Owned(new(), "/Game/Mods/Other/Materials/MI_Test"), "vehicle material editing cannot overwrite a native or another vehicle's package");
         Check(Rejects(() => SkinnedCookWorkspace.ValidateLength(new string('x', 180), "/Game/Mods/Test/SK_Test")), "overlong temporary cook filenames fail before launching Unreal");
@@ -27,7 +27,9 @@ internal static class VehicleContentRegressionChecks
             Check(vehicle.Clone().DonorId == donor.Id && vehicle.Clone().SizeMultiplier == 1.4f, "vehicle donor and size survive save/reopen: " + donor.Label);
         }
         Check(new[] { float.NaN, float.PositiveInfinity, .49f, 2.01f }.All(scale => Rejects(() => VehicleProjectService.ValidateIdentity(new() { SizeMultiplier = scale }))), "unsafe whole-vehicle sizes are rejected");
-        Check(VehicleDonorService.All.Select(d => d.Id).Distinct().Count() == VehicleDonorService.All.Length && VehicleDonorService.All.Length == 6, "six driving bases have distinct stable identities");
+        Check(VehicleDonorService.All.Select(d => d.Id).Distinct().Count() == VehicleDonorService.All.Length && VehicleDonorService.All.Length == 7, "seven driving bases have distinct stable identities");
+        var batbike = VehicleDonorService.All.Single(d => d.Id == "batbike2022");
+        Check(batbike.Blueprint.Contains("BP_VEH-Batbike2022_theBatman", StringComparison.Ordinal) && batbike.Mesh.Contains("SK_VEH_Batbike2022_theBatman", StringComparison.Ordinal) && batbike.SummonMesh.Contains("SK_VEH_Batbike2022_theBatman_Summon", StringComparison.Ordinal), "Batbike uses its verified bike blueprint, driving mesh and summon rig");
         Check(VehicleDonorService.ExtractionFilter("/DLC_PartyPack/Vehicles/DA_Test") == "Plugins/GameFeatures/DLC_PartyPack/Content/Vehicles/DA_Test", "DLC donor extraction uses the plugin mount");
         Check(VehicleDonorService.All.Single(d => d.Id == "batmobilemonstertruck").RequiredDlc == "Party Pack DLC", "Batmobeast declares its DLC requirement");
         Check(VehicleDonorService.All.Where(d => d.Id is "batmobile1995" or "batmobile1989" or "batmobile2005").All(d => d.Animations.Count >= 3), "native mechanics clips are catalogued for three driving bases");

@@ -77,6 +77,15 @@ public sealed class AppSettings
     // Layout, dark surfaces, category colors, and semantic status colors remain stable.
     public string VisualTheme { get; set; } = "Classic";
 
+    // Offline preview behaviour is kept separate from the project recipe. These settings never
+    // modify cooked assets or the vehicle that is packaged for the game.
+    public string PreviewQuality { get; set; } = "Balanced";
+    public int VehicleDetailedPartBudget { get; set; } = 6;
+    public int VehicleGeometryCacheLimitMb { get; set; } = 512;
+    public int VehicleCustomBodyPreviewLimitMb { get; set; } = 26;
+    public int ViewerFrameRateLimit { get; set; } = 60;
+    public bool VehicleSafePreviewMode { get; set; } = true;
+
     // Loaded once at startup; services consult this for path overrides.
     [JsonIgnore]
     public static AppSettings Current { get; set; } = new();

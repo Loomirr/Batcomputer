@@ -38,12 +38,31 @@ internal static class SkinnedRigComparisonService
             double scale = new[] { Math.Abs(a.Scale.X - b.Scale.X), Math.Abs(a.Scale.Y - b.Scale.Y), Math.Abs(a.Scale.Z - b.Scale.Z) }.Max();
             bool hierarchy = parentA != "<invalid>" && parentA == parentB;
             bool pose = double.IsFinite(translation + rotation + scale + degrees) && translation <= .001 && rotation <= .00001 && scale <= .00001;
+            // Blender's FBX exporter represents its metre-to-centimetre scene conversion as a
+            // uniform x100 scale on the otherwise identity, non-deforming root. Unreal retains
+            // that metadata even though every child local transform and the mesh bind data are
+            // already in centimetres. It is not an authored rest-pose change. Accept only this
+            // exact root-only representation; every real bone remains byte-for-byte strict.
+            bool centimeterRoot = a.Parent == -1 && b.Parent == -1 &&
+                translation <= .001 && rotation <= .00001 &&
+                IsUniformRatio(a.Scale, b.Scale, 100f);
+            pose |= centimeterRoot;
             rows.Add(new(a.Name, parentB, parentA, translation, degrees, rotation, scale, Values(b), Values(a), hierarchy && pose));
             if (!hierarchy) errors.Add($"Bone hierarchy differs at '{a.Name}': expected parent '{parentB}', found '{parentA}'.");
             if (!pose) errors.Add($"Rest pose/scale mismatch at '{a.Name}': translation {translation:G5} cm, rotation {degrees:G5} degrees, scale difference {scale:G5}. Preserve the native rest pose; automatic retargeting is not supported.");
         }
         foreach (var missing in expected.Where(e => !actual.Any(a => a.Name == e.Name))) errors.Add("Missing native bone: " + missing.Name);
         return new(expected.Count, actual.Count, errors.ToArray(), rows.ToArray());
+    }
+
+    private static bool IsUniformRatio(Vector3 actual, Vector3 expected, float ratio)
+    {
+        if (!float.IsFinite(actual.X + actual.Y + actual.Z + expected.X + expected.Y + expected.Z) ||
+            Math.Abs(expected.X) < .000001f || Math.Abs(expected.Y) < .000001f || Math.Abs(expected.Z) < .000001f)
+            return false;
+        return Math.Abs(actual.X / expected.X - ratio) <= .0001f &&
+               Math.Abs(actual.Y / expected.Y - ratio) <= .0001f &&
+               Math.Abs(actual.Z / expected.Z - ratio) <= .0001f;
     }
 
     internal static void Write(string path, Report report) => AtomicFileUtil.WriteAllText(path,

@@ -155,6 +155,7 @@ public sealed class StaticMeshObjProbeService
         public int IndexCount { get; set; }
         public int StaticMeshBytesBefore { get; set; }
         public int StaticMeshBytesAfter { get; set; }
+        public bool RepairedReversedSourceNormals { get; set; }
         public float Scale { get; set; }
         public float OffsetX { get; set; }
         public float OffsetY { get; set; }
@@ -209,6 +210,7 @@ public sealed class StaticMeshObjProbeService
         public List<ImportedSection> Sections { get; } = [];
         public List<CustomStaticMeshMaterialSlot> DeclaredMaterialSlots { get; } = [];
         public Bounds Bounds { get; set; }
+        public bool RepairedReversedSourceNormals { get; set; }
     }
 
     private sealed class ImportedSection
@@ -282,6 +284,7 @@ public sealed class StaticMeshObjProbeService
             result.VertexCount = mesh.Vertices.Count;
             result.IndexCount = mesh.Indices.Count;
             result.TriangleCount = mesh.Indices.Count / 3;
+            result.RepairedReversedSourceNormals = mesh.RepairedReversedSourceNormals;
             result.MaterialSlots = DescribeMaterialSlots(mesh);
             result.ObjSha256 = Hash(File.ReadAllBytes(request.ObjPath));
 
@@ -378,6 +381,10 @@ public sealed class StaticMeshObjProbeService
             result.Log.Add($"Parsed {result.VertexCount} flattened vertices and {result.TriangleCount} double-sided triangles from the OBJ.");
             result.Log.Add($"Mapped {mesh.Sections.Count} active OBJ material section(s) onto {mesh.DeclaredMaterialSlots.Count} stable slot declaration(s).");
             result.Log.Add($"Applied mesh transform: scale={request.Scale:0.###}, offset=({request.OffsetX:0.###}, {request.OffsetY:0.###}, {request.OffsetZ:0.###}), rotation=({request.RotationPitch:0.###}, {request.RotationYaw:0.###}, {request.RotationRoll:0.###}).");
+            if (result.RepairedReversedSourceNormals)
+            {
+                result.Log.Add("Repaired a source OBJ whose authored vertex normals were consistently reversed from its face geometry.");
+            }
             result.Log.Add("Expanded the final StaticMesh export's inline position, tangent, UV, and active index buffers.");
             result.Log.Add("Preserved the donor collision shell and package identity while rebuilding its material sections.");
         }
@@ -1066,7 +1073,11 @@ public sealed class StaticMeshObjProbeService
             vertex.Normal = RotateUnreal(vertex.Normal, rotationPitch, rotationYaw, rotationRoll);
         }
 
-        for (var i = 0; i < mesh.Indices.Count; i += 3)
+        // Every imported triangle is deliberately duplicated with reversed winding for Unreal's
+        // double-sided attachment shell. Those twins must not contribute to the geometric-normal
+        // fallback: adding both makes them cancel to zero and previously gave normal-less OBJ
+        // imports the arbitrary (0,0,1) normal in both the game mesh and the 3D preview.
+        for (var i = 0; i < mesh.Indices.Count; i += 6)
         {
             var a = mesh.Vertices[mesh.Indices[i]];
             var b = mesh.Vertices[mesh.Indices[i + 1]];
@@ -1089,6 +1100,35 @@ public sealed class StaticMeshObjProbeService
                 b.AccumulatedTangent += tangent;
                 c.AccumulatedTangent += tangent;
             }
+        }
+
+        // An OBJ may include normals that are all backwards (a common export mistake). Only
+        // repair an overwhelming, consistent mismatch; mixed/hard-surface normals are left as
+        // authored so this never changes an intentionally faceted custom hood.
+        var compared = 0;
+        var opposed = 0;
+        foreach (var vertex in mesh.Vertices)
+        {
+            if (LengthSquared(vertex.Normal) <= 0.000001f || LengthSquared(vertex.AccumulatedNormal) <= 0.000001f)
+            {
+                continue;
+            }
+            compared++;
+            if (Dot(Normalize(vertex.Normal), Normalize(vertex.AccumulatedNormal)) < -0.5f)
+            {
+                opposed++;
+            }
+        }
+        if (compared >= 12 && opposed * 10 >= compared * 9)
+        {
+            foreach (var vertex in mesh.Vertices)
+            {
+                if (LengthSquared(vertex.Normal) > 0.000001f)
+                {
+                    vertex.Normal = vertex.Normal * -1f;
+                }
+            }
+            mesh.RepairedReversedSourceNormals = true;
         }
 
         foreach (var vertex in mesh.Vertices)

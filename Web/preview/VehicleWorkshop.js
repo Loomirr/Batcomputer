@@ -67,7 +67,8 @@
   const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(38, 1, .01, 10000);
   camera.up.set(0, 0, 1);
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75)); renderer.outputEncoding = THREE.sRGBEncoding;
+  const quality = { 'Memory saver': 1, 'Balanced': 1.5, 'High detail': 2 }[data.previewQuality] || 1.5;
+  renderer.setPixelRatio(Math.min(devicePixelRatio, quality)); renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
   $('viewport').appendChild(renderer.domElement);
   const orbit = new THREE.OrbitControls(camera, renderer.domElement); orbit.enableDamping = true;
@@ -78,7 +79,7 @@
   vehicle.scale.setScalar(data.sizeMultiplier || 1);
   const gizmo = new THREE.TransformControls(camera, renderer.domElement); gizmo.setSize(.85); scene.add(gizmo);
   const selectionBox = new THREE.Box3Helper(new THREE.Box3(), 0xffd43b); selectionBox.visible = false; scene.add(selectionBox);
-  const loaded = new Map(), modelCache = new Map(), undo = [], redo = [], fields = new Map();
+  const loaded = new Map(), detailOrder = [], undo = [], redo = [], fields = new Map();
   let selected = null, selectedSlot = null, dragBefore = null, isolate = false, lights = true, mode = 'translate', ready = false, libraryPage = 0, libraryTarget = null, libraryChoice = null;
   const axisLegend = document.createElement('div'); axisLegend.className = 'axis-legend'; axisLegend.innerHTML = '<span class="ax">X · forward/back</span><span class="ay">Y · left/right</span><span class="az">Z · up/down</span>'; $('viewport').appendChild(axisLegend);
   const disableButton = document.createElement('button'); disableButton.id = 'disablePart'; disableButton.className = 'danger'; $('fields').before(disableButton);
@@ -191,7 +192,7 @@
     if(surfaceRole(selected.id)) { $('materials').textContent='Custom light surface · uses the native bulb shader. Change its assignment on Vehicle body.'; }
     else materialList($('materials'), selected.materials);
   }
-  function select(id, slot = null) { const state = loaded.get(id); selected = data.parts.find(p => p.id === id); selectedSlot = slot; if (!selected) return; gizmo.detach(); if (state && selected.editable && state.node.visible) gizmo.attach(state.node); $('scale').disabled = selected.group === 'Seating'||selected.lockScale; if ((selected.group === 'Seating'||selected.lockScale) && mode === 'scale') modeTo('translate'); if (isolate) visibility(); updateUi(); if (slot !== null && id==='body'&&surfaceChoices.length)surfacePanel.scrollIntoView({block:'nearest'});else if (slot !== null) $('materials').querySelector('[data-slot="' + slot + '"]')?.scrollIntoView({block:'nearest'});else $('inspector').scrollTop=0; }
+  function select(id, slot = null) { const state = loaded.get(id); selected = data.parts.find(p => p.id === id); selectedSlot = slot; if (!selected) return; ensureLoaded(state); gizmo.detach(); if (state && selected.editable && state.node.visible) gizmo.attach(state.node); $('scale').disabled = selected.group === 'Seating'||selected.lockScale; if ((selected.group === 'Seating'||selected.lockScale) && mode === 'scale') modeTo('translate'); if (isolate) visibility(); updateUi(); if (slot !== null && id==='body'&&surfaceChoices.length)surfacePanel.scrollIntoView({block:'nearest'});else if (slot !== null) $('materials').querySelector('[data-slot="' + slot + '"]')?.scrollIntoView({block:'nearest'});else $('inspector').scrollTop=0; }
   function bounds(id) { const state = id ? loaded.get(id) : null; return new THREE.Box3().setFromObject(state ? state.node : vehicle); }
   function frame(id, view) {
     const box = bounds(id); if (box.isEmpty()) return; const center = box.getCenter(new THREE.Vector3()), radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, .2);
@@ -314,24 +315,25 @@
   $('materialPrevious').onclick=()=>{libraryPage--;renderLibrary();};$('materialNext').onclick=()=>{libraryPage++;renderLibrary();};$('closeMaterials').onclick=()=>$('materialPicker').close();
   $('useMaterial').onclick=()=>{if(!libraryTarget||!libraryChoice)return;const before=snapshot();materials.set(materialKey(libraryTarget.id,libraryTarget.slot),{component:libraryTarget.id,slot:libraryTarget.slot,materialPath:libraryChoice.path});repaint(loaded.get(libraryTarget.id));$('materialPicker').close();checkpoint(before);};
   let motion = null, bodyModel = null;
+  function disposeObject(root) { root.traverse(n => { if (n.geometry) n.geometry.dispose(); const materials = n.material ? (Array.isArray(n.material) ? n.material : [n.material]) : []; materials.forEach(m => m.dispose?.()); }); }
+  function addMarker(state) { const p=state.part, marker = new THREE.Mesh(p.group === 'Seating' ? new THREE.BoxGeometry(.26,.32,.08) : new THREE.OctahedronGeometry(.045), new THREE.MeshBasicMaterial({ color: p.editable ? 0xffd43b : 0x71ccef, wireframe: true })); state.modelRoot.add(marker); if (p.group === 'Light sources (reference)' || p.group === 'Seating') state.modelRoot.add(new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), .6, 0x71ccef, .12, .07)); }
+  function unloadDetail(state) { if (!state || !state.detail || state.part.id === 'body') return; disposeObject(state.modelRoot); state.modelRoot.clear(); state.detail=false; addMarker(state); }
+  function enforceDetailBudget() { const budget=Math.max(1,Number(data.detailPartBudget)||6); while (detailOrder.length > budget) { const id=detailOrder.shift(), state=loaded.get(id); if (state && state.part.id !== 'body') unloadDetail(state); } }
+  async function loadDetail(state, file) { if (!state || state.loading || state.detail) return; state.loading=true; try { const gltf=await new THREE.GLTFLoader().loadAsync(file), model=gltf.scene; disposeObject(state.modelRoot); state.modelRoot.clear(); model.rotation.x=Math.PI/2; model.scale.z=-1; appearance(model,state.part,gltf.parser); state.modelRoot.add(model); state.detail=true; if(state.part.id==='body')bodyModel=model;else{detailOrder.push(state.part.id);enforceDetailBudget();} repaint(state); if(selected?.id===state.part.id)frame(state.part.id); } catch(error) { addMarker(state); $('error').textContent='Could not load '+state.part.label+': '+error.message; } finally { state.loading=false; updateUi(); } }
+  function ensureLoaded(state) { if (state && !state.detail && !state.loading && state.part.meshPackage) { state.loading=true; updateUi(); pushHost('vehicleWorkshopLoadPart',{component:state.part.id}); } }
+  async function loadPart(id, mesh, error) { const state=loaded.get(id); if (!state) return; state.loading=false; if (!mesh?.file) { $('error').textContent='Could not load '+state.part.label+': '+(error||'unknown error'); updateUi(); return; } state.part.file=mesh.file; state.part.materials=mesh.materials||[]; state.part.primitiveSlots=mesh.primitiveSlots||[]; await loadDetail(state,mesh.file); if(selected?.id===id)updateUi(); }
   async function load() {
-    const loader = new THREE.GLTFLoader();
     for (const part of data.parts) {
-      const anchor = new THREE.Group(); anchor.position.fromArray(part.anchor.position).multiplyScalar(.01); anchor.quaternion.fromArray(part.anchor.quaternion); anchor.scale.fromArray(part.anchor.scale); vehicle.add(anchor);
-      const node = new THREE.Group(); node.userData.part = part.id; anchor.add(node); toNode(node, current(part));
-      if (part.file) { if (!modelCache.has(part.file)) modelCache.set(part.file, await loader.loadAsync(part.file)); const gltf = modelCache.get(part.file), model = part.id === 'body' ? gltf.scene : gltf.scene.clone(true);
-        // This CUE exporter writes positions as (UE.X, UE.Z, UE.Y), including the handedness
-        // change. Swap Y/Z back; a rotation alone mirrors the vehicle and its attachments.
-        model.rotation.x = Math.PI / 2; model.scale.z = -1; appearance(model, part, gltf.parser); node.add(model); if(part.id === 'body') bodyModel = model; }
-      else { const marker = new THREE.Mesh(part.group === 'Seating' ? new THREE.BoxGeometry(.26,.32,.08) : new THREE.OctahedronGeometry(.045), new THREE.MeshBasicMaterial({ color: part.editable ? 0xffd43b : 0x71ccef, wireframe: true })); node.add(marker); if (part.group === 'Light sources (reference)' || part.group === 'Seating') { const arrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), .6, 0x71ccef, .12, .07); node.add(arrow); } }
-      const state = { part, anchor, node, hidden: false }; loaded.set(part.id, state); repaint(state);
-      if (part.light) { const beam = new THREE.SpotLight(0xffffff,1,24,Math.PI/3,.35,2);const target=new THREE.Object3D();target.position.set(1,0,0);node.add(target,beam);beam.target=target;state.beam=beam;const arrow=new THREE.ArrowHelper(new THREE.Vector3(1,0,0),new THREE.Vector3(),.6,0x71ccef,.12,.07);node.add(arrow);paintBeam(state); }
+      const anchor=new THREE.Group();anchor.position.fromArray(part.anchor.position).multiplyScalar(.01);anchor.quaternion.fromArray(part.anchor.quaternion);anchor.scale.fromArray(part.anchor.scale);vehicle.add(anchor);
+      const node=new THREE.Group();node.userData.part=part.id;anchor.add(node);toNode(node,current(part));const modelRoot=new THREE.Group();node.add(modelRoot);
+      const state={part,anchor,node,modelRoot,hidden:false,detail:false,loading:false};loaded.set(part.id,state);addMarker(state);repaint(state);
+      if(part.light){const beam=new THREE.SpotLight(0xffffff,1,24,Math.PI/3,.35,2),target=new THREE.Object3D();target.position.set(1,0,0);node.add(target,beam);beam.target=target;state.beam=beam;node.add(new THREE.ArrowHelper(new THREE.Vector3(1,0,0),new THREE.Vector3(),.6,0x71ccef,.12,.07));paintBeam(state);}
       if(part.group==='Weapons & grapple'||part.group==='Boost & exhaust')node.add(new THREE.ArrowHelper(new THREE.Vector3().fromArray(part.markerDirection||[1,0,0]).normalize(),new THREE.Vector3(),.8,part.group==='Boost & exhaust'?0x75dfff:0xffa84c,.15,.08));
     }
-    ready = true; $('loading').style.display = 'none'; select('body'); syncLightSurfaces(); visibility(); frame();
-    if(bodyModel && window.createVehicleMotion) motion = window.createVehicleMotion({data, vehicle, loaded, bodyModel, viewport:$('viewport'), viewbar:document.querySelector('.viewbar')});
-    if (data.warnings.length) $('error').textContent = data.warnings.length + ' preview warnings · see part details';
-    pushHost('vehicleWorkshopReady', { parts: loaded.size });
+    await loadDetail(loaded.get('body'),data.parts.find(p=>p.id==='body')?.file);
+    ready=true;$('loading').style.display='none';select('body');syncLightSurfaces();visibility();frame();
+    if(bodyModel&&window.createVehicleMotion)motion=window.createVehicleMotion({data,vehicle,loaded,bodyModel,viewport:$('viewport'),viewbar:document.querySelector('.viewbar')});
+    if(data.warnings.length)$('error').textContent=data.warnings.length+' preview warnings · see part details';pushHost('vehicleWorkshopReady',{parts:loaded.size});
   }
   function paintBeam(state) { if (!state?.beam) return; const value=beamSettings.get(state.part.id)||state.part.light;state.beam.color.setRGB(value.r/255,value.g/255,value.b/255).convertSRGBToLinear();state.beam.intensity=lights?value.intensity/128:0;state.beam.distance=value.radius/100;state.beam.angle=value.outerCone*rad; }
   async function loadRiders(riders) {
@@ -344,8 +346,10 @@
   }
   function resize() { const rect = $('viewport').getBoundingClientRect(); if (!rect.width || !rect.height) return; renderer.setSize(rect.width, rect.height); camera.aspect = rect.width / rect.height; camera.updateProjectionMatrix(); }
   new ResizeObserver(resize).observe($('viewport')); resize();
-  function tick() { requestAnimationFrame(tick); orbit.update(); motion?.update(); if (selected && loaded.has(selected.id)) { selectionBox.box.copy(bounds(selected.id)); selectionBox.visible = selected.editable && loaded.get(selected.id).node.visible; } renderer.render(scene, camera); } tick();
+  const frameLimit=Math.max(0,Number(data.frameRateLimit ?? 60)), frameInterval=frameLimit ? 1000/frameLimit : 0; let lastFrame=0;
+  function tick(now=0) { requestAnimationFrame(tick); if(frameInterval&&now-lastFrame<frameInterval)return;lastFrame=now;orbit.update();motion?.update();if (selected && loaded.has(selected.id)) { selectionBox.box.copy(bounds(selected.id)); selectionBox.visible = selected.editable && loaded.get(selected.id).node.visible; } renderer.render(scene, camera); } tick();
   load().catch(error => { $('loading').textContent = 'Preview could not be loaded: ' + error.message; $('error').textContent = 'Nothing was saved'; pushHost('vehicleWorkshopError', { error: error.message }); });
   // Deterministic hooks used by the local, headless interaction checks.
-  window.vehicleWorkshop = { select, fromNode, ueQuaternion, valid, frame, camera, gizmo, openSettings, openMaterials, loadRiders, get motion() { return motion; }, get ready() { return ready; }, get saved() { return clone(Array.from(saved.values())); }, get draft() { return clone(draft()); }, get loaded() { return loaded; }, get selectedSlot() { return selectedSlot; } };
+  window.addEventListener('pagehide',()=>{loaded.forEach(state=>disposeObject(state.modelRoot));renderer.dispose();});
+  window.vehicleWorkshop = { select, fromNode, ueQuaternion, valid, frame, camera, gizmo, openSettings, openMaterials, loadRiders, loadPart, get motion() { return motion; }, get ready() { return ready; }, get saved() { return clone(Array.from(saved.values())); }, get draft() { return clone(draft()); }, get loaded() { return loaded; }, get selectedSlot() { return selectedSlot; } };
 })();

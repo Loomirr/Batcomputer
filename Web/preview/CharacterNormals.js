@@ -29,7 +29,11 @@ vec3 bcPerturb(vec3 eye, vec3 n, vec3 sampleNormal, float facing) {
     shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_maps>',
       `vec3 bcUnperturbed = normal;
 #include <normal_fragment_maps>
+// Unreal DNRM/LEGO normal textures are DirectX tangent-space normals (green points down).
+// Three.js/glTF uses the opposite Y convention. The regular material normalMap path applies
+// normalScale.y = -1; mirror that here for this independent UV0 structural-detail layer.
 vec3 bcSample = texture2D(bcStructuralNormal, bcStructuralUv).xyz*2.0-1.0;
+bcSample.y = -bcSample.y;
 vec3 bcDetail = bcPerturb(-vViewPosition, bcUnperturbed, bcSample, faceDirection);
 normal = normalize(normal + (bcDetail-bcUnperturbed)*bcStructuralEnabled);`);
   };

@@ -388,6 +388,19 @@ internal static class Program
             return 0;
         }
 
+        // Opens a staged/custom character against the normal game PAKs. This mirrors the
+        // workshop's loose-content preview path, which is needed before an IoStore mod has been
+        // installed and for diagnostics of project-owned imported meshes.
+        if (args.Length >= 5 && args[0].Equals("--preview-character-loose", StringComparison.OrdinalIgnoreCase))
+        {
+            ApplicationConfiguration.Initialize();
+            var bodyMesh = args.Length >= 6 ? args[5] : null;
+            var folder = ModelPreviewService.BuildPreviewCharacter(args[1], args[2], args[3], bodyMesh,
+                looseContentRoots: [args[4]]);
+            Application.Run(ModelPreviewForm.ForFolder(folder, "Preview — " + args[3].Split('/')[^1]));
+            return 0;
+        }
+
         if (args.Length >= 4 && args[0].Equals("--preview-character-folder", StringComparison.OrdinalIgnoreCase))
         {
             var bodyMesh = args.Length >= 5 ? args[4] : null;

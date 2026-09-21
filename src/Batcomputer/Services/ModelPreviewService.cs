@@ -4948,7 +4948,10 @@ function dress(g,info){
         m.color.set(s.col?(s.cut?new THREE.Color(s.col).convertSRGBToLinear():new THREE.Color(s.col)):new THREE.Color(0xffffff));applied++;}
       else if(s.col){m.map=null;m.color.set(s.col);applied++;}
       else if(!m.map){m.color.set(0x9aa0a8);}
-      const n=tex(s.nrm,false); if(n)m.normalMap=n;else m.normalMap=null;
+      // Unreal stores tangent-space normals in DirectX convention (+Y down), while three.js
+      // consumes glTF/WebGL convention (+Y up).  The texture pixels themselves must stay
+      // unmodified so GLB export remains faithful; invert only the viewer's normal response.
+      const n=tex(s.nrm,false); if(n){m.normalMap=n;m.normalScale.set(1,-1);}else m.normalMap=null;
       // RAO.G is the EoM ambient-occlusion channel. three.js aoMap samples UV2, so give static
       // attachments their structural UV0 there; body meshes preserve the same UV as aUv0.
       const ao=tex(s.ao,false);
@@ -5093,7 +5096,7 @@ function dress(g,info){
           // The rest of the feature's material. Without these the prints render as flat decals:
           // the normal map is what makes printed ink sit proud of the plastic, and the MMR is what
           // stops every zone sharing one uniform gloss.
-          if(nrmPath){const n=tex(nrmPath,false);if(n){m2.normalMap=n;}}
+          if(nrmPath){const n=tex(nrmPath,false);if(n){m2.normalMap=n;m2.normalScale.set(1,-1);}}
           if(ormPath){const om2=tex(ormPath,false);if(om2){m2.roughnessMap=om2;m2.metalnessMap=om2;}}
           if(emisPath){const e=tex(emisPath,true);if(e){m2.emissiveMap=e;
             m2.emissive=new THREE.Color(emisCol||0xffffff).convertSRGBToLinear();

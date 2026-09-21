@@ -16,10 +16,15 @@ internal static class VehicleWorkshopService
 {
     internal sealed record Pose(float[] Position, float[] Quaternion, float[] Scale);
     internal sealed record MaterialSlot(int Slot, string Package, string Family, float[]? Color, string[] Parameters);
+    internal sealed record DeferredMesh(string File, int[] PrimitiveSlots, IReadOnlyList<MaterialSlot> Materials);
     internal sealed record Part(string Id, string Label, string Group, string File, string Socket, string Bone,
         bool Editable, Pose Anchor, VehicleComponentTransform Native, VehicleComponentTransform Current,
         IReadOnlyList<MaterialSlot> Materials, string Note)
     {
+        // Non-body meshes are exported only when selected. A full vehicle assembly can otherwise
+        // consume several copies of its geometry before the first frame is drawn.
+        public string MeshPackage { get; init; } = "";
+        public IReadOnlyList<string> NativeOverrideMaterials { get; init; } = [];
         public int[] PrimitiveSlots { get; init; } = [];
         public bool CanDisable { get; init; }
         public VehicleLightSettings? Light { get; init; }
@@ -42,6 +47,9 @@ internal static class VehicleWorkshopService
         public float SizeMultiplier { get; init; } = 1;
         public IReadOnlyList<VehicleAnimationPreviewService.Clip> Animations { get; init; } = [];
         public IReadOnlyList<VehicleAnimationPreviewService.RigBone> Rig { get; init; } = [];
+        public string PreviewQuality { get; init; } = "Balanced";
+        public int DetailPartBudget { get; init; } = 6;
+        public int FrameRateLimit { get; init; } = 60;
     }
     private static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     internal static readonly Pose Identity = new([0, 0, 0], [0, 0, 0, 1], [1, 1, 1]);
@@ -86,16 +94,31 @@ internal static class VehicleWorkshopService
         var settings = AppSettings.Current;
         var overlays = new List<string>();
         string? bodyCache = null;
+        var useCustomPreviewBody = project.Model is not null;
+        var warnings = new List<string>();
         if (project.Model is { } model)
         {
             progress?.Invoke("Checking the imported body…");
+            var cookedBytes = ImportedMeshBytes(directory, model);
+            var limitMb = Math.Clamp(settings.VehicleCustomBodyPreviewLimitMb, 0, 512);
+            if (settings.VehicleSafePreviewMode && limitMb > 0 && cookedBytes > limitMb * 1024L * 1024L)
+            {
+                // A GLB conversion can expand cooked render buffers vastly beyond their file size.
+                // Keep the workshop usable with a donor-shell fallback; the saved project and its
+                // in-game build continue to use the custom model unchanged.
+                useCustomPreviewBody = false;
+                warnings.Add($"Safe preview: the custom body is {cookedBytes / 1024d / 1024d:F1} MB cooked (limit {limitMb} MB), so this offline workshop is showing the donor body. Your saved model and in-game build are unchanged. Raise or disable the custom-body limit in Settings > Preview to attempt the full conversion.");
+            }
+        }
+        if (project.Model is { } customModel && useCustomPreviewBody)
+        {
             var stage = Path.Combine(folder, "Stage", "LEGOBatmanLotDK", "Content");
-            SkinnedMeshStageService.BakeMesh(stage, directory, model); overlays.Add(stage);
+            SkinnedMeshStageService.BakeMesh(stage, directory, customModel); overlays.Add(stage);
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             hash.AppendData(System.Text.Encoding.UTF8.GetBytes(SkinnedGlbExportService.Revision + "/" + typeof(MeshExporter).Assembly.FullName));
             foreach (var extension in new[] { ".uasset", ".uexp", ".ubulk" })
             {
-                var file = Path.Combine(stage, model.MeshPackage[6..] + extension);
+                var file = Path.Combine(stage, customModel.MeshPackage[6..] + extension);
                 if (File.Exists(file)) { using var stream = File.OpenRead(file); var buffer = new byte[131072]; int count; while ((count = stream.Read(buffer)) > 0) { cancellation.ThrowIfCancellationRequested(); hash.AppendData(buffer.AsSpan(0, count)); } }
             }
             bodyCache = Path.Combine(AppSettings.CacheRoot, "VehicleGeometry-v1", Convert.ToHexString(hash.GetHashAndReset()) + ".glb");
@@ -118,7 +141,6 @@ internal static class VehicleWorkshopService
             var p = JObject.FromObject(socket)["Properties"]!; var bone = p["BoneName"]!.ToString();
             if (bones.TryGetValue(bone, out var bonePose)) sockets.Add(p["SocketName"]!.ToString(), (Compose(bonePose, SocketPose(p)), bone));
         }
-        var warnings = new List<string>();
         if (!donor.FullWorkshop) warnings.Add(donor.HeadlightEditing ? "Headlight beam colors and positions are editable. Rear/accent controller colors and surface-to-light bindings are not verified on this base yet." : "Light controller editing is not verified on this driving base. Lights retain their native behavior."); var parts = new List<Part>(); var exports = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var primitiveSlots = new Dictionary<string, int[]>(StringComparer.OrdinalIgnoreCase);
         string Export(string package)
@@ -128,18 +150,18 @@ internal static class VehicleWorkshopService
             var name = "mesh-" + exports.Count + ".glb";
             var mesh = provider.LoadPackageObject(package);
             primitiveSlots[package] = MeshPrimitiveSlots(mesh);
-            if (package == project.Model?.MeshPackage && bodyCache is not null && ValidGlb(bodyCache))
+            if (useCustomPreviewBody && package == project.Model?.MeshPackage && bodyCache is not null && ValidGlb(bodyCache))
             {
                 File.Copy(bodyCache, Path.Combine(folder, name)); exports.Add(package, name); return name;
             }
-            progress?.Invoke(package == project.Model?.MeshPackage ? "Preparing body geometry (first preview can take a few minutes)…" : "Reading attachment geometry…");
+            progress?.Invoke(useCustomPreviewBody && package == project.Model?.MeshPackage ? "Preparing body geometry (first preview can take a few minutes)…" : "Reading attachment geometry…");
             var options = new ExporterOptions { MeshFormat = EMeshFormat.Gltf2, LodFormat = ELodFormat.FirstLod, ExportMaterials = false, ExportMorphTargets = false };
             var exporter = mesh switch { USkeletalMesh sk => new MeshExporter(sk, options), UStaticMesh sm => new MeshExporter(sm, options), _ => throw new InvalidDataException("Not a mesh: " + package) };
             var exportDir = Path.Combine(folder, "MeshExport", exports.Count.ToString());
             if (!exporter.TryWriteToDir(new DirectoryInfo(exportDir), out _, out var file)) throw new InvalidDataException("Mesh preview export failed: " + package);
             if (mesh is USkeletalMesh skeletal) SkinnedGlbExportService.CorrectFile(file, skeletal);
             File.Copy(file, Path.Combine(folder, name));
-            if (package == project.Model?.MeshPackage && bodyCache is not null)
+            if (useCustomPreviewBody && package == project.Model?.MeshPackage && bodyCache is not null)
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(bodyCache)!);
                 var temporary = bodyCache + "." + Guid.NewGuid().ToString("N") + ".tmp";
@@ -150,8 +172,8 @@ internal static class VehicleWorkshopService
             exports.Add(package, name); return name;
         }
         var nativeMaterials = Slots(body, null, provider);
-        var bodyPackage = project.Model?.MeshPackage ?? donor.Mesh;
-        var bodySlots = project.Model is null ? nativeMaterials : project.Model.Materials.Select(m => new MaterialSlot(m.Slot, m.MaterialPath, project.Palette.FirstOrDefault(c => c.Slot == m.Slot)?.Finish ?? "Custom material",
+        var bodyPackage = useCustomPreviewBody ? project.Model!.MeshPackage : donor.Mesh;
+        var bodySlots = !useCustomPreviewBody ? nativeMaterials : project.Model!.Materials.Select(m => new MaterialSlot(m.Slot, m.MaterialPath, project.Palette.FirstOrDefault(c => c.Slot == m.Slot)?.Finish ?? "Custom material",
             project.Palette.FirstOrDefault(c => c.Slot == m.Slot) is { } color ? [color.R, color.G, color.B] : null, [])).ToArray();
         parts.Add(new("body", "Vehicle body", "Body", Export(bodyPackage), "", "", false, Identity, new() { Component = "body" }, new() { Component = "body" }, bodySlots,
             "Click a surface to select its material slot. Shared slots affect every piece using that material. Import a body through Setup / body.") { PrimitiveSlots = primitiveSlots[bodyPackage] });
@@ -171,24 +193,28 @@ internal static class VehicleWorkshopService
                 else { note = "Unresolved native socket; positioning disabled."; warnings.Add(id + ": " + note); }
             }
             var replacement = project.ToyboxParts.FirstOrDefault(t => t.Component == id);
-            var meshPackage = replacement?.MeshPackage ?? Package(p?["StaticMesh"]); var file = ""; IReadOnlyList<MaterialSlot> slots = [];
+            var meshPackage = replacement?.MeshPackage ?? Package(p?["StaticMesh"]); var file = "";
+            var nativeOverrides = replacement is null ? p?["OverrideMaterials"]?.Select(Package).Where(path => path.Length > 0).ToArray() ?? [] : [];
+            IReadOnlyList<MaterialSlot> slots = project.MaterialOverrides.Where(m => m.Component == id)
+                .Select(m => new MaterialSlot(m.Slot, m.MaterialPath, "Saved material", null, [])).ToArray();
             if (meshPackage.Length > 0)
             {
-                try { file = Export(meshPackage); slots = Slots(provider.LoadPackageObject(meshPackage), replacement is null ? p?["OverrideMaterials"] : null, provider); }
-                catch (Exception ex) { note = "Mesh could not be previewed; marker only. " + ex.Message; warnings.Add(id + ": " + note); }
+                // Geometry and native material instances load only if this part is selected.
+                // The saved override slots above keep older recipes valid before that point.
             }
             var source = VehicleLightService.SupportsBeam(donor, id) && VehicleLightService.IsClass(original.Kind);
             parts.Add(new(id, Label(id), Group(id), file, socketName, bone, note.Length == 0, anchor, original.Transform,
                 project.Transforms.FirstOrDefault(t => t.Component == id) ?? original.Transform, slots,
                 source ? "Actual light beam. Move / rotate with the gizmo. Rear lights keep their native braking response. Bulb and glow meshes are separate parts; preview brightness is approximate." : note)
-                { PrimitiveSlots = primitiveSlots.GetValueOrDefault(meshPackage, []), CanDisable = original.Kind == "StaticMeshComponent", Light = source ? VehicleLightService.ReadDefaults(id, p) : null });
+                { MeshPackage = meshPackage, NativeOverrideMaterials = nativeOverrides, CanDisable = original.Kind == "StaticMeshComponent", Light = source ? VehicleLightService.ReadDefaults(id, p) : null });
         }
         foreach (var added in project.ToyboxParts.Where(t => t.Added))
         {
-            var mesh = provider.LoadPackageObject<UStaticMesh>(added.MeshPackage); var file = Export(added.MeshPackage);
             var original = new VehicleComponentTransform { Component = added.Component };
-            parts.Add(new(added.Component, UnrealPathUtil.AssetName(added.MeshPackage), "Toybox attachments", file, "Body", "Body", true, bones["Body"], original,
-                project.Transforms.FirstOrDefault(t => t.Component == added.Component) ?? original, Slots(mesh, null, provider), "Added visual part. No brake/headlight controller or collision is added. Select its surfaces to copy and recolor materials.") { CanDisable = true, PrimitiveSlots = primitiveSlots[added.MeshPackage] });
+            IReadOnlyList<MaterialSlot> slots = project.MaterialOverrides.Where(m => m.Component == added.Component)
+                .Select(m => new MaterialSlot(m.Slot, m.MaterialPath, "Saved material", null, [])).ToArray();
+            parts.Add(new(added.Component, UnrealPathUtil.AssetName(added.MeshPackage), "Toybox attachments", "", "Body", "Body", true, bones["Body"], original,
+                project.Transforms.FirstOrDefault(t => t.Component == added.Component) ?? original, slots, "Added visual part. No brake/headlight controller or collision is added. Select its surfaces to copy and recolor materials.") { MeshPackage = added.MeshPackage, CanDisable = true });
         }
         foreach (var seat in editable.Values.Where(c => VehicleCustomizationService.IsSeat(c.Name)))
         {
@@ -203,14 +229,14 @@ internal static class VehicleWorkshopService
             var original = VehicleSocketService.Transform(VehicleSocketService.Socket(nativeSkeleton, socketName), id);
             var launcherMesh = socketName.StartsWith("LauncherGadget_") ? "/Game/Models/Vehicles/VEH_LauncherGadget_01/SK_VEH_LauncherGadget_01" : socketName == "Grapple_01" ? "/Game/Models/Vehicles/VEH_GrappleLauncherGadget_01/SK_VEH_GrappleLauncherGadget_01" : "";
             var file = "";
-            if (launcherMesh.Length > 0) { try { file = Export(launcherMesh); } catch (Exception ex) { warnings.Add("Launcher marker only: " + ex.Message); } }
+            if (launcherMesh.Length > 0) { try { _ = provider.LoadPackageObject(launcherMesh); } catch (Exception ex) { warnings.Add("Launcher marker only: " + ex.Message); launcherMesh = ""; } }
             var effect = VehicleSocketService.EffectSockets.Contains(socketName, StringComparer.Ordinal);
             parts.Add(new(id, VehicleSocketService.Label(socketName), effect ? "Boost & exhaust" : "Weapons & grapple", file, socketName, socket.Bone, true, bones[socket.Bone], original,
                 project.Transforms.FirstOrDefault(t => t.Component == id) ?? original, [], effect
                 ? "Moves boost and engine start / idle / shutdown effects together. Arrow follows the native exhaust direction; particles are not simulated. Color and effect size stay native for now."
                 : launcherMesh.Length > 0
                 ? "Move the whole launcher here. Native deployment and aiming remain active. Model preview is the rest pose; test deployed clearance in game."
-                : "Fallback firing / VFX reference. This donor normally fires from the animated launcher's own socket; move Rocket launcher 1 or 2 first.") { LockScale = true, MarkerDirection = VehicleSocketService.MarkerDirection(socketName) });
+                : "Fallback firing / VFX reference. This donor normally fires from the animated launcher's own socket; move Rocket launcher 1 or 2 first.") { MeshPackage = launcherMesh, LockScale = true, MarkerDirection = VehicleSocketService.MarkerDirection(socketName) });
         }
         // Only show a reference marker when there is no resolved, editable source component.
         foreach (var socket in sockets.Where(s => s.Key.Contains("_Light_", StringComparison.Ordinal) && !parts.Any(p => p.Socket == s.Key && p.Light is not null)))
@@ -220,17 +246,74 @@ internal static class VehicleWorkshopService
         var animations = VehicleAnimationPreviewService.Read(provider, donor, warnings, cancellation);
         var scene = new Scene(project.Id, session, project.DisplayName, parts, nativeMaterials, project.Transforms, warnings)
         { Animations = animations, Rig = VehicleAnimationPreviewService.Rig(body), SizeMultiplier = project.SizeMultiplier, ToyboxCatalog = VehicleToyboxService.Catalog(provider), LightControls = donor.FullWorkshop, MaterialCatalog = VehicleMaterialCatalogService.Read(settings.EffectiveProjectRoot(), provider), MaterialOverrides = project.MaterialOverrides, DisabledParts = project.DisabledParts, Lights = project.Lights, AccentColor = project.AccentColor,
-            LightRoles = donor.FullWorkshop ? VehicleLightSurfaceService.Roles : [], LightSurfaces = project.LightSurfaces, LightSurfaceChoices = !donor.FullWorkshop || project.Model is null ? [] : VehicleLightSurfaceService.Analyze(provider.LoadPackageObject<USkeletalMesh>(bodyPackage), project) };
+            LightRoles = donor.FullWorkshop ? VehicleLightSurfaceService.Roles : [], LightSurfaces = project.LightSurfaces, LightSurfaceChoices = !donor.FullWorkshop || !useCustomPreviewBody ? [] : VehicleLightSurfaceService.Analyze(provider.LoadPackageObject<USkeletalMesh>(bodyPackage), project),
+            PreviewQuality = settings.PreviewQuality, DetailPartBudget = Math.Clamp(settings.VehicleDetailedPartBudget, 1, 24), FrameRateLimit = Math.Clamp(settings.ViewerFrameRateLimit, 0, 144) };
         foreach (var asset in new[] { "three.min.js", "GLTFLoader.js", "OrbitControls.js", "TransformControls.js", "VehicleWorkshop.js", "VehicleMotion.js", "VehicleRiders.js", "VehicleWorkshop.html", "VehicleWorkshop.css" })
             File.WriteAllBytes(Path.Combine(folder, asset == "VehicleWorkshop.html" ? "index.html" : asset), EmbeddedAssets.ReadBytes("preview/" + asset) ?? throw new FileNotFoundException("Missing vehicle viewer asset: " + asset));
         File.WriteAllText(Path.Combine(folder, "scene.js"), "window.VEHICLE_SCENE=" + JsonSerializer.Serialize(scene, Json) + ";");
         return scene;
+    }
+    /// <summary>Exports one already-validated scene attachment after the user selects it.</summary>
+    internal static DeferredMesh ExportDeferredMesh(string folder, Part part, CancellationToken cancellation = default, Action<string>? progress = null)
+    {
+        if (string.IsNullOrWhiteSpace(part.MeshPackage) || !ExtractedPackagePathService.IsContentPackagePath(part.MeshPackage))
+            throw new InvalidDataException("This preview part has no supported mesh source.");
+        var workshopRoot = Path.Combine(AppSettings.RuntimeRoot, "VehicleWorkshops");
+        if (!FileSystemPathUtil.IsWithinDirectory(folder, workshopRoot))
+            throw new InvalidDataException("Vehicle preview output is outside its managed workshop folder.");
+        var key = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(part.MeshPackage))).ToLowerInvariant()[..16];
+        var output = Path.Combine(folder, "lazy-" + key + ".glb");
+        cancellation.ThrowIfCancellationRequested();
+        progress?.Invoke("Loading " + part.Label + "…");
+        var settings = AppSettings.Current;
+        using var provider = ModelPreviewService.MakeProvider(settings.EffectiveGamePaksRoot(), settings.EffectiveUsmapPath()!);
+        var mesh = provider.LoadPackageObject(part.MeshPackage);
+        var options = new ExporterOptions { MeshFormat = EMeshFormat.Gltf2, LodFormat = ELodFormat.FirstLod, ExportMaterials = false, ExportMorphTargets = false };
+        var exporter = mesh switch
+        {
+            USkeletalMesh skeletal => new MeshExporter(skeletal, options),
+            UStaticMesh stat => new MeshExporter(stat, options),
+            _ => throw new InvalidDataException("The selected preview part is not a mesh: " + part.MeshPackage),
+        };
+        var scratch = Path.Combine(folder, "DeferredExport", Guid.NewGuid().ToString("N"));
+        try
+        {
+            if (!ValidGlb(output))
+            {
+                if (!exporter.TryWriteToDir(new DirectoryInfo(scratch), out _, out var generated))
+                    throw new InvalidDataException("Mesh preview export failed: " + part.MeshPackage);
+                cancellation.ThrowIfCancellationRequested();
+                if (mesh is USkeletalMesh skinned) SkinnedGlbExportService.CorrectFile(generated, skinned);
+                File.Copy(generated, output, overwrite: true);
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(scratch) && FileSystemPathUtil.IsWithinDirectory(scratch, Path.Combine(folder, "DeferredExport")))
+                try { Directory.Delete(scratch, recursive: true); } catch (IOException) { }
+        }
+        return new(Path.GetFileName(output), MeshPrimitiveSlots(mesh), Slots(mesh, part.NativeOverrideMaterials, provider));
     }
     private static bool ValidGlb(string path)
     {
         if (!File.Exists(path)) return false;
         try { using var stream = File.OpenRead(path); using var reader = new BinaryReader(stream); return stream.Length >= 20 && reader.ReadUInt32() == 0x46546c67 && reader.ReadUInt32() == 2 && reader.ReadUInt32() == stream.Length; }
         catch (IOException) { return false; }
+    }
+    private static long ImportedMeshBytes(string directory, SkinnedMeshImport mesh)
+    {
+        try
+        {
+            var manifest = SkinnedMeshStageService.ReadManifest(directory, mesh);
+            var root = SkinnedMeshCookService.SafePath(directory, mesh.CacheRelativePath);
+            return manifest.Files.Keys.Sum(file => new FileInfo(Path.Combine(root, file)).Length);
+        }
+        catch
+        {
+            // BakeMesh remains the authoritative validation. An unavailable size reading should
+            // not prevent a normal project from opening its workshop.
+            return 0;
+        }
     }
     private static int[] MeshPrimitiveSlots(UObject mesh)
     {
@@ -250,18 +333,19 @@ internal static class VehicleWorkshopService
             foreach (var file in new DirectoryInfo(root).EnumerateFiles("*.glb").Where(f => f.FullName != keep).OrderByDescending(f => f.LastWriteTimeUtc))
             {
                 retained += file.Length;
-                if (retained > 512L * 1024 * 1024 && FileSystemPathUtil.IsWithinDirectory(file.FullName, root)) { try { file.Delete(); } catch (IOException) { } }
+                var limit = Math.Clamp(AppSettings.Current.VehicleGeometryCacheLimitMb, 64, 4096) * 1024L * 1024L;
+                if (retained > limit && FileSystemPathUtil.IsWithinDirectory(file.FullName, root)) { try { file.Delete(); } catch (IOException) { } }
             }
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
     }
-    private static IReadOnlyList<MaterialSlot> Slots(UObject mesh, JToken? overrides, DefaultFileProvider provider)
+    private static IReadOnlyList<MaterialSlot> Slots(UObject mesh, IReadOnlyList<string>? overrides, DefaultFileProvider provider)
     {
         var defaults = ModelPreviewService.MeshSlotMaterials(mesh);
         return Enumerable.Range(0, defaults.Count).Select(i =>
         {
-            var material = defaults[i]; var path = Package(overrides?.ElementAtOrDefault(i));
+            var material = defaults[i]; var path = overrides?.ElementAtOrDefault(i) ?? "";
             if (path.Length > 0) { try { material = provider.LoadPackageObject(path); } catch { } }
             path = path.Length > 0 ? path : material?.GetPathName().Split('.')[0] ?? "";
             var family = path.Contains("ShadowImposter", StringComparison.OrdinalIgnoreCase) ? "Shadow helper" : path.Contains("Rubber", StringComparison.OrdinalIgnoreCase) ? "Rubber" : path.Contains("Metallic", StringComparison.OrdinalIgnoreCase) ? "Metal" : path.Contains("Transp", StringComparison.OrdinalIgnoreCase) ? "Transparent" : path.Contains("VehicleLight", StringComparison.OrdinalIgnoreCase) ? "Light glow / bulb" : path.Contains("MI_VEH_", StringComparison.OrdinalIgnoreCase) ? "Decal + emission" : "LEGO plastic";

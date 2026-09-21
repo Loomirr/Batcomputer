@@ -41,6 +41,10 @@ internal static class SkinnedGlbRegressionChecks
         rounded.M44 = .8f;
         Check(Reject(() => SkinnedGlbExportService.AffineMatrix(rounded)), "GLB affine correction rejects real non-affine transforms");
         Check(SkinnedRigComparisonService.Compare(bones, bones).Passed, "rig comparison accepts unchanged native transforms");
+        Check(SkinnedRigComparisonService.Compare(bones, [bones[0] with { Scale = bones[0].Scale * 100 }, bones[1]]).Passed,
+            "rig comparison accepts Blender's uniform centimetre scale on the identity root only");
+        Check(!SkinnedRigComparisonService.Compare(bones, [bones[0], bones[1] with { Scale = bones[1].Scale * 100 }]).Passed,
+            "rig comparison rejects centimetre scale on a deforming child bone");
         var report = SkinnedRigComparisonService.Compare(bones, [bones[0], bones[1] with { Translation = bones[1].Translation + Vector3.UnitX, Parent = -1 }]);
         Check(!report.Passed && report.Bones[1].TranslationCm == 1 && report.Bones[1].ExpectedParent == "Root" && report.Bones[1].ActualParent == "", "rig diagnostic identifies the moved bone and wrong parent");
         Check(!SkinnedRigComparisonService.Compare(bones, [bones[0]]).Passed && !SkinnedRigComparisonService.Compare(bones, [bones[0], bones[0]]).Passed,

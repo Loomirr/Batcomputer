@@ -8,10 +8,10 @@
     <AssemblyName>Batcomputer</AssemblyName>
     <RootNamespace>Batcomputer</RootNamespace>
     <ApplicationIcon Condition="Exists('Assets\Icon.ico')">Assets\Icon.ico</ApplicationIcon>
-    <Version>1.0.0-beta.1</Version>
+    <Version>1.0.0-beta.2</Version>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.0.1</FileVersion>
-    <InformationalVersion>1.0.0-beta.1</InformationalVersion>
+    <FileVersion>1.0.0.2</FileVersion>
+    <InformationalVersion>1.0.0-beta.2</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <!-- Code-built controls do not need designer serialization metadata. -->
     <NoWarn>$(NoWarn);WFO1000</NoWarn>
@@ -64,6 +64,7 @@
     <EmbeddedResource Include="Web\preview\VehicleWorkshop.css" />
     <EmbeddedResource Include="Web\preview\CharacterWorkshop.css" />
     <EmbeddedResource Include="Tools\SkinnedMesh\import_mesh.py" />
+    <EmbeddedResource Include="Tools\SkinnedMesh\prepare_blender_rig.py" />
     <!-- Shipped game-data catalogs and runtime socket calibration profiles. -->
     <None Update="gamedata\**\*.json"
           CopyToOutputDirectory="PreserveNewest"
@@ -99,6 +100,13 @@
     <Content Remove="Tools\BatcomputerRegistryWriter\Binaries\**\*;Tools\BatcomputerRegistryWriter\DerivedDataCache\**\*;Tools\BatcomputerRegistryWriter\Intermediate\**\*;Tools\BatcomputerRegistryWriter\Saved\**\*" />
     <None Update="Tools\README.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <None Update="Tools\Build-NativeSuitTemplateIndex.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <!-- Keep the Blender rig-preparation helper visible in the portable release as
+         well as embedding it for export beside a native GLB reference. -->
+    <None Update="Tools\SkinnedMesh\prepare_blender_rig.py"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"
+          ExcludeFromSingleFile="true"
+          TargetPath="Tools\SkinnedMesh\Batcomputer_PrepareBlenderRig.py" />
     <None Update="Tools\BatcomputerRegistryWriter\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <None Include="Tools\BatcomputerRegistryWriter\Source\**\*.cs"
           CopyToOutputDirectory="PreserveNewest"

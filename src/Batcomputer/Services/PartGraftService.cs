@@ -1045,6 +1045,14 @@ public sealed class PartGraftService
             SetObjectPropertyValueLive(newNode.Data, "ComponentTemplate", FromExportNumber(componentExportIndex), asset);
             SetNamePropertyValueLive(asset, newNode.Data, "AttachToName", ResolveAttachSocket(donorPart, attachSocket));
             SetNamePropertyValueLive(asset, newNode.Data, "ParentComponentOrVariableName", ResolveParentComponent(newNode.Data, donorPart));
+            // DLC donor shells can carry the newer BP_CutsceneMinifigCharacter_New_C
+            // owner metadata. This generated node belongs to the standard staged
+            // cutscene blueprint, so retaining the donor owner creates an invalid SCS
+            // relationship that crashes or fails to re-parse on load.
+            if (role.Equals("cutscene", StringComparison.OrdinalIgnoreCase))
+            {
+                SetNamePropertyValueLive(asset, newNode.Data, "ParentComponentOwnerClassName", CanonicalCutsceneParentOwnerClass);
+            }
             SetNamePropertyValueLive(asset, newNode.Data, "InternalVariableName", targetSlot);
             SetGuidPropertyValueLive(asset, newNode.Data, "VariableGuid", Guid.NewGuid());
             RepairScsNodeComponentDependencyLive(newNode);
@@ -2012,11 +2020,14 @@ public sealed class PartGraftService
         var sourceBody = CreateCanonicalStaticBodyInstanceForTest(donor);
         var sourceOwner = new NamePropertyData(MakeName(donor, "ParentComponentOwnerClassName"))
         {
-            Value = MakeName(donor, CanonicalCutsceneParentOwnerClass)
+            // Match the current Joker/DLC donor shell which must be rebound to the
+            // owning staged cutscene class before serialization.
+            Value = MakeName(donor, "BP_CutsceneMinifigCharacter_New_C")
         };
         var cloned = DeepClonePropertiesRebased([sourceBody, sourceOwner], target);
         var component = new NormalExport { Data = [cloned[0]] };
         var node = new NormalExport { Data = [cloned[1]] };
+        SetNamePropertyValueLive(target, node.Data, "ParentComponentOwnerClassName", CanonicalCutsceneParentOwnerClass);
 
         var body = FindPropertyLive<StructPropertyData>(component.Data, "BodyInstance");
         var profile = body is null

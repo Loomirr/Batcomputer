@@ -601,8 +601,13 @@ public sealed class ComponentRemoveService
                 !AnyArrayContainsObjectIndexLive(asset, "AllNodes", nodeRef) &&
                 !AnyArrayContainsObjectIndexLive(asset, "ChildNodes", nodeRef))
             {
-                fileResult.Error =
-                    $"SCS component '{componentName}' exists in {role}, but its construction node is already inactive.";
+                // A custom-character child suit can inherit an already hidden Face from its
+                // character definition. Replaying that same declarative removal must be
+                // idempotent: the component is already absent at runtime, and reactivating it
+                // just to hide it again would be less safe than accepting the completed state.
+                fileResult.ComponentFound = true;
+                fileResult.ScsNodeExportIndex = nodeIndex;
+                fileResult.AlreadyRemoved = true;
                 return fileResult;
             }
 

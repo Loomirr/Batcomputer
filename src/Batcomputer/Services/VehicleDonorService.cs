@@ -56,6 +56,20 @@ internal static class VehicleDonorService
             Menu = "/Game/AdditionalContent/DLC_Shared/Vehicles/BP_MenuActor_Batmobile_MonsterTruck",
             SummonMesh = "/Game/AdditionalContent/DLC_Shared/Vehicles/Summon/SK_VEH_Batmobile_MonsterTruck_Summon", SummonSkeleton = "/Game/AdditionalContent/DLC_Shared/Vehicles/Summon/SKEL_VEH_Batmobile_MonsterTruck_Summon",
             RequiredDlc = "Party Pack DLC", HeadlightEditing = false, Notes = "Experimental articulated suspension. Creator and players need Party Pack DLC. Light controllers stay native."
+        },
+        new("batbike2022", "2022 Batbike (experimental)", "Batbike2022_theBatman", PlinthRoot + "Batman/BP_VehiclePlinth_Batbike2022")
+        {
+            Mesh = "/Game/Models/Vehicles/VEH_Batbike2022_theBatman/SK_VEH_Batbike2022_theBatman",
+            Skeleton = "/Game/Models/Vehicles/VEH_Batbike2022_theBatman/SKEL_VEH_Batbike2022_theBatman",
+            Physics = "/Game/Models/Vehicles/VEH_Batbike2022_theBatman/PHYS_VEH_Batbike2022_theBatman",
+            Blueprint = "/Game/Models/Vehicles/VEH_Batbike2022_theBatman/BP_VEH-Batbike2022_theBatman",
+            Metadata = "/Game/Vehicles/DA_Vehicle_Batbike2022",
+            Ui = "/Game/Vehicles/DA_UI_Batbike2022",
+            Menu = "/Game/Vehicles/MenuActors/BP_MenuActor_Batbike2022",
+            SummonMesh = "/Game/Models/Vehicles/Summon/SK_VEH_Batbike2022_theBatman_Summon",
+            SummonSkeleton = "/Game/Models/Vehicles/Summon/SKEL_VEH_Batbike2022_theBatman_Summon",
+            HeadlightEditing = false,
+            Notes = "Experimental two-wheeler. Uses Wheel_F and Wheel_B rather than four car-wheel bones; fit and test both rider seats, steering and ground clearance in game. Light controllers stay native."
         }
     ];
     internal static Donor Get(VehicleProject project) => All.SingleOrDefault(d => d.Id == project.DonorId)

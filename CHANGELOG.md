@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.0-beta.2 — 2026-09-21
+
+- Loads vehicle attachment geometry on selection and limits retained detail to reduce workshop memory use.
+- Adds vehicle preview resolution, frame-rate, attachment-budget and geometry-cache settings. Oversized custom bodies can use a donor-shell preview; the saved custom model remains unchanged. The size threshold is a precaution, not a guaranteed memory cap.
+- Adds the experimental 2022 Batbike donor and extraction references. In-game acceptance is still required.
+- Accepts an already inactive component when replaying a saved visual removal, addressing the reported Face removal build error. The affected user project still needs verification.
+- Custom-character variants must currently be built into the same mod as their parent character. A separate variant mod also includes its parent and will collide with the installed parent mod; add the variant to the original mod and rebuild it.
+- Corrects the DirectX-to-WebGL normal-map convention in the character viewer, including the separate LEGO micro-normal layer. Imported and native surfaces now light in the intended direction without modifying their source textures or exported GLBs.
+- Repairs the custom OBJ normal fallback: two-sided import geometry no longer cancels its own face normals, and consistently reversed source normals are corrected when regenerating an imported mesh.
+
 ## 1.0.0-beta.1 — 2026-09-20
 
 **Batcomputer 1.0 Beta.** This is a prerelease, not a stable 1.0 release. Back up editable projects

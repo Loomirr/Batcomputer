@@ -39,6 +39,13 @@ internal static class DlcUpdateRegressionChecks
         Check(monster.Mesh.Contains("/DLC_Shared/") && monster.Menu.Contains("/DLC_Shared/") &&
             monster.SummonMesh.Contains("/DLC_Shared/") && monster.Metadata.StartsWith("/DLC_PartyPack/"),
             "relocated Batmobeast visual assets retain their Party Pack metadata mount");
+        Check(AnimArchetypeGraftService.IsCharacterArchetypePackage(
+                  "/Game/AdditionalContent/VillainMode/Characters/Playables/Joker/BP_CAT_Archetype_Joker") &&
+              AnimArchetypeGraftService.IsCharacterArchetypePackage(
+                  "/Game/AdditionalContent/VillainMode/Characters/Playables/HarleyQuinn/BP_CAT_Archetype_HarleyQuinn") &&
+              !AnimArchetypeGraftService.IsCharacterArchetypePackage(
+                  "/Game/AdditionalContent/VillainMode/Characters/Enemies/Archetypes/BP_ArchetypeJavelin"),
+            "Joker and Harley DLC playables retain their own archetypes while Villain Mode enemies stay ineligible");
 
         var equipment = new UAsset { Exports = [], Imports = [] }; equipment.ClearNameIndexList();
         var equipmentCdo = new NormalExport(equipment, []) { ObjectName = new FName(equipment, "Default__Equipment_C"),

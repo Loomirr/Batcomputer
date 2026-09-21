@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Runtime;
 
 namespace Batcomputer;
 
@@ -44,8 +45,10 @@ internal sealed class VehicleWorkshopForm : AdaptiveForm
             var folder = Path.Combine(_folder, Guid.NewGuid().ToString("N"));
             _scene = await Task.Run(() => VehicleWorkshopService.Create(_directory, _source, folder, Guid.NewGuid().ToString("N"), _cancel.Token,
                 text => { if (!IsDisposed && IsHandleCreated) BeginInvoke(() => { if (!IsDisposed) _status.Text = text; }); }));
-            _cancel.Token.ThrowIfCancellationRequested(); await _viewer.ShowFolderAsync(folder);
+            _cancel.Token.ThrowIfCancellationRequested(); CompactPreviewMemory(); await _viewer.ShowFolderAsync(folder);
+            var previousFolder = _activeFolder;
             _activeFolder = folder;
+            CleanupPreviewFolder(previousFolder);
             _status.Text = "Select a surface to change its material. Save vehicle keeps your edits.";
         }
         catch (OperationCanceledException) { _status.Text = "Preview cancelled."; }
@@ -80,9 +83,53 @@ internal sealed class VehicleWorkshopForm : AdaptiveForm
             else if (root.GetProperty("type").GetString() == "vehicleWorkshopSurface") await ChangeSurface(json);
             else if (root.GetProperty("type").GetString() == "vehicleWorkshopRiders") await PrepareRiders();
             else if (root.GetProperty("type").GetString() == "vehicleWorkshopToybox") await ChooseToyboxPart(json);
+            else if (root.GetProperty("type").GetString() == "vehicleWorkshopLoadPart") await LoadPart(root);
             else if (root.GetProperty("type").GetString() == "vehicleWorkshopError") _status.Text = "Preview: " + root.GetProperty("error").GetString();
         }
         catch (Exception ex) { _status.Text = "Placements were not applied: " + ex.Message; }
+    }
+    private async Task LoadPart(JsonElement message)
+    {
+        if (_scene is null || _activeFolder is null || _busy) return;
+        var id = message.TryGetProperty("component", out var component) ? component.GetString() ?? "" : "";
+        var part = _scene.Parts.SingleOrDefault(p => string.Equals(p.Id, id, StringComparison.Ordinal));
+        if (part is null || string.IsNullOrWhiteSpace(part.MeshPackage)) return;
+        _busy = true;
+        try
+        {
+            var folder = _activeFolder;
+            var mesh = await Task.Run(() => VehicleWorkshopService.ExportDeferredMesh(folder, part, _cancel.Token,
+                text => { if (!IsDisposed && IsHandleCreated) BeginInvoke(() => { if (!IsDisposed) _status.Text = text; }); }));
+            _cancel.Token.ThrowIfCancellationRequested(); CompactPreviewMemory();
+            var refreshed = part with { File = mesh.File, PrimitiveSlots = mesh.PrimitiveSlots, Materials = mesh.Materials };
+            _scene = _scene with { Parts = _scene.Parts.Select(p => p.Id == refreshed.Id ? refreshed : p).ToArray() };
+            await _viewer.ShowVehicleWorkshopPartAsync(part.Id, mesh);
+            _status.Text = "Loaded " + part.Label + ". Other parts load only when selected.";
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            _status.Text = "Could not load " + part.Label + ": " + ex.Message;
+            await _viewer.ShowVehicleWorkshopPartFailedAsync(part.Id, ex.Message);
+        }
+        finally { _busy = false; if (_cancel.IsCancellationRequested) Close(); }
+    }
+    private void CleanupPreviewFolder(string? folder)
+    {
+        if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder)) return;
+        var root = Path.Combine(AppSettings.RuntimeRoot, "VehicleWorkshops");
+        if (!FileSystemPathUtil.IsWithinDirectory(folder, root)) return;
+        try { Directory.Delete(folder, recursive: true); }
+        catch (IOException) { /* WebView may finish releasing the previous page after navigation. */ }
+        catch (UnauthorizedAccessException) { }
+    }
+    private static void CompactPreviewMemory()
+    {
+        // Mesh conversion creates large short-lived buffers. Do this between the CUE4Parse task
+        // ending and WebView receiving its GLB, so their peaks do not stack on smaller-RAM PCs.
+        if (GC.GetTotalMemory(forceFullCollection: false) < 96L * 1024 * 1024) return;
+        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
     }
     private async Task PrepareRiders()
     {

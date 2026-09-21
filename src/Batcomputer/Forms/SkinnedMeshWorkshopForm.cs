@@ -116,7 +116,7 @@ internal sealed class SkinnedMeshWorkshopForm : AdaptiveForm
         using var picker = new FolderBrowserDialog { Description = "Choose a folder for the native reference mesh and skeleton" };
         if (picker.ShowDialog(this) != DialogResult.OK) return;
         SetBusy(true, "Exporting the native mesh and rig…");
-        try { var file = await Task.Run(() => SkinnedMeshCookService.ExportReference(target.DonorMesh, Path.Combine(picker.SelectedPath, "Reference-" + DateTime.Now.ToString("yyyyMMdd-HHmmss")))); _status.Text = "Reference exported: " + file; }
+        try { var file = await Task.Run(() => SkinnedMeshCookService.ExportReference(target.DonorMesh, Path.Combine(picker.SelectedPath, "Reference-" + DateTime.Now.ToString("yyyyMMdd-HHmmss")))); _status.Text = "Reference + Blender rig-preparation script exported: " + file; }
         catch (Exception ex) { Dialog.Error(this, "Reference export failed", ex.Message); }
         finally { SetBusy(false); }
     }

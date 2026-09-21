@@ -8,6 +8,7 @@ Make a separate selectable vehicle with a custom body, materials and editable at
 | 1997 Batman & Robin, Talia sports car | Headlight beam color and placement |
 | 1989 Batmobile, 2005 Tumbler | Experimental; light controllers stay native |
 | Batmobeast | Experimental; requires Party Pack DLC for the creator and players; light controllers stay native |
+| 2022 Batbike | Experimental two-wheeler; uses a separate bike skeleton and front/rear wheel bones; light controllers stay native |
 
 Start with the driving model. A LEGO build-up model is a separate asset with a different rig; see [summon and parked models](vehicle-summon-models.md) after the car drives correctly.
 

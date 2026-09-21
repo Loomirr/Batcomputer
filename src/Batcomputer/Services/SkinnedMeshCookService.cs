@@ -15,7 +15,7 @@ namespace Batcomputer;
 /// <summary>Shared existing-rig pipeline. Only verified cooked geometry enters a suit stage.</summary>
 internal static class SkinnedMeshCookService
 {
-    internal const string Warning = "Your FBX must already be rigged and weighted to the selected game skeleton in Blender or another 3D editor. Batcomputer does not automatically rig or weight models. Export one joined mesh, preserve the native rest pose, and disable extra leaf bones. Cloth, morph targets and new rigs are not supported in this first pass.";
+    internal const string Warning = "Your FBX must already be rigged and weighted to the selected game skeleton in Blender or another 3D editor. Batcomputer does not automatically rig or weight models. After importing Batcomputer's GLB reference, run the adjacent Batcomputer_PrepareBlenderRig.py once in Blender; it preserves native bone names while preparing the correct FBX rest-space basis. Export one joined mesh with Armature (the object, not a bone) as the armature name, and disable extra leaf bones. Cloth, morph targets and new rigs are not supported in this first pass.";
     internal sealed record CookManifest(string SourceHash, string Donor, string Skeleton, string Package,
         string TemporarySkeleton, string[] Slots, Dictionary<string, string> Files);
 
@@ -45,6 +45,10 @@ internal static class SkinnedMeshCookService
         if (!exporter.TryWriteToDir(new DirectoryInfo(directory), out _, out var saved))
             throw new InvalidDataException("The native reference could not be exported.");
         SkinnedGlbExportService.CorrectFile(saved, mesh);
+        using (var input = typeof(SkinnedMeshCookService).Assembly.GetManifestResourceStream("Batcomputer.Tools.SkinnedMesh.prepare_blender_rig.py")
+               ?? throw new InvalidDataException("The bundled Blender rig-preparation script is missing."))
+        using (var output = File.Create(Path.Combine(directory, "Batcomputer_PrepareBlenderRig.py")))
+            input.CopyTo(output);
         return saved;
     }
 

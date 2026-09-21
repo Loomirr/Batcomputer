@@ -446,26 +446,31 @@ public sealed class AnimArchetypeGraftService
 
     /// <summary>
     /// Playable families normally inherit from BP_CAT_Archetype_*, but Catwoman's
-    /// native parent is the differently named BP_Catwoman_Archetype. Keep that
-    /// exception explicit so boss/NPC assets such as BP_Firefly_Boss_Archetype do
-    /// not become eligible gameplay donors merely because their names contain
-    /// "Archetype".
+    /// native parent is the differently named BP_Catwoman_Archetype. Joker and
+    /// Harley use the same CAT naming convention, but their valid archetypes live
+    /// under the Villain Mode DLC's Playables mount rather than /Game/Characters.
+    /// Keep both mount layouts explicit so boss/NPC assets such as
+    /// BP_Firefly_Boss_Archetype do not become eligible gameplay donors merely
+    /// because their names contain "Archetype".
     /// </summary>
     internal static bool IsCharacterArchetypePackage(string? packagePath)
     {
         var package = UnrealPathUtil.NormalizePackagePath(packagePath);
         var segments = package.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        if (segments.Length < 4 ||
-            !segments[1].Equals("Characters", StringComparison.OrdinalIgnoreCase) ||
-            (!segments[2].Equals("Minifig", StringComparison.OrdinalIgnoreCase) &&
-             !segments[2].Equals("Smallfig", StringComparison.OrdinalIgnoreCase)))
-        {
-            return false;
-        }
-
         var name = UnrealPathUtil.AssetName(package);
-        return name.StartsWith("BP_CAT_Archetype_", StringComparison.OrdinalIgnoreCase) ||
-               name.Equals("BP_Catwoman_Archetype", StringComparison.OrdinalIgnoreCase);
+        var baseGameCharacterArchetype = segments.Length >= 4 &&
+            segments[1].Equals("Characters", StringComparison.OrdinalIgnoreCase) &&
+            (segments[2].Equals("Minifig", StringComparison.OrdinalIgnoreCase) ||
+             segments[2].Equals("Smallfig", StringComparison.OrdinalIgnoreCase)) &&
+            (name.StartsWith("BP_CAT_Archetype_", StringComparison.OrdinalIgnoreCase) ||
+             name.Equals("BP_Catwoman_Archetype", StringComparison.OrdinalIgnoreCase));
+        var villainModePlayableArchetype = segments.Length >= 7 &&
+            segments[1].Equals("AdditionalContent", StringComparison.OrdinalIgnoreCase) &&
+            segments[2].Equals("VillainMode", StringComparison.OrdinalIgnoreCase) &&
+            segments[3].Equals("Characters", StringComparison.OrdinalIgnoreCase) &&
+            segments[4].Equals("Playables", StringComparison.OrdinalIgnoreCase) &&
+            name.StartsWith("BP_CAT_Archetype_", StringComparison.OrdinalIgnoreCase);
+        return baseGameCharacterArchetype || villainModePlayableArchetype;
     }
 
     /// <summary>The base playable's actual parent class package (a /BP_Master/ base class like

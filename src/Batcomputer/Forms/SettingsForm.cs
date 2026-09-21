@@ -30,6 +30,7 @@ public sealed partial class SettingsForm : AdaptiveForm
     private Panel? _pathsPanel;
     private Panel? _generalPanel;
     private Panel? _visualPanel;
+    private Panel? _previewPanel;
     private readonly List<(Panel item, Label bar)> _navItems = new();
 
     public SettingsForm()
@@ -129,6 +130,12 @@ public sealed partial class SettingsForm : AdaptiveForm
             _settings.AnimationsEnabled = _animationsToggle?.Checked ?? _settings.AnimationsEnabled;
             _settings.KeepPreviousExtracts = _keepExtractsToggle?.Checked ?? _settings.KeepPreviousExtracts;
             _settings.AutoCleanPreviewFiles = _autoCleanPreviewFilesToggle?.Checked ?? _settings.AutoCleanPreviewFiles;
+            _settings.VehicleSafePreviewMode = _vehicleSafePreviewToggle?.Checked ?? _settings.VehicleSafePreviewMode;
+            _settings.PreviewQuality = _previewQualityPicker?.SelectedItem?.ToString() ?? _settings.PreviewQuality;
+            _settings.VehicleDetailedPartBudget = SelectedLeadingNumber(_vehiclePartBudgetPicker, _settings.VehicleDetailedPartBudget);
+            _settings.VehicleGeometryCacheLimitMb = SelectedLeadingNumber(_vehicleCacheLimitPicker, _settings.VehicleGeometryCacheLimitMb);
+            _settings.VehicleCustomBodyPreviewLimitMb = SelectedLeadingNumber(_vehicleBodyLimitPicker, _settings.VehicleCustomBodyPreviewLimitMb, zeroWhenOff: true);
+            _settings.ViewerFrameRateLimit = SelectedLeadingNumber(_viewerFrameRatePicker, _settings.ViewerFrameRateLimit, zeroWhenOff: true);
             _settings.VisualTheme = Theme.ResolveVisualTheme(
                 _themePicker?.SelectedItem?.ToString() ?? _settings.VisualTheme).Name;
             // Apply immediately so the change takes effect without a restart.
@@ -156,27 +163,35 @@ public sealed partial class SettingsForm : AdaptiveForm
         _pathsPanel = BuildPathsPanel(firstRun);
         _generalPanel = BuildGeneralPanel();
         _visualPanel = BuildVisualPanel();
+        _previewPanel = BuildPreviewPanel();
         _pathsPanel.Dock = DockStyle.Fill;
         _generalPanel.Dock = DockStyle.Fill;
         _visualPanel.Dock = DockStyle.Fill;
+        _previewPanel.Dock = DockStyle.Fill;
         _generalPanel.Visible = false;
         _visualPanel.Visible = false;
+        _previewPanel.Visible = false;
         host.Controls.Add(_pathsPanel);
         host.Controls.Add(_generalPanel);
         host.Controls.Add(_visualPanel);
+        host.Controls.Add(_previewPanel);
 
         var navPaths = BuildNavItem("Paths", 60);
         var navGeneral = BuildNavItem("General", 104);
         var navVisual = BuildNavItem("Visual", 148);
+        var navPreview = BuildNavItem("Preview", 192);
         rail.Controls.Add(navPaths.item);
         rail.Controls.Add(navGeneral.item);
         rail.Controls.Add(navVisual.item);
+        rail.Controls.Add(navPreview.item);
         navPaths.item.Click += (_, _) => SelectTab(0);
         navGeneral.item.Click += (_, _) => SelectTab(1);
         foreach (Control c in navPaths.item.Controls) c.Click += (_, _) => SelectTab(0);
         foreach (Control c in navGeneral.item.Controls) c.Click += (_, _) => SelectTab(1);
         navVisual.item.Click += (_, _) => SelectTab(2);
         foreach (Control c in navVisual.item.Controls) c.Click += (_, _) => SelectTab(2);
+        navPreview.item.Click += (_, _) => SelectTab(3);
+        foreach (Control c in navPreview.item.Controls) c.Click += (_, _) => SelectTab(3);
 
         // Order matters: Fill first, then Left, then Bottom, so docking carves correctly.
         Controls.Add(host);
@@ -194,6 +209,7 @@ public sealed partial class SettingsForm : AdaptiveForm
         if (_pathsPanel is not null) _pathsPanel.Visible = index == 0;
         if (_generalPanel is not null) _generalPanel.Visible = index == 1;
         if (_visualPanel is not null) _visualPanel.Visible = index == 2;
+        if (_previewPanel is not null) _previewPanel.Visible = index == 3;
         for (var i = 0; i < _navItems.Count; i++)
         {
             var active = i == index;
@@ -330,7 +346,13 @@ public sealed partial class SettingsForm : AdaptiveForm
     private ToggleSwitch? _animationsToggle;
     private ToggleSwitch? _keepExtractsToggle;
     private ToggleSwitch? _autoCleanPreviewFilesToggle;
+    private ToggleSwitch? _vehicleSafePreviewToggle;
     private ThemedDropDown? _themePicker;
+    private ThemedDropDown? _previewQualityPicker;
+    private ThemedDropDown? _vehiclePartBudgetPicker;
+    private ThemedDropDown? _vehicleCacheLimitPicker;
+    private ThemedDropDown? _vehicleBodyLimitPicker;
+    private ThemedDropDown? _viewerFrameRatePicker;
 
     private const int RowRightEdge = RowDotX + 14;
 
@@ -524,6 +546,60 @@ public sealed partial class SettingsForm : AdaptiveForm
         });
 
         panel.AutoScrollMinSize = new Size(0, y + 74 + panel.Padding.Bottom);
+        return panel;
+    }
+
+    private static int SelectedLeadingNumber(ThemedDropDown? picker, int fallback, bool zeroWhenOff = false)
+    {
+        var text = picker?.SelectedItem?.ToString() ?? "";
+        if (zeroWhenOff && text.StartsWith("Off", StringComparison.OrdinalIgnoreCase)) return 0;
+        var first = text.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        return int.TryParse(first, out var value) ? value : fallback;
+    }
+
+    private Panel BuildPreviewPanel()
+    {
+        var panel = new Panel { AutoScroll = true, BackColor = Theme.WindowBg, Padding = new Padding(0, 12, 0, 12), Width = ContentDesignWidth };
+        var y = 20;
+        void Section(string title) { panel.Controls.Add(SectionDivider(title, y)); y += 38; }
+        void PickerRow(string title, string hint, ThemedDropDown picker, IEnumerable<string> choices, string selected)
+        {
+            panel.Controls.Add(new Label { Left = RowLabelX, Top = y + 6, Width = 300, Height = 20, Text = title, ForeColor = Theme.OnDark, Font = Theme.Body });
+            picker.Left = RowLabelX + 340; picker.Top = y; picker.Width = 280;
+            foreach (var choice in choices) picker.Items.Add(choice);
+            picker.SelectedItem = choices.FirstOrDefault(c => c.Equals(selected, StringComparison.OrdinalIgnoreCase)) ?? choices.First();
+            panel.Controls.Add(picker);
+            var height = Math.Max(28, TextRenderer.MeasureText(hint, Theme.Caption, new Size(RowRightEdge - RowLabelX, int.MaxValue), TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl).Height);
+            panel.Controls.Add(new Label { Left = RowLabelX, Top = y + 40, Width = RowRightEdge - RowLabelX, Height = height, Text = hint, ForeColor = Theme.OnDarkMuted, Font = Theme.Caption });
+            y += 52 + height;
+        }
+        void ToggleRow(string title, string hint, ToggleSwitch toggle)
+        {
+            panel.Controls.Add(new Label { Left = RowLabelX, Top = y + 2, Width = 320, Height = 20, Text = title, ForeColor = Theme.OnDark, Font = Theme.Body });
+            toggle.Left = RowLabelX + 340; toggle.Top = y; panel.Controls.Add(toggle);
+            var height = Math.Max(28, TextRenderer.MeasureText(hint, Theme.Caption, new Size(RowRightEdge - RowLabelX, int.MaxValue), TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl).Height);
+            panel.Controls.Add(new Label { Left = RowLabelX, Top = y + 28, Width = RowRightEdge - RowLabelX, Height = height, Text = hint, ForeColor = Theme.OnDarkMuted, Font = Theme.Caption });
+            y += 40 + height;
+        }
+
+        Section("VIEWER PERFORMANCE");
+        _previewQualityPicker = new ThemedDropDown { Placeholder = "Preview quality" };
+        PickerRow("Preview quality", "Controls the renderer resolution for vehicle previews. It does not change exports or in-game materials.", _previewQualityPicker, ["Memory saver", "Balanced", "High detail"], _settings.PreviewQuality);
+        _viewerFrameRatePicker = new ThemedDropDown { Placeholder = "Frame rate" };
+        PickerRow("Viewer frame-rate cap", "Caps rendering while the 3D preview is open. Lower caps reduce GPU/CPU use; Off renders as fast as the browser allows.", _viewerFrameRatePicker, ["30 FPS", "60 FPS", "120 FPS", "Off (unlimited)"], _settings.ViewerFrameRateLimit == 0 ? "Off (unlimited)" : _settings.ViewerFrameRateLimit + " FPS");
+
+        Section("VEHICLE WORKSHOP");
+        _vehiclePartBudgetPicker = new ThemedDropDown { Placeholder = "Loaded part budget" };
+        PickerRow("Detailed attachment budget", "How many selected attachment meshes remain loaded alongside the body. Older selections become lightweight markers, so large vehicles stay responsive.", _vehiclePartBudgetPicker, ["3 parts", "6 parts", "12 parts", "24 parts"], Math.Clamp(_settings.VehicleDetailedPartBudget, 1, 24) + " parts");
+        _vehicleCacheLimitPicker = new ThemedDropDown { Placeholder = "Geometry cache size" };
+        PickerRow("Vehicle geometry cache", "Maximum size of the disposable, versioned vehicle GLB cache. It can be rebuilt; this never removes projects or source FBX files.", _vehicleCacheLimitPicker, ["256 MB", "512 MB", "1024 MB", "2048 MB"], Math.Clamp(_settings.VehicleGeometryCacheLimitMb, 64, 4096) + " MB");
+        _vehicleSafePreviewToggle = new ToggleSwitch { Checked = _settings.VehicleSafePreviewMode };
+        ToggleRow("Protect against oversized custom bodies", "When a cooked custom vehicle body crosses the limit below, show its donor shell in the offline workshop instead of risking a massive GLB conversion. Builds and the in-game vehicle remain custom.", _vehicleSafePreviewToggle);
+        _vehicleBodyLimitPicker = new ThemedDropDown { Placeholder = "Custom-body limit" };
+        var bodyLimit = _settings.VehicleCustomBodyPreviewLimitMb == 0 ? "Off (allow any size)" : Math.Clamp(_settings.VehicleCustomBodyPreviewLimitMb, 1, 512) + " MB";
+        PickerRow("Custom-body safe limit", "Cooked file size is a precautionary threshold, not a RAM limit. Large models can expand substantially during preview conversion. Changes apply when the workshop is reopened.", _vehicleBodyLimitPicker, ["26 MB", "40 MB", "80 MB", "Off (allow any size)"], bodyLimit);
+
+        panel.AutoScrollMinSize = new Size(0, y + panel.Padding.Bottom);
         return panel;
     }
 
