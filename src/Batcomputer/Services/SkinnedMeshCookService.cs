@@ -56,8 +56,7 @@ internal static class SkinnedMeshCookService
         Action<string> log, CancellationToken cancellation = default)
     {
         var recipe = request.Clone();
-        if (!float.IsFinite(recipe.ImportScale) || recipe.ImportScale is < 0.0001f or > 1000)
-            throw new InvalidDataException("Import scale must be between 0.0001 and 1000.");
+        RequireDefaultImportScale(recipe.ImportScale);
         RequireNativeDonor(recipe.DonorMeshPackage);
         if (!recipe.MeshPackage.StartsWith("/Game/Mods/", StringComparison.Ordinal) ||
             recipe.MeshPackage.Split('/').Skip(1).Any(s => !UnrealPathUtil.IsValidIdentifier(s)))
@@ -169,6 +168,17 @@ bSkipEditorContent=True
         log("Validated. Assign a game material to each slot, preview, then save to the suit.");
         workspace.Complete = true;
         return recipe;
+    }
+
+    /// <summary>
+    /// A skeletal FBX has one shared bind space. Treating Unreal's import scale as
+    /// a character-size slider can alter that bind space independently from the
+    /// visible mesh and produces detached/broken bones at runtime.
+    /// </summary>
+    internal static void RequireDefaultImportScale(float scale)
+    {
+        if (!float.IsFinite(scale) || Math.Abs(scale - 1f) > .0001f)
+            throw new InvalidDataException("Skinned FBX import scale must be 1.0000. Size the mesh against Batcomputer's exported reference in Blender Edit Mode, apply object transforms, run Batcomputer_PrepareBlenderRig.py once, then export without using 0.01 or 100 as an import scale.");
     }
 
     internal static void ValidateRig(USkeletalMesh donor, USkeletalMesh mesh)

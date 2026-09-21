@@ -62,6 +62,11 @@ internal static class SkinnedMeshRegressionChecks
             "attachment clearance can be disabled and rejects invalid values");
         var recipe = new SkinnedMeshImport { DonorMeshPackage = "/Game/Characters/SK_Donor", SkeletonPackage = "/Game/Characters/SKEL_Donor",
             MeshPackage = "/Game/Mods/Fixture/Skinned/SK_Custom", Materials = [new() { Slot = 0, SourceMaterialName = "Body", MaterialPath = "/Game/Materials/MI_Body" }] };
+        Check(!Reject(() => SkinnedMeshCookService.RequireDefaultImportScale(1)) &&
+              Reject(() => SkinnedMeshCookService.RequireDefaultImportScale(.01f)) &&
+              Reject(() => SkinnedMeshCookService.RequireDefaultImportScale(100)) &&
+              Reject(() => SkinnedMeshCookService.RequireDefaultImportScale(float.NaN)),
+            "skinned import fixes bind-space scale at one instead of treating it as character size");
         var clone = recipe.Clone(); clone.Materials[0].MaterialPath = "/Game/Materials/MI_Changed"; clone.HiddenComponents.Add("Head");
         Check(recipe.Materials[0].MaterialPath == "/Game/Materials/MI_Body" && recipe.HiddenComponents.Count == 0,
             "skinned authoring sessions deep-clone materials and hidden components");

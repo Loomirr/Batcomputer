@@ -6,7 +6,11 @@ internal sealed class SkinnedMeshWorkshopForm : AdaptiveForm
     private readonly string _directory;
     private readonly ThemedDropDown _target = new() { Dock = DockStyle.Fill };
     private readonly TextBox _name = new() { Dock = DockStyle.Fill };
-    private readonly NumericUpDown _scale = new() { Minimum = .0001m, Maximum = 1000m, DecimalPlaces = 4, Value = 1, Dock = DockStyle.Fill };
+    // Skeletal source scale is not a character-size control. Scaling a cooked FBX
+    // changes the mesh/bind relationship and can leave the donor bones exposed or
+    // put the mesh far outside the pawn. Keep the supported Blender workflow fixed
+    // at one; authors size geometry against the exported reference in Edit Mode.
+    private readonly NumericUpDown _scale = new() { Minimum = 1, Maximum = 1, DecimalPlaces = 4, Value = 1, Dock = DockStyle.Fill, Enabled = false };
     private readonly DataGridView _materials = new() { Dock = DockStyle.Fill, AutoGenerateColumns = false, AllowUserToAddRows = false, AllowUserToDeleteRows = false };
     private readonly CheckedListBox _hidden = new() { Dock = DockStyle.Fill, CheckOnClick = true, BorderStyle = BorderStyle.None };
     private readonly Label _status = new() { Dock = DockStyle.Fill, AutoSize = false };
@@ -43,8 +47,8 @@ internal sealed class SkinnedMeshWorkshopForm : AdaptiveForm
         _actions.AddRange([_name, _scale, _materials, _hidden]);
         foreach (var target in targets) _target.Items.Add(target);
         _target.SelectedItem = targets.FirstOrDefault(t => t.Component == recipe.Component) ?? targets.FirstOrDefault();
-        _target.Enabled = !existing; _name.Text = recipe.Name; _scale.Value = Math.Clamp((decimal)recipe.ImportScale, _scale.Minimum, _scale.Maximum);
-        Add("1  Which native rig did you use? (component / reference mesh)", _target, 40); Add("Name", _name, 32); Add("FBX unit correction (keep the native bone rest pose)", _scale, 32);
+        _target.Enabled = !existing; _name.Text = recipe.Name; _scale.Value = 1;
+        Add("1  Which native rig did you use? (component / reference mesh)", _target, 40); Add("Name", _name, 32); Add("FBX import scale — fixed at 1.0000; size the mesh in Blender Edit Mode", _scale, 32);
         Add("2  Reference and source", Button("Export native reference + rig (GLB)…", async (_, _) => await ExportAsync()), 40);
         Add("", Button("Import / replace weighted FBX…", async (_, _) => await ImportAsync(false)), 40);
         Add("", Button("Reimport saved FBX", async (_, _) => await ImportAsync(true)), 40);
@@ -85,7 +89,7 @@ internal sealed class SkinnedMeshWorkshopForm : AdaptiveForm
     private void Fill() { _materials.Rows.Clear(); foreach (var m in _working.Materials) _materials.Rows.Add(m.SourceMaterialName, m.MaterialPath); _save.Enabled = !_busy && !string.IsNullOrEmpty(_working.CacheRelativePath); }
     private SkinnedMeshImport Read()
     {
-        _materials.EndEdit(); var result = _working.Clone(); result.Name = _name.Text.Trim();
+        _materials.EndEdit(); var result = _working.Clone(); result.Name = _name.Text.Trim(); result.ImportScale = 1;
         if (result.Name.Length == 0) throw new InvalidDataException("Give the mesh a name.");
         for (int i = 0; i < result.Materials.Count; i++) result.Materials[i].MaterialPath = UnrealPathUtil.NormalizePackagePath(_materials.Rows[i].Cells[1].Value?.ToString());
         result.HiddenComponents = _hidden.CheckedItems.Cast<string>().ToList(); return result;

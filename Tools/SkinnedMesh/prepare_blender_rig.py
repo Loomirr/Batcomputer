@@ -50,5 +50,11 @@ for name, matrix in targets.items():
 bpy.ops.object.mode_set(mode="OBJECT")
 armature.name = "Armature"
 armature["batcomputer_fbx_basis_v1"] = True
+# The native Root is deliberately zero-length at the feet, so its Blender marker
+# looks tiny beside a minifig. Make the complete hierarchy visible without
+# touching any transforms, geometry, or weights.
+armature.show_in_front = True
+armature.data.display_type = "STICK"
+armature.data.show_names = True
 
-print("Batcomputer: prepared %d native bones for FBX export. Select only the mesh and Armature; export binary FBX with Only Deform Bones on, Add Leaf Bones off, Armature FBXNode Type Null, Bake Animation off, and Apply Modifiers off." % len(bones))
+print("Batcomputer: prepared %d native bones for FBX export. The small Root marker at the feet is normal; use the visible stick hierarchy as the scale reference. Select only the mesh and Armature; export binary FBX with Only Deform Bones on, Add Leaf Bones off, Armature FBXNode Type Null, Bake Animation off, and Apply Modifiers off." % len(bones))

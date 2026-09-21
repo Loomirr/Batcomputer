@@ -9,7 +9,7 @@ namespace Batcomputer;
 /// <summary>Rest-pose correction for tool-owned, non-animated CUE4Parse GLB exports.</summary>
 internal static class SkinnedGlbExportService
 {
-    internal const string Revision = "native-rest-pose-v3";
+    internal const string Revision = "native-rest-pose-v4";
     internal sealed record Bone(string Name, int Parent, Vector3 Translation, Quaternion Rotation, Vector3 Scale);
 
     internal static Bone[] Bones(FReferenceSkeleton skeleton) => skeleton.FinalRefBoneInfo.Select((info, i) =>
@@ -27,6 +27,7 @@ internal static class SkinnedGlbExportService
         // part must also change sign. Swapping quaternion components alone inverts
         // the rotation and displaces every child of a rotated bone.
         var t = bone.Translation; var q = bone.Rotation; var s = bone.Scale;
+        // glTF uses metres while the game stores reference bones in centimetres.
         return new AffineTransform(new Vector3(s.X, s.Z, s.Y),
             Quaternion.Normalize(new(-q.X, -q.Z, -q.Y, q.W)), new Vector3(t.X, t.Z, t.Y) * .01f);
     }
@@ -61,6 +62,18 @@ internal static class SkinnedGlbExportService
                 BindSpaces: values.Select(v => v.Item2 * v.Item1.WorldMatrix).ToArray());
         }).ToArray();
         foreach (var bone in bones) byName[bone.Name].LocalTransform = ToGltf(bone);
+        // CUE4Parse writes native-centimetre vertex positions, unlike the converted
+        // glTF bone translations above. Scale each rendered mesh node once into
+        // metres so Blender sees the reference mesh and armature at the same size.
+        // Joints are excluded: changing them would invalidate the native bind pose.
+        foreach (var node in model.LogicalNodes.Where(node => node.Mesh is not null && !node.IsSkinJoint))
+        {
+            var transform = node.LocalTransform;
+            node.LocalTransform = new AffineTransform(
+                transform.Scale * .01f,
+                transform.Rotation,
+                transform.Translation * .01f);
+        }
         foreach (var binding in bindings)
         {
             var corrected = binding.Joints.Select((joint, i) =>
