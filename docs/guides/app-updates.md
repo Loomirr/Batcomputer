@@ -45,6 +45,9 @@ The initial **1.0.0 stable release uses the full ZIP**. Do not expect every upda
 download. New runtimes, changed dependencies or missing local files can increase its size.
 The Update center shows the download needed for the selected release.
 
+The public **Batcomputer-update-win-x64.zip** is also the complete fresh-install download. There
+is no separate app ZIP to install first; the fixed name is how existing updaters find it.
+
 ## Recovery
 
 Expand **Settings & recovery** and choose **Backups / recovery**. Backups live in
