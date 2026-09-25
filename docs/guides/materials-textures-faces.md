@@ -259,7 +259,7 @@ workshop's suggested type; BCA is only needed when the equipment actually has a 
 Use a 256×256 transparent canvas with roughly 32px margins; SDF output is 64×64. In the equipment
 workshop, **Set up HUD icon material…** assigns the SDF and a private native-shader material to all
 HUD modes together. Its compact appearance editor offers fill and outline colours, opacity, width, glow, grain and sharpness.
-BCA stays separate where the equipment has a BCA slot. SDF accents have passed in-game testing; the new appearance controls still need a game check. See
+BCA stays separate where the equipment has a BCA slot. Check padding, glow and upgraded HUD states in-game. See
 [Equipment icons](equipment-workshop.md#equipment-icons) for the steps and current limitations.
 
 The four UIMD icon fields do not all use the same size:
@@ -290,4 +290,4 @@ and use **Change cook profile** before building.
 
 Playable characters and modded suits with a usable body Color Mask can preview the base game's
 Red Brick colours in the 3D viewer. This changes only the preview. Batcomputer does not create,
-register, unlock, or package custom Red Bricks in this beta.
+register, unlock, or package custom Red Bricks.

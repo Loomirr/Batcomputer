@@ -69,8 +69,13 @@ You can skip UE while browsing and assembling, but you need it to build a mod.
 
 ## 6. Oodle runtime
 
-For compact packages, select `oo2core_9_win64.dll` from your own UE 5.6 installation. Batcomputer
-uses it locally and never copies it into generated mods or Batcomputer releases.
+Select `oo2core_9_win64.dll` from your own compatible UE installation when reading Oodle-compressed
+game data or using Oodle compression. The bundled helper does not include or automatically download
+that proprietary runtime. Batcomputer uses your selected copy locally and does not include it in
+generated mods or application releases.
+
+The [Settings reference](../reference/settings.md) explains the path indicators. Hover over a dot
+to see the resolved path and its checks; green is not proof of a complete extraction or successful build.
 
 ## Confirm the extraction
 

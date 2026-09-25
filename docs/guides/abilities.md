@@ -75,11 +75,6 @@ copies of the sword montages, not the entire goon AbilitySet or `InputData_Goon`
 An always-visible cosmetic item is simpler, but should still yield to hand slots during traversal,
 interactions and cutscenes. A permanent hand attachment alone does not make it a damaging weapon.
 
-Local acceptance status: Gordon, Robin, Lucius and Batgirl combat on Batman were reported working
-in-game. The later native-style tests also passed user testing. The sword proof was reported
-visible and able to attack without a target, with **1.5x** preferred over the earlier 2–3x speed.
-That does not certify every donor/body pairing, custom asset, or visibility mode.
-
 ### Held items and sword combat
 
 Held items are independent of fighting styles. Open **Abilities → Held items** to add, edit or
@@ -94,7 +89,7 @@ Small cosmetic examples use a passive native actor with no collision; they do no
 controllers, projectiles or enemy abilities. Their native models/materials are retained, including
 the traced primitive-color data where required. Example details explain limitations in the editor.
 Goggles are a hand prop, not headwear; the static Robin baton does not fold or supply a melee hitbox.
-The fourteen examples and the held-item tool flow, custom models and left-hand items have passed user testing. This does not certify every new combination or transition.
+Test each new item/hand/visibility combination during gameplay and transitions before sharing it.
 
 Visibility options are **Always held**, **Only while attacking**, **During combat or attacks**,
 and **Hide during combat / attacks**. The last option also hides during empty-space attacks.
@@ -139,12 +134,11 @@ material and custom-model recipe without dropping those settings. Config changes
 the generated-asset cache and persist in the saved suit project.
 
 Attack-only visibility requests the weapon while the player's melee ability is active and
-releases it afterward; higher-priority hand users can still hide it. Attack-only visibility has
-passed user testing. The adapter now adds native player combo/recovery breakout events after
-the sword's hit window; the combo correction passed user testing. The player graph chooses
+releases it afterward; higher-priority hand users can still hide it. The adapter adds native player combo/recovery breakout events after
+the sword's hit window. The player graph chooses
 attacks by context, not a guaranteed fixed four-swing sequence. Allowing no-target attacks now
 preserves each native state's target requirement rather than admitting every targeted opener
-into empty-space selection; this correction passed user testing. Counters, takedowns and prop attacks retain their
+into empty-space selection. Counters, takedowns and prop attacks retain their
 player defaults; the item collision uses the selected native actor's, so custom
 shapes may not match its hitbox. This is not a new selectable equipment-menu gadget.
 
@@ -153,55 +147,28 @@ baseball and smoke-bomb mesh examples and their direct material donors,
 alongside the character/animation trees. Missing or incompatible donors block building with an
 error instead of silently falling back to another weapon.
 
-Previously built bat/baton player-adapter test ZIPs are unchanged and do not need remaking.
-Their in-game-proven attack adaptation is now available through the normal fighting-style picker
-and suit build, with independently configured held items. Choose the baseball-bat or stun-baton
-held-item template for the corresponding tested actor/hitbox. Selecting only a model does not
-change attacks. Reapplying the same preset keeps combat settings; changing presets restores the
-new style's verified attack defaults and keeps the held items.
+For the baseball-bat or baton adapter, choose the corresponding native held-item template as
+well as the fighting style. Selecting only a model does not change attacks. Reapplying the same
+preset keeps combat settings; changing presets restores the new style's attack defaults while
+keeping independently configured items.
 
-Baton is a melee adapter, not an automatic electrical power. The integrated bat/baton test paks,
-held-item tool flow and separate native baton-trail experiment have passed user testing.
-Expanded configurable effects and on-hit status tests were later reported to crash on suit hover.
-Those paths are parked, not accepted stable features. Keep them out of ordinary release-test mods;
-the descriptions below document the prototype, not a recommendation to enable it.
+!!! warning "Effect/status experiments are on hold"
+    Expanded held-item effects and on-hit statuses have caused suit-hover crashes. Do not enable
+    them in a release mod. Keep **On-hit status** at **None** and leave additional effect lists empty
+    while testing ordinary held items. Native actor effects are separate.
 
 ### Cosmetic item effects
 
-Open **Held items → Edit item → Edit effects / placement**. Add up to three native effects per
-item, with mesh-local offsets in Unreal centimetres, pitch/yaw/roll and scale. The viewer shows
-placement markers and approximate animated particles, including the custom model if one is assigned.
-White markers identify emitter origins; axes show orientation. Particle shapes/colors are illustrative,
-not final Niagara rendering or editable game color parameters. Placement overlays show through the mesh
-so an emitter inside the model stays editable. Effects follow the held actor's visibility;
-for attack-only effects, use an attack-only item. Independent effect timing is not implemented yet.
-
-Twelve presets cover electric idle/trails, blade and baton trails, umbrella smear, baseball trail,
-smoke, frost, snow, fire/sparks, venom and Ivy fumes. Except for the original baton-trail proof,
-these combinations are experimental: some native systems need motion, owner parameters or context.
-All referenced systems are included in first-time/full/research extraction. Use Full refresh if a donor
-is missing. Builds fail on missing/non-Niagara donors rather than silently dropping the effect.
-
-Effects are additional suit-local components; the game systems themselves are not overwritten.
-When an item has configured effects, its original Niagara components are hidden/deactivated to avoid
-duplicate native trails. Removing all configured effects restores the original actor behavior on rebuild.
-No reflected Blueprint class fields or gameplay tags are added for these visual components.
+The experimental **Edit effects / placement** preview uses illustrative particles and placement
+markers, not Unreal's Niagara renderer. Seeing an effect in this preview is not evidence that it
+is safe to package. A working native baton trail does not validate unrelated fire, frost or smoke
+systems, which may require runtime owner parameters and controllers.
 
 ### On-hit status settings (experimental)
 
-**Combat settings → Behavior → On-hit status** adds timed **stun interruption** or **smoke distraction**
-to the sword, bat and baton player adapters. Duration is 0.25–10 seconds; None is the default.
-The attack's native damage effect is cloned locally and extended with a target-applied status.
-Damage calculations, original hit timing and native target checks remain; no victim reaction ability
-is granted to the wielder. Smoke is changed from volume-managed indefinite duration to a bounded duration.
-Statuses require goon targets and reject playable/boss/dead tags; native smoke exclusions remain.
-
-These use native AI interruption reactions, not a universal paralysis system. Target abilities,
-immunities and repeated hits can affect the observed reaction/duration. Test a duplicate suit against
-ordinary goons, resistant enemies and co-op before distribution. Electrical stun, poison damage,
-freezing, arbitrary gameplay abilities, all native fighting styles and gadget projectiles are not
-supported by this first status editor. Decorative items cannot apply statuses without a compatible attack.
-Visual sparks/fire/frost do not automatically inflict an associated gameplay effect.
+Leave **Combat settings → Behavior → On-hit status** at **None** for normal builds. The experimental
+status adapters are not a universal stun, freeze or poison system, and decorative particles do
+not automatically inflict damage or a status. These experiments need separate fixes and testing.
 
 The same style on its shipped gameplay family is the reliable path. A cross-family application is
 still experimental: Batcomputer copies only the traced combat effect, held-item bridge, and

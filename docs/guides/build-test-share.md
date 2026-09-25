@@ -22,6 +22,9 @@ Close the game before building, then choose **Build mod**:
 
 ![Build Mod workspace](../assets/screenshots/build-mod-workspace.jpg){ .bc-doc-shot loading=lazy }
 
+*Some screenshots show an earlier layout. In 1.0, archive import/export actions are under
+Home → Import/Export; Build mod is for checking and building.*
+
 1. Stages every enabled suit, vehicle and shared mod asset. Vehicle-only mods are supported.
 2. Validates the staged cooked data.
 3. Writes gameplay tags and native Asset Registry data.
@@ -56,6 +59,9 @@ Test at least:
 | Persistence | Back out to frontend, reload gameplay, then fully restart the game. |
 | Compatibility | Test beside at least one other custom suit mod using Loomirr's LOTDK UE4SS. |
 
+For inspecting or removing saved edits first, use [Review](review-changes.md). Recorded edit statuses
+are not a substitute for these build and gameplay checks.
+
 ## Create the ZIP
 
 On **Home** → **Import/Export**, select your mod and choose **Create release ZIP** after a successful build. The archive
@@ -69,7 +75,7 @@ Suit releases require Loomirr's LOTDK UE4SS. They must not include or overwrite 
 ## Share an editable project
 
 The release ZIP is for players. To let another creator continue editing a mod, select it on
-**Home** → **Import/Export**, select your mod and choose **Export editable copy**. The creator archive contains the
+**Home** → **Import/Export** and choose **Export editable copy**. The creator archive contains the
 saved mod, suit and vehicle recipes plus source images, meshes, their project-owned import caches,
 and cooked custom materials with their texture dependencies. Save your edits before exporting.
 Native game assets remain references; the game itself, UE4SS, mappings and saves are not included.
@@ -84,13 +90,15 @@ Re-export archives made with the earlier experimental sharing format. Missing so
 stop export with an explanation. Imported custom animation libraries are not transferred yet;
 projects referencing them are rejected rather than exported with missing dependencies.
 
+See [Import and export projects](import-export.md) for the step-by-step handoff and conflict checks.
+
 ## Before publishing
 
 - Custom equipment: use the [Equipment workshop checklist](equipment-workshop.md#limits-and-testing), including separate projectile variants and a native-suit control test.
 - Back up your project and source textures or OBJ files.
 - Confirm the Mod ID is final.
 - Include Loomirr's LOTDK UE4SS and the compatible game build in requirements.
-- State that the release contains no Batcomputer, UE, mappings, or extracted game files.
+- Do not bundle Batcomputer, Unreal Engine, mappings, your full game extraction or unrelated source/reference files.
 - Provide a short list of included suits and known limitations.
 - Cold-test the exact ZIP you intend to upload.
 

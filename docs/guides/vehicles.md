@@ -12,8 +12,8 @@ Make a separate selectable vehicle with a custom body, materials and editable at
 
 Start with the driving model. A LEGO build-up model is a separate asset with a different rig; see [summon and parked models](vehicle-summon-models.md) after the car drives correctly.
 
-!!! warning "Development feature"
-    Vehicles may not be available in the current public download. Native handling, collision and driving animations are retained. Moving the visible body or a seat does not rebuild the physics rig.
+!!! warning "Experimental vehicle workflow"
+    Vehicle authoring is included in 1.0. Native handling, collision and driving animations are retained. Moving the visible body or a seat does not rebuild the physics rig. Test each donor and model combination in-game.
 
 ## 1. Get the reference
 
@@ -100,7 +100,7 @@ Keep painted or permanently visible exhaust/flame geometry on its appropriate bo
 
 Export only the custom mesh and its complete donor armature as a **binary FBX**. Leave out reference meshes, lights, cameras and unrelated rigs. Disable extra leaf/end bones and animation baking. Keep all required native bones, including unweighted hierarchy bones. Preserve UVs and material slots.
 
-Use unit and axis settings that preserve the donor rest pose. A GLB-to-Blender-to-FBX round trip can change bone axes or introduce an extra root; looking correct in the viewport is not enough. Import a small trial first. Batcomputer checks the cooked hierarchy and rest transforms against the actual game rig. If that fails, fix the export rather than renaming bones or moving the rig until it passes. **FBX unit correction** is for a known unit mismatch, not a general alignment slider.
+Use unit and axis settings that preserve the donor rest pose. A GLB-to-Blender-to-FBX round trip can change bone axes or introduce an extra root; looking correct in the viewport is not enough. Import a small trial first. Batcomputer checks the cooked hierarchy and rest transforms against the actual game rig. If that fails, fix the export rather than renaming bones or moving the rig until it passes. Batcomputer's import scale must stay **1.0000**. Fit your geometry to the reference rather than compensating with 0.01 or 100.
 
 When a cooked rig comparison fails, check `rig-comparison.json` beside the import logs. It lists the expected and actual parent and rest transform for each bone.
 
@@ -158,7 +158,7 @@ Check the thumbnail, selection, steering, wheel rotation, boost, firing/grapple,
 
 The normal body import changes the driving model and vehicle menu model. The active car parked in the Batcave can use a separate summon mesh, so replacing the body does not cover every presentation actor. A shelf/display car or 2D thumbnail can be another asset again.
 
-The development build has a separate **Body & setup → Assembly model** import. It requires the selected donor's summon rig, not its driving skeleton. Read [summon and parked models](vehicle-summon-models.md) for the preparation flow and current limits.
+There is a separate **Body & setup → Assembly model** import. It requires the selected donor's summon rig, not its driving skeleton. Read [summon and parked models](vehicle-summon-models.md) for the preparation flow and current limits.
 
 ## Parts toybox and vehicle size
 

@@ -1,48 +1,85 @@
-# Import a skinned mesh
+# Import a skinned character mesh
 
-You can import a custom body or compatible attachment using a skeleton already in the game. The first weighted body test loaded in-game without crashing. How well your model moves still depends on the rig and weights you give it.
+Use a weighted FBX when a custom body or part needs to move with the character's native skeleton.
+Use [OBJ attachments](custom-meshes.md) for a rigid accessory attached to one socket instead.
 
-## Experimental tool flow
+!!! warning "Experimental native-rig workflow"
+    Batcomputer does not auto-rig, auto-weight or retarget a model. Keep the selected donor's
+    complete bone hierarchy, names and rest pose. New rigs, cloth and morph targets are not supported.
+    Start on a backed-up test suit and check the result in-game before sharing it.
 
-In **Parts → Import skinned mesh**, choose an existing skeletal component present in both the playable and cutscene actors. For an attachment, add the compatible native part first. The workshop replaces its geometry without converting component classes or changing the native animation/gameplay graph.
+## 1. Choose the rig you actually need
 
-1. Export the native mesh and rig as GLB. Import that reference into Blender or another 3D editor.
-2. Fit the model, bind it to that rig, and author/check its weights externally. Automatic weights are only a starting point. Preserve bone names, hierarchy and rest pose; remove exporter leaf/helper bones. Export **one joined mesh**, with named material slots, as binary FBX 7.4–7.7.
-3. Import the FBX in the workshop at **scale 1.0000**. Batcomputer validates weights, cooks with the configured **Unreal Engine 5.6 installation**, and compares the cooked rig and rest pose to the native donor. A recognized Blender 100× root-unit conversion is normalized together with its bone translations before cooking and rebuilding inverse bind matrices. Arbitrary rest-pose changes are rejected. The first cook can take several minutes.
-4. Assign cooked material package paths from the Materials/Textures toyboxes to each FBX slot. Optionally hide other visible components, such as the original cowl and face on a full-body model.
-5. Inspect the deformation preview: original/custom toggles, skeleton display, and individual bone rotation. This is a pose check with slot colors, **not native animation playback or final game shading**.
-6. Use skinned mesh, then Build Mod normally. Both character roles receive the replacement. The normal inspector can still apply role-specific materials. Reopening the workshop without changing a slot preserves those overrides.
+Set the suit's visual base and gameplay donor first. Open its skinned-mesh workshop from **Parts**
+and choose the native component in **Which native rig did you use?**
 
-Saved source FBXs and validated mesh buffers live under the suit's `ImportedSkinnedMeshes` directory. Reimport uses the saved copy; Import / replace selects a different external FBX. Each cook creates a new revision, so failed/cancelled cooks do not replace the working mesh. Source/buffer hashes are checked again when staging. Keep this directory with the suit project.
+For a body replacement, select **CharacterMesh0** and the correct native body mesh. For a head,
+hood or other attachment, select that attachment's native skeletal component. The list is drawn
+from the suit's available components; it is not a browser of every skeleton in the game. If the
+needed attachment is missing, add its native part to the suit before opening this workshop.
 
-If a saved mesh reports that it was cooked before the root-scale fix, open its skinned mesh workshop and choose **Reimport saved FBX**, then save and rebuild the mod. Earlier validation accepted a 100× root scale even when the native root was unit scale. Those cached buffers must be rebuilt; changing the preview scale cannot repair them. The corrected Minifig08 test preserves the mesh vertices and weights while bringing the exported skeleton from approximately 161.48 m to 1.61 m. On 24 September 2026, the user confirmed that all four Batman 2025 tests passed in-game: body only, body with head/face, body with capes, and all parts together. Check other imported models against their own donor and animation setup.
+Choose **Export native reference + rig (GLB)…**. This writes the reference and the adjacent
+`Batcomputer_PrepareBlenderRig.py` helper. Use a fresh export from 1.0 if you have an old reference
+with the tiny-rig or oversized-skeleton problem.
 
-Not supported yet: no new rigs, automatic weighting/retargeting, cloth, facial rigs/morphs, static-to-skeletal component conversion, or skeletal equipment authoring. Equipment restrictions stay in place pending dedicated tests. Remove skinned replacements before changing the suit's base/identity, then reimport against the new donor; cached cooks are not silently migrated. Standalone rigid attachments still use the existing static-mesh workflow.
+## 2. Prepare the model in Blender
 
-This importer does not author physics assets or transfer mesh-local socket definitions. Native skeleton references and the actor's existing gameplay machinery remain, but collision/ragdoll/death behavior and socket-dependent parts need explicit in-game testing.
+Follow [Prepare a native rig in Blender](blender-rig-preparation.md). In short:
+
+1. Import the GLB without changing the donor rig's proportions or bone names.
+2. Run the supplied preparation script once on that armature.
+3. Fit your geometry to the reference, then rig and weight it to those native bones.
+4. Export only the final joined mesh and the complete armature, with no extra leaf bones.
+
+Do not use an assembled character-viewer GLB as a replacement for this donor-specific reference.
+The assembled export can contain several independent rigs and preview placements.
+
+## 3. Import and assign materials
+
+1. Keep Batcomputer's import scale at **1.0000**. The current cooker rejects arbitrary import-scale changes.
+2. Choose **Import / replace weighted FBX…** and select your export.
+3. Wait for the import, cook and per-bone validation to finish.
+4. Assign a compatible **cooked game material** to every FBX slot. Blender shaders do not become Unreal materials automatically.
+5. Compare **Original**, **Custom** and **Skeleton** in the preview. Use **Frame** to fit the view.
+6. Test individual bones with the pose-check controls, then return to **Rest pose**.
+7. Hide only the original visual components your replacement actually covers, then choose **Use skinned mesh**.
+
+The pose-check colors identify material slots. This is not the final game shader or full animation
+playback. Hiding an overlapping original head may be appropriate for a full-body replacement;
+hiding an unrelated cape or face just to conceal a bad rig is not a fix.
+
+## 4. Save, rebuild and test
+
+Run **Check mod**, build the complete mod and cold-launch the game. Check idle, walking/running,
+attacks, traversal and cutscenes. A mesh can look fine in its rest pose and still stretch under animation.
+
+Use **Import / replace weighted FBX…** for a newly exported Blender file. **Reimport saved FBX**
+cooks the copy already stored by Batcomputer; it does not pick up a different file in Downloads.
+Keep your `.blend` and source art too.
+
+If changing the base or identity requires removing a saved skinned replacement, keep the source,
+make the base change, then export the new donor reference and reimport against it.
+
+## Fix an import error
+
+| Error or symptom | What to check |
+| --- | --- |
+| Unexpected bone named after the model | The armature **object** should be named `Armature`. Do not rename a native bone to fix an object-name problem. |
+| One extra bone or leaf bones | Export only the intended mesh and armature, disable Add Leaf Bones, and keep the complete native rig. |
+| Root rotation 90°/180° | Start with a fresh reference and run its helper once. Do not rotate native bones by trial and error. |
+| Root scale difference 99 or 0.99 | This is a measured mismatch, not a value to set to zero. Keep import scale 1.0000 and rebuild from the correctly prepared rig. |
+| Whole rig tiny or giant relative to the body | Check the complete stick hierarchy, not only Root at the feet. If the whole rig disagrees, stop and re-export the native reference. |
+| A few vertices stretch across the screen | Check their vertex groups and weights, the chosen donor and the per-bone report. Do not compensate by scaling the whole character. |
+| Import succeeds but cook fails | Read `cook.log`; a path-length or missing dependency error is not necessarily a weighting error. |
+
+When validation fails, keep `rig-comparison.json`, `import.log` and `cook.log` from the reported
+import folder. Include the donor's package name and your Batcomputer version in a bug report.
 
 ## Attachment body clearance
 
-Body clearance is separate from accessory XYZ placement. Native LBM Batman raises `Spine_01` by **4.3** for the hip/belt; native Armoured Batman raises `Neck` by **3.0** in gameplay and cutscenes. These are serialized in the attachment manager's `PermanentOffsetData`, not in the static mesh.
+Body clearance is a separate feature for [custom static attachments](custom-meshes.md).
+It adjusts supported native body offsets to make room for accessories; it does not fix an FBX
+bind-pose mismatch or authorize a differently scaled skeleton.
 
-Custom Hip and Shoulder attachments now use the matching slot tag instead of inheriting `TtCharacterAsset.Head` from their static donor shell. The import/edit dialog offers the native clearance default or an explicit nonnegative value; zero disables that attachment's contribution. Native part grafts inherit their donor's relevant clearance. Shared contributions use the maximum, not repeated addition, and existing native offsets are retained. Rebuild to update older suits.
-
-The verified minifigure recipe updates both roles and can create the native inherited cutscene manager override when needed. Unsupported manager layouts stop with an explanation rather than discarding unrelated properties. The current 3D preview does **not** simulate these gameplay bone-clearance offsets; inspect the result in-game.
-
-## Notes from the first body test
-
-The proof uses the existing `/Game/Characters/LEGOfig/SKEL_LEGOfig` skeleton and native Batman animation/gameplay setup. A separate UE 5.6 headless project imports and cooks the custom body. Its temporary editor skeleton reference is replaced by the existing game skeleton after checking compatibility; the temporary skeleton and editor materials are not shipped.
-
-The supplied source contains 53 native bones plus 68 exported socket/helper/end bones. Its test-only adapter merges helper weights into the native ancestor, limits and normalizes influences, and repairs three unweighted vertices from their nearest weighted neighbors. Those repairs were specific to that test model. The normal importer doesn't automatically fix arbitrary rigs or missing weights. Source files remain unchanged.
-
-The body retains four authored material sections and all 2,304 triangles. Four supplied textures use native gameplay/cutscene material-instance parents with neutral detail maps. Separate character components have their visible meshes cleared; their construction graph and gameplay machinery remain intact.
-
-## Verification and next in-game checks
-
-The original proof passed independent cooked-container reading, native hierarchy/rest-pose comparison, texture/material loading and character metadata/loading-bundle verification before being tested in-game. Maximum rest-position discrepancy was below 0.0001 game units. The integrated importer also cooked and validated the corrected test source. Automated structural checks do not replace testing the new tool workflow in-game.
-
-Automated checks cover material-slot names, attachment-manager layouts, cutscene references, invalid weights, and damaged cached files. Independent packed-container checks confirm the integrated mesh's native skeleton, four material references and both actor bindings. Offset checks pass after applying the same declarations twice, without stacking. The workshop preview exports its GLB and required viewer files; the preview and offset behavior still need checking in-game.
-
-Test selection, idle/run/jump, combat, gadgets, cutscene appearance, restart persistence, and switching back to an unchanged native suit. Inspect shoulders, elbows, knees, hands and head for weight problems. The embedded face is not a new animated face rig. This workflow doesn't require runtime DLL changes.
-
-For attachments, test a belt and shoulder piece separately and together in gameplay and cutscenes; rebuild twice to check that clearance does not stack, then remove the additions and verify the native baseline returns. Unrelated rigs, cloth, and morph targets aren't supported. To create a separate roster entry, use the [character editor](custom-characters.md).
+For other workflows, see [skeletal equipment](equipment-workshop.md#skeletal-equipment) and
+[vehicle rigs](vehicles.md). Use the reference exported by that editor, not a minifig body rig.

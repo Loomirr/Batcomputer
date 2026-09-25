@@ -1,76 +1,58 @@
-# Compatibility and beta limits
+# Compatibility and limits
 
-## Supported in the beta
+Batcomputer 1.0 is the first stable application release. Some authoring workflows are still
+experimental; stable packaging does not make every donor combination compatible.
 
-- Suit-menu discovery through the plugin loading provided by Loomirr's LOTDK UE4SS.
-- Multiple suits in one mod and multiple independently installed suit mods.
-- Batman and other character families when the suit uses an appropriate playable donor and unique
-  identity.
-- Built-in playable and cutscene visual bases, plus indexed character parts.
-- Exact shipped root-body profiles: standard Minifig, Minifig 08, headless Minifig, armless
-  Minifig, Minifig without its left hand, Minifig without its upper body, standard Smallfig,
-  Smallfig 08, and armless Smallfig. These profiles preserve the chosen gameplay donor and all use
-  the native shared `SKEL_LEGOfig` skeleton.
-- Game-material templates and face tools.
-- Character, face-detail, CT, RAO, mask, normal/packed, 512px character-icon, and 256px
-  suit-selector-icon texture cooking.
-- Supported equipment and glider grafting, plus exact per-suit sequence, montage, Animation
-  Blueprint layer, and locomotion overrides from compatible base-game or imported animations.
-- Workspace-wide cooked animation imports from a selected `.utoc`, `.ucas`, or `.pak`, with
-  package-collision checks and referenced support-package staging.
-- A separate regular cape plus a replacement glide cape when both come from the same indexed native
-  character variant and the preset is marked as a supported **Glide cape**. On a glide-only gameplay
-  donor, apply the preset first and its matching regular cape second. Batcomputer keeps normal
-  gameplay behavior and uses the cape donor's animation while gliding. Wingsuits and other
-  glide-only visuals are also supported when the regular `Cape` is removed.
-- Custom OBJ static-mesh attachments.
-- Read-only 3D inspection of indexed native parts with the mesh's resolved default and component
-  material overrides.
-- Direct installation, build checks, and installable ZIPs.
+## Available in 1.0
 
-## Not supported yet
+| Area | Supported workflow | Important limit |
+| --- | --- | --- |
+| Suits and characters | Native-character suits, independent characters and their extra suits | Unique identities and a compatible playable donor are required |
+| Game modes | Normal, Mayhem or Both for custom characters | Requires a compatible installed framework with integrated mode support |
+| Visual bases | Indexed playable, cutscene and supported quest visuals, including installed DLC | NPC visuals do not create NPC powers or player controls |
+| Body profiles | Nine shipped Minifig/Smallfig body variants on the shared LEGOfig rig | Shared bones do not guarantee matching takedown proportions |
+| Parts and materials | Indexed native parts, compatible material templates, textures, face maps and icons | Face/UV families and native shader contracts still matter |
+| Mesh imports | Rigid OBJ attachments and experimental weighted FBX on existing native rigs | No arbitrary skeleton transfer, auto-rigging, cloth or new morph targets |
+| Abilities and held items | Native loadouts, fighting-style adapters, independently configured hand props | A decorative item alone does not grant weapon attacks |
+| Equipment | Supported native gadget derivatives, model/icon edits and experimental native-rig FBX components | Support varies by donor; NPC gear can lack player-compatible logic |
+| Vehicles | Native driving donors, body/part/material/light edits and separate assembly-model imports | Experimental; donor physics and rig constraints remain |
+| Animation | Suit-local compatible sequence/montage/layer/locomotion overrides and a cooked import library | Not an arbitrary FBX animation importer or retargeter |
+| 3D workshop | Assembly inspection, supported material previews, custom static-part placement and reference GLB export | Not a full Unreal renderer or runtime simulation |
+| Sharing | Player release ZIPs and supported editable creator archives | Imported animation libraries are not transferred in creator archives |
+| Application updates | Verified download, restart, completion prompt and application-file recovery | 1.0.0 uses a full ZIP; smaller downloads require a release file catalog |
 
-The development branch adds [independent characters](../guides/custom-characters.md), their default
-and child suits, and an experimental existing-rig mesh importer. The first character/body proofs
-worked in-game; broader testing across multiple mods, restarts and co-op is still needed.
-Scripted story casting, new voices, new rigs and arbitrary unlock rules are not provided.
+The supported body profiles are standard Minifig, Minifig 08, headless Minifig, armless Minifig,
+Minifig without its left hand, Minifig without its upper body, standard Smallfig, Smallfig 08 and
+armless Smallfig. They keep the gameplay donor and use native `SKEL_LEGOfig`.
 
-- Custom Red Brick creation. The viewer only previews the game's existing colour options.
-- Arbitrary skeletal-mesh/skeleton transfer. The development build has an experimental
-  [existing-rig FBX workshop](../guides/skeletal-mesh-proof.md) for bodies and compatible parts;
-  facial rigs, cloth and skeletal equipment remain outside that first pass.
-- Arbitrary skeleton swapping. Supported Minifig and Smallfig body profiles already use the same
-  native skeleton; other rigs still need separate research and in-game proof.
-- Arbitrary new gameplay powers or code-driven character mechanics.
-- Physical collectible placement in levels.
-- Perfect shader/lighting parity between the 3D viewer and the game.
-- Combining a separate regular cape with a mismatched wingsuit or glide-only controller. The
-  supported flow requires a native **Glide cape** preset and its matching regular cape from the same
-  indexed character variant.
+## Not provided
 
-## Content that needs extra testing
+- New scripted story roles, dialogue/voice authoring or arbitrary unlock challenges.
+- Arbitrary gameplay code, enemy AI-to-player conversion or universal new powers.
+- New skeletons, cloth systems, morph targets or automatically fitted collision.
+- New Red Bricks or physical collectible placement. Red Brick colors in the viewer are preview-only.
+- Exact game shaders, procedural animation, cloth or physics in the offline viewer.
+- A safe combination of any cape and any glider controller. Use a supported **Glide cape** preset
+  and its matching regular cape from the same native variant, or remove the regular cape for a glide-only visual.
 
-Expanded configurable item VFX/on-hit status combinations were reported to crash on suit hover.
-They remain parked and must be isolated or excluded before release. Do not confuse them with the
-separate, previously working native baton-trail proof.
+## Experimental combinations
 
-- Equipment driven by controller actors, remote gadgets, or complex spawn/recall logic.
-- Unusual body rigs or character scales.
-- Cross-family face materials.
-- Animation sets far from the chosen playable donor.
-- Large or topologically unusual custom OBJ imports.
+Test custom skinned bodies/attachments, skeletal equipment, cross-family fighting styles,
+unusual body sizes, vehicle driving/assembly models and multi-character/co-op behavior separately.
+A successful cook and build check cannot prove the runtime behavior of all those systems.
 
-## Game updates
+!!! warning "Held-item effects and on-hit status"
+    Expanded effect/status experiments have caused suit-hover crashes. Treat those controls as
+    on hold, not a supported release feature. A working native baton trail does not prove an
+    arbitrary set of particles or statuses is safe.
 
-Cooked Blueprints and mappings can change after any game update. If a previously working project
-starts crashing or disappearing:
+For vehicles, test the driving and parked/summon appearances separately. A working driving body
+does not establish that the separate assembly model is correct for every donor.
 
-1. Obtain a mappings file for the new build.
-2. Run the full character extraction.
-3. Rebuild indexes.
-4. Re-select/rebase the playable and cutscene donors.
-5. Validate and rebuild every affected mod.
+## After a game update
 
-Do not assume a package is compatible merely because FModel can list it.
+Use mappings for the installed game, refresh all character assets, refresh the part index, and
+repair/rebase only projects that need it. Then check, rebuild and cold-test affected mods.
+An asset being readable in an extractor is not proof of game compatibility.
 
-For the full recovery order, see [Update or repair a suit](../guides/update-repair-suit.md).
+See [Update or repair a suit](../guides/update-repair-suit.md) for the recovery order.

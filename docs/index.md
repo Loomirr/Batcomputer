@@ -6,16 +6,17 @@ Batcomputer handles the files and registration needed to package and install you
 
 ![Batcomputer's mod workspace](assets/screenshots/home-mods.jpg){ .bc-doc-shot loading=lazy }
 
-!!! info "Public beta"
-    The release candidate is **1.0.0-beta.1 — Batcomputer 1.0 Beta**. Suit creation and packaging work in-game, but the project
-    remains in public beta. Back up your projects, and include copied diagnostics when reporting a
-    repeatable problem.
+!!! success "Batcomputer 1.0 is here"
+    Get the [official 1.0 release](https://github.com/Loomirr/Batcomputer/releases/tag/v1.0.0),
+    or use the built-in updater if your version supports it. These guides cover 1.0;
+    experimental features are marked on their own pages. Keep a backup before upgrading.
 
 ## Start here
 
-Using the development build? See the guides for [custom characters](guides/custom-characters.md),
-[custom equipment](guides/equipment-workshop.md) and [custom vehicles](guides/vehicles.md).
-These features may not be in the current download.
+New to modding? Start with a simple suit before replacing rigs or mixing gameplay systems.
+Already making mods? Jump to [custom characters](guides/custom-characters.md),
+[custom equipment](guides/equipment-workshop.md), [vehicles](guides/vehicles.md),
+or the [Blender rig walkthrough](guides/blender-rig-preparation.md).
 
 <div class="grid cards" markdown>
 
@@ -78,9 +79,22 @@ These features may not be in the current download.
 - Verified native cape/glider pairs on compatible gameplay donors while keeping their normal
   appearance and playstyle.
 - Custom static-mesh attachments imported from OBJ files.
+- Weighted FBX replacements on supported native rigs, including character bodies and parts.
+- Independent characters with their own default suit, extra suits, symbols and mode choices.
+- Experimental custom equipment and vehicles using native gameplay setups.
 - PawnTag, DCMD, UIMD, StringTable, gameplay-tag configuration, and Asset Registry data.
 - One or more suits in a single mod.
 - A local test installation and an installable ZIP.
+- Editable creator archives for handing a project to another modder.
+
+## New and updated guides
+
+- [Change a character's pawn-tag family](guides/character-identity.md) without renaming its project or display name.
+- [Choose the right donors](guides/choosing-donors.md), including Joker, Harley and NPC visuals.
+- [Import/Export](guides/import-export.md): which ZIP to give players and which to give creators.
+- [Review your edits](guides/review-changes.md) before building.
+- [Settings and performance](reference/settings.md): path indicators, preview quality and cleanup.
+- [Update and recover Batcomputer](guides/app-updates.md), or [move your workspace safely](guides/backups-and-moving.md).
 
 ## What it does not include
 

@@ -74,7 +74,7 @@ place. Check Diagnostics for the first failed donor or file operation before try
 
 - OBJ static meshes only.
 - Up to 64 named OBJ material sections per imported mesh.
-- No custom skeletal-mesh cooking or skeleton transfer.
+- This OBJ workflow does not rig or weight a mesh. Use the separate [native-rig FBX importer](skeletal-mesh-proof.md) for skinned replacements; arbitrary skeleton transfer remains unsupported.
 - No custom collision or physics setup.
 - Geometry that does not fit the tested game-mesh template may be rejected.
 - The viewer cannot reproduce every game shader, animation, or lighting condition.

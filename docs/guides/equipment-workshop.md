@@ -88,7 +88,9 @@ Batarang builds now create a private upgrade chain and retarget Alarmarang/Concu
 
 Filtering requires exactly one Batarang-family item in the loadout because these items share character upgrade attributes. Builds with a filtered item alongside another Batarang are blocked. Other equipment types retain their native upgrade data; their selectors remain unavailable until their contracts are checked.
 
-All-upgrades and no-upgrades configurations have passed in-game after the registration fix. The old “multi-only” test selected Combo rather than Scatterang; the labels now distinguish them. Single-upgrade configurations still need focused gameplay checks. A successful build alone does not prove runtime behavior.
+Test each enabled upgrade in-game with the relevant purchase unlocked. Combo and Scatterang
+are different behaviors; don't use one as a test for the other. A successful build does not prove
+that every filtered upgrade combination behaves correctly.
 
 ## Materials and effects
 
@@ -107,4 +109,5 @@ Most effects and audio remain view-only. The Batarang's **After-hit / ground mod
 
 Custom equipment, HUD artwork, all/no Batarang upgrades and Gordon's weighted pistol replacement have passed gameplay checks. Combo-only and Scatterang-only still need separate checks: Combo increases rapid-throw capacity, while Scatterang enables simultaneous throws. Before sharing a mod, test equip/switch, HUD, held model, quick fire, aimed fire, upgraded projectiles, restart persistence, and an ordinary suit retaining its native gadget.
 
-See the [equipment inventory](equipment-inventory.md) for the current extraction audit.
+For a first project, start with a supported playable donor and change one model or icon at a time.
+Use the support banner in your current extraction rather than an old inventory count.

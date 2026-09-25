@@ -5,16 +5,22 @@
 | Requirement | Why it is needed |
 | --- | --- |
 | Windows x64 | Batcomputer is currently a Windows desktop application. |
+| Microsoft Edge WebView2 Runtime | Embedded 3D workshops and the animated Update center use it. |
 | A local LOTDK installation | Batcomputer reads the original IoStore containers and installs test builds into the game. |
 | A matching `.usmap` | Cooked Unreal assets cannot be interpreted safely with mappings from another game build. |
 | Unreal Engine 5.6 | The bundled registry-writer project uses UE 5.6 to create native Asset Registry data. |
 | About 18 GB free for extraction | The full extraction includes characters, animations, localization, and supporting files. |
 | Loomirr's LOTDK UE4SS 0.1.1 or newer | Generated mods depend on its plugin loading and shared `/Game/Mods` discovery configuration. |
 
+Custom characters using **Mayhem** or **Both** additionally need a compatible framework release
+with integrated character modes API 1. See [Character game modes](../guides/character-modes.md).
+Installed DLC donors also require that DLC on the creator's and player's machines.
+
 ## Bundled with Batcomputer
 
 - The self-contained .NET desktop runtime.
 - The Oodle-capable `retoc` packaging helper.
+- The Blender native-rig preparation helper under `Tools/SkinnedMesh`.
 - A verified UE 5.6 Asset Registry writer module, plus its source fallback.
 - Game-data indexes and runtime calibration metadata that contain paths and measurements, not game
   textures or cooked assets.

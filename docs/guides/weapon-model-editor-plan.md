@@ -1,6 +1,7 @@
 # Held-item model editor
 
-You can give a held item your own model without changing its attacks. Custom models, left-hand placement, attack timing, and attack-only visibility have been tested in-game.
+You can give a held item your own model without changing its attacks. Start with a native item,
+replace its appearance, then test placement and visibility in both ordinary movement and combat.
 
 ## Replace a model
 
@@ -28,6 +29,8 @@ Extra VFX and status-effect controls are experimental and on hold after crash re
 
 Check the item in both hands, while moving, and during combat. Save and reopen the project, then rebuild it. An asymmetric test model makes flipped placement easier to spot.
 
-## Implementation notes
+## Related workflows
 
-The editor uses `ModelPreviewControl` and `ModelPreviewService` for the preview, and `StaticMeshObjProbeService` for weapon-local baking. It does not use the character-attachment staging path. Calibrated grip markers and full material rendering are not implemented.
+Use [Equipment](equipment-workshop.md) for a selectable gadget, [Abilities](abilities.md) for
+weapon attacks and visibility, and [custom attachments](custom-meshes.md) for a fixed character
+accessory. A hand prop, a gadget and a costume attachment are not interchangeable.

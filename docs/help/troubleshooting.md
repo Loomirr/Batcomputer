@@ -71,7 +71,7 @@ new base manually. See [Update or repair a suit](../guides/update-repair-suit.md
 Do not rebuild the mod yet. Check Diagnostics for the first base-stage or donor error. Refresh the
 current assets and part index, then rebase or select both the visual and gameplay donors again.
 
-Beta 7 restores the previous project and generated stage when a replay fails. If Diagnostics lists a
+Batcomputer restores the previous project and generated stage when a replay fails. If Diagnostics lists a
 recovery backup, keep that folder until the suit opens correctly.
 
 ## The 3D viewer is blank
@@ -81,6 +81,16 @@ recovery backup, keep that folder until the suit opens correctly.
 - Refresh extracted game assets.
 - Try another built-in playable to separate a project problem from a viewer problem.
 - Copy diagnostics, including texture decode or GLB generation lines.
+
+If the environment renders but a part is missing, check the assembly list's visibility controls
+and use **Show every part**. Reopen the character after updating Batcomputer to regenerate its
+preview. For a custom vehicle, check [oversized-body protection](../reference/settings.md#preview);
+that can intentionally show a donor shell instead of the custom body.
+
+If only imported surfaces look inside-out, compare the native reference and inspect the source
+mesh's face orientation, normals and negative object scale before changing the skeleton. A normal
+map's shading problem is different from bone deformation. Keep the original source and report
+which view first shows the issue.
 
 The viewer is an approximation. A material can look somewhat different under the game's
 lighting without being broken.
@@ -157,7 +167,7 @@ Do not tell users to leave Texture Quality on Epic as the workaround. If the cur
 changes appearance between quality levels, include the source PNG, texture role, cook profile, and
 Batcomputer diagnostics in the report.
 
-## A build says a material dependency is missing from the workspace source
+## An older material still references a missing workspace dependency
 
 First open **Materials** → **Your materials** and choose **Repair materials**. This is the right
 repair for an older material that still contains abandoned import-table names after its live texture
@@ -195,6 +205,22 @@ Joker/Harley suits built from the retained `Default` donors can inherit obsolete
 be omitted entirely, even with a valid registry. The updated tool maps those two legacy gates to
 the current native defaults (Joker HTV / Harley BTAS) when reading or saving projects. Rebuild and
 reinstall the full mod, then restart; changing or resetting your save is not required by this fix.
+
+## A custom character is missing in Mayhem
+
+For an independent character missing only in Mayhem, follow
+[the character discovery checklist](../guides/character-modes.md#suits-work-but-my-new-character-is-missing).
+NPC display names can stay unchanged; a colliding pawn-tag family can be edited separately.
+
+## A skinned mesh is tiny, huge or stretched in-game
+
+Use a fresh native reference from the current build, run its Blender preparation helper once,
+and keep import scale at **1.0000**. Reimport old FBX cooks before rebuilding. Do not use 0.01 or
+100 as a general character-size fix or disable the rig comparison to force an import through.
+
+The full hierarchy should fit the body even if the Root marker at the feet is tiny. If only a few
+pieces stretch, inspect their weights and compare the named donor/rest pose. For more detail, see
+[the skinned-mesh error table](../guides/skeletal-mesh-proof.md#fix-an-import-error).
 
 ## A `_Quest` visual returns to the base picker
 
@@ -244,7 +270,7 @@ percentage, try a lower scaling value, and include both values with a screenshot
 
 If `import.log` reports success but `cook.log` contains `Couldn't save package, filename is too long`, the failure is in Unreal's cook output path, not evidence of a broken FBX rig. Follow-up DeformerGraph missing-package errors can come from that failed save.
 
-The development build cooks in a short, isolated Windows temporary folder and copies the logs and validated mesh back to the project. Reimport the saved FBX after updating. The error dialog now shows the cook error rather than the first startup messages. Failed temporary workspaces are retained; their path is recorded in `cook-workspace.txt` beside the import logs. If even the short folder is rejected, shorten the mesh/package name or use a shorter Windows TEMP path.
+Batcomputer cooks in a short, isolated Windows temporary folder and copies the logs and validated mesh back to the project. Reimport the saved FBX after updating. The error dialog now shows the cook error rather than the first startup messages. Failed temporary workspaces are retained; their path is recorded in `cook-workspace.txt` beside the import logs. If even the short folder is rejected, shorten the mesh/package name or use a shorter Windows TEMP path.
 
 ## Access denied while building or installing
 

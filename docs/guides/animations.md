@@ -6,6 +6,10 @@ own generated animation assets when you package it. It never rewrites the base-g
 
 ## Explore a character's animation setup
 
+For a first test, change one action on a backed-up suit, rebuild and trigger that exact action in-game.
+Keep its movement, attacks and equipment unchanged until the replacement is working. Then test
+the transitions into and out of the action, not just its first pose.
+
 Open **Animations** and choose **Edit character animations**. The Animation Explorer follows the
 selected gameplay donor and groups its:
 

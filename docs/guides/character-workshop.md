@@ -43,10 +43,18 @@ Native parts and rigged body bones are not movable through this custom static-pa
 
 ## Export a GLB
 
+For an imported part that looks missing or incorrectly shaded, use the
+[viewer troubleshooting checks](../help/troubleshooting.md#the-3d-viewer-is-blank) before changing
+its rig or replacing its material. Preview visibility controls do not remove parts from a mod.
+
 Choose **Export GLB…** to export the assembled preview for inspection in Blender. The exporter
 includes its supported textures/materials and mesh UVs. Check appearance in Blender's Material
 Preview; the exported result is not a full Unreal shader graph or a ready-to-import replacement
 FBX. Preserve the original donor rig/rest pose when authoring a new game mesh.
+
+For a weighted FBX replacement, export the **native reference + rig** from the
+[skinned-mesh workshop](skeletal-mesh-proof.md), then follow the
+[Blender preparation guide](blender-rig-preparation.md). That is a different export from this assembly GLB.
 
 For sharing an editable Batcomputer project, use [Export editable copy](build-test-share.md#share-an-editable-project)
 instead. A GLB is not a substitute for the saved mod recipes and import caches.

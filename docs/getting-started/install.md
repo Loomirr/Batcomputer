@@ -1,50 +1,77 @@
 # Install Batcomputer
 
-## Portable installation
+## Fresh installation
 
-1. Download the current `Batcomputer-...-win-x64.zip` release.
-2. Extract the **entire** archive to a writable folder such as `C:\Tools\Batcomputer`.
-3. Do not run the executable from inside the ZIP.
-4. Start `Batcomputer.exe`.
+1. Open [GitHub Releases](https://github.com/Loomirr/Batcomputer/releases) and choose the latest stable release.
+2. Download the Windows x64 ZIP, not GitHub's **Source code** archive. The accompanying `.sha256` is a checksum, not a second installer.
+3. Extract the **entire** ZIP to a writable folder such as `C:\Tools\Batcomputer`. Do not run it inside the archive.
+4. Start the top-level **Batcomputer.exe** and complete [first-time setup](setup.md).
 
-Install Loomirr's LOTDK UE4SS 0.1.1 or newer in the game before using Batcomputer's direct mod
-installation. That framework release supplies the shared registry configuration used by every
-Batcomputer-authored suit mod.
-
-Batcomputer stores its settings, indexes, projects, and generated files beside the application
-unless you choose another workspace. Avoid `Program Files`, the game directory, and
-cloud-synchronized folders for the portable itself when possible.
+Keep the whole folder together. Batcomputer includes its .NET runtime; moving only the EXE will not work.
+Avoid Program Files, the game directory and cloud-synchronized folders for your authoring workspace.
 
 ## Expected portable layout
 
 ```text
 Batcomputer/
   Batcomputer.exe
-  CUE4Parse-Natives.dll
-  gamedata/
-  Generated/
-  Documentation/
-  licenses/
-  Tools/
+  app/                 application DLLs and bundled .NET runtime
+  Tools/               packaging, registry and Blender helpers
+  gamedata/            catalogs and metadata
+  Documentation/       bundled documentation
+  licenses/            dependency licenses and notices
 ```
 
-If a required bundled file is missing, Batcomputer reports an incomplete portable install instead
-of continuing with a half-working package.
+Settings and workspace folders are created as you use the app. They are not supplied as empty
+replacements in an update ZIP. See [Workspace and files](../reference/workspace.md).
 
-## Updating
+## Updating an existing installation
 
-1. Close Batcomputer.
-2. Keep a backup of your existing folder.
-3. Extract the new portable over a new folder.
-4. Copy `Batcomputer.settings.json`, `Generated`, and `Data\Mappings` into the new folder if you used
-   the default portable workspace. Let Batcomputer rebuild `Data\Cache` and other indexes.
-5. Launch the new version and open one existing project before deleting the old portable.
-6. Run **Check mod** before rebuilding or installing that project.
+If your version has **Updates**, use the [in-app updater](../guides/app-updates.md).
+Older builds without a compatible updater need one manual installation.
 
-During the beta, keep each portable version in its own folder until the new version has opened your
-projects successfully.
+To update in place:
 
-If the game dump also changed, follow [Update or repair a suit](../guides/update-repair-suit.md)
-before rebuilding.
+1. Close every Batcomputer window and back up your settings, projects and source assets.
+2. Extract the complete new ZIP into the **same Batcomputer folder**, allowing application files to be replaced.
+3. Do not delete the old folder first. Keep **Batcomputer.settings.json** and your existing workspace data.
+4. Launch the top-level EXE, check the displayed version, and open an existing project.
+5. Check Settings paths and run **Check mod** before rebuilding.
 
-Next: [First-time setup](setup.md).
+This carries over local projects and settings when you merge the archive correctly. Projects stored
+elsewhere stay in their existing locations. A manual extraction does not create an updater rollback;
+your backup is the recovery copy. Files left by older layouts may remain—do not delete unfamiliar
+folders while trying to tidy the installation.
+
+Prefer a separate new folder? Follow [Back up and move a workspace](../guides/backups-and-moving.md)
+so copied settings do not accidentally keep pointing at the old installation.
+
+## Check a download's SHA-256
+
+The 1.0 release has two ZIP names:
+
+| File | Purpose |
+| --- | --- |
+| `Batcomputer-v1.0.0-win-x64.zip` | Versioned download for manual installation |
+| `Batcomputer-update-win-x64.zip` | The fixed filename used by the built-in updater |
+| The matching `.zip.sha256` | A small text checksum for that ZIP, not an installer |
+
+For **1.0.0**, both ZIPs contain exactly the same files and have the same SHA-256. Download only
+the versioned ZIP for a manual install; you do not need both. The two checksum files name their
+respective ZIPs, so the checksum files themselves need not have matching hashes.
+
+In PowerShell, run this against the ZIP you downloaded:
+
+```powershell
+Get-FileHash -Algorithm SHA256 -LiteralPath 'C:\Downloads\Batcomputer-v1.0.0-win-x64.zip'
+```
+
+Compare the full hash with the matching checksum from the same release. A mismatch means you
+should download again before extracting. Matching hashes check file integrity; use the official
+repository as the download source.
+
+## What players need
+
+Install a compatible **Loomirr's LOTDK UE4SS** framework before installing your generated mod.
+Players need the framework and the finished mod, not Batcomputer or Unreal Engine.
+See [Requirements](requirements.md), especially for Mayhem mode support.

@@ -1,5 +1,9 @@
 # Create your first suit
 
+This walkthrough makes a suit for an existing character. To create a separate roster entry,
+use [Custom characters](custom-characters.md). If you are unsure which base supplies appearance
+versus gameplay, read [Choose visual and gameplay donors](choosing-donors.md) first.
+
 This tutorial starts with the game's existing assets. Test one simple suit in-game before adding
 custom textures or meshes.
 

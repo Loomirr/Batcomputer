@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.0.0 — first official release
+
+Batcomputer 1.0 is here. Thanks to everyone who tested the betas and sent over broken projects.
+
+- Built-in [updates](../guides/app-updates.md), with version display, download verification,
+  restart controls, a completion prompt and application-file recovery.
+- Organized portable layout: one top-level launcher, with application dependencies under `app`.
+- Corrected native reference and skinned import scale handling. See the new
+  [Blender rig walkthrough](../guides/blender-rig-preparation.md).
+- Editable custom-character pawn-tag families while keeping project IDs and display names separate.
+- Joker/Harley base and packaging fixes, improved skeletal previews and saved-project recovery.
+- A dedicated [Import/Export](../guides/import-export.md) category, clearer Review and accurate Settings path checks.
+- The suit, character, vehicle, equipment and animation tools from the betas remain available.
+  Experimental workflows still have their own [limits](compatibility.md).
+
+See the [1.0 release notes](../releases/1.0.0.md) for download and upgrade information.
+The entries below describe earlier releases; they are not the current installation instructions.
+
 ## 1.0.0-beta.1 — Batcomputer 1.0 Beta
 
 This is a prerelease. Back up projects and saves. Mayhem/Both builds require updated LOTDKExpanded
@@ -15,8 +33,8 @@ with integrated character modes API 1; no standalone helper is bundled. Follow t
 - Vehicle-only builds, expanded vehicle authoring and donor choices; build-up models remain
   experimental and need their own gameplay check.
 - Skinned import/cook hardening, face replacement fixes, height-specific takedown options and
-  corrected paired-cape gameplay-donor dialogue. See the [acceptance notes](../guides/development-roadmap.md#after-this-release)
-  for tested scope and remaining limitations.
+  corrected paired-cape gameplay-donor dialogue. See [Compatibility and limits](compatibility.md)
+  for the current scope and remaining limitations.
 
 - Custom characters have their own editor and default suit, with additional suits grouped under the same character. See [Custom characters](../guides/custom-characters.md).
 - The [equipment workshop](../guides/equipment-workshop.md) supports custom models, model/settings copy and paste, and a shared UI-texture picker. Icon entries distinguish direct SDF inputs, material SDF inputs, upgrade icons, and BCA color textures.

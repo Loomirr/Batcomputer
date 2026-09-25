@@ -1,6 +1,6 @@
 # Custom characters
 
-The **Characters** tab creates independent playable roster entries, not additional suits under Batman or another native character. Custom characters and their suit variants have been tested in-game. The editor is still in beta, so back up your save before testing.
+The **Characters** tab creates independent playable roster entries, not additional suits under Batman or another native character. This workflow is included in 1.0. Keep a save and project backup when testing a new character or changing its runtime identity.
 
 ## Create a character
 
@@ -37,7 +37,11 @@ Both **Full character extraction** and **DeveloperResearch** include `PROG_Chara
 
 There is no fixed character-count cap imposed by this workflow, but game-side roster, save and performance limits have not been stress-tested. Characters use new group/progression packages and additive roster configuration rather than replacing native characters or `PROG_Characters`. Keep character IDs unique across installed mods: different Mod IDs alone do not make two identical pawn/character IDs independent.
 
-Do not install a proof/test mod and a new mod using the same character/pawn identities together. Remove the earlier proof first, or choose a different character ID.
+Do not install two builds using the same character/pawn identities together. Replace the earlier
+installation when updating the same mod; independent characters need unique identities.
+
+For an existing character, you can [change its pawn-tag family](character-identity.md) without
+changing its fixed ID or display name. The tutorial includes the Ivy/Freeze collision case.
 
 ## Current boundaries
 

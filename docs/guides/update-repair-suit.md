@@ -23,9 +23,8 @@ manual rebase is needed only when that exact package is not present or the game 
 ## Before you start
 
 1. Close the game and any asset tools using the same files.
-2. Back up `Batcomputer.settings.json`, `Generated/NativeSuitProjects`, and
-   `Generated/NativeSuitModProjects`.
-3. Keep the source images and OBJ files used by the project.
+2. [Back up the workspace](backups-and-moving.md), including settings, projects and shared authoring libraries.
+3. Keep the source images, OBJ/FBX files and Blender projects.
 
 ## 1. Make the dump current
 
@@ -58,7 +57,7 @@ After the rebase finishes, open **Base** and choose **Use as base**. This rebuil
 cutscene stages from the current dump and replays the saved parts, removals, materials, and custom
 mesh recipes.
 
-Beta 7 keeps the previous project and generated stages if replay fails. Read the first useful error
+Batcomputer keeps the previous project and generated stages if replay fails. Read the first useful error
 in Diagnostics instead of repeatedly pressing **Use as base**.
 
 ## 4. Fix anything that cannot replay
@@ -79,7 +78,8 @@ does not:
 - To refresh one texture after editing its saved image, right-click it and choose **Reimport
   image**. Choose **Replace image…** to select a different image while keeping the same package
   path and cook profile.
-- For a custom mesh, confirm its project-owned OBJ source still exists.
+- For a custom mesh, confirm its project-owned source still exists. For older skinned cooks, use
+  **Reimport saved FBX** after updating; use a new reference if the donor rig itself changed.
 - If both base templates are missing, return to the base picker and select the visual and gameplay
   donors again.
 

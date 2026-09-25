@@ -2,6 +2,29 @@
 
 ## Using Batcomputer
 
+### Will installing 1.0 over an older version keep my projects?
+
+Yes, if you close the app and merge the **whole** release ZIP into the same folder without deleting
+your settings or workspace. Back up first. Don't copy just the EXE, and don't delete the old folder
+before extracting. See [Install/update](../getting-started/install.md#updating-an-existing-installation).
+
+### Does the updater update my mods or UE4SS too?
+
+No. It updates Batcomputer's application files. Your projects, game files and installed mods stay
+where they are. The game-side framework is a separate installation. See [Updates](../guides/app-updates.md).
+
+### Can I change a custom character's pawn tag without changing its name?
+
+Yes. Edit **Pawn-tag family** on the default character's **Character identity & modes** screen.
+Its project ID stays fixed and child suits inherit the new family. Display names such as Poison Ivy
+are fine; native NPC tag families are reserved. [Follow the identity walkthrough](../guides/character-identity.md).
+
+### Why can't I import a player's release ZIP as an editable mod?
+
+That ZIP contains cooked installation files, not the complete authoring recipes and sources.
+Ask for **Export editable copy** instead, then use **Home → Import/Export → Import editable mod**.
+See [Import/Export](../guides/import-export.md) for the differences and conflict checks.
+
 ### Can a custom character have its own symbol?
 
 Yes. Load the character's default definition and open **Characters → Character symbol**.
@@ -16,7 +39,7 @@ in-game after installing the complete rebuilt release.
 
 ### How do I inspect a part in the character viewer?
 
-The **Character library** has separate My suits, Playable and Cutscene sources. Search by suit
+The **Character library** has saved-library, Playable and Cutscene sources. The saved library includes both character definitions and suits. Search by suit
 name, narrow native suits with the character filter, then double-click a row, press Enter or
 choose **Open in workshop**. Filtering keeps your selection when it remains in the results.
 
@@ -239,7 +262,7 @@ and cold-launch the game. The full walkthrough is in [Update or repair a suit](.
 ### Will rebasing erase my parts, materials, or custom meshes?
 
 Rebasing changes the saved base source paths. **Use as base** then replays the saved parts,
-removals, materials, and custom-mesh recipes. Beta 7 restores the previous project and generated
+removals, materials, and custom-mesh recipes. Batcomputer restores the previous project and generated
 stages if that replay fails, but you should still keep a backup before a game update.
 
 ### Why does the inspector show zero components after selecting a base?
@@ -334,10 +357,11 @@ BC5 stores only two normal channels, so choose BGRA8, DXT5, or BC7 when the mate
 
 ### Can I import a model?
 
-The beta supports verified OBJ static-mesh attachments. The development build also has an
+Batcomputer 1.0 supports OBJ static-mesh attachments and an
 experimental [existing-rig FBX workshop](../guides/skeletal-mesh-proof.md) for bodies and compatible
 parts. Rigging and weights must be prepared externally first; arbitrary skeleton transfer, facial
-rigs, cloth and skeletal equipment are not supported by this first pass.
+rigs and cloth are not supported. Native-rig skeletal equipment has its own
+[equipment workshop](../guides/equipment-workshop.md#skeletal-equipment) flow.
 
 ### Why did my custom mesh move back after another edit?
 
@@ -355,7 +379,7 @@ compatible playable bodies. It does not create, unlock, register, or package Red
 ### Why does a hip material error mention a torso, or a build say its stage is incomplete?
 
 Material changes replay the whole saved suit, so a previously failed part can block an unrelated
-material edit. The current development build fixes omitted native animation/component defaults and
+material edit. The current build preserves native animation/component defaults and fixes
 premature part/glider saves that could leave failed edits behind. Build Mod waits for saved-suit
 restoration and retries an incomplete stage once automatically, without rewriting the saved recipe.
 
@@ -372,8 +396,10 @@ only when the installed editor has a different compatible `BuildId`.
 
 ### Where is the installable ZIP action?
 
-Build the mod first. On **Home** → **Build mod**, choose the **Zip _mod name_** tile. The archive is
-already arranged above `LEGOBatmanLotDK` for extraction into the Steam `common` folder.
+Build the mod first. On **Home** → **Import/Export**, select the mod and choose **Create release ZIP**.
+Extract into the game's installation directory so the archive's `LEGOBatmanLotDK` folder merges with
+that existing folder. Check the paths before confirming; don't nest a second copy inside it.
+For editable handoffs, use **Export editable copy** instead. See [Import/Export](../guides/import-export.md).
 
 ### Why should I fully restart the game after installing a build?
 

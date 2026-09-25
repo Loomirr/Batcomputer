@@ -1,30 +1,48 @@
 # Character game modes
 
-Custom character definitions can choose **Normal**, **Mayhem**, or **Both** in **Characters → Character identity & modes**. Choose a native playable gameplay donor separately from the character's appearance; a villain's cutscene model is not itself a safe playable donor.
+Independent characters can be configured for **Normal**, **Mayhem**, or **Both**. This is separate
+from their visual base, gameplay donor and display name.
 
-1. Create/open the character definition and choose its game modes.
-2. Customize its base, appearance and equipment. Joker and Harley gameplay donors require their installed DLC assets.
-3. Add the character to a mod and build it. Additional suits inherit the saved character definition's mode setting.
-4. Install/export the complete release, not just the PAK trio. The per-plugin policy is read by the updated LOTDKExpanded DLL. No separate Mode Access DLL is packaged.
+## Set the mode
 
-Existing projects default to Normal. Changing this setting keeps the character ID and pawn tags unchanged. Both uses one character identity across the two modes, not two separate characters.
+1. Open **Characters** and load the character's default definition.
+2. Choose **Character identity & modes**.
+3. Set **Game modes** to Normal, Mayhem or Both and choose **Save details**.
+4. Keep the default definition and its enabled child suits together in the mod.
+5. Run **Check mod**, build and install the **whole release bundle**.
+6. Fully restart the game and test in each selected mode.
 
-## Experimental limitations
+Child suits inherit their parent's mode policy. The editor's **Mayhem Mode theme** only changes
+Batcomputer's colors; it does not set this policy.
 
-The revised crossover helper has passed reported in-game checks for previews in both modes, Mayhem hub entry and switching away from Batman. The user's normal saves also returned to their expected state. Those results do not establish the cause of the earlier save-summary issue or guarantee every authored character is safe. Back up saves and test each custom character separately.
+## Required framework
 
-Integrated character modes support Steam executable profile 1344350 and reject unknown builds. Mayhem requires the DLC. Batcomputer checks the installed LOTDKExpanded capability receipt and DLL hash before building Mayhem/Both characters. Roster access does not guarantee compatibility with every opposite-mode mission, cinematic, gadget or progression rule. Test with backed-up saves and restart after changing the policy.
+Mayhem/Both needs a compatible **LOTDKExpanded** installation with integrated **character modes
+API 1**. An older framework that loads ordinary suits is not necessarily enough. Batcomputer
+checks the installed capability information and matching runtime before allowing those builds.
 
-The optional `LOTDKJokerHarleyNormal` and `LOTDKHeroesMayhem` downloads are Lua-only controls for the integrated runtime. They expose registered native characters in the opposite mode and leave custom characters' explicit policies alone. They are not required for authored character modes.
+Install the framework's complete matching release, not a loose DLL from another build.
+The old standalone Mode Access helper is superseded by integrated support; follow the framework's
+migration instructions and do not run duplicate mode handlers. Batcomputer's application updater
+does not update your game-side framework.
 
-## Check a new character
+Native Joker/Harley gameplay donors also require their DLC to be installed. Refresh the full
+extraction and part index after installing DLC or updating mappings.
 
-- **Normal:** appears in the normal roster, not Mayhem.
-- **Mayhem:** appears in Mayhem, not the normal roster.
-- **Both:** the same character and its suits appear in both rosters.
+## Suits work, but my new character is missing
 
-Check first-hover previews, selection, changing away again, and hub entry. Additional suits inherit the character definition's setting. Change the definition, rebuild the whole mod, install its registry plugin, then restart with updated LOTDKExpanded; editing a child suit or copying only its PAK does not update availability.
+Check these in order:
 
-When upgrading, move the old `ue4ss/Mods/LOTDKModeAccess` folder outside Mods and disable its mods.txt entry if present. Do not remove LOTDKExpanded. The integrated feature refuses to patch while the legacy DLL remains installed. Old configuration files remain compatible, but rebuild old releases to stop distributing the helper.
+1. Verify the new **character definition**, not just an extra suit, is enabled in the built mod.
+2. Check its chosen mode and test in that mode after a cold restart.
+3. Confirm the mod's registry plugin, tag configuration and pak/ucas/utoc trio all came from the same build.
+4. Confirm the installed framework loaded successfully and supports the selected mode.
+5. Check for a duplicate character/pawn-tag family, including conflicts with native NPC families.
+6. Remove duplicate older installations of this same mod before testing the replacement.
 
-If integrated character modes reject the game build or fail to initialize, native roster rules remain; requested modes are not guaranteed. Check `[LOTDKExpanded:CharacterModes]` in `UE4SS.log`. The integrated DLL has local test coverage and needs a fresh in-game acceptance run before uploading.
+For a character displayed as **Poison Ivy** or **Mr Freeze**, keep that display name but use a
+unique [pawn-tag family](character-identity.md). A readable pak alone cannot rule out a runtime
+identity conflict. Don't remake the whole character or reset your game save just to try another tag.
+
+Mode availability is not story casting, a new voice set or a promise that every mission/co-op
+context supports the selected donor. Test the actual gameplay contexts you plan to advertise.

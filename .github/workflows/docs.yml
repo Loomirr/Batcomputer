@@ -7,6 +7,7 @@ on:
       - "docs/**"
       - "mkdocs.yml"
       - "requirements-docs.txt"
+      - "Tools/Documentation/**"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
@@ -38,6 +39,9 @@ jobs:
 
       - name: Build documentation
         run: mkdocs build --strict --site-dir _site
+
+      - name: Check pages, assets and anchors
+        run: python Tools/Documentation/check_site.py _site
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5

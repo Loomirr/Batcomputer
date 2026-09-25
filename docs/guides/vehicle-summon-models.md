@@ -11,8 +11,8 @@ A vehicle can have more than one visible model. Importing the driving body does 
 
 This covers the active parked car, not every display stand or thumbnail in the game.
 
-!!! warning "Development importer"
-    In the development build, use **Body & setup → Assembly model** for a summon FBX. Finish the [normal driving-model workflow](vehicles.md) first. The assembly import requires the chosen donor's separate summon skeleton; do not put it in the driving-body slot. The build-up animation and parked appearance still need an in-game check.
+!!! warning "Experimental assembly importer"
+    Use **Body & setup → Assembly model** for a summon FBX. Finish the [normal driving-model workflow](vehicles.md) first. The assembly import requires the chosen donor's separate summon skeleton; do not put it in the driving-body slot. The build-up animation and parked appearance still need an in-game check.
 
 **Use matching body materials** is on by default and matches slots by their original names, not their order. Turn it off to keep materials assigned in the assembly importer. **Use native assembly** removes the replacement from the vehicle recipe but keeps its imported source files. Custom bone-count build-up rigs are not supported by this importer yet.
 
@@ -73,12 +73,22 @@ Move one group at a time in Blender Pose Mode. Whole pieces should move together
 
 A one-piece control can assign the entire model to a single non-root summon bone while retaining the full rig. It helps test mesh references and completion without evaluating a detailed build-up. It does not provide individual LEGO assembly behavior.
 
-The test exporter preserves the earlier driving model's geometry and material palette while replacing its skin weights and rig for the summon copies. Its FBXs have been cooked against the native summon skeleton; the prepared `.blend` is an inspection copy, not a promise that any Blender FBX preset preserves the same bind transforms.
+Preserve the driving model's final assembled shape and material-slot names while preparing the
+summon copy's weights. A correct Blender preview does not prove the FBX exporter preserved its
+bind transforms; validate the exported mesh against the summon donor.
 
-## What Batcomputer still needs to handle
+## Import, build and test the assembly model
 
-The intended in-tool flow is: **validated driving body → optional summon-model import → assembled alignment check → grouped preview → build**. That summon portion is not implemented yet.
+1. Finish and save the driving body first.
+2. Open **Body & setup → Assembly model** and export that donor's summon reference.
+3. Prepare the separate weighted model, then import its FBX with scale **1.0000**.
+4. Compare the final assembled shape and assign materials. Review **Use matching body materials** if slot names differ.
+5. Save the vehicle and rebuild its mod. Install the complete release and cold-launch the game.
+6. Test summoning, completion into the driving body, dismissing and the active parked car in the Batcave.
 
-A complete implementation needs to cook and validate the second model, assign its materials, and update **both** the gameplay summon component and the active Batcave equipped actor. The native completion, mesh-swap and reverse/dismiss behavior must remain intact. Only changing the menu actor will not fix the parked car.
+Assembly behavior remains experimental and can vary by donor. If driving works but summon/parked
+appearance is invisible or distorted, report that separately with both donor and mesh names. Do
+not replace the working driving rig to compensate for a failed summon model.
 
-Until those tests pass, keep the normal driving recipe and summon source separate. An authored destruction/debris system, different collision rig, extra animated mechanical parts, display-stand replacements and custom 2D icons are separate work—not features supplied automatically by a summon mesh.
+Destruction/debris authoring, new collision rigs and arbitrary display-stand replacements are not
+supplied by this importer. The [vehicle menu icon](vehicles.md#vehicle-menu-icon) is a separate 2D image.

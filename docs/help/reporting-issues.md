@@ -21,6 +21,19 @@ Use the repository's [bug report form](https://github.com/Loomirr/Batcomputer/is
 Also include the build-check findings and the final build section. If possible, say whether the
 same suit builds without the newest texture, material, part, or custom mesh.
 
+## For meshes or missing characters
+
+- **Skinned mesh:** give the native donor/component, Blender version and export settings. Include
+  the relevant `rig-comparison.json`, `import.log` and `cook.log` text. Say whether the problem
+  occurs at import, in the preview, or only under an in-game animation.
+- **Viewer:** identify native versus custom geometry, what is hidden in the assembly list,
+  and whether another character previews correctly. For vehicles, mention safe-preview settings.
+- **Character discovery:** include the character ID, pawn-tag family, selected game modes,
+  gameplay donor and installed framework version. State whether the default character or only an
+  extra suit is missing, and whether the complete registry/tag/trio bundle was installed.
+- **Updater:** include old/new app versions and the transaction's status/error text. Do not post
+  a whole workspace or recovery archive when a short log excerpt will do.
+
 ## Protect your machine and game data
 
 - Do not upload `.pak`, `.ucas`, `.utoc`, `.uasset`, `.uexp`, `.ubulk`, or extracted game assets.
@@ -32,7 +45,7 @@ same suit builds without the newest texture, material, part, or custom mesh.
 ## A good minimal report
 
 ```text
-Batcomputer: 0.9.0-beta.10
+Batcomputer: 1.0.0
 Game/mappings: <build and date>
 Action: Build Mod
 Expected: release installs

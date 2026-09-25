@@ -30,6 +30,20 @@ theme:
 plugins:
   - search
 
+# Keep dated investigations in the repository, not in user-facing site search.
+exclude_docs: |
+  /research/
+  /guides/custom-equipment-proof.md
+  /guides/equipment-inventory.md
+  /guides/development-roadmap.md
+  /releases/1.0.0-beta.3.md
+
+validation:
+  links:
+    not_found: warn
+    anchors: warn
+    unrecognized_links: warn
+
 markdown_extensions:
   - admonition
   - attr_list
@@ -54,22 +68,30 @@ nav:
       - First-time setup: getting-started/setup.md
   - Tutorials:
       - Create your first suit: guides/first-suit.md
+      - Choose visual and gameplay donors: guides/choosing-donors.md
       - Custom characters: guides/custom-characters.md
+      - Change a character's identity: guides/character-identity.md
       - Character game modes: guides/character-modes.md
       - Character 3D workshop: guides/character-workshop.md
       - Update or repair a suit: guides/update-repair-suit.md
+      - Review and remove edits: guides/review-changes.md
+      - Back up and move a workspace: guides/backups-and-moving.md
       - Materials, textures, and faces: guides/materials-textures-faces.md
       - Character animations: guides/animations.md
       - Suit abilities: guides/abilities.md
+      - Custom held-item models: guides/weapon-model-editor-plan.md
       - Custom equipment: guides/equipment-workshop.md
       - Custom vehicles (experimental): guides/vehicles.md
       - Vehicle summon and parked models: guides/vehicle-summon-models.md
       - Custom static meshes: guides/custom-meshes.md
       - Skinned meshes (experimental): guides/skeletal-mesh-proof.md
+      - Prepare a rig in Blender: guides/blender-rig-preparation.md
       - Build, test, and share: guides/build-test-share.md
+      - Import and export projects: guides/import-export.md
   - Reference:
       - Workspace and files: reference/workspace.md
-      - Compatibility and beta limits: reference/compatibility.md
+      - Settings and preview performance: reference/settings.md
+      - Compatibility and limits: reference/compatibility.md
       - Frequently asked questions: reference/faq.md
       - Changelog: reference/changelog.md
       - Third-party notices: reference/third-party-notices.md
