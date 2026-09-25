@@ -3,12 +3,12 @@
 ## 1.0.0 — first official release
 
 - Replaces the Windows update-completion message box with the shared themed dialog, including the installed version, verification status, recovery guidance and a Back to workshop action. The prompt still appears only after confirmed startup and only once per update.
-- Completes the first live GitHub full-ZIP updater test: download, verification, install, runtime startup, rollback and settings/project preservation passed. The author also confirmed the in-app restart and completion prompt. Changed-file updates have local regression coverage; a separate live GitHub incremental test remains outstanding.
+- Download updates in-app and choose when to restart. Existing settings and projects stay in place, with application-file backups available for recovery.
 - Retains the organized portable layout, skeletal fixes, character workflow improvements and updater introduced during the 1.0 betas. Pre-1.0 releases remain legacy/manual-only.
 
 ## 1.0.0-beta.3 — 2026-09-24
 
-- First GitHub updater prerelease test. Uses the full ZIP on the live feed; changed-file downloads are separately covered by local acceptance tests.
+- Adds GitHub updates with full-ZIP downloads for this release.
 - Marks pre-1.0 releases as legacy and excludes them from updater discovery and downloads, without an exception for testing. All 1.0 betas remain eligible.
 - Rebuilds ACL/retoc helpers from pinned sources, includes collected dependency notices, and uses only a configured local Oodle runtime (no runtime download fallback).
 
@@ -16,8 +16,8 @@
 - Fixes updater executable-version checks in Windows staging paths longer than MAX_PATH. Adds disposable selective-download, dependency-repair, corrupt-payload and subset-rollback tests.
 - Simplifies the Update center around the supplied Batcomputer model, with a hinged lever animation, activity-driven illuminated buttons, one primary action and expandable notes/settings/logs. Assets are bundled offline; motion can be paused, follows reduced-motion preference and stops while hidden. A still image handles WebGL failure and native controls remain available if WebView2 fails.
 - Redesigns the Update center with version/channel cards, a four-step progress track, release notes and live activity, and a single context-sensitive action. Startup confirmation refreshes in-place; verified downloads survive closing/reopening the menu. Adds disposable full-app tests and slow-download/bad-checksum scenarios.
-- Shows the installed version below the logo, in the title bar and in Settings. Adds manual GitHub update checks, beta/stable selection, opt-in startup notifications, verified downloads, install-on-exit and retained recovery backups. Includes a loopback-only updater test setup with two disposable builds; no GitHub release is needed for local testing. Independent release signatures remain follow-up work.
-- Corrects the recognized Blender 100× root-unit representation before skeletal cooking, rebuilds inverse bind matrices, and requires the cooked root to match the native donor. Earlier cached skinned imports require Reimport saved FBX. The supplied Minifig08 test retains its vertex positions and weights; the user confirmed all four in-game tests passed, covering the body alone, head/face, capes, and all parts together.
+- Shows the installed version below the logo, in the title bar and in Settings. Adds manual GitHub update checks, beta/stable selection, opt-in startup notifications, verified downloads, install-on-exit and retained recovery backups.
+- Corrects the recognized Blender 100× root-unit representation before skeletal cooking, rebuilds inverse bind matrices, and requires the cooked root to match the native donor. This fixes oversized or distorted imported bodies and attachments. Earlier cached skinned imports require Reimport saved FBX.
 - Adds an editable pawn-tag family for existing custom characters while preserving project IDs, display names, asset paths and progression IDs. Saved family projects are backed up and synchronized; rebuild and reinstall the whole mod after changing the family.
 - Detects both native character-group filename conventions so reserved NPC families cannot silently collide with custom characters.
 - Fixes skeletal preview exports rejected for transformed skinned nodes, without applying a second centimetre-to-metre conversion to mesh vertices.
