@@ -1,0 +1,14 @@
+[
+  {"Package":"blake3/2.2.1","Repository":"https://github.com/xoofx/Blake3.NET","Commit":"d27b9f55fa9a8e0fe3a737130da1465534085196","Evidence":"NuGet repository commit and upstream tag 2.2.1"},
+  {"Package":"infrablack.ue4config/0.7.2.97","Repository":"https://github.com/Wortex17/UE4Config","Commit":"c9d059b6b793d4c2ed57b825b3b0d2882049b1a6","Evidence":"Upstream v0.7.2 tag; package build suffix .97 is not independently matched"},
+  {"Package":"k4os.compression.lz4/1.3.8","Repository":"https://github.com/MiloszKrajewski/K4os.Compression.LZ4","Commit":"f5a25b7d72e2e41550fe20662597169ff11c3b60","Evidence":"Upstream tag 1.3.8"},
+  {"Package":"k4os.compression.lz4.streams/1.3.8","Repository":"https://github.com/MiloszKrajewski/K4os.Compression.LZ4","Commit":"f5a25b7d72e2e41550fe20662597169ff11c3b60","Evidence":"Upstream tag 1.3.8"},
+  {"Package":"k4os.hash.xxhash/1.0.8","Repository":"https://github.com/MiloszKrajewski/K4os.Hash.xxHash","Commit":"c36ef54edbd778c082cab04df7e42cb72a22d887","Evidence":"Upstream tag 1.0.8"},
+  {"Package":"lzma-sdk/22.1.1","Repository":"https://github.com/monemihir/LZMA-SDK","Commit":"addb9c8758ebdd131050b8f1e90a0a4a511c4d99","Evidence":"Upstream nuspec release commit following assembly version 22.1.1 bump"},
+  {"Package":"naudio.core/2.2.1","Repository":"https://github.com/naudio/NAudio","Commit":"b5d5ff83fd378f046398891fe5cd99426ce44732","Evidence":"Upstream tag v2.2.1"},
+  {"Package":"oggvorbisencoder/1.2.2","Repository":"https://github.com/SteveLillis/.NET-Ogg-Vorbis-Encoder","Commit":"39b951974a5b4c07dc7daac9b107c0fb16811d5f","Evidence":"Upstream release commit Bump version to v1.2.2"},
+  {"Package":"sharpgltf.core/1.0.0-alpha0023","Repository":"https://github.com/vpenades/SharpGLTF","Commit":"c1e41bd94cedc8b37667b202c463f1d50182e14c","Evidence":"Upstream tag 1.0.0-alpha23 (package uses zero-padded alpha0023)"},
+  {"Package":"sharpgltf.toolkit/1.0.0-alpha0023","Repository":"https://github.com/vpenades/SharpGLTF","Commit":"c1e41bd94cedc8b37667b202c463f1d50182e14c","Evidence":"Upstream tag 1.0.0-alpha23 (package uses zero-padded alpha0023)"},
+  {"Package":"substreamsharp/1.0.3","Repository":"https://github.com/connorhaigh/SubstreamSharp","Commit":"ab2f97da671a511fe956b06ea25e39992e504b08","Evidence":"Upstream tag v1.0.3"},
+  {"Package":"vgaudio/2.2.1","Repository":"https://github.com/Thealexbarney/VGAudio","Commit":"9c40e30baf4b5ab66dac07522adef4192d9a2e19","Evidence":"Upstream tag v2.2.1"}
+]

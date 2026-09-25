@@ -1,0 +1,5 @@
+offiutils/3.2.0
+Source basis: Repository commit declared by the resolved NuGet package
+These notices do not certify the composition of prebuilt native dependencies.
+
+licenses/dependencies/offiutils-3.2.0/LICENSE.txt | https://raw.githubusercontent.com/NotOfficer/Utils/3c6391fac38e2de58eb6bcfa399bba78645bce4f/LICENSE | SHA256 92b7deb769992d1737239cd5928ebd27e4d768e9671e54096224b46bcdf28bbb

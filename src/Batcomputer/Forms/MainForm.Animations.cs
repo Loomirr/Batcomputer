@@ -1337,18 +1337,24 @@ public sealed partial class MainForm
             : [common];
     }
 
-    private static ProcessStartInfo NewRetocStartInfo(string retoc, string workingDirectory) => new()
+    private static ProcessStartInfo NewRetocStartInfo(string retoc, string workingDirectory)
     {
-        FileName = retoc,
-        WorkingDirectory = workingDirectory,
-        UseShellExecute = false,
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        CreateNoWindow = true,
-    };
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = retoc,
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+        RetocRuntime.Configure(startInfo);
+        return startInfo;
+    }
 
     private static async Task<RetocCommandResult> RunRetocCommandAsync(ProcessStartInfo startInfo)
     {
+        RetocRuntime.Configure(startInfo);
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Could not start retoc.exe.");
         var stdoutTask = process.StandardOutput.ReadToEndAsync();

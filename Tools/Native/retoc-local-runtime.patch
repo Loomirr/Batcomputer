@@ -1,0 +1,12 @@
+diff --git a/retoc/src/iostore_writer.rs b/retoc/src/iostore_writer.rs
+--- a/retoc/src/iostore_writer.rs
++++ b/retoc/src/iostore_writer.rs
+@@ -65,7 +65,7 @@ impl IoStoreWriter {
+         // Unreal leaves the lookup header and memory-mapped payloads raw. Keeping
+         // those chunks raw avoids changing the loader contract while normal cooked
+         // assets and bulk data can still use Oodle.
+-        let allow_compression = !matches!(
++        let allow_compression = std::env::var_os("BATCOMPUTER_OODLE_DLL").is_some() && !matches!(
+             chunk_id.get_chunk_type(),
+             EIoChunkType::ContainerHeader | EIoChunkType::MemoryMappedBulkData
+         );

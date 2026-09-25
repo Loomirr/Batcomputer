@@ -1,0 +1,5 @@
+assetripper.texturedecoder/2.6.2
+Source basis: Repository commit declared by the resolved NuGet package
+These notices do not certify the composition of prebuilt native dependencies.
+
+licenses/dependencies/assetripper.texturedecoder-2.6.2/LICENSE.txt | https://raw.githubusercontent.com/AssetRipper/TextureDecoder/3cf2170242259918235c49d37850d4cea91f9d15/LICENSE | SHA256 dae6148ff7ad3331a6380a2ce0cbb87f71b8f177891aba1661b1d3a6fe52d5de

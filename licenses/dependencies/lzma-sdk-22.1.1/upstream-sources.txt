@@ -1,0 +1,5 @@
+lzma-sdk/22.1.1
+Source basis: Upstream nuspec release commit following assembly version 22.1.1 bump
+These notices do not certify the composition of prebuilt native dependencies.
+
+licenses/dependencies/lzma-sdk-22.1.1/LICENSE.txt | https://raw.githubusercontent.com/monemihir/LZMA-SDK/addb9c8758ebdd131050b8f1e90a0a4a511c4d99/LICENSE | SHA256 cbb9d941b9bf6bdb083bb64ba28e927b5fcbc6b14996b3143cfeff0c437e0ba8

@@ -1,5 +1,6 @@
 """Headless UE 5.6 import. Input JSON is data, never Python code supplied by the FBX."""
 import json
+import math
 from pathlib import Path
 import unreal
 
@@ -36,6 +37,60 @@ meshes = [m for m in meshes if isinstance(m, unreal.SkeletalMesh)]
 if len(meshes) != 1:
     raise RuntimeError("Expected exactly one imported skeletal mesh.")
 mesh = meshes[0]
+# Imported root-unit scales are real hierarchy transforms, not harmless metadata.
+# Normalize only the x100 FBX conversion when every other native local pose agrees.
+# Unreal's modifier rebuilds the inverse bind matrices from the corrected hierarchy.
+modifier = unreal.SkeletonModifier()
+if not modifier.set_skeletal_mesh(mesh):
+    raise RuntimeError("Could not inspect the imported reference skeleton.")
+expected = config["donor_bones"]
+names = [str(n) for n in modifier.get_all_bone_names()]
+if len(names) != len(expected) or set(names) != {b["name"] for b in expected}:
+    raise RuntimeError("Imported bones do not match the native donor. Keep the complete native rig and remove exporter helper/leaf bones.")
+root_correction = None
+poses = {name: modifier.get_bone_transform(name, False) for name in names}
+native_root = next(b for b in expected if b["parent"] == -1)
+root_scale = poses[native_root["name"]].scale3d
+has_root_units = all(abs(v - 100.0) < 0.0001 for v in (root_scale.x, root_scale.y, root_scale.z)) and all(abs(v - 1.0) < 0.00001 for v in native_root["scale"])
+def translation_error(factor):
+    return max(math.dist(tuple(v * factor for v in (poses[b["name"]].translation.x, poses[b["name"]].translation.y, poses[b["name"]].translation.z)), b["translation"]) for b in expected)
+translation_factor = 1.0
+if has_root_units and translation_error(1.0) > 0.001 and translation_error(100.0) <= 0.001:
+    translation_factor = 100.0
+corrected_names, corrected_poses = [], []
+for bone in expected:
+    name = bone["name"]
+    parent = str(modifier.get_parent_name(name))
+    expected_parent = expected[bone["parent"]]["name"] if bone["parent"] >= 0 else "None"
+    if parent != expected_parent:
+        raise RuntimeError("Native bone parent mismatch at " + name)
+    transform = poses[name]
+    t, q, s = transform.translation, transform.rotation, transform.scale3d
+    translation = math.dist(tuple(v * translation_factor for v in (t.x, t.y, t.z)), bone["translation"])
+    actual_q = (q.x, q.y, q.z, q.w)
+    expected_q = bone["rotation"]
+    dot = sum(a * b for a, b in zip(actual_q, expected_q))
+    rotation = max(0.0, 1.0 - abs(dot))
+    scales = (s.x, s.y, s.z)
+    difference = max(abs(a - b) for a, b in zip(scales, bone["scale"]))
+    finite = all(math.isfinite(v) for v in (*actual_q, *scales, translation, rotation))
+    root_units = bone["parent"] == -1 and all(abs(b - 1.0) < 0.00001 for b in bone["scale"]) and all(abs(a - 100.0) < 0.0001 for a in scales)
+    if not finite or translation > 0.001 or rotation > 0.00001 or (difference > 0.00001 and not root_units):
+        raise RuntimeError("Native rest-pose mismatch at %s: translation %.6g cm, rotation metric %.6g, scale difference %.6g. Preserve the donor rest pose." % (name, translation, rotation, difference))
+    if root_units:
+        root_correction = name
+    corrected = unreal.Transform()
+    corrected.translation = unreal.Vector(*bone["translation"])
+    corrected.rotation = unreal.Quat(*bone["rotation"])
+    corrected.scale3d = unreal.Vector(*bone["scale"])
+    corrected_names.append(name)
+    corrected_poses.append(corrected)
+if root_correction:
+    # Bake the confirmed unit representation into native local translations and
+    # remove its root scale together. Rebuild inverse binds from that hierarchy.
+    if not modifier.set_bones_transforms(corrected_names, corrected_poses, True) or not modifier.commit_skeleton_to_skeletal_mesh():
+        raise RuntimeError("Could not normalize the FBX root units and rebuild the bind matrices.")
+    unreal.log("Batcomputer: normalized x100 FBX root units; kept mesh vertices, weights and native child local poses.")
 materials = []
 slots = []
 for index, existing in enumerate(mesh.materials):
@@ -53,5 +108,5 @@ unreal.EditorAssetLibrary.save_loaded_asset(mesh.get_editor_property("skeleton")
 unreal.EditorAssetLibrary.save_loaded_asset(mesh)
 (root / "import-result.json").write_text(json.dumps({
     "mesh": mesh.get_path_name(), "skeleton": mesh.get_editor_property("skeleton").get_path_name(),
-    "slots": slots,
+    "slots": slots, "root_unit_correction": root_correction is not None,
 }), encoding="utf-8")

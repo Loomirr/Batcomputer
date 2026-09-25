@@ -27,6 +27,18 @@ internal static class CustomCharacterUiRegressionChecks
                 results.Add((boxes.Length == 4 && boxes.All(box => box.Width >= 180 && box.Height >= (box.Multiline ? 50 : box.PreferredHeight)) && boxes.Single(box => box.Text == "MoonKnight").ReadOnly,
                     "character identity fields remain usable at minimum width and permanent IDs are read-only"));
                 using var create = new CharacterIdentityDialog("New suit", "Suit ID", "Unhooded", ownerId: "MoonKnight");
+                using var editable = new CharacterIdentityDialog("Character identity", "ID", "Poison Ivy", "PoisonIvy", lockedId: true, pawnOwner: "PlayableIvyTest");
+                var pawnField = (TextBox)typeof(CharacterIdentityDialog).GetField("_pawnOwner", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(editable)!;
+                pawnField.Text = "AnotherIvyTest";
+                results.Add((editable.TechnicalId == "PoisonIvy" && editable.PawnOwnerValue == "AnotherIvyTest" && !pawnField.ReadOnly &&
+                    ((TextBox)typeof(CharacterIdentityDialog).GetField("_preview", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(editable)!).Text.Contains("Pawns.Playable.AnotherIvyTest.PoisonIvy"),
+                    "identity editor changes runtime family independently of the fixed project ID"));
+                using var review = new ChangeReviewControl();
+                var staged = new SavedChange { Category = "Parts", Target = "Head", Status = "staged", Detail = "Full staged detail" };
+                review.ShowChanges("Test", [staged, new() { Category = "Materials", Target = "Body", Status = "applied" }], _ => Task.CompletedTask);
+                ((ComboBox)typeof(ChangeReviewControl).GetField("_status", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(review)!).SelectedItem = "staged";
+                var rows = ((DataGridView)typeof(ChangeReviewControl).GetField("_list", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(review)!).Rows;
+                results.Add((rows.Count == 1 && ReferenceEquals(rows[0].Tag, staged), "review status filtering retains the correct original edit for removal"));
                 using var symbol = new CharacterSymbolDialog("Moon Knight", "");
                 _ = symbol.Handle; symbol.PerformLayout();
                 results.Add((Descendants(symbol).OfType<Button>().Any(b => b.Name == "import-symbol") &&

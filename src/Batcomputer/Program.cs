@@ -18,10 +18,85 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Length >= 2 && args[0] is "--apply-app-update" or "--rollback-app-update")
+            return AppUpdateInstaller.RunHelper(args);
+        if (args.Length == 0 && new DirectoryInfo(AppSettings.ToolRoot).Name == "helper")
+        {
+            var transaction = Directory.GetParent(AppSettings.ToolRoot)?.FullName;
+            if (transaction != null && File.Exists(Path.Combine(transaction, "journal.json")))
+            {
+                if (MessageBox.Show("Restore the application files backed up by this update?\n\nClose Batcomputer first. Settings and projects will not be changed.",
+                    "Batcomputer update recovery", MessageBoxButtons.OKCancel) == DialogResult.OK)
+                {
+                    var result = AppUpdateInstaller.RunHelper(new[] { "--rollback-app-update", transaction });
+                    MessageBox.Show(result == 0 ? "Previous application files restored. You can reopen Batcomputer from its usual folder."
+                        : "Recovery could not finish. Check status.txt in the update folder for details.", "Batcomputer update recovery");
+                    return result;
+                }
+                return 0;
+            }
+        }
+        if (args.Length == 2 && args[0] == "--verify-app-updater")
+            return AppUpdateRegressionChecks.Run(args[1]);
+        if (args.Length == 3 && args[0] == "--verify-updater-fixture")
+            return AppUpdateFixtureCheck.Run(args[1],args[2]);
+        if (args.Length == 2 && args[0] == "--verify-updater-github-fixture")
+            return AppUpdateFixtureCheck.Run(args[1],null,fullZip:true);
+        if (args.Length == 4 && args[0] == "--verify-updater-fixture" && args[3] == "--full-zip")
+            return AppUpdateFixtureCheck.Run(args[1],args[2],fullZip:true);
+        if (args.Length == 1 && args[0] == "--updater-test-runtime")
+        {
+            if (!File.Exists(Path.Combine(AppSettings.ToolRoot,AppUpdateInstaller.SandboxMarker))
+                && !File.Exists(Path.Combine(AppSettings.ToolRoot,AppUpdateInstaller.GitHubTestMarker))) return 1;
+            AppUpdateService.ValidatePayloadVersion(AppSettings.ToolRoot,AppVersion.Current);
+            File.WriteAllText(Path.Combine(AppSettings.ToolRoot,"updater-runtime-version.txt"),AppVersion.Current);
+            return 0;
+        }
+        if (args.Length == 1 && args[0] == "--updater-test-helper")
+            return AppUpdateFixtureCheck.VerifyHelper();
+        if (args.Length == 3 && args[0] is "--create-app-update" or "--create-app-update-files")
+        {
+            try
+            {
+                if (args[0] == "--create-app-update-files") AppUpdatePackageService.CreateWithFilePayloads(args[1], args[2]);
+                else AppUpdatePackageService.Create(args[1], args[2]);
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Directory.CreateDirectory(args[2]);
+                File.WriteAllText(Path.Combine(args[2], "package-error.txt"), ex.ToString());
+                return 1;
+            }
+        }
+        using var appUpdateLock = TryAcquireAppUpdateLock();
+        if (appUpdateLock == null) return 1;
         // Load user path settings (next to the .exe) for both CLI and GUI modes.
         // Empty/invalid fields fall back to built-in defaults, so this is safe even
         // with no settings file present.
         AppSettings.Current = AppSettings.Load();
+
+        if (args.Length == 1 && args[0] == "--updater-test-install")
+        {
+            try
+            {
+                var marker = Path.Combine(AppSettings.ToolRoot, AppUpdateInstaller.SandboxMarker);
+                if (!File.Exists(marker)) throw new InvalidOperationException("Not an updater sandbox.");
+                using var service = new AppUpdateService(new Uri(File.ReadAllText(marker).Trim()));
+                using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+                var release = service.CheckAsync(true, timeout.Token).GetAwaiter().GetResult()
+                    ?? throw new InvalidOperationException("No newer local test release.");
+                var staged = service.DownloadAsync(release, AppUpdateInstaller.NewTransaction(AppSettings.ToolRoot), null, timeout.Token).GetAwaiter().GetResult();
+                File.WriteAllText(Path.Combine(AppSettings.ToolRoot, "updater-test-transaction.txt"), staged.Directory);
+                AppUpdateInstaller.Schedule(staged);
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                File.WriteAllText(Path.Combine(AppSettings.ToolRoot, "updater-test-error.txt"), ex.ToString());
+                return 1;
+            }
+        }
 
         if (args.Length >= 4 && args[0].Equals("--preview-probe", StringComparison.OrdinalIgnoreCase))
         {
@@ -863,6 +938,22 @@ internal static class Program
         Theme.ApplyDarkTitleBarsAppWide();
         Animator.Enabled = AppSettings.Current.AnimationsEnabled;
 
+        var sandboxMarker = Path.Combine(AppSettings.ToolRoot, AppUpdateInstaller.SandboxMarker);
+        if ((args.FirstOrDefault() == "--updater-test-feed" || File.Exists(sandboxMarker)) && !AppUpdateTestEnvironment.FullApp)
+        {
+            if (!File.Exists(sandboxMarker))
+            {
+                Dialog.Error(null, "Updater test", "Use the disposable folder created by Tools/Updater/Start-LocalUpdateTest.ps1.");
+                return 1;
+            }
+            var feed = args.Length == 2 && args[0] == "--updater-test-feed" ? args[1] : File.ReadAllText(sandboxMarker).Trim();
+            using var updates = new AppUpdatesForm(new Uri(feed));
+            if (args.Length == 2 && args[0] == "--app-update-health")
+                updates.Shown += (_, _) => AppUpdateCompletion.AfterShown(updates, args[1]);
+            Application.Run(updates);
+            return 0;
+        }
+
         if (args.Length == 3 && args[0].Equals("--build-vehicle-mod", StringComparison.OrdinalIgnoreCase))
         {
             using var context = new HeadlessModBuildContext(args[1], "", args[2]);
@@ -912,7 +1003,7 @@ internal static class Program
         // automatically from the portable install.
         var initialExtractionRequested = false;
         var registryWriterPreparationRequested = false;
-        if (!AppSettings.Current.IsUsable())
+        if (!AppSettings.Current.IsUsable() && !AppUpdateTestEnvironment.FullApp)
         {
             using var setup = new FirstRunWizard(AppSettings.Current);
             setup.ShowDialog();
@@ -936,6 +1027,21 @@ internal static class Program
         }
 
         var mainForm = new MainForm();
+        if (args.Length == 2 && args[0] == "--app-update-health")
+            mainForm.Shown += (_, _) => AppUpdateCompletion.AfterShown(mainForm, args[1]);
+        if (AppSettings.Current.CheckForAppUpdatesOnStartup)
+            mainForm.Shown += async (_, _) =>
+            {
+                try
+                {
+                    using var service = new AppUpdateService(AppUpdateTestEnvironment.Feed);
+                    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                    var release = await service.CheckAsync(AppSettings.Current.IncludeBetaAppUpdates, timeout.Token);
+                    if (release != null && !mainForm.IsDisposed && !mainForm.Disposing)
+                        mainForm.NotifyAppUpdate(release);
+                }
+                catch { /* An optional network check must never interrupt startup or claim success. */ }
+            };
         if (initialExtractionRequested || registryWriterPreparationRequested)
         {
             mainForm.Shown += async (_, _) => await mainForm.RunInitialSetupTasksAsync(
@@ -947,6 +1053,17 @@ internal static class Program
     }
 
     private static int _handlingGuiCrash;
+
+    private static FileStream? TryAcquireAppUpdateLock()
+    {
+        try { return AppUpdateInstaller.AcquireAppLock(AppSettings.ToolRoot); }
+        catch (Exception ex)
+        {
+            MessageBox.Show("Batcomputer cannot open while its application folder is being updated, or if that folder is not writable.\n\n" + ex.Message,
+                "Batcomputer", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return null;
+        }
+    }
 
     private sealed class HeadlessModBuildContext : ApplicationContext
     {

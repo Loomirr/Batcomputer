@@ -57,7 +57,7 @@ internal static class EmbeddedAssets
 
     private static IEnumerable<string> DiskRoots()
     {
-        yield return Path.Combine(AppContext.BaseDirectory, "Assets");
+        yield return Path.Combine(AppSettings.ToolRoot, "Assets");
         if (!string.Equals(Application.StartupPath, AppContext.BaseDirectory, StringComparison.OrdinalIgnoreCase))
         {
             yield return Path.Combine(Application.StartupPath, "Assets");

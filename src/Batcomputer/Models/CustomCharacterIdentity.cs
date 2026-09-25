@@ -7,6 +7,9 @@ public sealed class CustomCharacterIdentity
 {
     public bool IsDefinition { get; set; }
     public string CharacterId { get; set; } = "";
+    // Stable project IDs and asset paths are independent from the runtime roster identity.
+    // Empty preserves the historical Pawns.Playable.<CharacterId> family.
+    public string PawnTagOwner { get; set; } = "";
     public string DefinitionSlotId { get; set; } = "";
     public string VariantId { get; set; } = "";
     // Advanced material override. An imported PNG takes precedence; empty retains the donor emblem.

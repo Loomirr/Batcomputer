@@ -1,0 +1,5 @@
+oodlesharp/0.0.1
+Source basis: Repository commit declared by the resolved NuGet package
+These notices do not certify the composition of prebuilt native dependencies.
+
+licenses/dependencies/oodlesharp-0.0.1/LICENSE.txt | https://raw.githubusercontent.com/NotOfficer/OodleSharp/716d8b9ce3bd74ece37097d2b5e5ef67ef0c48c5/LICENSE | SHA256 50753d4318c48681638939e5ebcf0a699d229a3bc4e747145dc26c9c1eeb902d

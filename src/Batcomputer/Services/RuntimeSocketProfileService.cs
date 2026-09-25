@@ -112,7 +112,7 @@ public static class RuntimeSocketProfileService
 
     private static IEnumerable<string> CandidateDirectories()
     {
-        yield return Path.Combine(AppContext.BaseDirectory, "gamedata", "RuntimeSocketProfiles");
+        yield return Path.Combine(AppSettings.ToolRoot, "gamedata", "RuntimeSocketProfiles");
     }
 
     private static void TryLoad(string file, IDictionary<string, Profile> profiles)

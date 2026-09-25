@@ -1,0 +1,5 @@
+vgaudio/2.2.1
+Source basis: Upstream tag v2.2.1
+These notices do not certify the composition of prebuilt native dependencies.
+
+licenses/dependencies/vgaudio-2.2.1/LICENSE.txt | https://raw.githubusercontent.com/Thealexbarney/VGAudio/9c40e30baf4b5ab66dac07522adef4192d9a2e19/LICENSE | SHA256 852bcc033a46c62f99fb5ffd43b3241ba2c0c440c6034aa2114505f2c4f03c4a

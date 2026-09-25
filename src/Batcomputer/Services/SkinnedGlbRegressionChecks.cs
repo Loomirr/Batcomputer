@@ -19,7 +19,11 @@ internal static class SkinnedGlbRegressionChecks
         var bindSpace = Matrix4x4.CreateTranslation(2,3,4); var skin = model.CreateSkin();
         (Node, Matrix4x4) Bind(Node n) { Matrix4x4.Invert(n.WorldMatrix, out var inverse); return (n, bindSpace * inverse); }
         skin.BindJoints([Bind(root), Bind(wheel)]);
+        var meshNode = scene.CreateNode("RegressionSkinnedBody");
+        meshNode.Mesh = model.CreateMesh("RegressionSkinnedBody");
+        meshNode.Skin = skin;
         SkinnedGlbExportService.CorrectRestPose(model, bones);
+        Check(meshNode.LocalMatrix == Matrix4x4.Identity, "skeletal correction keeps skinned mesh node transforms legal (identity), preventing missing viewer meshes");
         var native = Matrix4x4.CreateFromQuaternion(bones[1].Rotation) * Matrix4x4.CreateTranslation(bones[1].Translation) *
             Matrix4x4.CreateFromQuaternion(bones[0].Rotation) * Matrix4x4.CreateTranslation(bones[0].Translation);
         var expected = new Vector3(native.M41, native.M43, native.M42) * .01f;
@@ -41,8 +45,8 @@ internal static class SkinnedGlbRegressionChecks
         rounded.M44 = .8f;
         Check(Reject(() => SkinnedGlbExportService.AffineMatrix(rounded)), "GLB affine correction rejects real non-affine transforms");
         Check(SkinnedRigComparisonService.Compare(bones, bones).Passed, "rig comparison accepts unchanged native transforms");
-        Check(SkinnedRigComparisonService.Compare(bones, [bones[0] with { Scale = bones[0].Scale * 100 }, bones[1]]).Passed,
-            "rig comparison accepts Blender's uniform centimetre scale on the identity root only");
+        Check(!SkinnedRigComparisonService.Compare(bones, [bones[0] with { Scale = bones[0].Scale * 100 }, bones[1]]).Passed,
+            "cooked rig comparison rejects a 100x root scale even when child local poses match");
         Check(!SkinnedRigComparisonService.Compare(bones, [bones[0], bones[1] with { Scale = bones[1].Scale * 100 }]).Passed,
             "rig comparison rejects centimetre scale on a deforming child bone");
         var report = SkinnedRigComparisonService.Compare(bones, [bones[0], bones[1] with { Translation = bones[1].Translation + Vector3.UnitX, Parent = -1 }]);

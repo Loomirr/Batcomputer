@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' blob:; object-src 'none'; frame-src 'none'; base-uri 'none'">
+<title>Batcomputer Updates</title><link rel="icon" href="data:,"><link rel="stylesheet" href="updater.css"></head>
+<body><header><strong>BATCOMPUTER <span>/ Updates</span></strong><span id="installed">Batcomputer</span></header>
+<div id="sandbox" hidden>LOCAL TEST · only this disposable copy will be updated</div>
+<main>
+ <div id="stage"><img id="poster" src="Batcomputer-poster.png" alt="Batcomputer console with its lever and colored control panel"><canvas id="model" aria-label="Animated Batcomputer model" role="img" hidden></canvas><button id="motion" class="quiet" aria-pressed="true">Pause animation</button></div>
+ <section id="summary" aria-live="polite"><h1 id="headline">Ready when you are</h1><p id="target">Check for the latest Batcomputer update.</p><p id="status">Download now. Install when you're ready.</p></section>
+ <div id="progressArea" hidden><progress id="progress" max="100" aria-label="Update progress"></progress><span id="progressText"></span></div>
+ <div class="actions"><button id="restart" hidden>Restart now</button><button id="primary">Check for updates</button><button id="cancel" class="secondary" hidden>Cancel</button></div>
+ <p class="safe">Your projects, settings and installed mods stay in place.</p>
+</main>
+<footer>
+ <details id="notesSection"><summary>What's new</summary><pre id="notes">Release notes appear after checking for an update.</pre></details>
+ <details><summary>Settings &amp; recovery</summary><div class="settings"><label>Release channel <select id="channel"><option value="beta">Stable + beta</option><option value="stable">Stable only</option></select></label><label><input id="startup" type="checkbox"> Check on startup <span class="muted">— notify only</span></label><div class="links"><button id="releases" class="secondary">Release history ↗</button><button id="recovery" class="secondary">Backups &amp; recovery ↗</button></div></div></details>
+ <details id="activitySection"><summary>Technical details</summary><pre id="activity">No update activity yet.</pre></details>
+</footer>
+<div id="demo" hidden>Preview only · <button data-demo="available">Available</button><button data-demo="download">Downloading</button><button data-demo="verify">Verifying</button><button data-demo="ready">Ready</button><button data-demo="complete">Complete</button></div>
+<script src="three.min.js"></script><script src="GLTFLoader.js"></script><script src="updater.js"></script></body></html>

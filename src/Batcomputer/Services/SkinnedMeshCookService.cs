@@ -16,8 +16,9 @@ namespace Batcomputer;
 internal static class SkinnedMeshCookService
 {
     internal const string Warning = "Your FBX must already be rigged and weighted to the selected game skeleton in Blender or another 3D editor. Batcomputer does not automatically rig or weight models. After importing Batcomputer's GLB reference, run the adjacent Batcomputer_PrepareBlenderRig.py once in Blender; it preserves native bone names while preparing the correct FBX rest-space basis. Export one joined mesh with Armature (the object, not a bone) as the armature name, and disable extra leaf bones. Cloth, morph targets and new rigs are not supported in this first pass.";
+    internal const int RigValidationVersion = 2;
     internal sealed record CookManifest(string SourceHash, string Donor, string Skeleton, string Package,
-        string TemporarySkeleton, string[] Slots, Dictionary<string, string> Files);
+        string TemporarySkeleton, string[] Slots, Dictionary<string, string> Files, int RigValidationVersion = 0);
 
     internal static DefaultFileProvider OpenProvider(string? extraContainers = null)
     {
@@ -63,6 +64,17 @@ internal static class SkinnedMeshCookService
             throw new InvalidDataException("The custom mesh must use a valid suit-owned /Game/Mods package.");
         log("Checking source skin weights (no automatic repairs)…");
         var audit = SkinnedFbxValidator.Inspect(source);
+        object[] donorBones;
+        using (var nativeProvider = OpenProvider())
+        {
+            var native = nativeProvider.LoadPackageObject<USkeletalMesh>(recipe.DonorMeshPackage);
+            donorBones = SkinnedGlbExportService.Bones(native.ReferenceSkeleton).Select(b => (object)new {
+                name = b.Name, parent = b.Parent,
+                translation = new[] { b.Translation.X, b.Translation.Y, b.Translation.Z },
+                rotation = new[] { b.Rotation.X, b.Rotation.Y, b.Rotation.Z, b.Rotation.W },
+                scale = new[] { b.Scale.X, b.Scale.Y, b.Scale.Z }
+            }).ToArray();
+        }
         log($"Source: {audit.Vertices} vertices, {audit.Bones} bones. Checking UE 5.6 cooker…");
         var engine = AppSettings.Current.EffectiveUnrealEngineRoot();
         var editor = Path.Combine(engine, "Engine/Binaries/Win64/UnrealEditor-Cmd.exe");
@@ -86,9 +98,10 @@ internal static class SkinnedMeshCookService
         File.WriteAllText(Path.Combine(root, "cook-workspace.txt"), cookRoot);
         var project = Path.Combine(cookRoot, "SkinnedCook.uproject");
         File.WriteAllText(project, JsonSerializer.Serialize(new { FileVersion = 3, EngineAssociation = "5.6", Plugins = new[] {
-            new { Name = "PythonScriptPlugin", Enabled = true }, new { Name = "EditorScriptingUtilities", Enabled = true } } }));
+            new { Name = "PythonScriptPlugin", Enabled = true }, new { Name = "EditorScriptingUtilities", Enabled = true },
+            new { Name = "MeshModelingToolset", Enabled = true } } }));
         var cookSource = Path.Combine(cookRoot, "source.fbx"); File.Copy(sourceCopy, cookSource);
-        File.WriteAllText(Path.Combine(cookRoot, "import.json"), JsonSerializer.Serialize(new { source = cookSource, scale = recipe.ImportScale, package = recipe.MeshPackage }));
+        File.WriteAllText(Path.Combine(cookRoot, "import.json"), JsonSerializer.Serialize(new { source = cookSource, scale = recipe.ImportScale, package = recipe.MeshPackage, donor_bones = donorBones }));
         var script = Path.Combine(cookRoot, "import_mesh.py");
         using (var resource = typeof(SkinnedMeshCookService).Assembly.GetManifestResourceStream("Batcomputer.Tools.SkinnedMesh.import_mesh.py")
             ?? throw new InvalidDataException("The bundled skeletal import script is missing."))
@@ -125,6 +138,9 @@ bSkipEditorContent=True
         var reportPath = Path.Combine(cookRoot, "import-result.json");
         if (!File.Exists(reportPath)) throw new InvalidDataException("Unreal did not produce an import report. See " + Path.Combine(root, "import.log"));
         using var report = JsonDocument.Parse(File.ReadAllText(reportPath));
+        File.Copy(reportPath, Path.Combine(root, "import-result.json"));
+        if (report.RootElement.TryGetProperty("root_unit_correction", out var correction) && correction.GetBoolean())
+            log("Corrected the FBX's 100x root-unit scale to the native rest pose and rebuilt inverse bind matrices; mesh vertices and weights retained.");
         var slots = report.RootElement.GetProperty("slots").EnumerateArray().Select(s => s.GetString()!).ToArray();
         if (slots.Length == 0 || slots.Length > 64 || slots.Distinct(StringComparer.Ordinal).Count() != slots.Length)
             throw new InvalidDataException("Use between 1 and 64 uniquely named material slots.");
@@ -159,7 +175,7 @@ bSkipEditorContent=True
         }
         if (!files.ContainsKey("mesh.uasset") || !files.ContainsKey("mesh.uexp")) throw new InvalidDataException("Cooked mesh pair is incomplete.");
         var manifest = new CookManifest(recipe.SourceSha256, recipe.DonorMeshPackage, recipe.SkeletonPackage, recipe.MeshPackage,
-            UnrealPathUtil.NormalizePackagePath(report.RootElement.GetProperty("skeleton").GetString()), slots, files);
+            UnrealPathUtil.NormalizePackagePath(report.RootElement.GetProperty("skeleton").GetString()), slots, files, RigValidationVersion);
         AtomicFileUtil.WriteAllText(Path.Combine(root, "validated.json"), JsonSerializer.Serialize(manifest));
         var previous = recipe.Materials.ToDictionary(m => m.SourceMaterialName, StringComparer.Ordinal);
         var vehicle = VehicleDonorService.All.Any(d => d.Mesh == recipe.DonorMeshPackage || d.SummonMesh == recipe.DonorMeshPackage);
@@ -214,6 +230,7 @@ bSkipEditorContent=True
     private static async Task Run(string exe, IEnumerable<string> arguments, string directory, CancellationToken cancellation)
     {
         var start = new ProcessStartInfo(exe) { WorkingDirectory = Path.GetTempPath(), UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        RetocRuntime.Configure(start);
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         using var process = Process.Start(start) ?? throw new IOException("Could not launch " + Path.GetFileName(exe));
         var stdout = process.StandardOutput.ReadToEndAsync(cancellation); var stderr = process.StandardError.ReadToEndAsync(cancellation);

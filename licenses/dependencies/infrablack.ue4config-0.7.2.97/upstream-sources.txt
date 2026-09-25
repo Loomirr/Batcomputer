@@ -1,0 +1,5 @@
+infrablack.ue4config/0.7.2.97
+Source basis: Upstream v0.7.2 tag; package build suffix .97 is not independently matched
+These notices do not certify the composition of prebuilt native dependencies.
+
+licenses/dependencies/infrablack.ue4config-0.7.2.97/LICENSE.txt | https://raw.githubusercontent.com/Wortex17/UE4Config/c9d059b6b793d4c2ed57b825b3b0d2882049b1a6/LICENSE | SHA256 97d10a0eb0baf9f3786f1530b659b01be67399be45c19e028e4963c8c66bd65c

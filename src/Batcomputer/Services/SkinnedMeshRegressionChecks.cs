@@ -111,7 +111,9 @@ internal static class SkinnedMeshRegressionChecks
             foreach (var file in new[] { "mesh.uasset", "mesh.uexp" })
             { File.WriteAllBytes(Path.Combine(cache, file), [1, 2, 3]); files[file] = SkinnedMeshCookService.Hash(Path.Combine(cache, file)); }
             var manifest = new SkinnedMeshCookService.CookManifest(recipe.SourceSha256, recipe.DonorMeshPackage, recipe.SkeletonPackage,
-                recipe.MeshPackage, "/Game/Mods/Fixture/Skinned/SK_Custom_Skeleton", ["Body"], files);
+                recipe.MeshPackage, "/Game/Mods/Fixture/Skinned/SK_Custom_Skeleton", ["Body"], files, SkinnedMeshCookService.RigValidationVersion);
+            File.WriteAllText(Path.Combine(cache, "validated.json"), JsonSerializer.Serialize(manifest with { RigValidationVersion = 0 }));
+            Check(Reject(() => SkinnedMeshStageService.ReadManifest(root, recipe)), "legacy skeletal cooks must be reimported instead of reusing a possibly oversized bind skeleton");
             File.WriteAllText(Path.Combine(cache, "validated.json"), JsonSerializer.Serialize(manifest));
             Check(SkinnedMeshStageService.ReadManifest(root, recipe).Files.Count == 2, "skinned validated cache survives a saved recipe roundtrip");
             File.WriteAllBytes(Path.Combine(cache, "mesh.uexp"), [4]);

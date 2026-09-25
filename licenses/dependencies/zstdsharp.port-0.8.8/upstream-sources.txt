@@ -1,0 +1,5 @@
+zstdsharp.port/0.8.8
+Source basis: Repository commit declared by the resolved NuGet package
+These notices do not certify the composition of prebuilt native dependencies.
+
+licenses/dependencies/zstdsharp.port-0.8.8/LICENSE.txt | https://raw.githubusercontent.com/oleg-st/ZstdSharp/2cd0c019693bc786a5fe5c3be94e107b24e7267e/LICENSE | SHA256 9a6a7216e532c4ee4f78881d31fb641c27148eb01b2d0e8e3235ffe9a70a662c

@@ -33,7 +33,7 @@ public sealed class GameDataService
 
     private static GameDataService Load()
     {
-        var dir = Path.Combine(AppContext.BaseDirectory, "gamedata");
+        var dir = Path.Combine(AppSettings.ToolRoot, "gamedata");
         try
         {
             if (Directory.Exists(dir))

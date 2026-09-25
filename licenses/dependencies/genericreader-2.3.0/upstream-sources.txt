@@ -1,0 +1,5 @@
+genericreader/2.3.0
+Source basis: Repository commit declared by the resolved NuGet package
+These notices do not certify the composition of prebuilt native dependencies.
+
+licenses/dependencies/genericreader-2.3.0/LICENSE.txt | https://raw.githubusercontent.com/NotOfficer/GenericReader/225929b6e5455745fd4588c23dcfdad8e12035a4/LICENSE | SHA256 92b7deb769992d1737239cd5928ebd27e4d768e9671e54096224b46bcdf28bbb

@@ -46,3 +46,11 @@ Do not install a proof/test mod and a new mod using the same character/pawn iden
 - Variants start unlocked. Custom character symbols are supported separately from portraits and suit icons; rebuild the character definition and its mod after changing the symbol. The default vehicle and native upgrade-menu behavior remain donor-based.
 - Choose Normal, Mayhem or Both in [Character identity & modes](character-modes.md). This is separate from the visual base; Mayhem requires the installed DLC and updated LOTDKExpanded runtime, not a separate helper DLL.
 - Abilities and equipment work the same way as they do for suits. The extra VFX/status-effect experiments are still on hold because of crashes.
+
+## Changing a character's pawn-tag family
+
+In **Character identity & modes**, the character/project ID stays fixed, but **Pawn-tag family** can be edited on the character definition. For example, keep the display name **Poison Ivy** and project ID `PoisonIvy`, but use `MMPPoisonIvy` as the family. The default pawn tag becomes `Pawns.Playable.MMPPoisonIvy.PoisonIvy`.
+
+Batcomputer backs up the saved recipes and updates saved child suits together. Asset paths, project IDs and progress tags stay unchanged. Child suits inherit the family and cannot change it independently. Rebuild and reinstall the **whole mod** afterwards; changing recipes alone does not update installed PAKs. Old saved character selections are not migrated.
+
+Native families such as `PoisonIvy` and `MrFreeze` are reserved even though those NPCs are not normal selectable characters. Display names may still be Poison Ivy and Mr. Freeze. Don't manually replace only one tag in a project JSON or INI.

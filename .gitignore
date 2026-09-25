@@ -8,6 +8,14 @@ obj/
 # Local release staging and archives
 artifacts/
 .verification/
+.*-build/
+.*-research/
+.animation-base-collision-fixture/
+.animation-import-verification/
+.build-check/
+output/
+scratch-fbx/
+tmp/
 
 # Most UI artwork is compiled locally into the exe and is not kept in the repo.
 # The small theme-branding set is versioned so every source build has the headers
@@ -24,6 +32,11 @@ artifacts/
 Generated/
 _generated/
 Batcomputer.settings.json
+.batcomputer-updates/
+.batcomputer-update.lock
+.batcomputer-updater-sandbox
+.batcomputer-updater-full-app
+.batcomputer-updater-github-test
 
 # The mined asset catalog (gamedata/lotdk-*.json) IS shipped — it's reference
 # metadata (asset paths + class names), not game content. Exclude only the

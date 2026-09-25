@@ -1,0 +1,5 @@
+oggvorbisencoder/1.2.2
+Source basis: Upstream release commit Bump version to v1.2.2
+These notices do not certify the composition of prebuilt native dependencies.
+
+licenses/dependencies/oggvorbisencoder-1.2.2/LICENSE.txt | https://raw.githubusercontent.com/SteveLillis/.NET-Ogg-Vorbis-Encoder/39b951974a5b4c07dc7daac9b107c0fb16811d5f/LICENSE | SHA256 e7a8f4642a4d68142eed0d5f8bc8d5c21c482d9f081b221d0ef445dae857c4be

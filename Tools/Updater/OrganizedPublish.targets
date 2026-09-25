@@ -1,0 +1,16 @@
+<Project>
+  <!-- Native SDK apphost: no managed bootstrapper, second process or global .NET requirement. -->
+  <Target Name="OrganizeBatcomputerPublish" AfterTargets="Publish"
+          Condition="'$(BatcomputerOrganizedLayout)' == 'true' and '$(PublishSingleFile)' != 'true' and '$(RuntimeIdentifier)' == 'win-x64'">
+    <ItemGroup>
+      <_AppRuntime Include="$(PublishDir)*.dll;$(PublishDir)Batcomputer.deps.json;$(PublishDir)Batcomputer.runtimeconfig.json;$(PublishDir)createdump.exe" />
+      <_RuntimeNative Include="$(PublishDir)runtimes\**\*" />
+    </ItemGroup>
+    <MakeDir Directories="$(PublishDir)app" />
+    <Move SourceFiles="@(_AppRuntime)" DestinationFiles="@(_AppRuntime->'$(PublishDir)app\%(Filename)%(Extension)')" />
+    <Move SourceFiles="@(_RuntimeNative)" DestinationFiles="@(_RuntimeNative->'$(PublishDir)app\runtimes\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <CreateAppHost AppHostSourcePath="$(AppHostSourcePath)" AppHostDestinationPath="$(PublishDir)Batcomputer.exe"
+                   AppBinaryName="app/Batcomputer.dll" IntermediateAssembly="@(IntermediateAssembly->'%(FullPath)')"
+                   WindowsGraphicalUserInterface="true" DotNetSearchLocations="AppLocal" />
+  </Target>
+</Project>

@@ -58,6 +58,9 @@ public sealed class ModReleaseValidationService
                 result.AddError("character dependencies", $"Character '{family.Key}' must include exactly one enabled default definition.");
             else if (family.Any(project => project.CustomCharacter!.DefinitionSlotId != definitions[0].SlotId))
                 result.AddError("character dependencies", $"A suit for '{family.Key}' refers to a different saved character definition.");
+            else if (family.Any(project => !CustomCharacterProjectService.Scope(project.CustomCharacter!).Equals(
+                         CustomCharacterProjectService.Scope(definitions[0].CustomCharacter!), StringComparison.OrdinalIgnoreCase)))
+                result.AddError("character dependencies", $"A suit for '{family.Key}' has a stale pawn-tag family. Open Character identity on the definition and save to synchronize saved child suits.");
         }
 
         var suitIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -186,7 +189,7 @@ public sealed class ModReleaseValidationService
         {
             result.AddError("PawnTag", ownerMismatch, suitId);
         }
-        if (suit.CustomCharacter is { } character && CustomCharacterProjectService.IsNativeOwner(character.CharacterId))
+        if (suit.CustomCharacter is { } character && CustomCharacterProjectService.IsNativeOwner(CustomCharacterProjectService.PawnOwner(character)))
             result.AddError("character", "A custom character cannot reuse a native character group ID.", suitId);
         AddUnique(pawnTags, tag, suitId, "PawnTag", result, suitId);
     }

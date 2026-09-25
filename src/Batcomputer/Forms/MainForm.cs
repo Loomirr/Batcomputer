@@ -164,6 +164,7 @@ public sealed partial class MainForm : AdaptiveForm
     {
         Mods,
         Suits,
+        Import,
         BuildMod,
         Review,
     }
@@ -309,6 +310,7 @@ public sealed partial class MainForm : AdaptiveForm
         BuildLayout();
         WireEvents();
         SetDefaults();
+        Text = $"Batcomputer {AppVersion.Display} — Character & Suit Workshop" + (AppUpdateTestEnvironment.FullApp ? " · LOCAL TEST" : "");
 
         // WinForms applies its final DPI scale after Load on some systems. Fit the
         // completed layout on Shown, then re-clamp it if the window crosses onto a

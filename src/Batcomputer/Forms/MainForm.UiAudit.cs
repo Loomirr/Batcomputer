@@ -10,6 +10,7 @@ public sealed partial class MainForm
     {
         "Home - Mods",
         "Home - Suits",
+        "Home - Import/Export",
         "Home - Build mod",
         "Home - Review",
         "Suits - Home",
@@ -39,6 +40,9 @@ public sealed partial class MainForm
                 break;
             case "Home - Suits":
                 SelectHomeWorkspaceSection(HomeWorkspaceSection.Suits);
+                break;
+            case "Home - Import/Export":
+                SelectHomeWorkspaceSection(HomeWorkspaceSection.Import);
                 break;
             case "Home - Build mod":
                 SelectHomeWorkspaceSection(HomeWorkspaceSection.BuildMod);

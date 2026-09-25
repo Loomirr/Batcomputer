@@ -1,0 +1,5 @@
+bcnencoder.net/2.3.0
+Source basis: Repository commit declared by the resolved NuGet package
+These notices do not certify the composition of prebuilt native dependencies.
+
+licenses/dependencies/bcnencoder.net-2.3.0/LICENSE-MIT.txt | https://raw.githubusercontent.com/Nominom/BCnEncoder.NET/74eda8a330759d81e6307f19aefc547e40687825/LICENSE-MIT | SHA256 e2b6a70c0a540789d0d312c248d67bc571e3e84eaa191a391974bc0443e17ee0

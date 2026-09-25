@@ -1,0 +1,5 @@
+serilog.sinks.console/6.1.1
+Source basis: Repository commit declared by the resolved NuGet package
+These notices do not certify the composition of prebuilt native dependencies.
+
+licenses/dependencies/serilog.sinks.console-6.1.1/LICENSE.txt | https://raw.githubusercontent.com/serilog/serilog-sinks-console/b3cb1f042f5636161b831fa8816d70d865a5eec4/LICENSE | SHA256 b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1

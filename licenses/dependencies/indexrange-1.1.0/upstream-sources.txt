@@ -1,0 +1,5 @@
+indexrange/1.1.0
+Source basis: Repository commit declared by the resolved NuGet package
+These notices do not certify the composition of prebuilt native dependencies.
+
+licenses/dependencies/indexrange-1.1.0/LICENSE.txt | https://raw.githubusercontent.com/bgrainger/IndexRange/0ee6e541467a6d6519af8d8adfe1edad748fc8a2/LICENSE | SHA256 1df7d72bc50aba52efbe5fb56ef4bb2cd682494f1c2370823a846fa9083433eb

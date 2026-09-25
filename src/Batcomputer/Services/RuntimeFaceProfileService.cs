@@ -87,7 +87,7 @@ public static class RuntimeFaceProfileService
     public static ProfileSet Load()
     {
         var profiles = new Dictionary<string, FaceProfile>(StringComparer.OrdinalIgnoreCase);
-        var directory = Path.Combine(AppContext.BaseDirectory, "gamedata", "RuntimeFaceProfiles");
+        var directory = Path.Combine(AppSettings.ToolRoot, "gamedata", "RuntimeFaceProfiles");
         if (!Directory.Exists(directory))
         {
             return new ProfileSet(profiles);

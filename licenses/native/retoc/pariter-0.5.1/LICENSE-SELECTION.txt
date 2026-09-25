@@ -1,0 +1,1 @@
+Apache-2.0 selected from upstream declaration: MPL-2.0 OR MIT OR Apache-2.0 Authors: Dawid Ciężarkiewicz <dpc@dpc.pw> Repository: https://github.com/dpc/pariter Source: registry+https://github.com/rust-lang/crates.io-index Original license declaration files are retained alongside this text.

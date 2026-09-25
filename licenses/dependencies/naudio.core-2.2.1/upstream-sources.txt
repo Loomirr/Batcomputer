@@ -1,0 +1,5 @@
+naudio.core/2.2.1
+Source basis: Upstream tag v2.2.1
+These notices do not certify the composition of prebuilt native dependencies.
+
+licenses/dependencies/naudio.core-2.2.1/license.txt.txt | https://raw.githubusercontent.com/naudio/NAudio/b5d5ff83fd378f046398891fe5cd99426ce44732/license.txt | SHA256 303e01786b271eb464b3f43d18a375f2f17d37bc708a37c2fdf45b289fb5bfaa

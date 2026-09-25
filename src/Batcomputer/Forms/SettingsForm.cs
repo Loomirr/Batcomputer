@@ -100,7 +100,7 @@ public sealed partial class SettingsForm : AdaptiveForm
             AutoSize = false, Left = 20, Top = 0, Width = 520, Height = 58,
             AutoEllipsis = true,
             TextAlign = ContentAlignment.MiddleLeft, ForeColor = Theme.OnDarkMuted, Font = Theme.Caption,
-            Text = "Status dots: green = found, amber = not set, red = path missing."
+            Text = "Green: path checks passed · grey: output created on demand · red: needs attention. Hover for details."
         };
         var save = new Button { Width = 108, Height = 34, Top = 12, Text = "Save", DialogResult = DialogResult.OK };
         var cancel = new Button { Width = 100, Height = 34, Top = 12, Text = "Cancel", DialogResult = DialogResult.Cancel };
@@ -130,6 +130,9 @@ public sealed partial class SettingsForm : AdaptiveForm
             _settings.AnimationsEnabled = _animationsToggle?.Checked ?? _settings.AnimationsEnabled;
             _settings.KeepPreviousExtracts = _keepExtractsToggle?.Checked ?? _settings.KeepPreviousExtracts;
             _settings.AutoCleanPreviewFiles = _autoCleanPreviewFilesToggle?.Checked ?? _settings.AutoCleanPreviewFiles;
+            _settings.ReviewGroupByCategory = _reviewGroupsToggle?.Checked ?? _settings.ReviewGroupByCategory;
+            _settings.ReviewDetailedList = _reviewListToggle?.Checked ?? _settings.ReviewDetailedList;
+            _settings.ReviewShowTimestamps = _reviewTimesToggle?.Checked ?? _settings.ReviewShowTimestamps;
             _settings.VehicleSafePreviewMode = _vehicleSafePreviewToggle?.Checked ?? _settings.VehicleSafePreviewMode;
             _settings.PreviewQuality = _previewQualityPicker?.SelectedItem?.ToString() ?? _settings.PreviewQuality;
             _settings.VehicleDetailedPartBudget = SelectedLeadingNumber(_vehiclePartBudgetPicker, _settings.VehicleDetailedPartBudget);
@@ -156,6 +159,11 @@ public sealed partial class SettingsForm : AdaptiveForm
             Text = "Settings", Font = Theme.Heading, ForeColor = Theme.OnDark
         };
         rail.Controls.Add(railTitle);
+        var updates = new Button { Left = 14, Top = 250, Width = 148, Height = 58,
+            Text = AppVersion.Display + "\nUpdates…" };
+        Theme.StyleDarkButton(updates);
+        updates.Click += (_, _) => { using var dialog = new AppUpdatesForm(); dialog.ShowDialog(this); };
+        rail.Controls.Add(updates);
 
         // --- content host (Dock=Fill) holds the swappable panels ---
         var host = new Panel { Dock = DockStyle.Fill, BackColor = Theme.WindowBg };
@@ -297,9 +305,9 @@ public sealed partial class SettingsForm : AdaptiveForm
         row.Box.Width = input.Width - 22;
         row.Box.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top;
         row.Box.Text = row.Get(_settings) ?? "";
-        row.Box.TextChanged += (_, _) => UpdateStatus(row);
+        row.Box.TextChanged += (_, _) => { foreach (var item in _rows) UpdateStatus(item); };
         input.Controls.Add(row.Box);
-        input.Layout += (_, _) => row.Box.Top = (input.Height - row.Box.Height) / 2;
+        input.Layout += (_, _) => row.Box.SetBounds(11, (input.Height - row.Box.Height) / 2, Math.Max(20, input.ClientSize.Width - 22), row.Box.Height);
         row.Box.Top = (input.Height - row.Box.Height) / 2;
         input.Click += (_, _) => row.Box.Focus();
 
@@ -319,6 +327,17 @@ public sealed partial class SettingsForm : AdaptiveForm
         host.Controls.Add(input);
         host.Controls.Add(browse);
         host.Controls.Add(row.Status);
+        _tips.SetToolTip(label, row.Label);
+        void LayoutRow()
+        {
+            var scale = host.DeviceDpi / 96f;
+            var right = host.ClientSize.Width - (int)(28 * scale) - (host.VerticalScroll.Visible ? SystemInformation.VerticalScrollBarWidth : 0);
+            row.Status.Left = right - row.Status.Width;
+            browse.Left = row.Status.Left - (int)(8 * scale) - browse.Width;
+            input.Width = Math.Max(80, browse.Left - (int)(8 * scale) - input.Left);
+        }
+        host.ClientSizeChanged += (_, _) => LayoutRow();
+        LayoutRow();
         UpdateStatus(row);
     }
 
@@ -346,6 +365,9 @@ public sealed partial class SettingsForm : AdaptiveForm
     private ToggleSwitch? _animationsToggle;
     private ToggleSwitch? _keepExtractsToggle;
     private ToggleSwitch? _autoCleanPreviewFilesToggle;
+    private ToggleSwitch? _reviewGroupsToggle;
+    private ToggleSwitch? _reviewListToggle;
+    private ToggleSwitch? _reviewTimesToggle;
     private ToggleSwitch? _vehicleSafePreviewToggle;
     private ThemedDropDown? _themePicker;
     private ThemedDropDown? _previewQualityPicker;
@@ -437,6 +459,14 @@ public sealed partial class SettingsForm : AdaptiveForm
         ToggleRow("Clean generated 3D previews automatically",
             "On: older Generated\\Preview folders are removed before the next preview. Turn it off to keep generated models and textures for inspection.",
             _autoCleanPreviewFilesToggle);
+
+        Section("REVIEW");
+        _reviewListToggle = new ToggleSwitch { Checked = _settings.ReviewDetailedList };
+        ToggleRow("Use detailed review list", "Show a readable edit table, status filter, full details and explicit copy/remove buttons. Off: compact cards.", _reviewListToggle);
+        _reviewGroupsToggle = new ToggleSwitch { Checked = _settings.ReviewGroupByCategory };
+        ToggleRow("Group review by category", "Keep materials, parts, equipment and other edits in separate sections. Off: newest edits first.", _reviewGroupsToggle);
+        _reviewTimesToggle = new ToggleSwitch { Checked = _settings.ReviewShowTimestamps };
+        ToggleRow("Show review timestamps", "Show when an edit was recorded. These timestamps are not build or in-game verification dates.", _reviewTimesToggle);
 
         Section("PATHS");
         // Re-run the guided setup when paths change or a fresh full asset extraction is needed.
@@ -634,18 +664,12 @@ public sealed partial class SettingsForm : AdaptiveForm
 
     private void UpdateStatus(PathRow row)
     {
-        var value = row.Box.Text.Trim();
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            // No built-in defaults: every install's paths are different, so blank means "not set"
-            // rather than silently falling back to a path that only exists on one machine.
-            row.Status.DotColor = Theme.Warn;
-            _tips.SetToolTip(row.Status, "Not set — pick a path with Browse.");
-            return;
-        }
-
-        var exists = row.IsFile ? File.Exists(value) : Directory.Exists(value);
-        row.Status.DotColor = exists ? Theme.Good : Theme.Crit;
-        _tips.SetToolTip(row.Status, exists ? "Found" : (row.IsFile ? "File not found" : "Folder not found"));
+        var draft = System.Text.Json.JsonSerializer.Deserialize<AppSettings>(System.Text.Json.JsonSerializer.Serialize(_settings))!;
+        foreach (var item in _rows) item.Set(draft, string.IsNullOrWhiteSpace(item.Box.Text) ? null : item.Box.Text.Trim());
+        var status = SettingsPathStatusService.Check(row.Key, row.Box.Text.Trim(), draft);
+        row.Status.DotColor = status.Pending ? Theme.OnDarkMuted : status.Valid ? Theme.Good : Theme.Crit;
+        row.Status.AccessibleName = row.Label + ": " + status.Detail;
+        _tips.SetToolTip(row.Status, status.Detail);
+        _tips.SetToolTip(row.Box, status.Detail);
     }
 }

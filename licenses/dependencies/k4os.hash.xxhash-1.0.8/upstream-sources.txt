@@ -1,0 +1,5 @@
+k4os.hash.xxhash/1.0.8
+Source basis: Upstream tag 1.0.8
+These notices do not certify the composition of prebuilt native dependencies.
+
+licenses/dependencies/k4os.hash.xxhash-1.0.8/LICENSE.txt | https://raw.githubusercontent.com/MiloszKrajewski/K4os.Hash.xxHash/c36ef54edbd778c082cab04df7e42cb72a22d887/LICENSE | SHA256 ef5a021fc2ae3658f4ad8d2526c87fb2cf394285f47abfb784cf73a27ffd9522

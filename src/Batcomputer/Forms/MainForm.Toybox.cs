@@ -13,6 +13,7 @@ namespace Batcomputer;
 /// </summary>
 public sealed partial class MainForm
 {
+    private ChangeReviewControl? _changeReview;
     private Control CreateToyboxPanel()
     {
         var outer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
@@ -267,6 +268,7 @@ public sealed partial class MainForm
         // --- brand -----------------------------------------------------------
         var brand = new Panel { Dock = DockStyle.Left, Width = 196, BackColor = Color.Transparent };
         _headerBrand = brand;
+        AddAppVersionLabel(brand);
         RefreshHeaderWordmark();
         brand.Paint += (_, e) =>
         {
@@ -287,7 +289,7 @@ public sealed partial class MainForm
             const int rightInset = 8;
             const int verticalInset = 10;
             var availableWidth = Math.Max(1, brand.ClientSize.Width - leftInset - rightInset);
-            var availableHeight = Math.Max(1, brand.ClientSize.Height - (verticalInset * 2));
+            var availableHeight = Math.Max(1, brand.ClientSize.Height - 20 - (verticalInset * 2));
             var scale = Math.Min(
                 availableWidth / (float)Math.Max(1, wordmark.Width),
                 availableHeight / (float)Math.Max(1, wordmark.Height));
@@ -295,7 +297,7 @@ public sealed partial class MainForm
             var drawHeight = Math.Max(1, (int)MathF.Floor(wordmark.Height * scale));
             var dest = new Rectangle(
                 leftInset,
-                Math.Max(verticalInset, (brand.ClientSize.Height - drawHeight) / 2),
+                Math.Max(verticalInset, (brand.ClientSize.Height - 20 - drawHeight) / 2),
                 drawWidth,
                 drawHeight);
 
@@ -668,12 +670,13 @@ public sealed partial class MainForm
             Dock = DockStyle.Fill,
             FlowDirection = FlowDirection.TopDown,
             WrapContents = false,
-            AutoScroll = true,
+            AutoScroll = false,
             BackColor = Theme.PanelBg,
-            Padding = new Padding(4, 6, 4, 6),
+            Padding = new Padding(2, 6, 2, 6),
         };
         AddHomeRailButton(rail, HomeWorkspaceSection.Mods, "Mods", Theme.Mods, "Mods.png");
         AddHomeRailButton(rail, HomeWorkspaceSection.Suits, "Suits", Theme.Base, "Suits.png");
+        AddHomeRailButton(rail, HomeWorkspaceSection.Import, "Import/Export", Theme.Materials, "ImportExport.png");
         AddHomeRailButton(rail, HomeWorkspaceSection.BuildMod, "Build mod", Theme.Equipment, "BuildMod.png");
         AddHomeRailButton(rail, HomeWorkspaceSection.Review, "Review", Theme.Research, "Review.png");
         UpdateHomeWorkspaceRailSelection();
@@ -685,7 +688,7 @@ public sealed partial class MainForm
         var button = new Button
         {
             Text = label,
-            Width = 88,
+            Width = 104,
             Height = 56,
             Margin = new Padding(1, 1, 1, 3),
             Padding = new Padding(0, 3, 0, 3),
@@ -697,7 +700,8 @@ public sealed partial class MainForm
             BackColor = Theme.PanelBg,
             Cursor = Cursors.Hand,
             Tag = accent,
-            Image = LoadNavigationIcon(iconAsset, new Size(20, 20)),
+            Image = LoadNavigationIcon(iconAsset, new Size(20, 20)) ??
+                (section == HomeWorkspaceSection.Import ? LoadNavigationIcon("Mods.png", new Size(20, 20)) : null),
             ImageAlign = ContentAlignment.TopCenter,
             TextImageRelation = TextImageRelation.ImageAboveText,
         };
@@ -1906,6 +1910,7 @@ public sealed partial class MainForm
         _toyboxTileGrid.SetTiles(Array.Empty<VirtualTilePanel.Tile>());
         _toyboxTileGrid.Visible = false;
         _toyboxTileFlow.Visible = true;
+        if (_changeReview is not null) _changeReview.Visible = false;
         _toyboxTileFlow.BringToFront();
     }
 
@@ -2014,6 +2019,9 @@ public sealed partial class MainForm
     {
         switch (_homeWorkspaceSection)
         {
+            case HomeWorkspaceSection.Import:
+                RefreshImportExportTiles();
+                return;
             case HomeWorkspaceSection.Suits:
                 RefreshHomeSuitLibraryTiles();
                 return;
@@ -2796,13 +2804,29 @@ public sealed partial class MainForm
             items = items.Where(c => c.Category.Equals(filter, StringComparison.OrdinalIgnoreCase));
         }
 
+        if (AppSettings.Current.ReviewDetailedList)
+        {
+            var search = CurrentToyboxSearch();
+            var shown = items.Where(c => (c.Category + " " + c.Target + " " + c.Detail + " " + c.Status).Contains(search, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (_changeReview is null)
+            {
+                _changeReview = new ChangeReviewControl();
+                ((TableLayoutPanel)_toyboxTileGrid.Parent!).Controls.Add(_changeReview, 0, 1);
+            }
+            _toyboxTileFlow.Visible = _toyboxTileGrid.Visible = false;
+            _changeReview.ShowChanges(suitName, shown, RemoveReviewChangeAsync);
+            _changeReview.Visible = true; _changeReview.BringToFront();
+            return;
+        }
+
         var tiles = items.Select(c =>
         {
             var glyph = c.Status == "applied" ? "✓" : c.Status == "staged" ? "◷" : "•";
             return new VirtualTilePanel.Tile
             {
-                Title = $"{glyph} {c.Category}",
-                Subtitle = $"{c.Target}\n{c.Detail}",
+                Section = AppSettings.Current.ReviewGroupByCategory ? c.Category : "LATEST EDITS",
+                Title = string.IsNullOrWhiteSpace(c.Target) ? c.Category : c.Target,
+                Subtitle = $"{glyph} {c.Status}" + (AppSettings.Current.ReviewShowTimestamps ? " · " + FormatWhen(c.When) : "") + $"\n{c.Detail}",
                 Accent = Theme.CategoryColor(c.Category),
                 ToolTip = $"{c.Category} · {c.Target}\n{c.Detail}\nStatus: {c.Status} · {FormatWhen(c.When)}",
                 OnClick = () => Dialog.Info(null, "Change detail", $"{c.Category} · {c.Target}\n\n{c.Detail}\n\nStatus: {c.Status}\nWhen: {FormatWhen(c.When)}\n\nRight-click to remove this change."),
@@ -2815,10 +2839,21 @@ public sealed partial class MainForm
             };
         }).ToList();
 
+        var query = CurrentToyboxSearch();
+        if (query.Length > 0) tiles = tiles.Where(t => (t.Title + " " + t.Subtitle + " " + t.Section).Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (AppSettings.Current.ReviewGroupByCategory) tiles = tiles.OrderBy(t => t.Section, StringComparer.OrdinalIgnoreCase).ToList();
+
         ShowVirtualTiles(tiles, header,
             emptyMessage: string.IsNullOrEmpty(filter) || filter == "All changes"
                 ? "Nothing recorded yet. Apply a base, material, part, or equipment and it shows up here."
-                : $"No '{filter}' changes. Switch the dropdown to 'All changes'.");
+                : $"No '{filter}' changes. Switch the dropdown to 'All changes'.",
+            hero: new VirtualTilePanel.HeroModel
+            {
+                Overline = "PROJECT REVIEW", Title = suitName,
+                Subtitle = "Saved edit intent — run Build check before packaging. Applied does not mean tested in-game.",
+                Badge = $"{tiles.Count} shown / {all.Count} edits", BadgeColor = Theme.Research,
+                Chips = all.GroupBy(c => c.Category).Select(g => ($"{g.Key}: {g.Count()}", Theme.CategoryColor(g.Key))).ToArray()
+            });
     }
 
     /// <summary>

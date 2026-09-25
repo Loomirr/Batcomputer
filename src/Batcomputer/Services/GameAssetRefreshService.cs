@@ -885,6 +885,7 @@ public sealed class GameAssetRefreshService
         startInfo.ArgumentList.Add(paksRoot);
         startInfo.ArgumentList.Add(outputRoot);
 
+        RetocRuntime.Configure(startInfo);
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Could not start retoc.exe.");
 

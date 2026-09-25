@@ -1,0 +1,5 @@
+oodle.net/2.2.0
+Source basis: Repository commit declared by the resolved NuGet package
+These notices do not certify the composition of prebuilt native dependencies.
+
+licenses/dependencies/oodle.net-2.2.0/LICENSE.txt | https://raw.githubusercontent.com/NotOfficer/Oodle.NET/6a6b78bc3c145eddd6a3ae139fd95d6678049e12/LICENSE | SHA256 92b7deb769992d1737239cd5928ebd27e4d768e9671e54096224b46bcdf28bbb

@@ -104,6 +104,8 @@ internal static class SkinnedMeshStageService
         var root = SkinnedMeshCookService.SafePath(directory, mesh.CacheRelativePath);
         var manifest = JsonSerializer.Deserialize<SkinnedMeshCookService.CookManifest>(File.ReadAllText(Path.Combine(root, "validated.json")))
             ?? throw new InvalidDataException("Missing validated skeletal cook. Reimport the FBX.");
+        if (manifest.RigValidationVersion != SkinnedMeshCookService.RigValidationVersion)
+            throw new InvalidDataException("This skinned mesh was cooked before the root-scale fix. Use Reimport saved FBX to rebuild and validate its bind pose before previewing or packaging.");
         if (manifest.SourceHash != mesh.SourceSha256 || manifest.Donor != mesh.DonorMeshPackage || manifest.Skeleton != mesh.SkeletonPackage || manifest.Package != mesh.MeshPackage ||
             SkinnedMeshCookService.Hash(SkinnedMeshCookService.SafePath(directory, mesh.SourceRelativePath)) != manifest.SourceHash)
             throw new InvalidDataException("Skinned source or rig changed since validation. Reimport before building.");

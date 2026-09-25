@@ -1,0 +1,6 @@
+cue4parse/1.2.2.202607
+Source basis: Repository commit declared by the resolved NuGet package
+These notices do not certify the composition of prebuilt native dependencies.
+
+licenses/dependencies/cue4parse-1.2.2.202607/LICENSE.txt | https://raw.githubusercontent.com/FabianFG/CUE4Parse/ecad882a3049df6f27e0c5c3a3531346305c010b/LICENSE | SHA256 c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4
+licenses/dependencies/cue4parse-1.2.2.202607/NOTICE.txt | https://raw.githubusercontent.com/FabianFG/CUE4Parse/ecad882a3049df6f27e0c5c3a3531346305c010b/NOTICE | SHA256 973a479eb91393ac01473e67ccb5ba31f077157afb9278392ee7ef2a97162262

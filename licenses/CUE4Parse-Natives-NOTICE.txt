@@ -1,14 +1,16 @@
 CUE4Parse-Natives.dll
 =====================
 
-native/CUE4Parse-Natives.dll is a prebuilt binary from the CUE4Parse project.
+native/CUE4Parse-Natives.dll is built from pinned CUE4Parse, ACL and RTM sources.
+See licenses/native/build-provenance.txt for source revisions, patches and hashes.
+Complete upstream notices are in licenses/native/CUE4Parse.txt,
+licenses/native/CUE4Parse-NOTICE.txt, licenses/native/ACL.txt and licenses/native/RTM.txt.
 Batcomputer uses it for exactly one thing: decompressing ACL-compressed
 animation data, which is how LEGO Batman: Legacy of the Dark Knight stores
 facial expression poses. CUE4Parse offers no managed ACL decoder, and the
 format is not practical to reimplement correctly.
 
-Everything else in the preview pipeline (texture decode, mesh conversion,
-pak access) is managed code.
+Other preview dependencies have their own notices under licenses/dependencies.
 
 
 CUE4Parse
@@ -56,6 +58,6 @@ Bundled inside CUE4Parse-Natives. Licensed under the MIT License.
 Updating
 --------
 The DLL must stay ABI-matched to the CUE4Parse PackageReference version in
-Batcomputer.csproj (currently 1.2.2.202607). It is not published as a
-standalone release asset; it ships inside FModel's single-file executable and
-can be lifted out of that bundle without running it.
+Batcomputer.csproj (currently 1.2.2.202607). Rebuild with the source repository's
+Tools/Native/Build-NativeHelpers.ps1, collect notices and rerun acceptance checks.
+Do not replace it with an unrecorded binary extracted from another application.

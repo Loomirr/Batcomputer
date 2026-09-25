@@ -50,6 +50,7 @@ nav:
   - Getting started:
       - Requirements: getting-started/requirements.md
       - Install Batcomputer: getting-started/install.md
+      - Update Batcomputer: guides/app-updates.md
       - First-time setup: getting-started/setup.md
   - Tutorials:
       - Create your first suit: guides/first-suit.md

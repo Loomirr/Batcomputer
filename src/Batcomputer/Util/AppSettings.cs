@@ -12,6 +12,10 @@ namespace Batcomputer;
 /// </summary>
 public sealed class AppSettings
 {
+    // Network checks are opt-in. Beta builds include beta releases by default.
+    public bool CheckForAppUpdatesOnStartup { get; set; }
+    public bool IncludeBetaAppUpdates { get; set; } = AppVersion.IsPrerelease(AppVersion.Current);
+
     // Base folder the tool works out of; the Generated\ output folder is created directly under it.
     public string? ProjectRoot { get; set; }
 
@@ -85,6 +89,9 @@ public sealed class AppSettings
     public int VehicleCustomBodyPreviewLimitMb { get; set; } = 26;
     public int ViewerFrameRateLimit { get; set; } = 60;
     public bool VehicleSafePreviewMode { get; set; } = true;
+    public bool ReviewGroupByCategory { get; set; } = true;
+    public bool ReviewDetailedList { get; set; } = true;
+    public bool ReviewShowTimestamps { get; set; } = true;
 
     // Loaded once at startup; services consult this for path overrides.
     [JsonIgnore]
@@ -98,7 +105,7 @@ public sealed class AppSettings
 
     /// <summary>The folder containing the running executable and all tool-owned state.</summary>
     public static string ToolRoot =>
-        AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        AppLayout.ToolRoot;
 
     /// <summary>Small persistent tool data such as reusable indexes and downloaded mappings.</summary>
     public static string DataRoot => Path.Combine(ToolRoot, "Data");

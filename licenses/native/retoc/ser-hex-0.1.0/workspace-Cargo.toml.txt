@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = [
+    "ser-hex",
+    "ser-hex-tracer",
+    "ser-hex-viewer",
+    "ser-hex-tui",
+    "examples/*",
+]
+
+[workspace.package]
+repository = "https://github.com/trumank/ser-hex"
+authors = ["trumank"]
+license = "MIT OR Apache-2.0"
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+anyhow = "1.0.90"
+serde = "1.0.210"
+serde_json = { version = "1.0.130", features = ["unbounded_depth"] }

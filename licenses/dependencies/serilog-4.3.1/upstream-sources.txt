@@ -1,0 +1,5 @@
+serilog/4.3.1
+Source basis: Repository commit declared by the resolved NuGet package
+These notices do not certify the composition of prebuilt native dependencies.
+
+licenses/dependencies/serilog-4.3.1/LICENSE.txt | https://raw.githubusercontent.com/serilog/serilog/5625030e8f8fceca2e3180575aba174751ef7add/LICENSE | SHA256 73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68

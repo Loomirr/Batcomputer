@@ -1,0 +1,1 @@
+Apache-2.0 selected from upstream declaration: MIT OR Apache-2.0 Authors: trumank Repository: https://github.com/trumank/ser-hex Source: git+https://github.com/trumank/ser-hex.git#3d890bb069929e9c9c4c817c433f9b8753c264ed Original license declaration files are retained alongside this text.

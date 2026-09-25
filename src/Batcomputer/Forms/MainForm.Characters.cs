@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Batcomputer;
 
 public sealed partial class MainForm
@@ -79,7 +81,8 @@ public sealed partial class MainForm
         if (owner.CustomCharacter is not { IsDefinition: true } identity || !BaseEligibilityService.Evaluate(owner).IsReady)
         { Dialog.Warn(this, "Choose a character base first", "Set and save this character's native base before creating its additional suits."); return; }
         using var dialog = new CharacterIdentityDialog("New suit for " + owner.DisplayName, "Suit ID (permanent; e.g. Unmasked)",
-            note: "This copies the current design into a separate suit. Edit its appearance and abilities independently.", ownerId: identity.CharacterId, modeAvailability: identity.ModeAvailability);
+            note: "This copies the current design into a separate suit. Edit its appearance and abilities independently.", ownerId: identity.CharacterId, modeAvailability: identity.ModeAvailability,
+            pawnOwner: CustomCharacterProjectService.PawnOwner(identity));
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
         await SaveNewCharacterRecipeAsync(owner, dialog.DisplayNameValue, identity.CharacterId, dialog.TechnicalId, owner.SlotId, dialog.DescriptionValue);
     }
@@ -191,15 +194,29 @@ public sealed partial class MainForm
         using var dialog = new CharacterIdentityDialog(identity.IsDefinition ? "Character identity" : "Character suit identity",
             identity.IsDefinition ? "Character ID (fixed)" : "Suit ID (fixed)", _currentProject.DisplayName,
             identity.IsDefinition ? identity.CharacterId : identity.VariantId, _currentProject.Description, lockedId: true,
-            note: $"{_currentProject.ProgressTag}\nOwner and IDs are fixed to keep saves and child suits valid. Story cutscenes are not supported.",
-            ownerId: identity.IsDefinition ? null : identity.CharacterId, modeAvailability: effectiveMode);
+            note: $"{_currentProject.ProgressTag}\nProject IDs stay fixed. Changing the pawn-tag family updates saved child suits and requires rebuilding/reinstalling the mod. Old in-game selections are not migrated. Story cutscenes are not supported.",
+            ownerId: identity.IsDefinition ? null : identity.CharacterId, modeAvailability: effectiveMode,
+            pawnOwner: CustomCharacterProjectService.PawnOwner(identity));
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        var previous = JsonSerializer.Deserialize<NativeSuitProject>(JsonSerializer.Serialize(_currentProject))!;
         _currentProject.DisplayName = dialog.DisplayNameValue; _currentProject.Description = dialog.DescriptionValue;
         if (identity.IsDefinition) identity.ModeAvailability = dialog.ModeAvailability;
         CustomCharacterProjectService.ApplyIdentity(_currentProject);
         _suitNameText.Text = _currentProject.DisplayName; _descriptionText.Text = _currentProject.Description;
-        try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject); }
-        catch (Exception ex) { Dialog.Error(this, "Identity was not saved", ex.Message); return; }
+        try
+        {
+            var service = _projectService ??= new SuitProjectService(_projectRootText.Text.Trim());
+            if (CharacterPawnIdentityService.NeedsUpdate(service, _currentProject, dialog.PawnOwnerValue))
+            {
+                if (!Dialog.Confirm(this, "Change runtime identity?", "This updates this character and its saved suits, keeping project IDs and source files. A backup is created. Rebuild and reinstall the entire mod; old saved character selections may reset.", confirmText: "Update family"))
+                { _currentProject = previous; ApplyProjectToFields(previous); return; }
+                var updated = CharacterPawnIdentityService.SaveFamily(service, _currentProject, dialog.PawnOwnerValue, out var backup);
+                AppendLog("Pawn-tag family updated; recipe backup: " + backup + ". Rebuild and reinstall the mod.");
+                LoadProjectIntoUi(updated);
+            }
+            else service.SaveProject(_currentProject);
+        }
+        catch (Exception ex) { _currentProject = previous; ApplyProjectToFields(previous); Dialog.Error(this, "Identity was not saved", ex.Message); return; }
         RefreshToyboxTiles(); RefreshInspector();
     }
 }

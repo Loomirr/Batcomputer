@@ -1,0 +1,6 @@
+fmod5sharp/3.1.0
+Source basis: Repository commit declared by the resolved NuGet package
+These notices do not certify the composition of prebuilt native dependencies.
+
+licenses/dependencies/fmod5sharp-3.1.0/LICENSE.txt | https://raw.githubusercontent.com/SamboyCoding/Fmod5Sharp/d9df2cbcc1aa478d7de9fcb64f83f7ba49f23258/LICENSE | SHA256 c31ab18d3300b0666925b29071e5c60459ee12d7740b8ecde556fc83d3ea948d
+licenses/dependencies/fmod5sharp-3.1.0/NOTICE.txt | https://raw.githubusercontent.com/SamboyCoding/Fmod5Sharp/d9df2cbcc1aa478d7de9fcb64f83f7ba49f23258/NOTICE | SHA256 e94bfb333de4f2d11afab8aec4ff1efb8a21f7f58c1701b42965309d4b32c57f

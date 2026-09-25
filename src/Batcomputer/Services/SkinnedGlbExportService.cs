@@ -9,7 +9,7 @@ namespace Batcomputer;
 /// <summary>Rest-pose correction for tool-owned, non-animated CUE4Parse GLB exports.</summary>
 internal static class SkinnedGlbExportService
 {
-    internal const string Revision = "native-rest-pose-v4";
+    internal const string Revision = "native-rest-pose-v5";
     internal sealed record Bone(string Name, int Parent, Vector3 Translation, Quaternion Rotation, Vector3 Scale);
 
     internal static Bone[] Bones(FReferenceSkeleton skeleton) => skeleton.FinalRefBoneInfo.Select((info, i) =>
@@ -62,18 +62,10 @@ internal static class SkinnedGlbExportService
                 BindSpaces: values.Select(v => v.Item2 * v.Item1.WorldMatrix).ToArray());
         }).ToArray();
         foreach (var bone in bones) byName[bone.Name].LocalTransform = ToGltf(bone);
-        // CUE4Parse writes native-centimetre vertex positions, unlike the converted
-        // glTF bone translations above. Scale each rendered mesh node once into
-        // metres so Blender sees the reference mesh and armature at the same size.
-        // Joints are excluded: changing them would invalidate the native bind pose.
-        foreach (var node in model.LogicalNodes.Where(node => node.Mesh is not null && !node.IsSkinJoint))
-        {
-            var transform = node.LocalTransform;
-            node.LocalTransform = new AffineTransform(
-                transform.Scale * .01f,
-                transform.Rotation,
-                transform.Translation * .01f);
-        }
+        // CUE4Parse's glTF POSITION accessors are already in metres (the native
+        // minifig is ~1.615m high). Only native bone translations need conversion.
+        // Scaling positions again shrinks the mesh 100x. Scaling a skinned node
+        // also violates glTF and makes SharpGLTF reject every skeletal export.
         foreach (var binding in bindings)
         {
             var corrected = binding.Joints.Select((joint, i) =>

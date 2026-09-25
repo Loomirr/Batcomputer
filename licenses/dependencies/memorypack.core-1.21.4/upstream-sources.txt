@@ -1,0 +1,5 @@
+memorypack.core/1.21.4
+Source basis: Repository commit declared by the resolved NuGet package
+These notices do not certify the composition of prebuilt native dependencies.
+
+licenses/dependencies/memorypack.core-1.21.4/LICENSE.md.txt | https://raw.githubusercontent.com/Cysharp/MemoryPack/0f2fe0827907940768293b7bb81b9605a7d8cba8/LICENSE.md | SHA256 49877bf1474e33fda62f80825cd8cde3b9272e645796b6ab8137054f8d9d5d29

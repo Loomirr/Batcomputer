@@ -1,0 +1,38 @@
+{
+  "RecordedUtc": "2026-09-25T02:23:40.5844250Z",
+  "RetocSource": "https://github.com/Loomirr/retoc-oodle/tree/a3d3c84f030118c36896568e35e0dcea6305e2b9",
+  "CueSource": "https://github.com/FabianFG/CUE4Parse/tree/ecad882a3049df6f27e0c5c3a3531346305c010b",
+  "AclSource": "https://github.com/nfrechette/acl/tree/414689d5cff4286a7898487a46dc5e48005d38da",
+  "RtmSource": "https://github.com/nfrechette/rtm/tree/d7982f2b2524feeb322f424b29cf43df30b5d5b7",
+  "Rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)",
+  "BuildRecipe": "Tools/Native/Build-NativeHelpers.ps1; pinned sources/lockfile, local-only loader; CUE ACL + RTM only, MSVC static CRT",
+  "Patches": [
+    {
+      "Path": "Tools/Native/retoc-local-runtime.patch",
+      "Sha256": "8977d28f96289890515724b9c0fa5d69950d0cbfe1e1ead8c0d71158692e1b89"
+    },
+    {
+      "Path": "Tools/Native/retoc.Cargo.lock",
+      "Sha256": "fb6f34a2c1c90cb4f8fd65dbdc627bcef74ceeb386f063f76d95a365d090e16d"
+    },
+    {
+      "Path": "Tools/Native/OodleLoader/Cargo.toml",
+      "Sha256": "30928e088b1cf7a415a0c377a10bbe92b8036a2bba690461b7d5512b26dc40f0"
+    },
+    {
+      "Path": "Tools/Native/OodleLoader/src/lib.rs",
+      "Sha256": "d75009053a7fd5eff6a917276b55cf3dd3a54f3618a38608dac0dfafdde0ade2"
+    }
+  ],
+  "Binaries": [
+    {
+      "Path": "Tools/retoc-oodle/retoc.exe",
+      "Sha256": "fc4ff730191e158f497ba6f3d07b7cbddb953e18f929b62f23ccf549ea3f2099"
+    },
+    {
+      "Path": "CUE4Parse-Natives.dll",
+      "Sha256": "b3c9c04e33624408d1b80c1817d30a906e7eb687077af6bcde3a4ebdbe6d18e7"
+    }
+  ],
+  "Note": "Source-pinned/rebuildable, not a promise of bit-identical output across toolchain versions. No Oodle runtime/source included. Distribution terms for the separate Unreal writer remain outside this record."
+}

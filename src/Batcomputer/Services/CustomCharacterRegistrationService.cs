@@ -53,7 +53,9 @@ public static class CustomCharacterRegistrationService
             var identity = definition.CustomCharacter!;
             foreach (var project in family)
                 Require(CustomCharacterProjectService.IdentityError(project) is null &&
-                    project.CustomCharacter!.DefinitionSlotId == definition.SlotId, "Character identity/definition mismatch: " + project.DisplayName);
+                    project.CustomCharacter!.DefinitionSlotId == definition.SlotId &&
+                    CustomCharacterProjectService.Scope(project.CustomCharacter).Equals(CustomCharacterProjectService.Scope(identity), StringComparison.OrdinalIgnoreCase),
+                    "Character identity/definition mismatch: " + project.DisplayName + ". Reopen the character definition and synchronize its pawn-tag family before rebuilding.");
             var groupPackage = GroupPackage(mod, identity.CharacterId);
             var groupFile = CopyDonor(nativeContent, content, GroupDonor, groupPackage);
             var group = Read(groupFile, maps);

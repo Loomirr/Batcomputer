@@ -11,7 +11,8 @@ public static class CustomCharacterProjectService
 {
     public static bool IsCharacter(NativeSuitProject? project) => project?.CustomCharacter?.IsDefinition == true;
     public static bool IsIdentifier(string? id) => id is not null && Regex.IsMatch(id, "^[A-Za-z][A-Za-z0-9]{0,63}$");
-    public static string Scope(CustomCharacterIdentity identity) => "Pawns.Playable." + identity.CharacterId;
+    public static string PawnOwner(CustomCharacterIdentity identity) => string.IsNullOrWhiteSpace(identity.PawnTagOwner) ? identity.CharacterId : identity.PawnTagOwner;
+    public static string Scope(CustomCharacterIdentity identity) => "Pawns.Playable." + PawnOwner(identity);
     public static string PawnTag(CustomCharacterIdentity identity) => Scope(identity) + "." + identity.VariantId;
     public static string ProgressTag(CustomCharacterIdentity identity) =>
         $"GameProgress.Definitions.Characters.{identity.CharacterId}.{identity.VariantId}";
@@ -22,7 +23,7 @@ public static class CustomCharacterProjectService
         if (identity is null)
             return PawnTagConfigService.CharacterOwnerMismatchError(project.PawnTag, donorPawnTag);
         if (!Enum.IsDefined(identity.ModeAvailability)) return "The character's game-mode availability is invalid. Reopen Character identity.";
-        if (!IsIdentifier(identity.CharacterId) || !IsIdentifier(identity.VariantId) ||
+        if (!IsIdentifier(identity.CharacterId) || !IsIdentifier(PawnOwner(identity)) || !IsIdentifier(identity.VariantId) ||
             string.IsNullOrWhiteSpace(identity.DefinitionSlotId))
             return "The custom character identity is incomplete. Create it through Characters, or choose a saved character as the suit's base.";
         if (identity.IsDefinition && (identity.DefinitionSlotId != project.SlotId || identity.VariantId != identity.CharacterId))
@@ -48,8 +49,9 @@ public static class CustomCharacterProjectService
     {
         if (GameDataService.Instance.Db.Families.Any(family => family.Name.Equals(id, StringComparison.OrdinalIgnoreCase))) return true;
         var groups = Path.Combine(AppSettings.Current.EffectiveExtractedContentRoot(), "Characters", "MetaData", "Groups");
-        return Directory.Exists(groups) && Directory.EnumerateFiles(groups, "DA_CharacterGroup_*.uasset", SearchOption.TopDirectoryOnly)
-            .Any(path => Path.GetFileNameWithoutExtension(path)["DA_CharacterGroup_".Length..].Equals(id, StringComparison.OrdinalIgnoreCase));
+        return Directory.Exists(groups) && new[] { "DA_CharacterGroup_", "DA_Character_Group_" }.Any(prefix =>
+            Directory.EnumerateFiles(groups, prefix + "*.uasset", SearchOption.TopDirectoryOnly)
+                .Any(path => Path.GetFileNameWithoutExtension(path)[prefix.Length..].Equals(id, StringComparison.OrdinalIgnoreCase)));
     }
 
     public static void RequireAvailableIdentity(NativeSuitProject candidate, SuitProjectService service)
@@ -57,7 +59,7 @@ public static class CustomCharacterProjectService
         var identity = candidate.CustomCharacter ?? throw new InvalidDataException("Missing character identity.");
         foreach (var path in CreationOutputDirectories(candidate, service))
             if (Directory.Exists(path)) throw new InvalidDataException("That identity already has generated assets. Choose another ID or recover the earlier project: " + path);
-        if (IsNativeOwner(identity.CharacterId)) throw new InvalidDataException("That character ID belongs to a native character. Choose a new, unique ID.");
+        if (IsNativeOwner(PawnOwner(identity))) throw new InvalidDataException("That pawn-tag family belongs to a native character. Choose a unique pawn-tag family; the display name can stay unchanged.");
         foreach (var summary in service.ListProjectFiles())
         {
             var other = service.LoadProject(summary.Path);
@@ -109,7 +111,8 @@ public static class CustomCharacterProjectService
             IsDefinition = definition, CharacterId = characterId, VariantId = variantId,
             DefinitionSlotId = definition ? project.SlotId : definitionSlotId,
             SymbolPackage = definition ? "" : source?.CustomCharacter?.SymbolPackage ?? "",
-            ModeAvailability = source?.CustomCharacter?.ModeAvailability ?? CharacterModeAvailability.Normal
+            ModeAvailability = source?.CustomCharacter?.ModeAvailability ?? CharacterModeAvailability.Normal,
+            PawnTagOwner = definition ? "" : source?.CustomCharacter?.PawnTagOwner ?? ""
         };
         var stem = $"CC_{characterId}_{variantId}";
         var root = $"/Game/Mods/{stem}/Characters";

@@ -1,0 +1,5 @@
+zlib-ng.net/1.2.0
+Source basis: Repository commit declared by the resolved NuGet package
+These notices do not certify the composition of prebuilt native dependencies.
+
+licenses/dependencies/zlib-ng.net-1.2.0/LICENSE.txt | https://raw.githubusercontent.com/NotOfficer/Zlib-ng.NET/1e6ae3cb5ed91f1ec743103039d3ac345babd179/LICENSE | SHA256 92b7deb769992d1737239cd5928ebd27e4d768e9671e54096224b46bcdf28bbb

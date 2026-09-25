@@ -18,6 +18,8 @@ internal static class ReleaseRegressionChecks
             Check(result.Passed, result.Description, failures, output);
         foreach (var result in CharacterModeRegressionChecks.Run())
             Check(result.Passed, result.Description, failures, output);
+        foreach (var result in CharacterPawnIdentityRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
         foreach (var result in DlcUpdateRegressionChecks.Run())
             Check(result.Passed, result.Description, failures, output);
         foreach (var result in SkinnedGlbRegressionChecks.Run())

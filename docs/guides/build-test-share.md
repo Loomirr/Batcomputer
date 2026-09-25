@@ -58,7 +58,7 @@ Test at least:
 
 ## Create the ZIP
 
-On **Home** → **Build mod**, choose the **Zip _mod name_** tile after a successful build. The archive
+On **Home** → **Import/Export**, select your mod and choose **Create release ZIP** after a successful build. The archive
 uses game-relative paths
 and starts above `LEGOBatmanLotDK`, so users can extract it into the game's installation directory or
 install it with a compatible mod manager.
@@ -69,12 +69,12 @@ Suit releases require Loomirr's LOTDK UE4SS. They must not include or overwrite 
 ## Share an editable project
 
 The release ZIP is for players. To let another creator continue editing a mod, select it on
-**Home** → **Build mod** and choose **Export editable copy**. The creator archive contains the
+**Home** → **Import/Export**, select your mod and choose **Export editable copy**. The creator archive contains the
 saved mod, suit and vehicle recipes plus source images, meshes, their project-owned import caches,
 and cooked custom materials with their texture dependencies. Save your edits before exporting.
 Native game assets remain references; the game itself, UE4SS, mappings and saves are not included.
 
-The recipient chooses **Import editable mod**. Import refuses a duplicate Mod ID, suit ID or
+The recipient chooses **Home** → **Import/Export** → **Import editable mod**. Import refuses a duplicate Mod ID, suit ID or
 vehicle ID, pawn tag or character package. An existing identical shared material can be reused;
 a different material at the same package path blocks import. Use a clean workspace for a direct handoff, then review the native donors, run a current
 extraction/refresh, and rebuild before installing. The source files are copied into the receiving

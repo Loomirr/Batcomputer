@@ -1,0 +1,5 @@
+sharpgltf.core/1.0.0-alpha0023
+Source basis: Upstream tag 1.0.0-alpha23 (package uses zero-padded alpha0023)
+These notices do not certify the composition of prebuilt native dependencies.
+
+licenses/dependencies/sharpgltf.core-1.0.0-alpha0023/LICENSE.txt | https://raw.githubusercontent.com/vpenades/SharpGLTF/c1e41bd94cedc8b37667b202c463f1d50182e14c/LICENSE | SHA256 5e720094b3423cc2c1aef53325f2b99145d45155e36b81adb9063d18a552e469

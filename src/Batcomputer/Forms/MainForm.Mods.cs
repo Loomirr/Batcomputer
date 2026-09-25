@@ -388,24 +388,8 @@ public sealed partial class MainForm
                 Accent = Theme.Research,
                 OnClick = () => OpenModDetails(modPath, modId),
             });
-            tiles.Add(new VirtualTilePanel.Tile
-            {
-                Section = SectionRelease,
-                Title = "Export editable copy",
-                Subtitle = "share projects, sources, materials and vehicle settings",
-                Accent = Theme.Info,
-                OnClick = () => ExportEditableMod(modPath),
-            });
             if (hasBuild)
             {
-                tiles.Add(new VirtualTilePanel.Tile
-                {
-                    Section = SectionRelease,
-                    Title = $"Zip {TrimMiddle(activeSummary.DisplayName, 20)}",
-                    Subtitle = "create an installable ZIP",
-                    Accent = Theme.Info,
-                    OnClick = () => CreateModReleaseZip(modPath),
-                });
                 tiles.Add(new VirtualTilePanel.Tile
                 {
                     Section = SectionRelease,
@@ -428,15 +412,6 @@ public sealed partial class MainForm
                 OnClick = CreateModFlow,
             });
         }
-        tiles.Add(new VirtualTilePanel.Tile
-        {
-            Section = SectionMods,
-            Title = "Import editable mod",
-            Subtitle = "open a creator archive without replacing your projects",
-            Accent = Theme.Info,
-            OnClick = ImportEditableMod,
-        });
-
         // Keep the build workspace consistent with Home and duplicate detection: every saved mod
         // remains selectable, including older projects beyond the first screenful.
         foreach (var summary in ModTileSummaries(mods))
@@ -461,6 +436,53 @@ public sealed partial class MainForm
         }
 
         ShowVirtualTiles(tiles, hero: hero);
+    }
+
+    private void RefreshImportExportTiles()
+    {
+        var mods = ModService.ListMods().ToList();
+        var (selected, mod) = ResolveHomeActiveMod(mods);
+        var hasMod = selected is not null && mod is not null;
+        var hasBuild = hasMod && BuildManifestService.FindMissingOrEmptyFiles(
+            ExpectedModTrioPaths(ModBuildRoot(selected!.ModId), mod!.PackageBaseName)).Count == 0;
+        var tiles = new List<VirtualTilePanel.Tile>
+        {
+            new() { Section = "IMPORT", Title = "Import editable mod",
+                Subtitle = "open a creator archive without replacing your projects",
+                Accent = Theme.Materials, OnClick = ImportEditableMod },
+        };
+        if (hasMod)
+        {
+            var modPath = selected!.Path;
+            tiles.Add(new() { Section = "EXPORT", Title = "Export editable copy",
+                Subtitle = "share projects, sources, materials and vehicle settings",
+                Accent = Theme.Info, OnClick = () => ExportEditableMod(modPath) });
+            if (hasBuild)
+                tiles.Add(new() { Section = "EXPORT", Title = "Create release ZIP",
+                    Subtitle = "package the selected mod's existing build for installation",
+                    Accent = Theme.Info, OnClick = () => CreateModReleaseZip(modPath) });
+            else
+                tiles.Add(new() { Section = "EXPORT", Title = "Build before packaging",
+                    Subtitle = "open Build mod to prepare an installable release",
+                    Accent = Theme.Warn, OnClick = () => SelectHomeWorkspaceSection(HomeWorkspaceSection.BuildMod) });
+        }
+        foreach (var summary in ModTileSummaries(mods))
+        {
+            var captured = summary;
+            var active = hasMod && string.Equals(captured.Path, selected!.Path, StringComparison.OrdinalIgnoreCase);
+            tiles.Add(new() { Section = "SELECT MOD TO EXPORT", Title = TrimMiddle(captured.DisplayName, 26),
+                Subtitle = active ? "selected for export" : "select for editable export or release ZIP",
+                Accent = active ? Theme.Materials : Theme.OnDarkMuted,
+                OnClick = () => { _homeActiveModProjectPath = captured.Path; RefreshImportExportTiles(); } });
+        }
+        ShowVirtualTiles(tiles, hero: new VirtualTilePanel.HeroModel
+        {
+            Overline = "IMPORT / EXPORT",
+            Title = hasMod ? selected!.DisplayName : "Import or select a mod",
+            Subtitle = "Creator archives contain editable projects and sources. Release ZIPs contain built files for installation, not editable import."
+                + (hasMod ? " Rebuild after edits before packaging a release ZIP." : " Create a mod under Mods to export your own work."),
+            ThumbAccent = Theme.Materials,
+        });
     }
 
     internal static IReadOnlyList<ModProjectService.ModSummary> ModTileSummaries(
@@ -1274,7 +1296,7 @@ public sealed partial class MainForm
                     ("Extract into", "...\\Steam\\steamapps\\common"),
                 },
             });
-            RefreshBuildModTiles();
+            RefreshToyboxTiles();
         }
         catch (Exception ex)
         {
@@ -2691,6 +2713,7 @@ public sealed partial class MainForm
         psi.ArgumentList.Add(inputDir);
         psi.ArgumentList.Add(outUtoc);
 
+        RetocRuntime.Configure(psi, settings);
         using var p = Process.Start(psi);
         if (p is null) { AppendLog("Could not start retoc.exe."); return -1; }
         var o = await p.StandardOutput.ReadToEndAsync();
@@ -2738,6 +2761,7 @@ public sealed partial class MainForm
         psi.ArgumentList.Add(inputDir);
         psi.ArgumentList.Add(outDir);
 
+        RetocRuntime.Configure(psi);
         using var p = Process.Start(psi);
         if (p is null) { AppendLog("Could not start retoc.exe."); return -1; }
         var o = await p.StandardOutput.ReadToEndAsync();

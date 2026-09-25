@@ -8,16 +8,16 @@
     <AssemblyName>Batcomputer</AssemblyName>
     <RootNamespace>Batcomputer</RootNamespace>
     <ApplicationIcon Condition="Exists('Assets\Icon.ico')">Assets\Icon.ico</ApplicationIcon>
-    <Version>1.0.0-beta.2</Version>
+    <Version>1.0.0-beta.3</Version>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.0.2</FileVersion>
-    <InformationalVersion>1.0.0-beta.2</InformationalVersion>
+    <FileVersion>1.0.0.3</FileVersion>
+    <InformationalVersion>1.0.0-beta.3</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <!-- Code-built controls do not need designer serialization metadata. -->
     <NoWarn>$(NoWarn);WFO1000</NoWarn>
     <!-- Disposable fixtures can contain links to replaced extraction caches. Do not
          let default SDK globs traverse them and silently omit shipped runtime data. -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);artifacts\**;Generated\**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);artifacts\**;Generated\**;obj\**;bin\**</DefaultItemExcludes>
   </PropertyGroup>
   <ItemGroup>
     <!-- Character modes are provided by the installed LOTDKExpanded runtime, not a bundled DLL. -->
@@ -32,14 +32,16 @@
   </PropertyGroup>
   <!-- Keep the runtime layout beside Debug output; publish settings apply only to Release. -->
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <BatcomputerOrganizedLayout Condition="'$(BatcomputerOrganizedLayout)' == ''">true</BatcomputerOrganizedLayout>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
-    <PublishSingleFile>true</PublishSingleFile>
-    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <PublishSingleFile>false</PublishSingleFile>
+    <EnableCompressionInSingleFile Condition="'$(PublishSingleFile)' == 'true'">true</EnableCompressionInSingleFile>
+    <IncludeNativeLibrariesForSelfExtract Condition="'$(PublishSingleFile)' == 'true'">true</IncludeNativeLibrariesForSelfExtract>
     <!-- Release ships without a loose PDB. -->
     <DebugType>none</DebugType>
   </PropertyGroup>
+  <Import Project="Tools\Updater\OrganizedPublish.targets" />
   <ItemGroup>
     <!-- Unreal build rules are not part of Batcomputer. -->
     <Compile Remove="Tools\BatcomputerRegistryWriter\**\*.cs" />
@@ -63,6 +65,7 @@
     <EmbeddedResource Include="Web\preview\VehicleWorkshop.html" />
     <EmbeddedResource Include="Web\preview\VehicleWorkshop.css" />
     <EmbeddedResource Include="Web\preview\CharacterWorkshop.css" />
+    <EmbeddedResource Include="Web\updater\*.html;Web\updater\*.css;Web\updater\*.js;Web\updater\*.glb;Web\updater\*.png" />
     <EmbeddedResource Include="Tools\SkinnedMesh\import_mesh.py" />
     <EmbeddedResource Include="Tools\SkinnedMesh\prepare_blender_rig.py" />
     <!-- Shipped game-data catalogs and runtime socket calibration profiles. -->
@@ -87,7 +90,7 @@
     <None Update="CHANGELOG.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <None Update="LICENSE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <None Update="THIRD_PARTY_NOTICES.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
-    <None Update="licenses\*.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Update="licenses\**\*.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <!-- D-DIN is bundled under the SIL Open Font License 1.1. Keep the notice with
          the other release licenses instead of publishing a mostly empty Assets tree. -->
     <None Update="Assets\Font\SIL Open Font License.txt"

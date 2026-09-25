@@ -1,0 +1,5 @@
+substreamsharp/1.0.3
+Source basis: Upstream tag v1.0.3
+These notices do not certify the composition of prebuilt native dependencies.
+
+licenses/dependencies/substreamsharp-1.0.3/Licence.txt.txt | https://raw.githubusercontent.com/connorhaigh/SubstreamSharp/ab2f97da671a511fe956b06ea25e39992e504b08/Licence.txt | SHA256 dbd0c6d4e869c98c3ccf20aee30eb2191d8553a377641fac045b0f9746ca4189

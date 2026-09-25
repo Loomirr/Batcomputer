@@ -1,0 +1,5 @@
+blake3/2.2.1
+Source basis: NuGet repository commit and upstream tag 2.2.1
+These notices do not certify the composition of prebuilt native dependencies.
+
+licenses/dependencies/blake3-2.2.1/license.txt.txt | https://raw.githubusercontent.com/xoofx/Blake3.NET/d27b9f55fa9a8e0fe3a737130da1465534085196/license.txt | SHA256 7f7d75677fb85a9a2cb8146e5a96eec2d574654ce54e5c70a820531ece14b073

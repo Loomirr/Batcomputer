@@ -1,0 +1,1 @@
+Apache-2.0 selected from upstream declaration: MIT OR Apache-2.0 Authors: Chip Senkbeil <chip@senkbeil.org> Repository: https://github.com/chipsenkbeil/typed-path Source: registry+https://github.com/rust-lang/crates.io-index Original license declaration files are retained alongside this text.

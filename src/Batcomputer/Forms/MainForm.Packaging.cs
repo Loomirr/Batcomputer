@@ -139,6 +139,7 @@ public sealed partial class MainForm
         menu.Items.Add(new ToolStripSeparator());
 
         menu.Items.Add("Settings…", null, (_, _) => OpenSettings());
+        menu.Items.Add("Updates… (" + AppVersion.Display + ")", null, (_, _) => { using var updates = new AppUpdatesForm(); updates.ShowDialog(this); });
         return menu;
     }
 
@@ -733,6 +734,7 @@ public sealed partial class MainForm
             psi.ArgumentList.Add("-RetocExe");
             psi.ArgumentList.Add(AppSettings.Current.EffectiveRetocExePath());
 
+            RetocRuntime.Configure(psi);
             using var process = Process.Start(psi);
             if (process is null)
             {
