@@ -4,7 +4,7 @@ Batcomputer is a Windows modding tool for *LEGO Batman: Legacy of the Dark Knigh
 Build suits, customize equipment, and create new playable characters using assets from your own
 copy of the game. Pick a base, make your changes, and build a mod to try in-game.
 
-> **Release candidate:** Batcomputer 1.0 Beta (`1.0.0-beta.1`)
+> **Version:** Batcomputer 1.0 (`1.0.0`) — first official release
 > **Documentation:** [loomirr.github.io/Batcomputer](https://loomirr.github.io/Batcomputer/)
 
 This repository contains Batcomputer only. It does not contain game files, extracted assets, Oodle,
@@ -12,10 +12,10 @@ or Loomirr's LOTDK UE4SS.
 
 ## What it does
 
-The development build adds [custom characters](https://loomirr.github.io/Batcomputer/guides/custom-characters/)
+Batcomputer includes [custom characters](https://loomirr.github.io/Batcomputer/guides/custom-characters/)
 with their own suits, a [custom equipment workshop](https://loomirr.github.io/Batcomputer/guides/equipment-workshop/),
 and experimental [skinned-mesh imports using existing game rigs](https://loomirr.github.io/Batcomputer/guides/skeletal-mesh-proof/).
-These are still being tested for the next release, so they may not be in the current download yet.
+Skinned-mesh importing remains experimental and requires the matching native rig.
 
 - Build a suit from a visual base and a playable gameplay donor.
 - Add parts, capes, gliders, materials, textures, and custom OBJ attachments.
@@ -56,14 +56,23 @@ Extract a portable release somewhere writable, such as `C:\Tools\Batcomputer`.
 ```text
 Batcomputer/
   Batcomputer.exe
+  app/             required DLLs and bundled .NET runtime
   Generated/       build output, suit projects, previews, and extracts
   Data/            reusable indexes and the writer cache
   Runtime/         local runtime state
   Tools/           retoc and the verified Asset Registry writer
+  gamedata/        reference catalogs
+  Documentation/   offline guides
+  licenses/        dependency license and notice texts
 ```
 
-The default workspace stays beside `Batcomputer.exe`. Settings can move the workspace or the large
+Extract the entire ZIP; do not move the EXE away from its folders. Generated, Data and Runtime are
+created locally as needed. The default workspace stays beside `Batcomputer.exe`. Settings can move the workspace or the large
 extracted game dump to another drive.
+
+The installed version is shown in the app. Open **Updates** to check GitHub, download a verified
+update and restart when ready. Earlier builds without an updater need one manual installation.
+Pre-1.0 releases are legacy and are not offered by the updater.
 
 Batcomputer does not bundle LOTDKExpanded or a standalone Mode Access DLL. Install the current
 LOTDK UE4SS framework separately. Normal/Mayhem/Both character settings write per-mod configuration

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0 — first official release
+
+- Replaces the Windows update-completion message box with the shared themed dialog, including the installed version, verification status, recovery guidance and a Back to workshop action. The prompt still appears only after confirmed startup and only once per update.
+- Completes the first live GitHub full-ZIP updater test: download, verification, install, runtime startup, rollback and settings/project preservation passed. The author also confirmed the in-app restart and completion prompt. Changed-file updates have local regression coverage; a separate live GitHub incremental test remains outstanding.
+- Retains the organized portable layout, skeletal fixes, character workflow improvements and updater introduced during the 1.0 betas. Pre-1.0 releases remain legacy/manual-only.
+
 ## 1.0.0-beta.3 — 2026-09-24
 
 - First GitHub updater prerelease test. Uses the full ZIP on the live feed; changed-file downloads are separately covered by local acceptance tests.

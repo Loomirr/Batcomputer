@@ -938,6 +938,21 @@ internal static class Program
         Theme.ApplyDarkTitleBarsAppWide();
         Animator.Enabled = AppSettings.Current.AnimationsEnabled;
 
+        if (args.Length is 1 or 2 && args[0] == "--preview-update-complete")
+        {
+            using var preview = Dialog.CreateForm(null, AppUpdateCompletion.Presentation(AppVersion.Current, preview: true));
+            preview.ShowInTaskbar = true;
+            if (args.Length == 2)
+                preview.Shown += (_, _) => preview.BeginInvoke(new Action(() =>
+                {
+                    using var bitmap = new Bitmap(preview.Width, preview.Height);
+                    preview.DrawToBitmap(bitmap, new Rectangle(Point.Empty, preview.Size));
+                    bitmap.Save(Path.GetFullPath(args[1]), System.Drawing.Imaging.ImageFormat.Png);
+                }));
+            preview.ShowDialog();
+            return 0;
+        }
+
         var sandboxMarker = Path.Combine(AppSettings.ToolRoot, AppUpdateInstaller.SandboxMarker);
         if ((args.FirstOrDefault() == "--updater-test-feed" || File.Exists(sandboxMarker)) && !AppUpdateTestEnvironment.FullApp)
         {

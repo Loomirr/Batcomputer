@@ -43,6 +43,15 @@ internal static class AppUpdateRegressionChecks
             foreach (var version in new[] { "v1.0-Beta", "1.0.0-beta.1", "1.0.0", "2.0.0-alpha" })
                 if (!AppUpdateService.IsSupportedRelease(version)) throw new Exception("Supported release rejected.");
         });
+        Check("completion uses themed dialog with installed version and recovery guidance", () =>
+        {
+            var model = AppUpdateCompletion.Presentation("1.0.0");
+            if (model.Severity != Dialog.Level.Good || !model.Subtitle.Contains("v1.0.0")
+                || model.PrimaryText != "Back to workshop" || model.Chips.Count != 2
+                || !model.CalloutDetail.Contains("Settings & recovery")) throw new Exception("Completion presentation is incomplete.");
+            if (!AppUpdateCompletion.Presentation("1.0.0", preview: true).WindowTitle.Contains("Preview"))
+                throw new Exception("Preview must be distinguishable from a real completion.");
+        });
         Check("reject paths escaping app files, state, ADS, device names and Windows aliases", () =>
         {
             foreach (var path in new[] { "../Batcomputer.exe", "C:/oops.dll", "Tools//a", "Tools/../a", "Tools/a:stream", "Tools/CON.txt", "Tools/a. ", "Data/rig.json", "Generated/project.json", "Runtime/foo.dll", "Batcomputer.settings.json", "Tools\\foo", "app/../Data/project.json", "app/Batcomputer.settings.json", "app/Generated/project.json" })

@@ -3,6 +3,20 @@ namespace Batcomputer;
 /// <summary>Claims a verified startup notification once per transaction, never on ordinary launches.</summary>
 internal static class AppUpdateCompletion
 {
+    internal static Dialog.Model Presentation(string version, bool preview = false) => new()
+    {
+        WindowTitle = "Batcomputer — Update complete" + (preview ? " · Preview" : ""),
+        Title = "You're up to date.",
+        Subtitle = "Batcomputer v" + version + "  •  Ready for your next build",
+        Severity = Dialog.Level.Good,
+        Chips = new() { ("Files verified", Theme.Good), ("Startup confirmed", Theme.Good) },
+        Message = "Your settings, projects and installed mods are right where you left them.",
+        CalloutTitle = "A backup is ready if you need it",
+        CalloutDetail = "Find your previous application files in Updates → Settings & recovery.",
+        PrimaryText = "Back to workshop",
+        // Preview construction has no update, health, settings or notification-claim side effects.
+    };
+
     internal static string? Claim(string root, string token, string version)
     {
         if (!Guid.TryParseExact(token, "N", out _)) return null;
@@ -30,8 +44,8 @@ internal static class AppUpdateCompletion
         owner.BeginInvoke(new Action(() =>
         {
             if (owner.IsDisposed || owner.Disposing) return;
-            if (Claim(AppSettings.ToolRoot, token, AppVersion.Current) is { } message)
-                MessageBox.Show(owner, message, "Batcomputer — Update complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            if (Claim(AppSettings.ToolRoot, token, AppVersion.Current) != null)
+                Dialog.Show(owner, Presentation(AppVersion.Current));
         }));
     }
 }
