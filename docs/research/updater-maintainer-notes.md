@@ -4,6 +4,66 @@ These are the packaging and local-test notes retained from the 1.0 development c
 For user instructions, see [Updating Batcomputer](../guides/app-updates.md).
 Release publication and test status below are historical, not the current support matrix.
 
+## Current beta publication and future two-ZIP packaging
+
+**1.1.0-beta.1 is published full-ZIP-only**, with the complete
+`Batcomputer-update-win-x64.zip` and its SHA-256 sidecar. This lets original 1.0 clients
+install the new patch reader. The patch ZIP/catalog prepared during development stays local.
+Use `--create-app-update` for this release, not `--create-app-update-patch`.
+
+Later releases can use one complete ZIP for manual installs/older clients and one patch ZIP
+for an exact base version. Keep a verified copy of that base release's complete publish folder.
+
+```powershell
+dotnet publish Batcomputer.csproj -c Release -o artifacts/publish-1.1-beta1
+Start-Process artifacts/publish-1.1-beta1/Batcomputer.exe -Wait -ArgumentList @(
+  '--create-app-update-patch',
+  'artifacts/release-1.0.0/final-publish',
+  'artifacts/publish-1.1-beta1',
+  'artifacts/package-1.1-beta1'
+)
+```
+
+Upload the full `Batcomputer-update-win-x64.zip`, the generated
+`Batcomputer-update-from-1.0.0-win-x64.zip`, `Batcomputer-update-win-x64.patches.json`, and
+the SHA-256 sidecar for each. Do not also generate a `.files.json` catalog for this release:
+that would select the older per-file download route instead of testing the patch ZIP.
+The full ZIP is also the fresh-install download; another duplicate full ZIP is unnecessary.
+`Publish-GitHubPrerelease.ps1 -DryRun` checks these local assets without contacting GitHub.
+Publication still requires the final committed/pushed source revision and explicit approval.
+
+The patch contains only changed/new application files plus the complete target manifest. The
+client requires the exact base version and verifies every file it will reuse. It reconstructs
+and verifies a complete staging tree before touching the installation. A mismatched, missing
+or changed local dependency uses the full ZIP; corrupted remote metadata or payloads block
+installation. Updates do not delete unknown files or touch saved projects/settings/mods.
+
+The **original published 1.0 updater needs the full ZIP for its first update**: it cannot read
+the new patch catalog. Do not claim a small first download for those users. Later compatible
+clients can take a matching base-specific patch; skipped or different versions use the full
+download. Binary delta patches and chained patches are not implemented.
+
+For an isolated current-beta test (no windows opened and no GitHub publication):
+
+```powershell
+./Tools/Updater/Prepare-PatchUpdateTest.ps1 `
+  -BaseDirectory artifacts/release-1.0.0/final-publish `
+  -OutputRoot artifacts/my-new-patch-test -Port 8773
+```
+
+This creates a current candidate, an actual original-client runner, disposable installs and
+a **current-code bridge runner stamped with the base version for testing**. The bridge is not
+the historical 1.0 release and must not be distributed as such. Automated patch acceptance
+uses that runner against the original install; the original runner verifies the full-ZIP
+bootstrap. In the `manual` fixture, Check → Download → Restart now should show the new beta
+and the completion prompt once. Keep the loopback server running for the manual check and
+stop its recorded process when finished. Use a fresh output directory for every preparation.
+
+The fixture checker additionally supports `--change-reused-file` after the feed argument.
+It intentionally edits one dependency in a marked disposable install after Check, verifies
+a full-download fallback, and checks that rollback restores the pre-install dependency.
+Never run this acceptance command against a real installation.
+
 ## Release author: build an updater package
 
 **Distribution checks:** packaging rejects Oodle/game runtimes and Epic editor DLLs. The release owner chose to retain the authored prebuilt registry writer; only its exact expected tool path is exempted. This is not legal clearance of its distribution terms. Native retoc/ACL helpers are now source-pinned, tested builds with dependency notices. See [the remediation report](../research/native-redistribution-remediation-20260924.md). Do not ship local proprietary runtimes or infer permission from a wrapper's license.

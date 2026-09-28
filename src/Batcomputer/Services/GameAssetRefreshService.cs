@@ -138,6 +138,8 @@ public sealed class GameAssetRefreshService
         // One metadata asset used only by the Playable 3D viewer's read-only native
         // colour-preset selector. This does not restore Red Brick authoring assets.
         ViewerBaseGameRedBrickPaletteService.RetocFilter,
+        // Native character default-vehicle picker: metadata only, not every vehicle mesh.
+        "Content/Vehicles/DA_Vehicle_",
         // Shared parent used by native cape materials. It lives outside Characters,
         // so a character-only filter does not bring it into the extracted workspace.
         CapeTransparentMaterialFilter,
@@ -571,13 +573,20 @@ public sealed class GameAssetRefreshService
         if (!Directory.Exists(contentRoot) || outputRoot is null || !string.Equals(Path.GetFileName(Path.GetDirectoryName(contentRoot)), "LEGOBatmanLotDK", StringComparison.OrdinalIgnoreCase))
             throw new DirectoryNotFoundException("Run a full asset refresh first: no usable extracted LEGOBatmanLotDK\\Content folder is active.");
 
-        var missing = VehicleDonorService.All.SelectMany(d => d.Required.Concat([d.SummonMesh, d.SummonSkeleton]))
+        var missing = VehicleDonorService.All.SelectMany(d => d.Required.Concat([d.SummonMesh, d.SummonSkeleton]).Concat(d.BoostPackages))
+            .Concat(VehicleBoostColorService.Packages).Concat(VehicleBoostColorService.WiringPackages)
+            .Concat(VehicleExhaustService.StylePackages).Concat(VehicleBoostSpeedService.Packages)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Where(package => !VehicleDonorService.PackageComplete(contentRoot, package))
             .ToArray();
+        var metadataDirectory = Path.Combine(contentRoot, "Vehicles");
+        var needVehicleCatalog = !Directory.Exists(metadataDirectory) ||
+            !Directory.EnumerateFiles(metadataDirectory, "DA_Vehicle_Batmobile1966*.uasset").Any();
+        var filters = missing.Select(VehicleDonorService.ExtractionFilter)
+            .Concat(needVehicleCatalog ? ["Content/Vehicles/DA_Vehicle_"] : []).ToArray();
         var logs = new List<string>();
-        if (missing.Length == 0)
-            return new(contentRoot, [], [], ["Every vehicle driving base is already extracted."]);
+        if (filters.Length == 0)
+            return new(contentRoot, [], [], ["Every vehicle driving base, boost dependency and vehicle metadata catalog is already extracted."]);
 
         var dlcRoot = DlcRootForPaksRoot(paksRoot);
         string? mount = null;
@@ -590,11 +599,11 @@ public sealed class GameAssetRefreshService
                 mount = CreateCombinedContainerMount(paksRoot, dlcRoot, outputRoot);
                 input = mount;
             }
-            for (var i = 0; i < missing.Length; i++)
+            for (var i = 0; i < filters.Length; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var filter = VehicleDonorService.ExtractionFilter(missing[i]);
-                progress?.Report(new Progress(5 + i * 90 / missing.Length, "Extracting", filter));
+                var filter = filters[i];
+                progress?.Report(new Progress(5 + i * 90 / filters.Length, "Extracting", filter));
                 var command = await RunRetocAsync(retoc, input, outputRoot, filter, cancellationToken);
                 if (command.ExitCode != 0)
                     throw new InvalidOperationException($"retoc failed for '{filter}' (exit {command.ExitCode}).\n" + string.Join(Environment.NewLine, command.ErrorLines.Concat(command.OutputLines).TakeLast(8)));

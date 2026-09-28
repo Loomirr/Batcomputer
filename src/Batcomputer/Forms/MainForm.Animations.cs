@@ -179,6 +179,16 @@ public sealed partial class MainForm
         importTile.Height = 104;
         _toyboxTileFlow.Controls.Add(importTile);
 
+        var cookDraftTile = MakeTile(
+            "+ Cook animation draft",
+            "saved JSON → Unreal 5.6 → animation library",
+            () => _ = CookAnimationDraftAsync(),
+            Theme.Animations,
+            dashed: true);
+        cookDraftTile.Width = 210;
+        cookDraftTile.Height = 104;
+        _toyboxTileFlow.Controls.Add(cookDraftTile);
+
         var libraryTile = MakeTile(
             "Imported animation library",
             importedCount > 0 ? $"{importedCount} ready · browse library" : "library is empty",
@@ -244,6 +254,16 @@ public sealed partial class MainForm
         importTile.Width = 210;
         importTile.Height = 104;
         _toyboxTileFlow.Controls.Add(importTile);
+
+        var cookDraftTile = MakeTile(
+            "+ Cook animation draft",
+            "turn a 3D viewer draft into a usable sequence",
+            () => _ = CookAnimationDraftAsync(),
+            Theme.Animations,
+            dashed: true);
+        cookDraftTile.Width = 210;
+        cookDraftTile.Height = 104;
+        _toyboxTileFlow.Controls.Add(cookDraftTile);
 
         var explorerTile = MakeTile(
             "Edit character animations",
@@ -853,6 +873,75 @@ public sealed partial class MainForm
         }
         var leaf = pkg[(pkg.LastIndexOf('/') + 1)..];
         return $"{pkg}.{leaf}";
+    }
+
+    /// <summary>Cook one 3D-viewer draft and put the verified AnimSequence in the workspace library.</summary>
+    private async Task CookAnimationDraftAsync()
+    {
+        if (_animationImportInProgress)
+        {
+            Dialog.Info(this, "Animation work is already running", "Let the current animation import or cook finish first.");
+            return;
+        }
+        var projectRoot = _projectRootText.Text.Trim();
+        if (string.IsNullOrWhiteSpace(projectRoot))
+        {
+            Dialog.Warn(this, "Choose a workspace first", "Set the project root before cooking an animation draft.");
+            return;
+        }
+        using var draftDialog = new OpenFileDialog
+        {
+            Title = "Choose an animation draft saved from the 3D viewer",
+            Filter = "Batcomputer animation draft (*.animation-draft.json;*.json)|*.animation-draft.json;*.json",
+            CheckFileExists = true
+        };
+        if (draftDialog.ShowDialog(this) != DialogResult.OK) return;
+        using var fbxDialog = new OpenFileDialog
+        {
+            Title = "Choose a prepared native LEGOfig body FBX (used only as a temporary cook rig)",
+            Filter = "Rigged FBX (*.fbx)|*.fbx",
+            CheckFileExists = true
+        };
+        if (fbxDialog.ShowDialog(this) != DialogResult.OK) return;
+
+        using var progress = new AnimationImportProgressForm(Path.GetFileName(draftDialog.FileName));
+        _animationImportInProgress = true;
+        progress.Show(this);
+        try
+        {
+            progress.SetPhase("Checking the draft", "Matching its bones to the installed game's native LEGOfig rig…");
+            var result = await Task.Run(() => AnimationDraftCookService.CookAndImportAsync(
+                projectRoot, draftDialog.FileName, fbxDialog.FileName,
+                line =>
+                {
+                    if (IsHandleCreated && !IsDisposed)
+                        BeginInvoke(new Action(() =>
+                        {
+                            AppendLog("  " + line);
+                            if (!progress.IsDisposed) progress.SetPhase("Cooking animation draft", line);
+                        }));
+                }));
+            progress.Close();
+            AppendLog($"Animation ready: {result.Entry.Name} → {result.Entry.PackagePath}" +
+                (result.Reused ? " (reused the existing cook)." : $". Cook report: {result.ReportDirectory}"));
+            RefreshToyboxTiles();
+            Dialog.Info(this, "Animation is ready",
+                "Your draft is now a cooked animation in this workspace's library. " +
+                "Choose an individual slot for it in Edit character animations, then build your suit.\n\n" +
+                result.Entry.PackagePath);
+            OpenAnimationExplorer(result.Entry.PackagePath);
+        }
+        catch (Exception ex)
+        {
+            if (!progress.IsDisposed) progress.Close();
+            AppendLog("Animation draft cook failed: " + ex.Message.Replace('\n', ' '));
+            Dialog.Error(this, "Animation draft could not be cooked", ex.Message,
+                windowTitle: "Animations");
+        }
+        finally
+        {
+            _animationImportInProgress = false;
+        }
     }
 
     /// <summary>

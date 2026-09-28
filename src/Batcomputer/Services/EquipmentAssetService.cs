@@ -120,7 +120,11 @@ public static class EquipmentAssetService
         if (split) { using var source = File.OpenRead(Path.ChangeExtension(file, ".uexp")); source.CopyTo(bytes); }
         bytes.Position = 0;
         using var reader = new AssetBinaryReader(bytes);
-        return new UAsset(reader, EngineVersion.VER_UE5_6, mappings, split, flags);
+        var asset = new UAsset(reader, EngineVersion.VER_UE5_6, mappings, split, flags);
+        // Memory parsing must retain provenance: generated Blueprint parents are
+        // resolved only in this asset's own staging Content tree.
+        asset.FilePath = Path.GetFullPath(file);
+        return asset;
     }
 
     internal static IEnumerable<(string Path, PropertyData Property)> Properties(IEnumerable<PropertyData> properties, string prefix = "")

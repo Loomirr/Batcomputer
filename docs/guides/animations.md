@@ -34,6 +34,61 @@ An individual idle/walk/run override and a whole Locomotion layer swap cannot bo
 Batcomputer stops the build and asks you to reset one side instead of packaging two competing
 controllers.
 
+## Pose and keyframe a draft in the 3D viewer
+
+Open a character's **3D viewer**, then choose **Create** in the inspector. This is a local animation
+studio for the native LEGOfig body rig. It opens in rest pose and does not modify the suit, the game,
+or an imported animation. The parts list folds away to give the model and timeline more room; use
+**Parts** if you need to inspect it while editing.
+
+1. Name the clip, describe its intended use, and set its length (30 frames per second, up to 30 seconds).
+2. Choose a bone from the searchable hierarchy. **Show joints** makes its joint markers clickable in
+   the 3D view, and **Focus joint** centers the camera on the selected bone.
+3. At the desired frame, use **Move**, **Rotate**, or **Scale** on the joint gizmo. The numeric fields
+   show the selected bone's offset from its rest pose; they are not world-space coordinates. Scale
+   is a multiplier of the bone's rest size (1 means unchanged), limited to 0.05–5 per axis. Choose
+   local or world axes and turn on snapping when you need precise increments.
+4. Use **Set key**, **Key rest pose**, or the transform controls to make keys. Drag a diamond in the
+   timeline to retime it; copy/paste a key to another bone or frame; use **Undo/Redo** to correct an
+   edit. A key's **Transition** can be linear, smooth, or held until the next key.
+5. Scrub the timeline or use frame stepping, playback speed, looping, the frame number, and timeline
+   zoom to inspect the motion. Save the draft JSON and reopen it later on the same native rig. Use
+   **New draft** for another clip; it warns before discarding unsaved work.
+
+Drag the small grip on the timeline's top edge to make the track area taller or shorter. Its height
+is remembered. With the grip focused, Up/Down changes the height by keyboard.
+
+Useful shortcuts while the 3D viewport has focus: `W` moves, `R` rotates, `E` scales, `K` adds a key,
+Space starts or pauses, Left/Right steps one frame (Shift steps five), and Ctrl+Z/Ctrl+Y undo/redo.
+
+The editor saves a draft JSON first. To make it playable in a mod:
+
+1. Save the draft from **Create** in the 3D viewer. Saving does not change the suit or game.
+2. In Batcomputer's **Animations** page, choose **Cook animation draft** and select that JSON.
+   Select a prepared, weighted native LEGOfig body FBX when asked. Configure Unreal Engine 5.6
+   in Settings. Batcomputer validates the draft against the installed game's rig, cooks an
+   `AnimSequence` in an isolated Unreal project, connects it to the native skeleton, and adds it
+   to this workspace's animation library. You do not need to run Unreal commands yourself.
+3. In **Edit character animations**, select the exact suit animation slot and choose the cooked
+   library entry. Build the suit, then test that action in-game. No other slot is changed.
+
+For the one-time FBX reference, export **native reference + rig (GLB)** from the skinned-mesh
+workshop using the standard Minifig body. Follow the [Blender rig preparation guide](blender-rig-preparation.md)
+and export the weighted reference geometry with its complete armature as one binary FBX. Keep
+that reference locally; do not include the game's extracted model in a shared mod. A mismatched
+rig is rejected before library import. The FBX is a temporary cook scaffold, not a replacement
+mesh shipped with the animation.
+
+The cooked sequence is stored in the workspace library and staged into a suit's pak only after
+that suit references it. A cook does not install a mod automatically. If you change a draft and
+cook it again, its content-hashed package name is new, so the previously assigned version stays
+intact until you deliberately choose the new one.
+
+One character can have several idle slots, and the game may not play them all in a short session.
+Seeing one idle work does not prove that the other slots were selected or that every authored clip
+has played. For a reliable in-game check, temporarily map each candidate to a known primary idle
+slot on a disposable test suit and observe it separately.
+
 ## Import a cooked animation pack
 
 Choose **Import animation pack**, then select the `.utoc`, `.ucas`, or `.pak` from the cooked

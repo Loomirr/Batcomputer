@@ -18,4 +18,6 @@ public sealed class CustomCharacterIdentity
     public string SymbolPngBase64 { get; set; } = "";
     // The definition owns this setting. Child suits inherit it at build time.
     public CharacterModeAvailability ModeAvailability { get; set; } = CharacterModeAvailability.Normal;
+    // Empty retains the historical donor vehicle; "None" clears it; otherwise an exact vehicle pawn tag.
+    public string DefaultVehicleTag { get; set; } = "";
 }

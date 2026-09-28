@@ -48,8 +48,12 @@ internal static class SkinnedMeshCookService
         SkinnedGlbExportService.CorrectFile(saved, mesh);
         using (var input = typeof(SkinnedMeshCookService).Assembly.GetManifestResourceStream("Batcomputer.Tools.SkinnedMesh.prepare_blender_rig.py")
                ?? throw new InvalidDataException("The bundled Blender rig-preparation script is missing."))
-        using (var output = File.Create(Path.Combine(directory, "Batcomputer_PrepareBlenderRig.py")))
-            input.CopyTo(output);
+        using (var reader = new StreamReader(input))
+        {
+            var script = reader.ReadToEnd();
+            var baseId = VehicleDonorService.All.FirstOrDefault(d => d.Mesh == donor)?.Id ?? "";
+            File.WriteAllText(Path.Combine(directory, "Batcomputer_PrepareBlenderRig.py"), script.Replace("__BATCOMPUTER_BASE__", baseId, StringComparison.Ordinal));
+        }
         return saved;
     }
 
@@ -57,6 +61,7 @@ internal static class SkinnedMeshCookService
         Action<string> log, CancellationToken cancellation = default)
     {
         var recipe = request.Clone();
+        var allowVehicleWheelRaise = VehicleDonorService.All.Any(d => d.Mesh == recipe.DonorMeshPackage && recipe.Component == "SkeletalMeshComponent");
         RequireDefaultImportScale(recipe.ImportScale);
         RequireNativeDonor(recipe.DonorMeshPackage);
         if (!recipe.MeshPackage.StartsWith("/Game/Mods/", StringComparison.Ordinal) ||
@@ -101,7 +106,7 @@ internal static class SkinnedMeshCookService
             new { Name = "PythonScriptPlugin", Enabled = true }, new { Name = "EditorScriptingUtilities", Enabled = true },
             new { Name = "MeshModelingToolset", Enabled = true } } }));
         var cookSource = Path.Combine(cookRoot, "source.fbx"); File.Copy(sourceCopy, cookSource);
-        File.WriteAllText(Path.Combine(cookRoot, "import.json"), JsonSerializer.Serialize(new { source = cookSource, scale = recipe.ImportScale, package = recipe.MeshPackage, donor_bones = donorBones }));
+        File.WriteAllText(Path.Combine(cookRoot, "import.json"), JsonSerializer.Serialize(new { source = cookSource, scale = recipe.ImportScale, package = recipe.MeshPackage, donor_bones = donorBones, allow_wheel_raise = allowVehicleWheelRaise }));
         var script = Path.Combine(cookRoot, "import_mesh.py");
         using (var resource = typeof(SkinnedMeshCookService).Assembly.GetManifestResourceStream("Batcomputer.Tools.SkinnedMesh.import_mesh.py")
             ?? throw new InvalidDataException("The bundled skeletal import script is missing."))
@@ -162,7 +167,7 @@ bSkipEditorContent=True
         {
             var donor = provider.LoadPackageObject<USkeletalMesh>(recipe.DonorMeshPackage);
             var mesh = provider.LoadPackageObject<USkeletalMesh>(recipe.MeshPackage);
-            ValidateRigWithReport(donor, mesh, Path.Combine(root, "rig-comparison.json"), log);
+            ValidateRigWithReport(donor, mesh, Path.Combine(root, "rig-comparison.json"), log, allowVehicleWheelRaise);
             recipe.SkeletonPackage = UnrealPathUtil.NormalizePackagePath(donor.Skeleton?.ResolvedObject?.GetPathName() ?? "");
             if (!ExtractedPackagePathService.IsContentPackagePath(recipe.SkeletonPackage)) throw new InvalidDataException("The donor has no usable native skeleton.");
         }
@@ -200,9 +205,9 @@ bSkipEditorContent=True
     internal static void ValidateRig(USkeletalMesh donor, USkeletalMesh mesh)
         => ValidateRigWithReport(donor, mesh, null, null);
 
-    private static void ValidateRigWithReport(USkeletalMesh donor, USkeletalMesh mesh, string? reportPath, Action<string>? log)
+    private static void ValidateRigWithReport(USkeletalMesh donor, USkeletalMesh mesh, string? reportPath, Action<string>? log, bool allowVehicleWheelRaise = false)
     {
-        var comparison = SkinnedRigComparisonService.Compare(SkinnedGlbExportService.Bones(donor.ReferenceSkeleton), SkinnedGlbExportService.Bones(mesh.ReferenceSkeleton));
+        var comparison = SkinnedRigComparisonService.Compare(SkinnedGlbExportService.Bones(donor.ReferenceSkeleton), SkinnedGlbExportService.Bones(mesh.ReferenceSkeleton), allowVehicleWheelRaise);
         if (reportPath is not null)
         {
             SkinnedRigComparisonService.Write(reportPath, comparison);

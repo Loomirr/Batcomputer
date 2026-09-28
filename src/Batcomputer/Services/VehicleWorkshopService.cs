@@ -31,6 +31,18 @@ internal static class VehicleWorkshopService
         public bool LockScale { get; init; }
         public float[] MarkerDirection { get; init; } = [1, 0, 0];
     }
+    internal sealed record BoostPreview(string Label, bool Twin, string Colour, string[] Outlets);
+    internal static BoostPreview? Boost(VehicleProject project)
+    {
+        var donor = VehicleDonorService.Get(project);
+        if (VehicleExhaustService.Unavailable(donor) is not null) return null;
+        var chosen = VehicleExhaustService.FindStyle(project.BoostStyle);
+        var own = VehicleExhaustService.Styles.FirstOrDefault(s => s.BoostBlueprint == donor.BoostBlueprint);
+        var colour = project.BoostColor is { } custom ? $"#{custom.R:X2}{custom.G:X2}{custom.B:X2}" : (chosen ?? own)?.PreviewColour ?? "#ff8a2a";
+        return new(chosen?.Label ?? donor.Label + "'s own boost", project.TwinExhausts,
+            colour,
+            project.TwinExhausts ? [donor.ExhaustSocket, VehicleExhaustService.SecondSocket] : [donor.ExhaustSocket]);
+    }
     internal sealed record Scene(string VehicleId, string Session, string Name, IReadOnlyList<Part> Parts,
         IReadOnlyList<MaterialSlot> NativeMaterials, IReadOnlyList<VehicleComponentTransform> Saved, IReadOnlyList<string> Warnings)
     {
@@ -50,6 +62,7 @@ internal static class VehicleWorkshopService
         public string PreviewQuality { get; init; } = "Balanced";
         public int DetailPartBudget { get; init; } = 6;
         public int FrameRateLimit { get; init; } = 60;
+        public BoostPreview? Boost { get; init; }
     }
     private static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     internal static readonly Pose Identity = new([0, 0, 0], [0, 0, 0, 1], [1, 1, 1]);
@@ -96,6 +109,11 @@ internal static class VehicleWorkshopService
         string? bodyCache = null;
         var useCustomPreviewBody = project.Model is not null;
         var warnings = new List<string>();
+        if (project.Model is not null && VehicleLegacyMeshRepairService.Pending(directory, project).Contains("body"))
+        {
+            useCustomPreviewBody = false;
+            warnings.Add("This saved body predates the rig-scale correction. Showing the native donor shell until its saved FBX is rebuilt; the project and old cook are unchanged.");
+        }
         if (project.Model is { } model)
         {
             progress?.Invoke("Checking the imported body…");
@@ -141,6 +159,9 @@ internal static class VehicleWorkshopService
             var p = JObject.FromObject(socket)["Properties"]!; var bone = p["BoneName"]!.ToString();
             if (bones.TryGetValue(bone, out var bonePose)) sockets.Add(p["SocketName"]!.ToString(), (Compose(bonePose, SocketPose(p)), bone));
         }
+        var nativeSecondOutlet = sockets.ContainsKey(VehicleExhaustService.SecondSocket);
+        if (project.TwinExhausts && sockets.TryGetValue(donor.ExhaustSocket, out var firstOutlet))
+            sockets.TryAdd(VehicleExhaustService.SecondSocket, firstOutlet);
         if (!donor.FullWorkshop) warnings.Add(donor.HeadlightEditing ? "Headlight beam colors and positions are editable. Rear/accent controller colors and surface-to-light bindings are not verified on this base yet." : "Light controller editing is not verified on this driving base. Lights retain their native behavior."); var parts = new List<Part>(); var exports = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var primitiveSlots = new Dictionary<string, int[]>(StringComparer.OrdinalIgnoreCase);
         string Export(string package)
@@ -226,14 +247,15 @@ internal static class VehicleWorkshopService
         foreach (var socketName in VehicleSocketService.EditableSockets.Where(sockets.ContainsKey))
         {
             var id = "socket:" + socketName; var socket = sockets[socketName];
-            var original = VehicleSocketService.Transform(VehicleSocketService.Socket(nativeSkeleton, socketName), id);
+            var original = VehicleSocketService.Transform(VehicleSocketService.Socket(nativeSkeleton,
+                socketName == VehicleExhaustService.SecondSocket && !nativeSecondOutlet ? donor.ExhaustSocket : socketName), id);
             var launcherMesh = socketName.StartsWith("LauncherGadget_") ? "/Game/Models/Vehicles/VEH_LauncherGadget_01/SK_VEH_LauncherGadget_01" : socketName == "Grapple_01" ? "/Game/Models/Vehicles/VEH_GrappleLauncherGadget_01/SK_VEH_GrappleLauncherGadget_01" : "";
             var file = "";
             if (launcherMesh.Length > 0) { try { _ = provider.LoadPackageObject(launcherMesh); } catch (Exception ex) { warnings.Add("Launcher marker only: " + ex.Message); launcherMesh = ""; } }
             var effect = VehicleSocketService.EffectSockets.Contains(socketName, StringComparer.Ordinal);
             parts.Add(new(id, VehicleSocketService.Label(socketName), effect ? "Boost & exhaust" : "Weapons & grapple", file, socketName, socket.Bone, true, bones[socket.Bone], original,
                 project.Transforms.FirstOrDefault(t => t.Component == id) ?? original, [], effect
-                ? "Moves boost and engine start / idle / shutdown effects together. Arrow follows the native exhaust direction; particles are not simulated. Color and effect size stay native for now."
+                ? "Moves the boost outlet and available engine flames together. Boost preview is approximate; check the effect in game."
                 : launcherMesh.Length > 0
                 ? "Move the whole launcher here. Native deployment and aiming remain active. Model preview is the rest pose; test deployed clearance in game."
                 : "Fallback firing / VFX reference. This donor normally fires from the animated launcher's own socket; move Rocket launcher 1 or 2 first.") { MeshPackage = launcherMesh, LockScale = true, MarkerDirection = VehicleSocketService.MarkerDirection(socketName) });
@@ -247,8 +269,8 @@ internal static class VehicleWorkshopService
         var scene = new Scene(project.Id, session, project.DisplayName, parts, nativeMaterials, project.Transforms, warnings)
         { Animations = animations, Rig = VehicleAnimationPreviewService.Rig(body), SizeMultiplier = project.SizeMultiplier, ToyboxCatalog = VehicleToyboxService.Catalog(provider), LightControls = donor.FullWorkshop, MaterialCatalog = VehicleMaterialCatalogService.Read(settings.EffectiveProjectRoot(), provider), MaterialOverrides = project.MaterialOverrides, DisabledParts = project.DisabledParts, Lights = project.Lights, AccentColor = project.AccentColor,
             LightRoles = donor.FullWorkshop ? VehicleLightSurfaceService.Roles : [], LightSurfaces = project.LightSurfaces, LightSurfaceChoices = !donor.FullWorkshop || !useCustomPreviewBody ? [] : VehicleLightSurfaceService.Analyze(provider.LoadPackageObject<USkeletalMesh>(bodyPackage), project),
-            PreviewQuality = settings.PreviewQuality, DetailPartBudget = Math.Clamp(settings.VehicleDetailedPartBudget, 1, 24), FrameRateLimit = Math.Clamp(settings.ViewerFrameRateLimit, 0, 144) };
-        foreach (var asset in new[] { "three.min.js", "GLTFLoader.js", "OrbitControls.js", "TransformControls.js", "VehicleWorkshop.js", "VehicleMotion.js", "VehicleRiders.js", "VehicleWorkshop.html", "VehicleWorkshop.css" })
+            PreviewQuality = settings.PreviewQuality, DetailPartBudget = Math.Clamp(settings.VehicleDetailedPartBudget, 1, 24), FrameRateLimit = Math.Clamp(settings.ViewerFrameRateLimit, 0, 144), Boost = Boost(project) };
+        foreach (var asset in new[] { "three.min.js", "GLTFLoader.js", "OrbitControls.js", "TransformControls.js", "VehicleWorkshop.js", "VehicleMotion.js", "VehicleBoostPreview.js", "VehicleRiders.js", "VehicleWorkshop.html", "VehicleWorkshop.css" })
             File.WriteAllBytes(Path.Combine(folder, asset == "VehicleWorkshop.html" ? "index.html" : asset), EmbeddedAssets.ReadBytes("preview/" + asset) ?? throw new FileNotFoundException("Missing vehicle viewer asset: " + asset));
         File.WriteAllText(Path.Combine(folder, "scene.js"), "window.VEHICLE_SCENE=" + JsonSerializer.Serialize(scene, Json) + ";");
         return scene;

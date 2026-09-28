@@ -14,8 +14,9 @@ internal static class NativeBlueprintSchemaService
         asset.GetParentClass(out var parentPath, out var parentName);
         var name = parentName?.ToString() ?? "";
         var package = UnrealPathUtil.NormalizePackagePath(parentPath?.ToString() ?? "");
-        if (name.Length == 0 || mappings.Schemas.ContainsKey(name) ||
-            !ExtractedPackagePathService.IsContentPackagePath(package)) return;
+        if (name.Length == 0 || !ExtractedPackagePathService.IsContentPackagePath(package)) return;
+        var generated = package.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase);
+        if (!generated && mappings.Schemas.ContainsKey(name)) return;
         if (visited.Count >= 32 || !visited.Add(package))
             throw new InvalidDataException("Cyclic or excessively deep native Blueprint inheritance: " + package);
         var file = ResolveParentFile(asset.FilePath, package, AppSettings.Current.EffectiveExtractedContentRoot());
@@ -23,6 +24,9 @@ internal static class NativeBlueprintSchemaService
             throw new InvalidDataException(package.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase)
                 ? $"The generated parent Blueprint {package} is missing from this character's staging folder. Rebuild the character from its saved project."
                 : $"The parent Blueprint {package} is missing from the active extraction. Refresh game assets before editing this character.");
+        // A schema cached from another stage is not evidence that this stage owns
+        // its generated parent. Always establish that provenance before reusing it.
+        if (mappings.Schemas.ContainsKey(name)) return;
         var parent = new UAsset(file, EngineVersion.VER_UE5_6, mappings, CustomSerializationFlags.SkipPreloadDependencyLoading);
         EnsureParents(parent, visited);
         if (parent.GetClassExport() is not { } parentClass || parentClass.ObjectName.ToString() != name)

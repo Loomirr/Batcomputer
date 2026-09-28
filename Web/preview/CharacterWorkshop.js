@@ -1,5 +1,5 @@
 /* Scene inspection only: no authoring transforms or visibility changes are persisted. */
-window.BatcomputerCharacterWorkshop = function ({ THREE, scene, camera, controls, renderer, loaded, root, complete = true, onSurfaceSelected }) {
+window.BatcomputerCharacterWorkshop = function ({ THREE, scene, camera, controls, renderer, loaded, root, complete = true, onSurfaceSelected, withNeutralFace }) {
   const partNames = { CharacterMesh0: 'Body', __BareHead: 'Head base', Head: 'Head attachment', Face: 'Face', Torso: 'Chest attachment', Torso2: 'Second chest attachment', Cape: 'Cape', Collar: 'Collar' };
   const parts = loaded.map((entry, index) => ({ id: String(index), object: entry.scene,
     component: entry.m.part, nativeHidden: !!entry.m.hidden,
@@ -35,11 +35,33 @@ window.BatcomputerCharacterWorkshop = function ({ THREE, scene, camera, controls
   exportButton.disabled = !complete;
   exportButton.title = complete ? 'Export the whole assembly, even when isolated. Approximate preview materials; not a merged game-ready rig.' : 'A part failed to load. Reload the preview before exporting.';
   document.body.appendChild(panel);
+  const animationPreview = window.BatcomputerCharacterAnimationPreview({ THREE, loaded, root: root || sceneRoot(),
+    data: window.PREVIEW_CHARACTER_ANIMATIONS });
+  window.characterAnimationPreview = animationPreview;
+  document.body.appendChild(animationPreview.panel);
+  const animationCreator = window.BatcomputerCharacterAnimationCreator({ THREE, scene, camera, renderer, controls,
+    loaded, root: root || sceneRoot(), preview: animationPreview });
+  window.characterAnimationCreator = animationCreator;
+  document.body.appendChild(animationCreator.panel);
   const layout = window.BatcomputerCharacterWorkshopShell({ THREE, scene, root: root || sceneRoot(), camera, controls, renderer, panel, parts,
+    animationPanel: animationPreview.panel,
     select: id => choose(parts.find(p => p.id === id) || null),
     focus: () => focus(selected ? [selected] : parts),
+    focusMotion: () => { const bodyPart = parts.find(part => part.component === 'CharacterMesh0');
+      if (bodyPart) focus([bodyPart]); },
+    onTabChanged: id => { if (id === 'creator') animationCreator.enter(); else animationCreator.leave(); },
     whole: () => { isolated = false; applyVisibility(); focus(parts); } });
   layout.moveExport(exportButton);
+  window.characterIconStudio = window.BatcomputerCharacterIconStudio({ THREE, scene, root: root || sceneRoot(), loaded, complete,
+    withNeutralFace: () => { const restoreDraft = animationCreator.withRestPose(); const restoreMotion = animationPreview.withRestPose(); const restoreFace = withNeutralFace?.();
+      return () => { restoreFace?.(); restoreMotion?.(); restoreDraft?.(); }; },
+    canTestSuit: !!(window.BATCOMPUTER_ICON_TEST_HOST && window.PREVIEW_CAN_SAVE_PLACEMENTS && window.PREVIEW_LAYOUT_KEY),
+    layoutKey: window.PREVIEW_LAYOUT_KEY || '',
+    post: message => window.chrome?.webview?.postMessage(message) });
+  const iconButton = button('Icon studio', () => window.characterIconStudio.open());
+  iconButton.disabled = !complete;
+  iconButton.title = 'Render transparent suit icons using LoTDK template framing';
+  layout.moveExport(iconButton);
   if (!complete) layout.reportError('Some parts failed to load; export is disabled');
   function applyVisibility() {
     parts.forEach(p => { p.object.visible = visibility.get(p.object) && (!isolated || p === selected); });
@@ -98,7 +120,7 @@ window.BatcomputerCharacterWorkshop = function ({ THREE, scene, camera, controls
   renderer.domElement.setAttribute('aria-label', 'Character 3D viewport');
   renderer.domElement.addEventListener('pointerdown', e => {
     // A canvas is not focusable by default. Give viewport interaction keyboard focus so a
-    // previously edited numeric field cannot continue swallowing W/E/R or F.
+    // previously edited numeric field cannot continue swallowing W/R/E or F.
     renderer.domElement.focus({ preventScroll: true });
     pointer = e.button === 0 ? { x: e.clientX, y: e.clientY } : null;
   });
@@ -126,5 +148,5 @@ window.BatcomputerCharacterWorkshop = function ({ THREE, scene, camera, controls
   return { select: id => choose(parts.find(p => p.id === id) || null), focus: () => focus(selected ? [selected] : parts),
     selectComponent: component => choose(parts.find(p => p.component === component) || null),
     resize: layout.resize, reportError: layout.reportError,
-    update: () => { if (helper) helper.update(); } };
+    update: () => { if (helper) helper.update(); animationPreview.update(); animationCreator.update(); } };
 };

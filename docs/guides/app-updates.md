@@ -41,9 +41,19 @@ The updater can reuse unchanged files **when a release provides a changed-file c
 local file hashes, downloads changed or missing files, then verifies the complete staged app.
 A changed DLL is downloaded in full, compressed; this is not a binary-delta patch.
 
-The initial **1.0.0 stable release uses the full ZIP**. Do not expect every update to be a small
-download. New runtimes, changed dependencies or missing local files can increase its size.
+Both **1.0.0 stable and 1.1.0-beta.1 use the full ZIP**. The beta includes the new patch-ZIP
+reader for future releases, but its own download is full-sized. Do not expect every update
+to be a small download. New runtimes, changed dependencies or missing local files can increase its size.
 The Update center shows the download needed for the selected release.
+
+Starting with the 1.1 beta updater, a release can instead offer a **base-version patch ZIP**.
+It is selected only when your installed version matches the patch's starting version and every
+file it needs to reuse matches the target hash. A different starting version, or a missing/modified
+reused dependency, uses the full ZIP. Files are checked again while staging; a change after checking
+can trigger the full fallback. Corrupt downloads are rejected rather than installed.
+
+Original 1.0 updater builds do not read patch-ZIP catalogs. They download the full ZIP to gain
+this feature first. The full ZIP remains available for new users and manual installations.
 
 The public **Batcomputer-update-win-x64.zip** is also the complete fresh-install download. There
 is no separate app ZIP to install first; the fixed name is how existing updaters find it.

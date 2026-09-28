@@ -24,7 +24,8 @@ public sealed partial class MainForm
         var menu = new ContextMenuStrip();
         menu.Items.Add("Inspect part in 3D…", null, (_, _) => ShowPartInspector(part));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Apply to character", null, async (_, _) => await ApplyToyboxPartDropToCharacterAsync(part));
+        if (!part.IsSynthesized && PartRecipeService.Confidence(part).Level != PartRecipeService.RecipeConfidence.Unsafe)
+            menu.Items.Add("Apply to character", null, async (_, _) => await ApplyToyboxPartDropToCharacterAsync(part));
         menu.Items.Add("Select for advanced graft", null, (_, _) => SelectToyboxPart(part));
         menu.Items.Add("Copy source path", null, (_, _) => { try { Clipboard.SetText(part.SourcePackagePath); } catch { /* clipboard busy */ } });
         return menu;
@@ -2129,7 +2130,8 @@ public sealed partial class MainForm
                 : $"{glyph} {TrimMiddle(CleanPartMeshDisplayName(part), 28)}",
             Subtitle = $"{part.Slot} • {part.Context}\nfrom {TrimMiddle(PartSourceDisplayName(part), 24)}",
             Accent = accent,
-            DragPayload = new ToyboxDragPayload { Kind = "part", Part = part },
+            DragPayload = part.IsSynthesized || level == PartRecipeService.RecipeConfidence.Unsafe
+                ? null : new ToyboxDragPayload { Kind = "part", Part = part },
             ToolTip =
                 $"Recipe: {level} — {reason}\n\n" +
                 $"{part.Slot} from {part.SourcePackagePath}\nMesh: {part.MeshObjectPath} ({part.MeshKind})\n" +
@@ -2140,7 +2142,7 @@ public sealed partial class MainForm
         };
     }
 
-    private List<VirtualTilePanel.Tile> CustomStaticMeshTiles(string search)
+    private List<VirtualTilePanel.Tile> CustomStaticMeshTiles(string search, string? attachmentPoint = null)
     {
         var tiles = new List<VirtualTilePanel.Tile>
         {
@@ -2158,6 +2160,8 @@ public sealed partial class MainForm
         foreach (var skinned in _currentProject?.SkinnedMeshes ?? [])
         {
             var current = skinned;
+            if (attachmentPoint is not null &&
+                !current.Component.Equals(attachmentPoint, StringComparison.OrdinalIgnoreCase)) continue;
             if (MatchesToyboxSearch(search, current.Name, current.Component, "skinned FBX"))
                 tiles.Add(new VirtualTilePanel.Tile { Section = "SKINNED MESHES", Title = current.Name, Subtitle = current.Component + " · " + current.Materials.Count + " materials",
                     Accent = Theme.Parts, OnClick = () => _ = OpenSkinnedMeshWorkshopAsync(current), ToolTip = "Edit materials, reimport the weighted FBX, inspect deformation, or restore the native component." });
@@ -2168,7 +2172,8 @@ public sealed partial class MainForm
             var legacy = _currentProject is null
                 ? null
                 : new CustomStaticMeshImportService().FindLegacyObjProof(_currentProject, _projectRootText.Text.Trim());
-            if (legacy is not null && MatchesToyboxSearch(search, legacy.DisplayName, legacy.SourceObjPath, "legacy OBJ import"))
+            if (legacy is not null && (attachmentPoint is null || attachmentPoint == "Unverified") &&
+                MatchesToyboxSearch(search, legacy.DisplayName, legacy.SourceObjPath, "legacy OBJ import"))
             {
                 tiles.Add(new VirtualTilePanel.Tile
                 {
@@ -2188,6 +2193,8 @@ public sealed partial class MainForm
         {
             var current = mesh;
             var attachment = CustomStaticMeshImportService.ResolveAttachmentSlot(current.Target, current.AttachSocket);
+            if (attachmentPoint is not null &&
+                !attachment.Id.Equals(attachmentPoint, StringComparison.OrdinalIgnoreCase)) continue;
             var sectionNames = StaticMeshObjProbeService.EffectiveMaterialSlots(current)
                 .OrderBy(slot => slot.Slot)
                 .Select(slot => string.IsNullOrWhiteSpace(slot.SourceMaterialName)
@@ -2219,6 +2226,214 @@ public sealed partial class MainForm
         return tiles;
     }
 
+    private NativeSuitPartIndex? _warmingAttachmentIndex;
+    private string _attachmentWarmError = "";
+
+    private async Task WarmAttachmentCatalogAsync(NativeSuitPartIndex index)
+    {
+        try
+        {
+            await Task.Run(() => AttachmentAssetCatalogService.ForActiveGame(index));
+        }
+        catch (Exception ex)
+        {
+            _attachmentWarmError = ex.Message;
+            AppendLog("Attachment catalog could not be prepared: " + ex.Message);
+        }
+        if (!IsDisposed && ReferenceEquals(_partIndex, index) &&
+            _toyboxCategoryCombo.Text.Equals("Parts", StringComparison.OrdinalIgnoreCase) &&
+            _toyboxTypeCombo.Text.Equals("All parts", StringComparison.OrdinalIgnoreCase))
+            RefreshToyboxTiles();
+    }
+
+    private void RefreshAttachmentAssetTiles()
+    {
+        if (_partIndex is null) LoadPartIndexAndRefreshGrid(logIfMissing: false, refreshToybox: false);
+        if (_partIndex is null)
+        {
+            var available = CustomStaticMeshTiles(CurrentToyboxSearch(), FilterVal(3));
+            available.Add(new VirtualTilePanel.Tile
+            {
+                Section = "CATALOG SETUP", Title = "Build part index", Accent = Theme.Gold, Dashed = true,
+                Subtitle = "scan native Blueprints to identify each mesh's real wiring",
+                OnClick = () => _ = BuildPartIndexAsync()
+            });
+            ShowVirtualTiles(available, header: "Build the part index before classifying attachment meshes. Without the Blueprint scan, " +
+                        "a native recipe would be mislabeled as preview only.",
+                emptyMessage: "Build the part index to browse attachments.");
+            return;
+        }
+        if (!AttachmentAssetCatalogService.TryGetCached(_partIndex, out var entries))
+        {
+            if (!ReferenceEquals(_warmingAttachmentIndex, _partIndex))
+            {
+                _warmingAttachmentIndex = _partIndex;
+                _attachmentWarmError = "";
+                _ = WarmAttachmentCatalogAsync(_partIndex);
+            }
+            var available = CustomStaticMeshTiles(CurrentToyboxSearch(), FilterVal(3));
+            available.Add(new VirtualTilePanel.Tile
+            {
+                Title = _attachmentWarmError.Length == 0 ? "Preparing parts…" : "Parts could not be loaded",
+                Subtitle = _attachmentWarmError.Length == 0 ? "Indexing mesh wiring in the background" : _attachmentWarmError,
+                Accent = Theme.Parts
+            });
+            ShowVirtualTiles(available, header: "The catalog is being prepared without blocking the workspace.",
+                emptyMessage: "Parts will appear when the catalog is ready.");
+            return;
+        }
+        var search = CurrentToyboxSearch();
+        var contextFilter = FilterVal(0);
+        var meshFilter = FilterVal(1);
+        var sourceFilter = FilterVal(2);
+        var pointFilter = FilterVal(3);
+        var allItems = AttachmentAssetCatalogService.BrowseItems(entries);
+        var query = allItems.AsEnumerable();
+        if (contextFilter is not null)
+            query = query.Where(item => item.Recipes.Any(recipe => recipe.Context.Equals(contextFilter,
+                StringComparison.OrdinalIgnoreCase)));
+        if (meshFilter is "Static" or "Skeletal")
+            query = query.Where(item => item.Asset.MeshClass.StartsWith(meshFilter, StringComparison.OrdinalIgnoreCase));
+        if (sourceFilter == "Your meshes") query = [];
+        else if (!string.IsNullOrWhiteSpace(sourceFilter))
+            query = query.Where(item => item.Recipes.Any(recipe => recipe.CharacterFolder.Equals(sourceFilter,
+                StringComparison.OrdinalIgnoreCase)));
+        if (pointFilter is not null)
+            query = query.Where(item => item.AttachmentPoints.Contains(pointFilter, StringComparer.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(search))
+            query = query.Where(item => item.Asset.MeshPackagePath.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                item.Recipes.Any(recipe => MatchesPartSearch(recipe, search)));
+
+        var matches = query.ToArray();
+        var tiles = matches.Select(item => new VirtualTilePanel.Tile
+        {
+            Title = item.Asset.Name,
+            Subtitle = item.GroupedRecipes is { } group
+                ? $"{string.Join(", ", item.AttachmentPoints)} · {group.Count} Blueprint uses\n{item.Asset.MeshClass}"
+                : item.Recipe is { } recipe
+                ? $"{string.Join(", ", item.AttachmentPoints)} · {recipe.Context}\n{TrimMiddle(PartSourceDisplayName(recipe), 24)}"
+                : $"{string.Join(", ", item.AttachmentPoints)} · {item.Asset.Status}\n{item.Asset.MeshClass}",
+            Accent = item.GroupedRecipes is not null ? Theme.Gold : item.Recipe is { } selected
+                ? AttachmentAssetCatalogService.CanOneClickGraft(item.Asset, selected) ? Theme.Parts : Theme.Gold
+                : item.Asset.InferredRecipes.Count > 0 ? Theme.Gold : Theme.OnDarkMuted,
+            ToolTip = item.GroupedRecipes is { } donors
+                ? $"{item.Asset.MeshPackagePath}\n{donors.Count} Blueprint uses at {string.Join(", ", item.AttachmentPoints)}.\nClick to choose an exact donor."
+                : item.Recipe is { } usage
+                ? $"{item.Asset.MeshPackagePath}\n{usage.Context} · {usage.Slot}\n{usage.SourcePackagePath}\nClick to inspect this exact Blueprint usage."
+                : $"{item.Asset.MeshPackagePath}\n{item.Asset.Status}\nAttachment point: {string.Join(", ", item.AttachmentPoints)}\nNo observed Blueprint usage.",
+            OnClick = () => _ = ShowAttachmentAssetAsync(item.Asset, item.Recipe, item.GroupedRecipes),
+        }).ToList();
+        if (sourceFilter is null || sourceFilter == "Your meshes")
+            tiles.InsertRange(0, CustomStaticMeshTiles(search, pointFilter));
+        ShowVirtualTiles(tiles,
+            header: $"{matches.Length:N0} shown of {allItems.Count:N0} parts. Frequently reused meshes are grouped by attachment point; " +
+                    "open a group to choose its exact Blueprint donor. Face, root-body, cape, and glider usages are inspect-only here.",
+            emptyMessage: "No parts matched. Check your search and filters.");
+    }
+
+    private async Task ShowAttachmentAssetAsync(AttachmentAssetCatalogService.Entry entry,
+        NativeSuitPartRecord? selectedRecipe = null,
+        IReadOnlyList<NativeSuitPartRecord>? groupedRecipes = null)
+    {
+        var visibleRecipes = groupedRecipes ?? entry.Usages;
+        using var dialog = new Form
+        {
+            Text = $"Attachment asset — {entry.Name}", StartPosition = FormStartPosition.CenterParent,
+            ClientSize = new Size(850, 530), MinimumSize = new Size(660, 420),
+            BackColor = Theme.WindowBg, ForeColor = Theme.OnDark
+        };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4,
+            Padding = new Padding(16) };
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 62));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
+        dialog.Controls.Add(layout);
+        layout.Controls.Add(new Label { Dock = DockStyle.Fill, Font = Theme.Title, ForeColor = Theme.OnDark,
+            Text = $"{entry.Name}   ·   {entry.Status}\n{entry.MeshPackagePath}", AutoEllipsis = true }, 0, 0);
+        layout.Controls.Add(new Label { Dock = DockStyle.Fill, ForeColor = Theme.OnDarkMuted,
+            Text = visibleRecipes.Count == 0 ? "No Blueprint recipe found. This mesh is for preview only." :
+                groupedRecipes is not null ? $"{visibleRecipes.Count} references at {groupedRecipes[0].Slot}. Choose an exact donor to inspect or use." :
+                "Select an exact donor usage; conflicting slots and contexts are kept separate." }, 0, 1);
+        var recipes = new ListBox { Dock = DockStyle.Fill, BackColor = Theme.CardBg,
+            ForeColor = Theme.OnDark, Font = Theme.Body, IntegralHeight = false };
+        foreach (var recipe in visibleRecipes)
+        {
+            var safe = AttachmentAssetCatalogService.CanOneClickGraft(entry, recipe);
+            recipes.Items.Add($"{(safe ? "READY" : "INSPECT")}  ·  {recipe.Context}  ·  {recipe.Slot}  ·  " +
+                $"{recipe.ComponentClass}  ·  {recipe.AttachSocket}  ·  {recipe.SourcePackagePath}");
+        }
+        if (recipes.Items.Count > 0)
+        {
+            var selectedIndex = selectedRecipe is null ? -1 : visibleRecipes.ToList().FindIndex(
+                recipe => ReferenceEquals(recipe, selectedRecipe));
+            recipes.SelectedIndex = selectedIndex >= 0 ? selectedIndex : groupedRecipes is null ? 0 : -1;
+        }
+        layout.Controls.Add(recipes, 0, 2);
+        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
+        var close = new Button { Text = "Close", Width = 105, Height = 36 };
+        var inspect = new Button { Text = "Inspect in 3D", Width = 135, Height = 36 };
+        var use = new Button { Text = "Use selected recipe", Width = 160, Height = 36 };
+        Theme.StyleDarkButton(close); Theme.StyleDarkButton(inspect); Theme.StyleGoldButton(use);
+        actions.Controls.Add(close); actions.Controls.Add(use); actions.Controls.Add(inspect);
+        layout.Controls.Add(actions, 0, 3);
+        NativeSuitPartRecord? Selected() => recipes.SelectedIndex >= 0 ? visibleRecipes[recipes.SelectedIndex] : null;
+        void UpdateUse() => use.Enabled = Selected() is { } p &&
+            AttachmentAssetCatalogService.CanOneClickGraft(entry, p);
+        recipes.SelectedIndexChanged += (_, _) => UpdateUse();
+        UpdateUse();
+        close.Click += (_, _) => dialog.Close();
+        NativeSuitPartRecord? toApply = null;
+        inspect.Click += (_, _) =>
+        {
+            var part = Selected() ?? new NativeSuitPartRecord
+            {
+                MeshPackagePath = entry.MeshPackagePath,
+                MeshObjectName = entry.Name,
+                MeshObjectPath = $"{entry.MeshPackagePath}.{entry.Name}",
+                MeshKind = entry.MeshClass,
+                SourcePackagePath = entry.MeshPackagePath
+            };
+            var safe = Selected() is { } p && AttachmentAssetCatalogService.CanOneClickGraft(entry, p);
+            using var inspector = new PartInspectorForm(part, allowApply: safe);
+            if (safe)
+                inspector.ApplyRequested += (_, _) =>
+                {
+                    toApply = part;
+                    inspector.Close();
+                    dialog.Close();
+                };
+            inspector.ShowDialog(dialog);
+        };
+        use.Click += (_, _) =>
+        {
+            if (Selected() is not { } p || !AttachmentAssetCatalogService.CanOneClickGraft(entry, p)) return;
+            toApply = p;
+            dialog.Close();
+        };
+        dialog.ShowDialog(this);
+        if (toApply is not null) await ApplySelectedAttachmentRecipeAsync(entry, toApply);
+    }
+
+    private async Task ApplySelectedAttachmentRecipeAsync(
+        AttachmentAssetCatalogService.Entry entry, NativeSuitPartRecord selected)
+    {
+        if (!AttachmentAssetCatalogService.CanOneClickGraft(entry, selected)) return;
+        var oppositeRole = selected.Context.Equals("playable", StringComparison.OrdinalIgnoreCase)
+            ? "cutscene" : "playable";
+        // Only pair a unique, equally wired native role. Conflicting usages never get guessed.
+        var counterpart = AttachmentAssetCatalogService.UniqueCompatibleCounterpart(entry, selected);
+
+        _selectedPlayablePart = selected.Context.Equals("playable", StringComparison.OrdinalIgnoreCase)
+            ? selected : counterpart;
+        _selectedCutscenePart = selected.Context.Equals("cutscene", StringComparison.OrdinalIgnoreCase)
+            ? selected : counterpart;
+        UpdateSelectedPartLabels();
+        if (counterpart is null)
+            AppendLog($"Attachment {entry.Name}: no unambiguous {oppositeRole} recipe; only the selected {selected.Context} role will be grafted.");
+        await GraftSelectedPartsAsync();
+    }
+
     private ContextMenuStrip BuildCustomStaticMeshTileMenu(CustomStaticMeshImport mesh)
     {
         var menu = new ContextMenuStrip();
@@ -2229,7 +2444,8 @@ public sealed partial class MainForm
 
     private void ShowPartInspector(NativeSuitPartRecord part)
     {
-        var inspector = new PartInspectorForm(part);
+        var inspector = new PartInspectorForm(part,
+            allowApply: !part.IsSynthesized && PartRecipeService.Confidence(part).Level != PartRecipeService.RecipeConfidence.Unsafe);
         inspector.ApplyRequested += async (_, _) => await ApplyToyboxPartDropToCharacterAsync(part);
         inspector.Show(this);
     }
@@ -3940,6 +4156,17 @@ public sealed partial class MainForm
             await PartIndexGate.WaitAsync();
             gateHeld = true;
             var index = await Task.Run(() => service.BuildPartIndex());
+            // The first attachment discovery/classification is comparatively expensive. Keep it
+            // off the UI thread before the refreshed Parts view becomes visible.
+            ExtractedAttachmentMeshCatalogService.Invalidate();
+            try
+            {
+                await Task.Run(() => AttachmentAssetCatalogService.ForActiveGame(index));
+            }
+            catch (Exception ex)
+            {
+                AppendLog("Attachment catalog prewarm failed; Parts will offer a retry: " + ex.Message);
+            }
             _partIndex = index;
             // The hamburger command is also the explicit same-root catalog refresh. Make the next
             // material, part, and animation query rescan the active extracted mounts.
@@ -4419,7 +4646,10 @@ public sealed partial class MainForm
         }
 
         var samplePart = selectedPlayablePart ?? selectedCutscenePart!;
-        var targetSlot = samplePart.Slot;
+        // The satchel's authentic donor uses Costume, but it is an additive
+        // accessory. Give it its own component so a base Costume or Cape survives.
+        var isSatchel = samplePart.MeshObjectName.Equals("SK_TorsoA_Satchel", StringComparison.OrdinalIgnoreCase);
+        var targetSlot = isSatchel ? "Satchel" : samplePart.Slot;
 
         // Glider/cape parts (GA_Glider_*, GA_Wingsuit_*, SK_CAPE_Glide - they come in
         // on a "Cape" slot or carry the "Glider" tag) must land on the base's ACTUAL
@@ -4631,6 +4861,12 @@ public sealed partial class MainForm
 
             // Rebuild the clean stage from the saved graft list.
             UpsertPartGraft(transactionProject, targetSlot, isGliderPart, selectedPlayablePart, selectedCutscenePart);
+            if (isSatchel)
+            {
+                // Keep the donor's skeletal component class and animation recipe;
+                // cloning a base's unrelated face/cape shell is not equivalent.
+                transactionProject.PartGrafts[^1].PreferDonorComponentShell = true;
+            }
             if (isGliderPart || isCosmeticCape)
             {
                 var nowHasPair = GliderService.HasCapeAndGliderCombination(

@@ -44,6 +44,8 @@ internal static class Program
             return AppUpdateFixtureCheck.Run(args[1],null,fullZip:true);
         if (args.Length == 4 && args[0] == "--verify-updater-fixture" && args[3] == "--full-zip")
             return AppUpdateFixtureCheck.Run(args[1],args[2],fullZip:true);
+        if (args.Length == 4 && args[0] == "--verify-updater-fixture" && args[3] == "--change-reused-file")
+            return AppUpdateFixtureCheck.Run(args[1],args[2],changeReusedFile:true);
         if (args.Length == 1 && args[0] == "--updater-test-runtime")
         {
             if (!File.Exists(Path.Combine(AppSettings.ToolRoot,AppUpdateInstaller.SandboxMarker))
@@ -54,18 +56,21 @@ internal static class Program
         }
         if (args.Length == 1 && args[0] == "--updater-test-helper")
             return AppUpdateFixtureCheck.VerifyHelper();
-        if (args.Length == 3 && args[0] is "--create-app-update" or "--create-app-update-files")
+        if ((args.Length == 3 && args[0] is "--create-app-update" or "--create-app-update-files") ||
+            (args.Length == 4 && args[0] == "--create-app-update-patch"))
         {
+            var output = args[^1];
             try
             {
-                if (args[0] == "--create-app-update-files") AppUpdatePackageService.CreateWithFilePayloads(args[1], args[2]);
+                if (args[0] == "--create-app-update-patch") AppUpdatePackageService.CreateWithPatchZip(args[1], args[2], output);
+                else if (args[0] == "--create-app-update-files") AppUpdatePackageService.CreateWithFilePayloads(args[1], args[2]);
                 else AppUpdatePackageService.Create(args[1], args[2]);
                 return 0;
             }
             catch (Exception ex)
             {
-                Directory.CreateDirectory(args[2]);
-                File.WriteAllText(Path.Combine(args[2], "package-error.txt"), ex.ToString());
+                Directory.CreateDirectory(output);
+                File.WriteAllText(Path.Combine(output, "package-error.txt"), ex.ToString());
                 return 1;
             }
         }
@@ -75,6 +80,73 @@ internal static class Program
         // Empty/invalid fields fall back to built-in defaults, so this is safe even
         // with no settings file present.
         AppSettings.Current = AppSettings.Load();
+
+        if (args.Length is 1 or 2 && args[0] == "--repair-vehicle-cooks")
+        {
+            try
+            {
+                var projects = new VehicleProjectService(AppSettings.Current.EffectiveProjectRoot());
+                var targets = projects.List().Where(item => args.Length == 1 || item.Id.Equals(args[1], StringComparison.OrdinalIgnoreCase)).ToArray();
+                if (args.Length == 2 && targets.Length == 0) throw new InvalidDataException("No saved vehicle has ID " + args[1]);
+                foreach (var item in targets)
+                {
+                    var project = projects.Load(item.Path);
+                    var pending = VehicleLegacyMeshRepairService.Pending(projects.DirectoryFor(project), project);
+                    if (pending.Count == 0)
+                    {
+                        if (project.Model is not null) SkinnedMeshStageService.ReadManifest(projects.DirectoryFor(project), project.Model);
+                        if (project.SummonModel is not null) SkinnedMeshStageService.ReadManifest(projects.DirectoryFor(project), project.SummonModel);
+                        Console.WriteLine(item.Id + ": current and validated"); continue;
+                    }
+                    Console.WriteLine(item.Id + ": rebuilding " + string.Join(", ", pending));
+                    VehicleLegacyMeshRepairService.RepairAsync(projects, project, Console.WriteLine).GetAwaiter().GetResult();
+                    Console.WriteLine(item.Id + ": validated");
+                }
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+        }
+
+        if (args.Length is 2 or 3 && args[0] == "--probe-vehicle-workshop")
+        {
+            var folder = Path.Combine(Path.GetTempPath(), "BatcomputerVehicleProbe-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var projects = new VehicleProjectService(AppSettings.Current.EffectiveProjectRoot());
+                var project = projects.Load(projects.ProjectPath(args[1]));
+                if (args.Length == 3 && args[2] == "--full") AppSettings.Current.VehicleSafePreviewMode = false;
+                var scene = VehicleWorkshopService.Create(projects.DirectoryFor(project), project, folder, Guid.NewGuid().ToString("N"),
+                    progress: Console.WriteLine);
+                Console.WriteLine(project.Id + ": workshop scene ready, " + scene.Parts.Count + " parts");
+                foreach (var warning in scene.Warnings) Console.WriteLine("Warning: " + warning);
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+            finally
+            {
+                if (Directory.Exists(folder) && FileSystemPathUtil.IsWithinDirectory(folder, Path.GetTempPath()))
+                    Directory.Delete(folder, true);
+            }
+        }
+
+        if (args.Length is 1 or 2 && args[0] == "--probe-vehicle-lamp-meshes")
+        {
+            var donors = args.Length == 2 ? VehicleDonorService.All.Where(d => d.Id == args[1]).ToArray() : VehicleDonorService.All;
+            if (donors.Length == 0) throw new InvalidDataException("Unknown vehicle driving base: " + args[1]);
+            var content = AppSettings.Current.EffectiveExtractedContentRoot();
+            foreach (var donor in donors)
+            {
+                if (!VehicleDonorService.PackageComplete(content, donor.Blueprint))
+                {
+                    Console.WriteLine(donor.Id + ": blueprint not extracted");
+                    continue;
+                }
+                var lamps = VehicleLightService.LampMeshes(VehicleAssetService.Read(content, donor.Blueprint));
+                Console.WriteLine(donor.Id + ": " + lamps.Count + " decorative lamp mesh(es)");
+                foreach (var lamp in lamps) Console.WriteLine("  " + lamp);
+            }
+            return 0;
+        }
 
         if (args.Length == 1 && args[0] == "--updater-test-install")
         {
@@ -145,9 +217,16 @@ internal static class Program
             return succeeded ? 0 : 1;
         }
 
+        if (args.Length >= 6 && args[0].Equals("--audit-preview-materials", StringComparison.OrdinalIgnoreCase))
+        {
+            // <paks> <usmap> <outputDirectory> <looseContentRoot> <materialPath> [...]
+            PreviewMaterialAuditService.Run(args[1], args[2], args[3], args[4], args.Skip(5));
+            return 0;
+        }
+
         if (args.Length >= 5 && args[0].Equals("--preview-suit", StringComparison.OrdinalIgnoreCase))
         {
-            // --preview-suit <paksDir> <usmap> <suitProjectJson> <projectRoot>
+            // --preview-suit <paksDir> <usmap> <suitProjectJson> <projectRoot> [outputDirectory]
             var project = JsonSerializer.Deserialize<NativeSuitProject>(File.ReadAllText(args[3]), JsonOptions)
                 ?? throw new InvalidOperationException("Could not read the suit project.");
             Console.WriteLine(ModelPreviewService.BuildPreviewSuit(
@@ -155,7 +234,8 @@ internal static class Program
                 args[2],
                 project,
                 args[4],
-                redBrickTints: ViewerBaseGameRedBrickPaletteService.LoadPreviewTints()));
+                redBrickTints: ViewerBaseGameRedBrickPaletteService.LoadPreviewTints(),
+                outputDirectory: args.Length >= 6 ? Path.GetFullPath(args[5]) : null));
             return 0;
         }
 
@@ -438,8 +518,15 @@ internal static class Program
 
         if (args.Length >= 1 && args[0].Equals("--preview-window", StringComparison.OrdinalIgnoreCase))
         {
+            if (args.Length >= 2 && !File.Exists(Path.Combine(Path.GetFullPath(args[1]), "index.html")))
+            {
+                Console.Error.WriteLine("The preview folder must contain index.html.");
+                return 1;
+            }
             ApplicationConfiguration.Initialize();
-            Application.Run(new ModelPreviewForm(ModelPreviewForm.WebGlSmokeTestHtml(), "Preview — WebGL smoke test"));
+            Application.Run(args.Length >= 2
+                ? ModelPreviewForm.ForFolder(Path.GetFullPath(args[1]), "Batcomputer — local character preview")
+                : new ModelPreviewForm(ModelPreviewForm.WebGlSmokeTestHtml(), "Preview — WebGL smoke test"));
             return 0;
         }
 
@@ -451,6 +538,28 @@ internal static class Program
             // is the only way to tell from a screenshot which build a window is actually showing.
             Application.Run(ModelPreviewForm.ForFolder(folder,
                 "Preview — " + args[3].Split('/')[^1] + "  [" + Path.GetFileName(folder) + "]"));
+            return 0;
+        }
+
+        if (args.Length >= 5 && args[0].Equals("--preview-character-output", StringComparison.OrdinalIgnoreCase))
+        {
+            // Headless, isolated preview build for comparing face families and icon output.
+            // An optional additional pak folder can supply a mod without modifying game files.
+            var folder = ModelPreviewService.BuildPreviewCharacter(args[1], args[2], args[3],
+                previewOptions: new ModelPreviewService.CharacterPreviewOptions { OutputDirectory = args[4] },
+                additionalPakDirectories: args.Length >= 6 && !string.IsNullOrWhiteSpace(args[5]) ? [args[5]] : null);
+            var animationTestIndex = 0;
+            foreach (var animationPackage in args.Skip(6).Where(path => !string.IsNullOrWhiteSpace(path)))
+            {
+                var bundle = CharacterAnimationPreviewService.LoadBundle(folder, animationPackage);
+                var clip = bundle.Primary;
+                File.WriteAllText(Path.Combine(folder, $"sample-animation-{animationTestIndex++}.json"),
+                    System.Text.Json.JsonSerializer.Serialize(bundle,
+                        new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase }));
+                Console.WriteLine($"On-demand animation passed: {clip.Package}, target={clip.TargetPart}, " +
+                    $"{clip.FrameCount} samples, {clip.Tracks.Count} moving bones, linked={string.Join(',', bundle.Companions.Select(c => c.TargetPart))}.");
+            }
+            Console.WriteLine(folder);
             return 0;
         }
 
@@ -572,6 +681,26 @@ internal static class Program
                 : 1;
         }
 
+        if (args.Length == 2 && args[0].Equals("--attachment-catalog-report", StringComparison.OrdinalIgnoreCase))
+        {
+            var index = new PartIndexService(args[1]).LoadPartIndex();
+            var entries = AttachmentAssetCatalogService.ForActiveGame(index);
+            var attachmentEntries = entries.Where(e => e.MeshPackagePath.Contains(
+                "/Characters/Attachments/", StringComparison.OrdinalIgnoreCase)).ToArray();
+            Console.WriteLine($"attachmentMeshes={attachmentEntries.Length}");
+            Console.WriteLine($"blueprintOnlyMeshes={entries.Count - attachmentEntries.Length}");
+            Console.WriteLine($"partsViewMeshes={entries.Count}");
+            Console.WriteLine($"partsViewItems={AttachmentAssetCatalogService.BrowseItems(entries).Count}");
+            Console.WriteLine($"nativeRecipeMeshes={attachmentEntries.Count(e => e.NativeRecipes.Count > 0)}");
+            Console.WriteLine($"inferredOnlyMeshes={attachmentEntries.Count(e => e.NativeRecipes.Count == 0 && e.InferredRecipes.Count > 0)}");
+            Console.WriteLine($"previewOnlyMeshes={attachmentEntries.Count(e => e.Usages.Count == 0)}");
+            Console.WriteLine($"observedUsages={attachmentEntries.Sum(e => e.NativeRecipes.Count)}");
+            Console.WriteLine($"partIndex={(index is null ? "missing or stale" : "current")}");
+            foreach (var entry in attachmentEntries.Where(e => e.NativeRecipes.Count == 0))
+                Console.WriteLine($"{entry.Status}: {entry.MeshPackagePath}");
+            return index is null ? 1 : 0;
+        }
+
         if (args.Length >= 2 && args[0].Equals("--build-part-index", StringComparison.OrdinalIgnoreCase))
         {
             var projectRoot = args[1];
@@ -623,6 +752,32 @@ internal static class Program
         if (args.Length >= 2 && args[0].Equals("--probe-props", StringComparison.OrdinalIgnoreCase))
         {
             return ProbeProps(args[1]);
+        }
+
+        if (args.Length == 4 && args[0].Equals("--probe-boost-color", StringComparison.OrdinalIgnoreCase))
+        {
+            if (args[3].Length != 6 || !System.Text.RegularExpressions.Regex.IsMatch(args[3], "^[0-9a-fA-F]{6}$"))
+                throw new InvalidDataException("Use a six-digit RGB hex color.");
+            var sample = new VehicleProject { Id = "BoostProbe", BoostColor = new VehicleRgbColor {
+                R = Convert.ToInt32(args[3][..2], 16), G = Convert.ToInt32(args[3][2..4], 16), B = Convert.ToInt32(args[3][4..6], 16) } };
+            void SaveBoost(UAsset asset, string package)
+            {
+                var file = SkinnedMeshCookService.SafePath(args[2], package[6..] + ".uasset");
+                Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+                asset.FolderName = new FString(package);
+                asset.Write(file);
+            }
+            VehicleBoostColorService.Stage(sample, args[1], args[2], SaveBoost, Console.WriteLine);
+            var blueprint = VehicleAssetService.Read(args[1], VehicleAssetService.NativeBlueprint);
+            var redirects = new Dictionary<string, string> {
+                [VehicleAssetService.NativeBlueprint] = VehicleProjectService.Blueprint(sample),
+                [VehicleBoostColorService.NativePawnData] = VehicleProjectService.PawnData(sample) };
+            CustomEquipmentService.Rename(blueprint, redirects);
+            SkinnedMeshStageService.RedirectImports(blueprint, redirects);
+            SaveBoost(blueprint, VehicleProjectService.Blueprint(sample));
+            VehicleBoostColorService.RequireRedirect(args[2], VehicleProjectService.Blueprint(sample), VehicleProjectService.PawnData(sample));
+            Console.WriteLine("Boost-color package roundtrip passed. No game files were changed.");
+            return 0;
         }
 
         if (args.Length >= 2 && args[0].Equals("--probe-material", StringComparison.OrdinalIgnoreCase))
@@ -701,6 +856,11 @@ internal static class Program
         if (args.Length >= 1 && args[0].Equals("--verify-release-regressions", StringComparison.OrdinalIgnoreCase))
         {
             return ReleaseRegressionChecks.Run(Console.Out);
+        }
+
+        if (args.Length == 4 && args[0].Equals("--test-suit-icon-cook", StringComparison.OrdinalIgnoreCase))
+        {
+            return SuitIconDryRunService.RunCli(args[1], args[2], args[3], Console.Out);
         }
 
         if (args.Length == 2 && args[0].Equals("--verify-dlc-native", StringComparison.OrdinalIgnoreCase))
@@ -928,6 +1088,25 @@ internal static class Program
             return AnimLibraryCli(args);
         }
 
+        if (args.Length == 4 && args[0].Equals("--cook-animation-draft", StringComparison.OrdinalIgnoreCase))
+        {
+            // Internal/headless equivalent of Animations -> Cook animation draft.
+            try
+            {
+                var result = AnimationDraftCookService.CookAndImportAsync(args[1], args[2], args[3],
+                    line => Console.WriteLine("animation: " + line)).GetAwaiter().GetResult();
+                Console.WriteLine("package=" + result.Entry.PackagePath);
+                Console.WriteLine("cooked=" + result.CookedUasset);
+                Console.WriteLine("report=" + result.ReportDirectory);
+                return result.Entry.IsAvailable ? 0 : 1;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("ERROR: " + ex);
+                return 1;
+            }
+        }
+
         ApplicationConfiguration.Initialize();
         ConfigureGuiCrashReporting();
 
@@ -972,6 +1151,13 @@ internal static class Program
         if (args.Length == 3 && args[0].Equals("--build-vehicle-mod", StringComparison.OrdinalIgnoreCase))
         {
             using var context = new HeadlessModBuildContext(args[1], "", args[2]);
+            Application.Run(context);
+            return context.ExitCode;
+        }
+
+        if (args.Length == 3 && args[0].Equals("--install-built-vehicle-mod", StringComparison.OrdinalIgnoreCase))
+        {
+            using var context = new HeadlessModBuildContext(args[1], "", args[2], installOnly: true);
             Application.Run(context);
             return context.ExitCode;
         }
@@ -1086,15 +1272,17 @@ internal static class Program
         private readonly string _projectRoot;
         private readonly string _suitProjectPath;
         private readonly string _modProjectPath;
+        private readonly bool _installOnly;
         private bool _started;
 
         public int ExitCode { get; private set; } = 1;
 
-        public HeadlessModBuildContext(string projectRoot, string suitProjectPath, string modProjectPath)
+        public HeadlessModBuildContext(string projectRoot, string suitProjectPath, string modProjectPath, bool installOnly = false)
         {
             _projectRoot = projectRoot;
             _suitProjectPath = suitProjectPath;
             _modProjectPath = modProjectPath;
+            _installOnly = installOnly;
             _form = new MainForm
             {
                 ShowInTaskbar = false,
@@ -1120,6 +1308,13 @@ internal static class Program
             Application.Idle -= BeginBuild;
             try
             {
+                if (_installOnly)
+                {
+                    var installed = _form.InstallBuiltVehicleModForCli(_projectRoot, _modProjectPath);
+                    Console.WriteLine(installed.Detail.TrimEnd());
+                    ExitCode = installed.Success ? 0 : 1;
+                    return;
+                }
                 var result = string.IsNullOrEmpty(_suitProjectPath)
                     ? await _form.BuildVehicleModForCliAsync(_projectRoot, _modProjectPath)
                     : await _form.RebuildAndBuildModForCliAsync(
@@ -1444,6 +1639,14 @@ internal static class Program
                     _ => " = " + prop.RawValue?.ToString(),
                 };
                 Console.WriteLine($"  {prop.Name} : {prop.PropertyType}{extra}");
+                if (export.GetExportClassType()?.ToString() == "NiagaraDataInterfaceColorCurve" && prop.Name.ToString() == "ShaderLUT" && prop is ArrayPropertyData colorLut)
+                {
+                    var samples = colorLut.Value.OfType<FloatPropertyData>().Select(x => x.Value).ToArray();
+                    foreach (var at in new[] { 0, 4, 8, samples.Length / 4 - 4, samples.Length / 4, samples.Length / 2, samples.Length - 4 }.Where(i => i >= 0 && i + 3 < samples.Length).Distinct())
+                        Console.WriteLine($"      sample[{at}]: {string.Join(", ", samples.Skip(at).Take(4))}");
+                }
+                if (prop.Name.ToString() is "StartUpEffects" or "ConstantEffects" or "ShutDownEffects" or "GearChangeEffects" or "BoostVFXs")
+                    DumpProperty(prop, "    ", 0);
                 if (prop.Name.ToString() == "ParentSetsArray" && prop is UAssetAPI.PropertyTypes.Objects.ArrayPropertyData pa)
                 {
                     for (var k = 0; k < pa.Value.Length; k++)
@@ -1489,7 +1692,8 @@ internal static class Program
                     // reflected struct array. Dump it recursively so new
                     // authoring code can mirror a real donor exactly instead
                     // of guessing at enum/tag serialisation.
-                    if (prop.Name.ToString() is "Overrides" or "AnimSetEntryArray")
+                    if (prop.Name.ToString() is "Overrides" or "AnimSetEntryArray" or
+                        "StartUpEffects" or "ConstantEffects" or "ShutDownEffects" or "GearChangeEffects")
                     {
                         Console.WriteLine($"    --- {prop.Name} expanded ---");
                         foreach (var el in arr.Value)
@@ -1522,6 +1726,13 @@ internal static class Program
                     foreach (var child in array.Value)
                     {
                         DumpProperty(child, indent + "  ", depth + 1);
+                    }
+                    break;
+                case MapPropertyData map:
+                    foreach (var pair in map.Value)
+                    {
+                        DumpProperty(pair.Key, indent + "  Key ", depth + 1);
+                        DumpProperty(pair.Value, indent + "  Value ", depth + 1);
                     }
                     break;
             }
@@ -1941,7 +2152,7 @@ internal static class Program
         }
     }
 
-    private static int RepathNameMap(string assetPath, string from, string to)
+    internal static int RepathNameMap(string assetPath, string from, string to)
     {
         if (!File.Exists(assetPath))
         {

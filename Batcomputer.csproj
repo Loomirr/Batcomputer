@@ -8,10 +8,10 @@
     <AssemblyName>Batcomputer</AssemblyName>
     <RootNamespace>Batcomputer</RootNamespace>
     <ApplicationIcon Condition="Exists('Assets\Icon.ico')">Assets\Icon.ico</ApplicationIcon>
-    <Version>1.0.0</Version>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.0.0</FileVersion>
-    <InformationalVersion>1.0.0</InformationalVersion>
+    <Version>1.1.0-beta.1</Version>
+    <AssemblyVersion>1.1.0.0</AssemblyVersion>
+    <FileVersion>1.1.0.1</FileVersion>
+    <InformationalVersion>1.1.0-beta.1</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <!-- Code-built controls do not need designer serialization metadata. -->
     <NoWarn>$(NoWarn);WFO1000</NoWarn>
@@ -67,6 +67,7 @@
     <EmbeddedResource Include="Web\preview\CharacterWorkshop.css" />
     <EmbeddedResource Include="Web\updater\*.html;Web\updater\*.css;Web\updater\*.js;Web\updater\*.glb;Web\updater\*.png" />
     <EmbeddedResource Include="Tools\SkinnedMesh\import_mesh.py" />
+    <EmbeddedResource Include="Tools\Animations\author_animation_drafts.py" />
     <EmbeddedResource Include="Tools\SkinnedMesh\prepare_blender_rig.py" />
     <!-- Shipped game-data catalogs and runtime socket calibration profiles. -->
     <None Update="gamedata\**\*.json"

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.0-beta.1 — 2026-09-27
+
+This beta brings together the new animation creator, character animation previews,
+optional suit icon studio, material/face improvements, expanded Parts catalog and vehicle tools.
+It also fixes saved-suit restore errors caused by lost generated-parent paths and adds
+base-version patch ZIP support with a complete-ZIP fallback for future releases.
+
+This release uses the full ZIP so original 1.0 clients can update directly.
+See the [beta notes](../releases/1.1.0-beta.1.md). 1.0.0 remains the stable release.
+
 ## 1.0.0 — first official release
 
 Batcomputer 1.0 is here. Thanks to everyone who tested the betas and sent over broken projects.

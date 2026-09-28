@@ -7,6 +7,12 @@ public sealed class VehicleProjectService(string projectRoot)
 {
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true, PropertyNameCaseInsensitive = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     public string Root => Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "VehicleProjects");
+    public static VehicleProject CreateNew(string nativeContent)
+    {
+        var project = new VehicleProject();
+        VehicleLightService.DisableLampMeshes(project, nativeContent);
+        return project;
+    }
     public sealed record Summary(string Id, string Name, string Owner, string Path, string Error = "");
     public string ProjectPath(string id) { RequireId(id); return Path.Combine(Root, id + ".vehicle-project.json"); }
     public string DirectoryFor(VehicleProject project) { RequireId(project.Id); return Path.Combine(Root, project.Id); }
@@ -60,6 +66,10 @@ public sealed class VehicleProjectService(string projectRoot)
         if (string.IsNullOrWhiteSpace(p.DisplayName)) throw new InvalidDataException("Give the vehicle a name.");
         if (!Regex.IsMatch(p.OwnerTag ?? "", "^Pawns\\.Playable\\.[A-Za-z][A-Za-z0-9]*$")) throw new InvalidDataException("Choose a character owner, not an individual suit tag.");
         var donor = VehicleDonorService.Get(p);
+        VehicleSoundService.Validate(p);
+        VehicleBoostColorService.Validate(p);
+        VehicleExhaustService.ValidateSelection(p, donor);
+        VehicleBoostSpeedService.Validate(p);
         if (!float.IsFinite(p.SizeMultiplier) || p.SizeMultiplier is < .5f or > 2f) throw new InvalidDataException("Vehicle size must be between 50% and 200%.");
         if (p.Transforms is null || p.Palette is null || p.Transforms.Any(t => t is null || t.Component is null) || p.Palette.Any(c => c is null)) throw new InvalidDataException("Incomplete vehicle settings.");
         VehicleCustomizationService.ValidateShape(p);
@@ -81,6 +91,7 @@ public sealed class VehicleProjectService(string projectRoot)
     internal static string Mesh(VehicleProject p) => ContentRoot(p) + "/Vehicles/SK_" + p.Id;
     internal static string Metadata(VehicleProject p) => ContentRoot(p) + "/Vehicles/DA_Vehicle_" + p.Id;
     internal static string Blueprint(VehicleProject p) => ContentRoot(p) + "/Vehicles/BP_" + p.Id;
+    internal static string PawnData(VehicleProject p) => ContentRoot(p) + "/Vehicles/DA_DPRD_Batmobile1995_BatmanForever_PawnData";
     internal static string Progress(VehicleProject p) => "/Game/GameProgress/Mods/Vehicle_" + p.Id + "/PROG_" + p.Id;
 
     internal static bool RuntimeSuitManifestRequired(string buildRoot)

@@ -34,7 +34,7 @@ public sealed class PartInspectorForm : AdaptiveForm
 
     public event EventHandler? ApplyRequested;
 
-    public PartInspectorForm(NativeSuitPartRecord part)
+    public PartInspectorForm(NativeSuitPartRecord part, bool allowApply = true)
     {
         _part = part;
         var (confidence, reason) = PartRecipeService.Confidence(part);
@@ -224,6 +224,8 @@ public sealed class PartInspectorForm : AdaptiveForm
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         var primary = MakeButton("Use on character", primary: true, (_, _) => ApplyRequested?.Invoke(this, EventArgs.Empty));
         primary.Width = 150;
+        primary.Enabled = allowApply;
+        if (!allowApply) primary.Text = "Preview only";
         var leftActions = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,

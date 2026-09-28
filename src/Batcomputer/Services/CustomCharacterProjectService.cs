@@ -23,6 +23,8 @@ public static class CustomCharacterProjectService
         if (identity is null)
             return PawnTagConfigService.CharacterOwnerMismatchError(project.PawnTag, donorPawnTag);
         if (!Enum.IsDefined(identity.ModeAvailability)) return "The character's game-mode availability is invalid. Reopen Character identity.";
+        if (!CharacterVehicleChoiceService.IsValidTag(identity.DefaultVehicleTag))
+            return "The character's selected vehicle tag is invalid. Reopen Character vehicle.";
         if (!IsIdentifier(identity.CharacterId) || !IsIdentifier(PawnOwner(identity)) || !IsIdentifier(identity.VariantId) ||
             string.IsNullOrWhiteSpace(identity.DefinitionSlotId))
             return "The custom character identity is incomplete. Create it through Characters, or choose a saved character as the suit's base.";
@@ -112,6 +114,7 @@ public static class CustomCharacterProjectService
             DefinitionSlotId = definition ? project.SlotId : definitionSlotId,
             SymbolPackage = definition ? "" : source?.CustomCharacter?.SymbolPackage ?? "",
             ModeAvailability = source?.CustomCharacter?.ModeAvailability ?? CharacterModeAvailability.Normal,
+            DefaultVehicleTag = definition ? source?.CustomCharacter?.DefaultVehicleTag ?? "" : "",
             PawnTagOwner = definition ? "" : source?.CustomCharacter?.PawnTagOwner ?? ""
         };
         var stem = $"CC_{characterId}_{variantId}";
@@ -162,23 +165,54 @@ public static class CustomCharacterProjectService
         var from = Path.GetFullPath(service.ProjectOutputDirectory(source));
         var to = Path.GetFullPath(service.ProjectOutputDirectory(target));
         if (from.Equals(to, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Source and new project must differ.");
-        foreach (var relative in source.CustomStaticMeshes.Select(mesh => mesh.SourceObjRelativePath)
-                     .Concat(source.SkinnedMeshes.Concat(EquipmentSkinnedModelService.Models(source)).SelectMany(mesh => new[] { mesh.SourceRelativePath, mesh.CacheRelativePath }))
-                     .Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase))
+
+        var copies = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        void AddCopy(string input, string output)
         {
+            if (copies.TryGetValue(output, out var previous))
+            {
+                if (!previous.Equals(input, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException($"Two different model sources would copy to '{output}': '{previous}' and '{input}'.");
+                return; // The same FBX may be declared directly and included in its cache folder.
+            }
+            copies.Add(output, input);
+        }
+        void RequireFile(string relative)
+        {
+            if (string.IsNullOrWhiteSpace(relative)) return;
             var input = Below(from, relative);
-            var output = Below(to, relative);
-            if (File.Exists(input)) CopyFile(input, output);
-            else if (Directory.Exists(input))
-                foreach (var file in Directory.EnumerateFiles(input, "*", SearchOption.AllDirectories))
-                    CopyFile(file, Below(output, Path.GetRelativePath(input, file)));
-            else throw new FileNotFoundException("A saved model source/cache is missing. Repair it in the source project before copying.", input);
+            if (!File.Exists(input)) throw new FileNotFoundException(
+                "A saved model source is missing. Repair it in the source project before copying.", input);
+            AddCopy(input, Below(to, relative));
         }
-        if (File.Exists(source.CoverImagePath))
+        void RequireCache(string relative)
         {
-            target.CoverImagePath = Path.Combine(to, "cover" + Path.GetExtension(source.CoverImagePath));
-            CopyFile(source.CoverImagePath, target.CoverImagePath);
+            if (string.IsNullOrWhiteSpace(relative)) return;
+            var input = Below(from, relative);
+            if (!Directory.Exists(input)) throw new DirectoryNotFoundException(
+                "A saved model cache is missing. Repair it in the source project before copying: " + input);
+            var output = Below(to, relative);
+            foreach (var file in Directory.EnumerateFiles(input, "*", SearchOption.AllDirectories))
+                AddCopy(file, Below(output, Path.GetRelativePath(input, file)));
         }
+
+        foreach (var mesh in source.CustomStaticMeshes) RequireFile(mesh.SourceObjRelativePath);
+        foreach (var mesh in source.SkinnedMeshes.Concat(EquipmentSkinnedModelService.Models(source)))
+        {
+            RequireFile(mesh.SourceRelativePath);
+            RequireCache(mesh.CacheRelativePath);
+        }
+
+        string? cover = null;
+        if (!string.IsNullOrWhiteSpace(source.CoverImagePath))
+        {
+            if (!File.Exists(source.CoverImagePath)) throw new FileNotFoundException(
+                "The saved suit cover image is missing. Repair it in the source project before copying.", source.CoverImagePath);
+            cover = Path.Combine(to, "cover" + Path.GetExtension(source.CoverImagePath));
+            AddCopy(Path.GetFullPath(source.CoverImagePath), cover);
+        }
+        foreach (var (output, input) in copies) CopyFile(input, output);
+        if (cover is not null) target.CoverImagePath = cover;
         // Custom OBJ geometry is regenerated from each project's alignment settings. Give it its
         // own output package while leaving shared material/texture library references untouched.
         foreach (var mesh in target.CustomStaticMeshes)

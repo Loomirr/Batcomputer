@@ -86,7 +86,7 @@
   const weaponsButton = document.createElement('button'); weaponsButton.id = 'weaponsMode'; weaponsButton.textContent = 'Weapons'; $('seatsMode').before(weaponsButton);
   weaponsButton.onclick = () => { $('search').value = 'launcher'; $('filter').value = 'all'; select('socket:LauncherGadget_01'); };
   const boostButton = document.createElement('button'); boostButton.id = 'boostMode'; boostButton.textContent = 'Boost'; weaponsButton.after(boostButton);
-  boostButton.onclick = () => { $('search').value = 'exhaust'; $('filter').value = 'all'; select('socket:VFX_Exhaust_01'); };
+  boostButton.onclick = () => { $('search').value = 'exhaust'; $('filter').value = 'all'; select('socket:' + (data.boost?.outlets?.[0] || 'VFX_Exhaust_01')); };
   const surfacePanel = document.createElement('fieldset'); surfacePanel.id = 'surfacePanel'; surfacePanel.hidden = true;
   surfacePanel.innerHTML = '<legend>Light surface · experimental</legend><select id="surfaceSlot" aria-label="Light surface slot" style="width:100%"></select><select id="surfaceRole" aria-label="Light behavior" style="width:100%;margin-top:6px"></select><p id="surfaceReason" class="muted"></p><button id="suggestLightRoles">Use named light slots</button>';
   $('fields').before(surfacePanel);
@@ -143,7 +143,7 @@
   function pushHost(type, values) { if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage(Object.assign({ type, vehicleId: data.vehicleId, session: data.session }, values)); }
   function changed(id) { return saved.has(id) || disabled.has(id) || beamSettings.has(id) || id==='body'&&lightSurfaces.size>0 || surfaceRole(id) || accentColor&&id.startsWith('C_') || Array.from(materials.values()).some(m => m.component === id); }
   function partLabel(part) { const role=surfaceRole(part.id);return role?role.label+' · custom lens':part.label; }
-  function updateUi() { $('undo').disabled = !undo.length; $('redo').disabled = !redo.length; $('apply').disabled = !ready||riderBusy; $('setup').disabled=riderBusy;$('paintMode').disabled=riderBusy; $('counts').textContent = editable.size + ' adjustable · ' + materials.size + ' material edits'; const dirty = snapshot() !== initial; viewState.textContent = dirty ? 'Unsaved changes' : 'No new changes'; viewState.classList.toggle('dirty',dirty); $('status').textContent = riderBusy?'Preparing figures · seat edits can continue':dirty ? 'Unsaved changes · Save vehicle to keep them' : 'Orbit: drag · Pan: right drag · Zoom: wheel · W/E/R: transform'; sectionButtons.forEach((button,id)=>{button.classList.toggle('active',section===id);button.setAttribute('aria-pressed',String(section===id));}); renderList(); updateInspector(); }
+  function updateUi() { $('undo').disabled = !undo.length; $('redo').disabled = !redo.length; $('apply').disabled = !ready||riderBusy; $('setup').disabled=riderBusy;$('paintMode').disabled=riderBusy; $('counts').textContent = editable.size + ' adjustable · ' + materials.size + ' material edits'; const dirty = snapshot() !== initial; viewState.textContent = dirty ? 'Unsaved changes' : 'No new changes'; viewState.classList.toggle('dirty',dirty); $('status').textContent = riderBusy?'Preparing figures · seat edits can continue':dirty ? 'Unsaved changes · Save vehicle to keep them' : 'Orbit: drag · Pan: right drag · Zoom: wheel · W move · R rotate · E scale'; sectionButtons.forEach((button,id)=>{button.classList.toggle('active',section===id);button.setAttribute('aria-pressed',String(section===id));}); renderList(); updateInspector(); }
   function effectiveSlot(part, slot) { const override = materials.get(materialKey(part.id, slot.slot)), packagePath = override?.materialPath || slot.package, choice = byPath.get(packagePath), paint = choice?.paint; return { ...slot, package: packagePath, color: paint ? [paint.r,paint.g,paint.b] : override ? null : slot.color, family: paint?.finish || (override ? choice?.family || 'Assigned material' : slot.family), parameters: override ? [] : slot.parameters }; }
   function materialList(target, slots) {
     target.replaceChildren();
@@ -234,7 +234,7 @@
     const rect = renderer.domElement.getBoundingClientRect(); ray.setFromCamera(new THREE.Vector2((e.clientX - rect.left) / rect.width * 2 - 1, -(e.clientY - rect.top) / rect.height * 2 + 1), camera);
     const hits = ray.intersectObject(vehicle, true); for (const hit of hits) { let n = hit.object; while (n && !n.userData.part) n = n.parent; if (n && loaded.get(n.userData.part).node.visible) { const slots = hit.object.userData.materialSlots; select(n.userData.part, slots?.[hit.face?.materialIndex || 0] ?? null); break; } }
   });
-  addEventListener('keydown', e => { if (document.querySelector('dialog[open]') || /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return; if (e.ctrlKey && ['z', 'y'].includes(e.key.toLowerCase())) { e.preventDefault(); $(e.key.toLowerCase() === 'z' ? 'undo' : 'redo').click(); } else if (!e.ctrlKey && !e.altKey) { if (e.key.toLowerCase() === 'w') modeTo('translate'); if (e.key.toLowerCase() === 'e') modeTo('rotate'); if (e.key.toLowerCase() === 'r') modeTo('scale'); if (e.key.toLowerCase() === 'f') frame(selected && selected.id); } });
+  addEventListener('keydown', e => { if (document.querySelector('dialog[open]') || /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return; if (e.ctrlKey && ['z', 'y'].includes(e.key.toLowerCase())) { e.preventDefault(); $(e.key.toLowerCase() === 'z' ? 'undo' : 'redo').click(); } else if (!e.ctrlKey && !e.altKey) { if (e.key.toLowerCase() === 'w') modeTo('translate'); if (e.key.toLowerCase() === 'r') modeTo('rotate'); if (e.key.toLowerCase() === 'e') modeTo('scale'); if (e.key.toLowerCase() === 'f') frame(selected && selected.id); } });
   function appearance(node, part, parser) {
     let fallback = 0;
     node.traverse(n => { if (!n.isMesh) return; const colors = part.materials;
@@ -314,7 +314,7 @@
   $('materialSearch').oninput=$('materialSource').onchange=()=>{libraryPage=0;libraryChoice=null;$('useMaterial').disabled=true;$('materialPath').textContent='Select a material. Preview shading is approximate.';renderLibrary();};
   $('materialPrevious').onclick=()=>{libraryPage--;renderLibrary();};$('materialNext').onclick=()=>{libraryPage++;renderLibrary();};$('closeMaterials').onclick=()=>$('materialPicker').close();
   $('useMaterial').onclick=()=>{if(!libraryTarget||!libraryChoice)return;const before=snapshot();materials.set(materialKey(libraryTarget.id,libraryTarget.slot),{component:libraryTarget.id,slot:libraryTarget.slot,materialPath:libraryChoice.path});repaint(loaded.get(libraryTarget.id));$('materialPicker').close();checkpoint(before);};
-  let motion = null, bodyModel = null;
+  let motion = null, boostPreview = null, bodyModel = null;
   function disposeObject(root) { root.traverse(n => { if (n.geometry) n.geometry.dispose(); const materials = n.material ? (Array.isArray(n.material) ? n.material : [n.material]) : []; materials.forEach(m => m.dispose?.()); }); }
   function addMarker(state) { const p=state.part, marker = new THREE.Mesh(p.group === 'Seating' ? new THREE.BoxGeometry(.26,.32,.08) : new THREE.OctahedronGeometry(.045), new THREE.MeshBasicMaterial({ color: p.editable ? 0xffd43b : 0x71ccef, wireframe: true })); state.modelRoot.add(marker); if (p.group === 'Light sources (reference)' || p.group === 'Seating') state.modelRoot.add(new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), .6, 0x71ccef, .12, .07)); }
   function unloadDetail(state) { if (!state || !state.detail || state.part.id === 'body') return; disposeObject(state.modelRoot); state.modelRoot.clear(); state.detail=false; addMarker(state); }
@@ -333,6 +333,7 @@
     await loadDetail(loaded.get('body'),data.parts.find(p=>p.id==='body')?.file);
     ready=true;$('loading').style.display='none';select('body');syncLightSurfaces();visibility();frame();
     if(bodyModel&&window.createVehicleMotion)motion=window.createVehicleMotion({data,vehicle,loaded,bodyModel,viewport:$('viewport'),viewbar:document.querySelector('.viewbar')});
+    if(window.createVehicleBoostPreview)boostPreview=window.createVehicleBoostPreview({data,loaded,viewbar:document.querySelector('.viewbar')});
     if(data.warnings.length)$('error').textContent=data.warnings.length+' preview warnings · see part details';pushHost('vehicleWorkshopReady',{parts:loaded.size});
   }
   function paintBeam(state) { if (!state?.beam) return; const value=beamSettings.get(state.part.id)||state.part.light;state.beam.color.setRGB(value.r/255,value.g/255,value.b/255).convertSRGBToLinear();state.beam.intensity=lights?value.intensity/128:0;state.beam.distance=value.radius/100;state.beam.angle=value.outerCone*rad; }
@@ -347,7 +348,7 @@
   function resize() { const rect = $('viewport').getBoundingClientRect(); if (!rect.width || !rect.height) return; renderer.setSize(rect.width, rect.height); camera.aspect = rect.width / rect.height; camera.updateProjectionMatrix(); }
   new ResizeObserver(resize).observe($('viewport')); resize();
   const frameLimit=Math.max(0,Number(data.frameRateLimit ?? 60)), frameInterval=frameLimit ? 1000/frameLimit : 0; let lastFrame=0;
-  function tick(now=0) { requestAnimationFrame(tick); if(frameInterval&&now-lastFrame<frameInterval)return;lastFrame=now;orbit.update();motion?.update();if (selected && loaded.has(selected.id)) { selectionBox.box.copy(bounds(selected.id)); selectionBox.visible = selected.editable && loaded.get(selected.id).node.visible; } renderer.render(scene, camera); } tick();
+  function tick(now=0) { requestAnimationFrame(tick); if(frameInterval&&now-lastFrame<frameInterval)return;lastFrame=now;orbit.update();motion?.update();boostPreview?.update();if (selected && loaded.has(selected.id)) { selectionBox.box.copy(bounds(selected.id)); selectionBox.visible = selected.editable && loaded.get(selected.id).node.visible; } renderer.render(scene, camera); } tick();
   load().catch(error => { $('loading').textContent = 'Preview could not be loaded: ' + error.message; $('error').textContent = 'Nothing was saved'; pushHost('vehicleWorkshopError', { error: error.message }); });
   // Deterministic hooks used by the local, headless interaction checks.
   window.addEventListener('pagehide',()=>{loaded.forEach(state=>disposeObject(state.modelRoot));renderer.dispose();});

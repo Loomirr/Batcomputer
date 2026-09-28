@@ -1,5 +1,5 @@
 // Layout/presentation only. Existing controls retain their own save and bake behavior.
-window.BatcomputerCharacterWorkshopShell = function ({ THREE, scene, root, camera, controls, renderer, panel, parts, select, focus, whole }) {
+window.BatcomputerCharacterWorkshopShell = function ({ THREE, scene, root, camera, controls, renderer, panel, parts, animationPanel, select, focus, focusMotion, onTabChanged, whole }) {
   const el = (tag, parent, text, id) => { const e = document.createElement(tag); if (text) e.textContent = text; if (id) e.id = id; if (parent) parent.appendChild(e); return e; };
   function button(parent, text, action, title) { const b = el('button', parent, text); b.type = 'button'; b.onclick = action; if (title) b.title = title; return b; }
   const shell = el('section', document.body, null, 'character-workshop');
@@ -42,7 +42,9 @@ window.BatcomputerCharacterWorkshopShell = function ({ THREE, scene, root, camer
   for (const [id, title, ids, description] of [
     ['placement', 'Placement', ['meshmove'], 'Native parts use game attachment placement. Only imported custom parts can be moved; Bake to game and rebuild to apply those edits.'],
     ['materials', 'Surfaces', ['partuv', 'matedit'], 'Inspect maps, UV sets and face layers. These controls do not edit saved materials.'],
-    ['face', 'Face', ['exprwrap'], 'Preview facial expressions; does not change game animations.'],
+    ['face', 'Face', ['exprwrap', 'facelayers'], 'Preview facial expressions and isolate printed layers; these controls do not change game animations or saved materials.'],
+    ['animations', 'Motion', ['cw-animations'], 'Search this character’s base-game animation family. Playback and scrubbing do not change the suit or game.'],
+    ['creator', 'Create', ['cw-animation-creator'], 'Author native-body bone keyframes on a local draft timeline. Save a JSON draft; game animation cooking is not available yet.'],
     ['scene', 'Scene', ['redbrick'], 'Lighting and Red Brick previews do not change your mod.']]) {
     tabButtons.set(id, button(tabs, title, () => setTab(id)));
     const section = el('section', host); sections.set(id, section); el('p', section, description).className = 'cw-note';
@@ -52,11 +54,18 @@ window.BatcomputerCharacterWorkshopShell = function ({ THREE, scene, root, camer
   }
   const placementEmpty = el('p', sections.get('placement'), 'Native placement is read-only. Use Hide part to inspect overlapping meshes.'); placementEmpty.className = 'cw-muted'; placementEmpty.hidden = true;
   const scenePanel = sections.get('scene');
-  const lights = []; scene.traverse(node => { if (node.isLight) lights.push([node, node.intensity]); });
+  const lights = []; scene.traverse(node => { if (node.isLight) lights.push([node, node.intensity, node.position.clone()]); });
   const lightingLabel = el('label', scenePanel, 'Lighting');
   const lighting = el('select', lightingLabel); lighting.setAttribute('aria-label', 'Preview lighting');
-  for (const name of ['Studio', 'Soft', 'Contrast']) { const option = el('option', lighting, name); option.value = name; }
-  lighting.onchange = () => lights.forEach(([light, native]) => { light.intensity = native * (lighting.value === 'Soft' ? (light.isHemisphereLight ? 1.1 : .55) : lighting.value === 'Contrast' ? (light.isHemisphereLight ? .45 : .9) : 1); });
+  for (const name of ['Studio', 'Soft', 'Contrast', 'Surface detail']) { const option = el('option', lighting, name); option.value = name; }
+  lighting.onchange = () => lights.forEach(([light, native, position], index) => {
+    light.position.copy(position);
+    light.intensity = native * (lighting.value === 'Soft' ? (light.isHemisphereLight ? 1.1 : .55) :
+      lighting.value === 'Contrast' ? (light.isHemisphereLight ? .45 : .9) :
+      lighting.value === 'Surface detail' ? (light.isHemisphereLight ? .35 : index === 1 ? .9 : .22) : 1);
+    if (lighting.value === 'Surface detail' && index === 1) light.position.set(.8, 3, 8);
+  });
+  el('small', scenePanel, 'Surface detail uses a side light to reveal normal-map texture; it is an inspection view, not game lighting.').className = 'cw-muted';
   const exposureLabel = el('label', scenePanel, 'Exposure'), exposure = el('input', exposureLabel);
   exposure.type = 'range'; exposure.min = '.5'; exposure.max = '1.8'; exposure.step = '.05'; exposure.value = String(renderer.toneMappingExposure || 1.1);
   exposure.setAttribute('aria-label', 'Preview exposure'); exposure.oninput = () => { renderer.toneMappingExposure = Number(exposure.value); };
@@ -71,9 +80,23 @@ window.BatcomputerCharacterWorkshopShell = function ({ THREE, scene, root, camer
   const diagnosticsButton = button(footer, 'Diagnostics', () => { shell.classList.toggle('cw-debug'); diagnosticsButton.setAttribute('aria-expanded', String(shell.classList.contains('cw-debug'))); });
   const diagnostics = document.getElementById('err'); if (diagnostics) shell.appendChild(diagnostics);
   document.body.classList.add('cw-ready');
+  let activeTab = '', partsWereHiddenBeforeCreator = false;
   function setTab(id) {
+    if (id === 'creator' && activeTab !== 'creator') {
+      partsWereHiddenBeforeCreator = shell.classList.contains('cw-hide-parts');
+      shell.classList.add('cw-hide-parts');
+    } else if (id !== 'creator' && activeTab === 'creator') {
+      shell.classList.toggle('cw-hide-parts', partsWereHiddenBeforeCreator);
+    }
+    activeTab = id;
+    shell.classList.toggle('cw-animator', id === 'creator');
+    heading.textContent = id === 'creator' ? 'Animation studio' : heading.dataset.sceneTitle || 'Scene';
+    detail.textContent = id === 'creator' ? 'Native body rig · local animation draft' : detail.dataset.sceneDetail || 'Select a part to inspect it.';
+    onTabChanged?.(id);
     sections.forEach((section, name) => { section.hidden = name !== id; });
     tabButtons.forEach((button, name) => { button.classList.toggle('active', name === id); button.setAttribute('aria-pressed', String(name === id)); });
+    if (id === 'animations' || id === 'creator') focusMotion?.();
+    resize();
   }
   function setInspector(show) { shell.classList.toggle('cw-hide-inspector', !show); resize(); }
   function resize() {
@@ -89,7 +112,9 @@ window.BatcomputerCharacterWorkshopShell = function ({ THREE, scene, root, camer
     reportError(message) { status.textContent = 'Preview issue: ' + message + ' · see Diagnostics'; status.classList.add('cw-warning'); },
     select(part) {
       rows.forEach((row, id) => { row.classList.toggle('active', id === part?.id); row.setAttribute('aria-pressed', String(id === part?.id)); });
-      heading.textContent = part?.label || 'Scene'; detail.textContent = part ? (part.component || 'Native part') : 'Select a part to inspect it.';
+      heading.dataset.sceneTitle = part?.label || 'Scene';
+      detail.dataset.sceneDetail = part ? (part.component || 'Native part') : 'Select a part to inspect it.';
+      if (activeTab !== 'creator') { heading.textContent = heading.dataset.sceneTitle; detail.textContent = detail.dataset.sceneDetail; }
       let available = false;
       for (const id of ['meshmove']) {
         const control = document.getElementById(id), picker = control?.querySelector('select');

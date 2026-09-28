@@ -68,7 +68,7 @@ window.BatcomputerCharacterMeshEditor = function ({ THREE, scene, root, camera, 
     a.rotation.every((v, i) => Math.abs(v - b.rotation[i]) < 1e-5), current = s => s.liveTransform || s.authored;
   const modes = new Map();
   function setMode(value) { mode = value; gizmo.setMode(value); modes.forEach((b, key) => b.classList.toggle('active', key === value)); }
-  [['translate', 'Move · W'], ['rotate', 'Rotate · E'], ['scale', 'Scale · R']].forEach(([value, title]) => modes.set(value, button(title, () => setMode(value))));
+  [['translate', 'Move · W'], ['rotate', 'Rotate · R'], ['scale', 'Scale · E']].forEach(([value, title]) => modes.set(value, button(title, () => setMode(value))));
   const space = el('select', panel); space.setAttribute('aria-label', 'Transform coordinate space');
   [['local', 'Local axes'], ['world', 'World axes']].forEach(([value, title]) => { const o = el('option', space, title); o.value = value; });
   space.onchange = () => gizmo.setSpace(space.value); space.value = 'local'; space.onchange();
@@ -159,7 +159,7 @@ window.BatcomputerCharacterMeshEditor = function ({ THREE, scene, root, camera, 
     // Text/numeric entry and native select type-ahead still own their keys.
     if (/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName) || e.target.isContentEditable || !selected || baking || bakeQueued || interacting) return;
     if ((e.ctrlKey || e.metaKey) && ['z', 'y'].includes(e.key.toLowerCase())) { e.preventDefault(); e.key.toLowerCase() === 'y' || e.shiftKey ? step(redo, undo, 'after') : step(undo, redo, 'before'); }
-    else if (!e.ctrlKey && !e.altKey && !e.metaKey && { w: 'translate', e: 'rotate', r: 'scale' }[e.key.toLowerCase()]) { e.preventDefault(); setMode({ w: 'translate', e: 'rotate', r: 'scale' }[e.key.toLowerCase()]); }
+    else if (!e.ctrlKey && !e.altKey && !e.metaKey && { w: 'translate', r: 'rotate', e: 'scale' }[e.key.toLowerCase()]) { e.preventDefault(); setMode({ w: 'translate', r: 'rotate', e: 'scale' }[e.key.toLowerCase()]); }
   };
   window.addEventListener('keydown', keydown);
   window.addEventListener('pagehide', () => { flush(); restoreGhost(); gizmo.dispose(); origin.geometry.dispose(); origin.material.dispose(); window.removeEventListener('keydown', keydown); }, { once: true });

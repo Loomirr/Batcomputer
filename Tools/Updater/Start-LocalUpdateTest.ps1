@@ -32,6 +32,8 @@ if ($ServeOnly) {
                     '^/releases\.json$' { 'releases.json' }
                     '^/Batcomputer-update-win-x64\.zip$' { 'Batcomputer-update-win-x64.zip' }
                     '^/Batcomputer-update-win-x64\.files\.json$' { 'Batcomputer-update-win-x64.files.json' }
+                    '^/Batcomputer-update-win-x64\.patches\.json$' { 'Batcomputer-update-win-x64.patches.json' }
+                    '^/Batcomputer-update-from-[0-9A-Za-z.-]+-win-x64\.zip$' { $route.Substring(1) }
                     '^/bc-file-[0-9a-f]{64}\.gz$' { $route.Substring(1) }
                     default { $null }
                 }

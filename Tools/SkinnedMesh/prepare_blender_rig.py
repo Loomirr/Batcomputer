@@ -21,8 +21,14 @@ if bpy.context.mode != "OBJECT":
     bpy.ops.object.mode_set(mode="OBJECT")
 
 bones = armature.data.bones
-if not bones.get("Root"):
-    raise RuntimeError("The selected armature has no native Root bone.")
+root_bones = [bone for bone in bones if bone.parent is None]
+if len(root_bones) != 1 or root_bones[0].name not in {"Root", "AttachRoot"}:
+    found = ", ".join(bone.name for bone in root_bones) or "none"
+    raise RuntimeError(
+        "Expected one native Root or AttachRoot bone at the top of the selected armature; "
+        "found: %s. Select the armature from the matching Batcomputer reference GLB." % found
+    )
+root_name = root_bones[0].name
 
 local_by_name = {
     bone.name: bone.matrix_local.copy() if bone.parent is None
@@ -39,7 +45,14 @@ while pending:
         parent = parent_by_name[name]
         if parent is not None and parent not in targets:
             continue
-        local = Matrix.Identity(4) if parent is None else conversion @ local_by_name[name] @ inverse_conversion
+        if parent is None:
+            # Attachment roots carry the orientation that places Spine_03 inside
+            # the torso. Keep that orientation while converting the FBX basis;
+            # otherwise the child bones swing sideways out of the mesh.
+            local = (local_by_name[name] @ inverse_conversion
+                     if root_name == "AttachRoot" else Matrix.Identity(4))
+        else:
+            local = conversion @ local_by_name[name] @ inverse_conversion
         targets[name] = local if parent is None else targets[parent] @ local
         pending.remove(name)
 
@@ -50,11 +63,22 @@ for name, matrix in targets.items():
 bpy.ops.object.mode_set(mode="OBJECT")
 armature.name = "Armature"
 armature["batcomputer_fbx_basis_v1"] = True
-# The native Root is deliberately zero-length at the feet, so its Blender marker
-# looks tiny beside a minifig. Make the complete hierarchy visible without
-# touching any transforms, geometry, or weights.
+# The full-character Root marker can look tiny beside a minifig. Show the whole
+# hierarchy without touching any transforms, geometry, or weights.
 armature.show_in_front = True
 armature.data.display_type = "STICK"
 armature.data.show_names = True
 
-print("Batcomputer: prepared %d native bones for FBX export. The small Root marker at the feet is normal; use the visible stick hierarchy as the scale reference. Select only the mesh and Armature; export binary FBX with Only Deform Bones on, Add Leaf Bones off, Armature FBXNode Type Null, Bake Animation off, and Apply Modifiers off." % len(bones))
+# This optional authoring tag lets Batcomputer warn before a vehicle body is
+# imported onto a different driving rig. FBX custom properties must be enabled
+# in Blender's export options; the tag does not change bones or weights.
+batcomputer_base = "__BATCOMPUTER_BASE__"
+if batcomputer_base:
+    tagged = [obj for obj in bpy.data.objects if obj.type == "MESH" and
+              (obj.parent == armature or any(mod.type == "ARMATURE" and mod.object == armature
+                                             for mod in obj.modifiers))]
+    for obj in tagged:
+        obj["BatcomputerBase"] = batcomputer_base
+    print("Batcomputer: tagged %d vehicle mesh object(s) for driving base %s. Enable Custom Properties when exporting FBX." % (len(tagged), batcomputer_base))
+
+print("Batcomputer: prepared %d native bones (%s) for FBX export. Use the visible stick hierarchy as the scale reference. Select only the mesh and Armature; export binary FBX with Only Deform Bones on, Add Leaf Bones off, Armature FBXNode Type Null, Bake Animation off, and Apply Modifiers off." % (len(bones), root_name))

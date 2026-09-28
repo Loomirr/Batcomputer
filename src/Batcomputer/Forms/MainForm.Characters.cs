@@ -18,6 +18,7 @@ public sealed partial class MainForm
         if (current is not null)
         {
             tiles.Add(new() { Section = "CURRENT CHARACTER", Title = "Character identity & modes", Subtitle = current.CustomCharacter!.ModeAvailability + " · " + current.PawnTag, Accent = Theme.Materials, OnClick = EditCustomCharacterIdentity });
+            tiles.Add(new() { Section = "CURRENT CHARACTER", Title = "Character vehicle", Subtitle = current.CustomCharacter.DefaultVehicleTag switch { "" => "donor default", "None" => "no default vehicle", var tag => tag }, Accent = Theme.Gliders, OnClick = () => _ = EditCustomCharacterVehicleAsync() });
             tiles.Add(new() { Section = "CURRENT CHARACTER", Title = "Character symbol", Subtitle = string.IsNullOrWhiteSpace(current.CustomCharacter.SymbolPngBase64) ? "import a PNG emblem · shared by all suits" : "custom PNG emblem · shared by all suits", Accent = Theme.Materials, OnClick = EditCustomCharacterSymbol });
             tiles.Add(new() { Section = "CURRENT CHARACTER", Title = "＋ Add a suit", Subtitle = "new variant for this character", Accent = Theme.Base, OnClick = () => _ = CreateCharacterSuitAsync(current) });
             tiles.Add(new() { Section = "CURRENT CHARACTER", Title = "Add to a mod / Build", Subtitle = "includes default suit + roster + unlock data", Accent = Theme.Gold,
@@ -176,6 +177,41 @@ public sealed partial class MainForm
             AppendLog("Character symbol saved. Build the mod to apply it to all suits of this character.");
         }
         catch (Exception ex) { Dialog.Error(this, "Symbol was not saved", ex.Message); }
+    }
+
+    private async Task EditCustomCharacterVehicleAsync()
+    {
+        if (await AwaitLoadedProjectStageRestoresBeforeEditAsync("editing the character vehicle") == false ||
+            _currentProject?.CustomCharacter is not { IsDefinition: true } identity) return;
+        try
+        {
+            var projectRoot = _projectRootText.Text.Trim();
+            var scope = CustomCharacterProjectService.Scope(identity);
+            var choices = await Task.Run(() => CharacterVehicleChoiceService.ForCharacter(projectRoot, scope, AppSettings.Current.EffectiveExtractedContentRoot()));
+            using var dialog = new AdaptiveDialogForm { Text = "Batcomputer — Character vehicle", ClientSize = new Size(610, 250), MinimumSize = new Size(500, 240), StartPosition = FormStartPosition.CenterParent, BackColor = Theme.WindowBg, ForeColor = Theme.OnDark, Font = Theme.Body, Padding = new Padding(18) };
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
+            layout.RowStyles.Add(new(SizeType.Absolute, 45)); layout.RowStyles.Add(new(SizeType.Absolute, 50)); layout.RowStyles.Add(new(SizeType.Percent, 100));
+            layout.Controls.Add(new Label { Text = "DEFAULT VEHICLE FOR " + _currentProject.DisplayName, Dock = DockStyle.Fill, ForeColor = Theme.Gold }, 0, 0);
+            var picker = new ThemedDropDown { Dock = DockStyle.Fill };
+            foreach (var option in choices) picker.Items.Add(option);
+            var selected = identity.DefaultVehicleTag ?? "";
+            if (!choices.Any(choice => choice.Tag == selected)) picker.Items.Add(new CharacterVehicleChoiceService.Choice("Saved vehicle · " + selected, selected));
+            picker.SelectedItem = picker.Items.Cast<CharacterVehicleChoiceService.Choice>().First(choice => choice.Tag == selected);
+            layout.Controls.Add(picker, 0, 1);
+            layout.Controls.Add(new Label { Text = "A custom vehicle must be enabled in the same mod and owned by this character. 'No default vehicle' clears the character-group default; disable any separately owned vehicle projects in the mod if you want none available at all.", Dock = DockStyle.Fill, ForeColor = Theme.OnDarkMuted }, 0, 2);
+            var save = new Button { Text = "Save vehicle", Width = 145, DialogResult = DialogResult.OK };
+            var cancel = new Button { Text = "Cancel", Width = 100, DialogResult = DialogResult.Cancel };
+            Theme.StyleGoldButton(save); Theme.StyleDarkButton(cancel);
+            dialog.Controls.Add(layout); dialog.Controls.Add(DialogActionFooter.Create(save, cancel)); dialog.AcceptButton = save; dialog.CancelButton = cancel;
+            if (dialog.ShowDialog(this) != DialogResult.OK || picker.SelectedItem is not CharacterVehicleChoiceService.Choice choice) return;
+            var previous = identity.DefaultVehicleTag ?? "";
+            identity.DefaultVehicleTag = choice.Tag;
+            try { (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(_currentProject); }
+            catch { identity.DefaultVehicleTag = previous; throw; }
+            RefreshToyboxTiles();
+            AppendLog("Character default vehicle saved. Rebuild the mod to apply it: " + (choice.Tag == "None" ? "none" : choice.Tag == "" ? "donor default" : choice.Tag));
+        }
+        catch (Exception ex) { Dialog.Error(this, "Character vehicle was not saved", ex.Message); }
     }
 
     private void EditCustomCharacterIdentity()

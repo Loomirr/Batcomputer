@@ -20,6 +20,7 @@ internal sealed class SkinnedMeshWorkshopForm : AdaptiveForm
     private SkinnedMeshImport _working;
     private bool _busy;
     private readonly bool _existing;
+    private readonly bool _vehicle;
     private readonly List<Control> _actions = [];
     internal SkinnedMeshImport? Result { get; private set; }
     internal bool RemoveRequested { get; private set; }
@@ -27,7 +28,7 @@ internal sealed class SkinnedMeshWorkshopForm : AdaptiveForm
     internal SkinnedMeshWorkshopForm(string directory, IReadOnlyList<SkinnedMeshStageService.Target> targets,
         IReadOnlyList<string> components, SkinnedMeshImport recipe, bool existing, bool vehicle = false)
     {
-        _directory = directory; _working = recipe.Clone(); _existing = existing;
+        _directory = directory; _working = recipe.Clone(); _existing = existing; _vehicle = vehicle;
         Text = "Batcomputer — Skinned mesh workshop (experimental)"; StartPosition = FormStartPosition.CenterParent;
         ClientSize = new Size(1280, 860); MinimumSize = new Size(1020, 740); AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = Theme.WindowBg; ForeColor = Theme.OnDark; Font = Theme.Body;
@@ -105,6 +106,12 @@ internal sealed class SkinnedMeshWorkshopForm : AdaptiveForm
             var request = Read(); request.ImportScale = (float)_scale.Value;
             if (_target.SelectedItem is not SkinnedMeshStageService.Target target) throw new InvalidDataException("Select a compatible native component.");
             request.Component = target.Component; request.DonorMeshPackage = target.DonorMesh;
+            if (_vehicle && FbxBaseTag.Read(source) is { } taggedBase)
+            {
+                var selectedBase = VehicleDonorService.All.FirstOrDefault(d => d.Mesh == target.DonorMesh);
+                if (selectedBase is not null && taggedBase != selectedBase.Id &&
+                    !Dialog.Confirm(this, "Different driving base", $"This FBX was prepared for {taggedBase}, but this vehicle uses {selectedBase.Label}. Bones and wheel mounts may not match. Continue only if you intentionally re-rigged it for this base.", confirmText: "Import anyway")) return;
+            }
             SetBusy(true, "Importing and validating the FBX…");
             var imported = await Task.Run(() => SkinnedMeshCookService.ImportAsync(_directory, source, request, Status, _cancel.Token));
             _working = imported; Fill(); _status.Text = "Cook validated. Assign materials, inspect the mesh, then save.";

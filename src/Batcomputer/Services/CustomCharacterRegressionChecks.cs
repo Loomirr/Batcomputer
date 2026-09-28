@@ -20,6 +20,17 @@ internal static class CustomCharacterRegressionChecks
         var before = JsonSerializer.Serialize(source);
         var character = CustomCharacterProjectService.CreateRecipe(source, "Moon Knight", "MoonKnight", "MoonKnight");
         var child = CustomCharacterProjectService.CreateRecipe(character, "Unhooded", "MoonKnight", "NoHood", character.SlotId);
+        Check(character.CustomCharacter!.DefaultVehicleTag == "" && child.CustomCharacter!.DefaultVehicleTag == "" &&
+            CharacterVehicleChoiceService.IsValidTag("None") && CharacterVehicleChoiceService.IsValidTag("Pawns.Vehicle.Batmobile1989") &&
+            CharacterVehicleChoiceService.IsValidTag("Pawns.Vehicle.Batcomputer.TestCar"),
+            "existing characters retain donor vehicle while no-vehicle and exact native/custom tags are valid");
+        character.CustomCharacter.DefaultVehicleTag = "None";
+        Check(JsonSerializer.Deserialize<NativeSuitProject>(JsonSerializer.Serialize(character))!.CustomCharacter!.DefaultVehicleTag == "None" &&
+            CustomCharacterProjectService.IdentityError(character) is null,
+            "no-default-vehicle choice survives project serialization and identity validation");
+        character.CustomCharacter.DefaultVehicleTag = "Pawns.Vehicle.Bad/Path";
+        Check(CustomCharacterProjectService.IdentityError(character) is not null, "invalid vehicle tags cannot enter a character build");
+        character.CustomCharacter.DefaultVehicleTag = "";
         Check(CustomCharacterProjectService.IsCharacter(character) && !CustomCharacterProjectService.IsCharacter(child) &&
             !CustomCharacterProjectService.IsCharacter(source), "character definitions, child suits, and legacy suits remain distinct project kinds");
         Check(character.PawnTag == "Pawns.Playable.MoonKnight.MoonKnight" && child.PawnTag == "Pawns.Playable.MoonKnight.NoHood" &&
@@ -61,6 +72,48 @@ internal static class CustomCharacterRegressionChecks
         try
         {
             var suits = new SuitProjectService(root); var mods = new ModProjectService(root);
+            var meshSource = new NativeSuitProject { SlotId = "source_with_fbx", SkinnedMeshes = [new()
+            {
+                SourceRelativePath = "SkinnedMeshes/revision/source.fbx",
+                CacheRelativePath = "SkinnedMeshes/revision"
+            }] };
+            var meshTarget = new NativeSuitProject { SlotId = "copied_with_fbx" };
+            var cache = Path.Combine(suits.ProjectOutputDirectory(meshSource), "SkinnedMeshes", "revision");
+            Directory.CreateDirectory(cache);
+            var fbx = Path.Combine(cache, "source.fbx");
+            File.WriteAllText(fbx, "original FBX");
+            File.WriteAllText(Path.Combine(cache, "validated.json"), "original cache");
+            CustomCharacterProjectService.CopyAuthoringSources(meshSource, meshTarget, suits);
+            var copiedCache = Path.Combine(suits.ProjectOutputDirectory(meshTarget), "SkinnedMeshes", "revision");
+            Check(File.ReadAllText(Path.Combine(copiedCache, "source.fbx")) == "original FBX" &&
+                File.ReadAllText(Path.Combine(copiedCache, "validated.json")) == "original cache" &&
+                Directory.EnumerateFiles(copiedCache).Count() == 2 && File.ReadAllText(fbx) == "original FBX",
+                "character copy deduplicates an FBX nested in its cache without altering the source project");
+
+            meshSource.SkinnedMeshes[0].SourceRelativePath = "SkinnedMeshes/revision/missing.fbx";
+            var missingTarget = new NativeSuitProject { SlotId = "missing_fbx_copy" };
+            Check(Throws<FileNotFoundException>(() => CustomCharacterProjectService.CopyAuthoringSources(meshSource, missingTarget, suits)) &&
+                !Directory.Exists(suits.ProjectOutputDirectory(missingTarget)),
+                "character copy rejects a missing declared FBX before writing target files");
+            meshSource.SkinnedMeshes[0].SourceRelativePath = "SkinnedMeshes/revision/source.fbx";
+            meshSource.SkinnedMeshes[0].CacheRelativePath = "SkinnedMeshes/missing_revision";
+            var missingCacheTarget = new NativeSuitProject { SlotId = "missing_cache_copy" };
+            Check(Throws<DirectoryNotFoundException>(() => CustomCharacterProjectService.CopyAuthoringSources(meshSource, missingCacheTarget, suits)) &&
+                !Directory.Exists(suits.ProjectOutputDirectory(missingCacheTarget)),
+                "character copy rejects a missing declared cache before writing target files");
+
+            var collisionSource = new NativeSuitProject { SlotId = "source_with_collision",
+                CustomStaticMeshes = [new() { SourceObjRelativePath = "cover.png" }] };
+            var collisionFolder = suits.ProjectOutputDirectory(collisionSource);
+            Directory.CreateDirectory(collisionFolder);
+            File.WriteAllText(Path.Combine(collisionFolder, "cover.png"), "mesh source");
+            collisionSource.CoverImagePath = Path.Combine(root, "other-cover.png");
+            File.WriteAllText(collisionSource.CoverImagePath, "different cover source");
+            var collisionTarget = new NativeSuitProject { SlotId = "collision_copy" };
+            Check(Throws<InvalidDataException>(() => CustomCharacterProjectService.CopyAuthoringSources(collisionSource, collisionTarget, suits)) &&
+                !Directory.Exists(suits.ProjectOutputDirectory(collisionTarget)),
+                "character copy reports different sources targeting the same file before writing either");
+
             var copyContent = Path.Combine(root, "UnsafeCopyMustNotExist");
             Check(Throws(() => new ToolMaterialLibraryService(root).CopyCharacterMaterialSources([], copyContent,
                 new Dictionary<string, (GeneratedTextureEntry, string)> { ["/Game/Mods/Old/T_Cape"] = (new(), Path.Combine(root, "missing")) })) &&
@@ -116,6 +169,43 @@ internal static class CustomCharacterRegressionChecks
             CustomCharacterRegistrationService.GroupPackage("ModA", "Example") != CustomCharacterRegistrationService.GroupDonor &&
             CustomCharacterRegistrationService.GroupPackage("ModA", "Example") != CustomCharacterRegistrationService.GroupPackage("ModB", "Example"),
             "character group/progression outputs have mod-owned paths, never the native donor paths");
+        var activeGroupContent = AppSettings.Current.EffectiveExtractedContentRoot();
+        if (VehicleDonorService.PackageComplete(activeGroupContent, CustomCharacterRegistrationService.GroupDonor))
+        {
+            var nativeVehicles = CharacterVehicleChoiceService.Native(activeGroupContent);
+            Check(nativeVehicles.Count >= 5 && nativeVehicles.Select(choice => choice.Tag).Distinct(StringComparer.Ordinal).Count() == nativeVehicles.Count,
+                "native vehicle choices include extracted base-game and DLC metadata without duplicate pawn tags");
+            var group = VehicleAssetService.Read(activeGroupContent, CustomCharacterRegistrationService.GroupDonor);
+            var donorVehicle = NativeAssetTextPatch.GetGameplayTag(group, "DefaultVehicle");
+            Check(donorVehicle?.StartsWith("Pawns.Vehicle.", StringComparison.Ordinal) == true &&
+                NativeAssetTextPatch.SetGameplayTag(group, "DefaultVehicle", "None") &&
+                NativeAssetTextPatch.GetGameplayTag(group, "DefaultVehicle") == "None" &&
+                NativeAssetTextPatch.SetGameplayTag(group, "DefaultVehicle", "Pawns.Vehicle.Batmobile1989") &&
+                NativeAssetTextPatch.GetGameplayTag(group, "DefaultVehicle") == "Pawns.Vehicle.Batmobile1989",
+                "character group can clear or select its exact default vehicle without editing the native donor");
+            if (VehicleDonorService.PackageComplete(activeGroupContent, CustomCharacterRegistrationService.ProgressDonor))
+            {
+                var noVehicle = CustomCharacterProjectService.CreateRecipe(null, "No vehicle test", "NoVehicleTest", "NoVehicleTest");
+                noVehicle.CustomCharacter!.DefaultVehicleTag = "None";
+                var tempStage = Path.Combine(Path.GetTempPath(), "BatcomputerCharacterVehicle-" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(tempStage);
+                try
+                {
+                    CustomCharacterRegistrationService.Generate(tempStage, activeGroupContent, "VehicleChoiceTest", [noVehicle], VehicleLightService.Maps, []);
+                    var staged = VehicleAssetService.Read(tempStage, CustomCharacterRegistrationService.GroupPackage("VehicleChoiceTest", noVehicle.CustomCharacter.CharacterId));
+                    Check(NativeAssetTextPatch.GetGameplayTag(staged, "DefaultVehicle") == "None",
+                        "no-default-vehicle choice survives character group staging and cooked reload");
+                    var ownedVehicle = new VehicleProject { Id = "OwnedVehicleTest", OwnerTag = CustomCharacterProjectService.Scope(noVehicle.CustomCharacter) };
+                    noVehicle.CustomCharacter.DefaultVehicleTag = VehicleProjectService.PawnTag(ownedVehicle);
+                    var withVehicle = Path.Combine(tempStage, "WithVehicle");
+                    CustomCharacterRegistrationService.Generate(withVehicle, activeGroupContent, "VehicleChoiceTest", [noVehicle], VehicleLightService.Maps, [ownedVehicle]);
+                    var selected = VehicleAssetService.Read(withVehicle, CustomCharacterRegistrationService.GroupPackage("VehicleChoiceTest", noVehicle.CustomCharacter.CharacterId));
+                    Check(NativeAssetTextPatch.GetGameplayTag(selected, "DefaultVehicle") == VehicleProjectService.PawnTag(ownedVehicle),
+                        "owned custom vehicle choice survives character group staging and cooked reload");
+                }
+                finally { Directory.Delete(tempStage, true); }
+            }
+        }
 
         // Exercise the exact opaque FInstancedStruct codec with a tiny native-layout fixture.
         var asset = new UAsset();
@@ -140,4 +230,6 @@ internal static class CustomCharacterRegressionChecks
         return results;
     }
     private static bool Throws(Action action) { try { action(); return false; } catch (Exception) { return true; } }
+    private static bool Throws<T>(Action action) where T : Exception
+    { try { action(); return false; } catch (T) { return true; } catch (Exception) { return false; } }
 }

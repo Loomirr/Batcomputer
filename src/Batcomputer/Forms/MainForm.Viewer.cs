@@ -170,6 +170,8 @@ public sealed partial class MainForm
 
         _viewer = new ModelPreviewControl { Dock = DockStyle.Fill };
         _viewer.PlacementSaveRequested += (_, args) => SaveViewerPlacement(args);
+        _viewer.SuitIconTestRequested += (_, args) => _ = TestViewerSuitIconAsync(args);
+        _viewer.SuitIconApplyRequested += (_, args) => _ = ApplyViewerSuitIconAsync(args);
         right.Controls.Add(_viewer, 0, 0);
 
         _viewerStatus = new Label
@@ -183,6 +185,149 @@ public sealed partial class MainForm
 
         LoadViewerCatalog();
         return root;
+    }
+
+    private async Task TestViewerSuitIconAsync(PreviewSuitIconTestRequestedEventArgs request)
+    {
+        var viewer = _viewer;
+        var project = _viewerProject;
+        var generation = _viewerLoadGeneration;
+        if (viewer is null || project is null ||
+            !request.LayoutKey.Equals(ViewerLayoutService.SuitKey(project), StringComparison.OrdinalIgnoreCase))
+        {
+            if (viewer is not null)
+                await viewer.NotifySuitIconTestAsync(false, "Open a saved suit in the 3D viewer before testing its icon.");
+            return;
+        }
+
+        var projectRoot = AppSettings.Current.EffectiveProjectRoot();
+        var output = Path.Combine(AppSettings.RuntimeRoot, "IconTests", Guid.NewGuid().ToString("N"));
+        _viewerStatus!.Text = $"{project.DisplayName}: cooking a separate suit icon test…";
+        try
+        {
+            var result = await Task.Run(() => SuitIconDryRunService.Cook(projectRoot, request.PngBytes, output));
+            AppendLog($"Suit icon test: {project.DisplayName} — {result.Cook.Width}x{result.Cook.Height} {result.Cook.PixelFormat}, {result.Cook.MipCount} mips.");
+            AppendLog("Suit icon test output: " + result.Folder);
+            AppendLog("Suit icon test did not change the project, icon paths, build, or game installation.");
+            if (generation == _viewerLoadGeneration && ReferenceEquals(project, _viewerProject))
+            {
+                _viewerStatus.Text = $"{project.DisplayName}: suit icon cook passed; saved icons unchanged.";
+                await viewer.NotifySuitIconTestAsync(true,
+                    "Native 256px BC7 test passed (9 mips). Saved icons and game files are unchanged. See the log for the test folder.");
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendLog("Suit icon test failed: " + ex.Message);
+            if (generation == _viewerLoadGeneration && ReferenceEquals(project, _viewerProject))
+            {
+                _viewerStatus.Text = $"{project.DisplayName}: suit icon test failed; saved icons unchanged.";
+                await viewer.NotifySuitIconTestAsync(false, "Suit icon test failed: " + ex.Message);
+            }
+        }
+    }
+
+    private async Task ApplyViewerSuitIconAsync(PreviewSuitIconTestRequestedEventArgs request)
+    {
+        var viewer = _viewer;
+        var viewedProject = _viewerProject;
+        var generation = _viewerLoadGeneration;
+        if (viewer is null || viewedProject is null ||
+            string.IsNullOrWhiteSpace(viewedProject.SlotId) ||
+            !request.LayoutKey.Equals(ViewerLayoutService.SuitKey(viewedProject), StringComparison.OrdinalIgnoreCase))
+        {
+            if (viewer is not null)
+                await viewer.NotifySuitIconApplyAsync(false, "Open a saved suit in the 3D viewer before assigning its icon.");
+            return;
+        }
+
+        var project = ResolveViewerProjectForEdit(viewedProject, _currentProject)!;
+        var priorIcon = string.IsNullOrWhiteSpace(project.IconSuit) ? "the donor icon" : project.IconSuit;
+        if (!Dialog.Confirm(this, "Use this suit icon?",
+                $"Assign the 256 × 256 studio image to {project.DisplayName}?\n\n" +
+                $"Current icon: {priorIcon}\n\n" +
+                "The current icon and its texture recipe are kept. This saves the suit project, but does not build or install a mod.",
+                confirmText: "Use as suit icon"))
+        {
+            await viewer.NotifySuitIconApplyAsync(false, "Icon assignment cancelled; the saved suit is unchanged.");
+            return;
+        }
+
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("assign the viewer suit icon") ||
+            generation != _viewerLoadGeneration || !ReferenceEquals(viewedProject, _viewerProject))
+        {
+            await viewer.NotifySuitIconApplyAsync(false, "The viewed suit changed. Reopen its icon studio and try again.");
+            return;
+        }
+
+        var projectRoot = AppSettings.Current.EffectiveProjectRoot();
+        var outputRoot = "";
+        try
+        {
+            if (!await EnsureTextureCookTemplatesAsync(projectRoot))
+                throw new InvalidOperationException("The native suit-icon cook template is not ready. Refresh game assets first.");
+            if (generation != _viewerLoadGeneration || !ReferenceEquals(viewedProject, _viewerProject))
+                throw new InvalidOperationException("The viewed suit changed during template preparation. Nothing was assigned.");
+
+            var templateJson = TextureCookTemplateService.TemplateJsonPath(
+                projectRoot, TextureCookTemplateService.NativeSuitIconTemplateFolder);
+            var requestedName = $"SuitIconStudio_{Guid.NewGuid():N}";
+            var slotIndex = NextTextureSlotIndex(project);
+            var modFolder = project.IconSuit.Split('/', StringSplitOptions.RemoveEmptyEntries) is var iconSegments &&
+                            iconSegments.Length >= 3 && iconSegments[0] == "Game" && iconSegments[1] == "Mods"
+                ? iconSegments[2] : project.SlotId;
+            var packagePath = TexturePackagePathFromUserName(templateJson, requestedName, slotIndex,
+                modFolder, project.SlotId, "Suit selector icon");
+            if (project.GeneratedTextures.Any(entry =>
+                    entry.PackagePath.Equals(packagePath, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException("The generated icon path is already used by this suit. Try again.");
+
+            outputRoot = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureImports",
+                MakeSafePackageBaseName(project.SlotId), requestedName);
+            _viewerStatus!.Text = $"{project.DisplayName}: cooking the new suit icon…";
+            var cooked = await Task.Run(() => SuitIconDryRunService.CookToPackage(
+                projectRoot, request.PngBytes, outputRoot, packagePath));
+            if (generation != _viewerLoadGeneration || !ReferenceEquals(viewedProject, _viewerProject) ||
+                !ReferenceEquals(project, ResolveViewerProjectForEdit(viewedProject, _currentProject)))
+                throw new InvalidOperationException("The viewed suit changed during the icon cook. The new texture was not assigned.");
+
+            if (ReferenceEquals(project, _currentProject)) ReadFieldsIntoProject(project);
+            var preset = new TextureCookPreset(NativeUimdIconCookProfile,
+                "Native 256px BC7 suit selector icon", templateJson, 256, 256, "PF_BC7",
+                TextureProfileSafety.Verified, "Verified native suit icon layout.");
+            var entry = BuildTextureEntryFromSummary(outputRoot, cooked.SourcePng, templateJson,
+                DefaultTextureSourceRawRoot(projectRoot), packagePath,
+                MakeSafePackageBaseName($"Texture_{requestedName}_{slotIndex:00000}_P"),
+                "Suit icon studio", "Suit selector icon", preset);
+            if (project.GeneratedTextures.Any(texture =>
+                    texture.PackagePath.Equals(entry.PackagePath, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException("The cooked icon path conflicts with an existing texture. Nothing was assigned.");
+
+            var oldIcon = project.IconSuit;
+            project.GeneratedTextures.Add(entry);
+            project.IconSuit = entry.PackagePath;
+            try { new SuitProjectService(projectRoot).SaveProject(project); }
+            catch
+            {
+                project.IconSuit = oldIcon;
+                project.GeneratedTextures.Remove(entry);
+                throw;
+            }
+
+            AppendLog($"Suit icon assigned: {project.DisplayName} — {entry.PackagePath} ({cooked.Cook.Width}x{cooked.Cook.Height} {cooked.Cook.PixelFormat}, {cooked.Cook.MipCount} mips).");
+            AppendLog("Previous icon retained: " + priorIcon);
+            AppendLog("Suit project saved. Build and install its mod when you want to see the new icon in-game.");
+            _viewerStatus.Text = $"{project.DisplayName}: new suit icon saved; rebuild the mod to use it in-game.";
+            if (ReferenceEquals(project, _currentProject)) RefreshToyboxTiles();
+            await viewer.NotifySuitIconApplyAsync(true,
+                "Suit icon saved to this project. The previous icon is retained. Build and install the mod to see the change in-game.");
+        }
+        catch (Exception ex)
+        {
+            AppendLog("Suit icon assignment failed: " + ex.Message);
+            _viewerStatus!.Text = $"{project.DisplayName}: suit icon was not assigned.";
+            await viewer.NotifySuitIconApplyAsync(false, "Suit icon was not assigned: " + ex.Message);
+        }
     }
 
     /// <summary>Reads the catalogue (cached after the first pak scan) and fills the list.</summary>

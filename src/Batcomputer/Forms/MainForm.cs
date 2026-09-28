@@ -3404,6 +3404,7 @@ public sealed partial class MainForm : AdaptiveForm
         bool Has(string token) => probe.Contains(token, StringComparison.OrdinalIgnoreCase);
         var s = (slot ?? string.Empty).Trim();
 
+        if (Has("SK_TorsoA_Satchel")) return "torso.satchel";
         if (Has("/Hair/") || Has("SM_HAIR") || Has("_HAIR_") || Has("HAIR")) return "head.scalp_hair";
         if (Has("/HAT/") || Has("_HAT_") || Has("SM_HAT")) return "head.hat";
         if (s.StartsWith("Cape", StringComparison.OrdinalIgnoreCase)) return "cape.primary";

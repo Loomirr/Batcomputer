@@ -6,7 +6,7 @@ namespace Batcomputer;
 /// <summary>Read-only preflight. Unreal must not silently repair missing skin weights on import.</summary>
 internal static class SkinnedFbxValidator
 {
-    internal sealed record Audit(int Vertices, int Bones, IReadOnlyList<string> Materials);
+    internal sealed record Audit(int Vertices, int Bones, IReadOnlyList<string> Materials, string? BatcomputerBase);
     private sealed record Node(string Name, object[] Values, List<Node> Children);
     private const int Limit = 128 * 1024 * 1024;
 
@@ -60,7 +60,12 @@ internal static class SkinnedFbxValidator
         var unnormalized = sums.Count(s => Math.Abs(s - 1) > 0.001);
         if (unweighted > 0 || overLimit > 0 || unnormalized > 0)
             throw new InvalidDataException($"Fix weights in Blender before importing: {unweighted} unweighted vertices, {overLimit} with more than 8 influences, {unnormalized} not normalized. Use Normalize All / Limit Total, then inspect deformation. No automatic repairs were applied.");
-        return new Audit(sums.Length, bones.Length, objects.Where(n => n.Name == "Material").Select(n => Text(n, 1).Split('\0')[0]).ToArray());
+        var baseTags = objects.SelectMany(n => n.Children.Where(c => c.Name == "Properties70"))
+            .SelectMany(n => n.Children.Where(c => c.Name == "P" && Text(c, 0) == "BatcomputerBase"))
+            .Select(n => n.Values.LastOrDefault()?.ToString() ?? "").Where(value => value.Length > 0)
+            .Distinct(StringComparer.Ordinal).ToArray();
+        if (baseTags.Length > 1) throw new InvalidDataException("The FBX contains conflicting Batcomputer driving-base tags.");
+        return new Audit(sums.Length, bones.Length, objects.Where(n => n.Name == "Material").Select(n => Text(n, 1).Split('\0')[0]).ToArray(), baseTags.SingleOrDefault());
 
         Node? ReadNode(int depth)
         {

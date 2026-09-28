@@ -24,7 +24,8 @@ internal static class VehicleAssetService
     internal const string PaletteTemplate = "/Game/Characters/Attachments/Hair/MI_Black";
     internal const string Warning = "Experimental vehicle editor. Seat offsets need in-game testing; collision and handling stay native.";
     internal static readonly string[] RequiredPackages = [NativeBlueprint, NativeMesh, NativePhysics, NativeSkeleton, NativeMetadata, NativeUi, NativeMenu, NativePlinth, NativeProgress];
-    internal static IEnumerable<string> ExtractionFilters => VehicleDonorService.ExtractionFilters.Concat(VehiclePaintService.ExtractionFilters);
+    internal static IEnumerable<string> ExtractionFilters => VehicleDonorService.ExtractionFilters.Concat(VehiclePaintService.ExtractionFilters)
+        .Concat(VehicleBoostColorService.Packages.Concat(VehicleBoostColorService.WiringPackages).Concat(VehicleExhaustService.StylePackages).Concat(VehicleBoostSpeedService.Packages).Select(VehicleDonorService.ExtractionFilter));
     internal static readonly string[] NativeOwners = ["Pawns.Playable.Batman", "Pawns.Playable.BatGirl", "Pawns.Playable.CatWoman", "Pawns.Playable.Gordon", "Pawns.Playable.Nightwing", "Pawns.Playable.RobinDickGrayson", "Pawns.Playable.TaliaAlGhul", "Pawns.Playable.PoisonIvy"];
     internal sealed record Component(string Name, string Kind, string Attachment, VehicleComponentTransform Transform)
     { public override string ToString() => Name.Replace("_GEN_VARIABLE", ""); }
@@ -38,6 +39,8 @@ internal static class VehicleAssetService
         var donor = VehicleDonorService.Get(p);
         var NativeMesh = donor.Mesh; var NativeSkeleton = donor.Skeleton; var NativeBlueprint = donor.Blueprint;
         VehicleIconService.Validate(p, directory);
+        VehicleBoostColorService.Validate(p, nativeContent);
+        VehicleExhaustService.Validate(p, donor, nativeContent);
         var missing = donor.MissingPackages(nativeContent);
         Require(missing.Length == 0, donor.UnavailableMessage + "\n" + string.Join("\n", missing));
         if (p.Model is { } model)
@@ -111,6 +114,8 @@ internal static class VehicleAssetService
             a.FolderName = new FString(package); a.Write(file);
             Require(Read(content, package).Exports.Count == a.Exports.Count, "Vehicle export roundtrip failed: " + package);
         }
+        VehicleBoostColorService.Stage(p, nativeContent, content, Save, log);
+        VehicleExhaustService.Stage(p, donor, nativeContent, Save, log);
         var model = p.Model?.Clone();
         if (model is not null)
         {
@@ -159,7 +164,7 @@ internal static class VehicleAssetService
             SkinnedMeshStageService.BakeMesh(content, directory, summon);
         }
         var meshPackage = model?.MeshPackage;
-        if (p.Transforms.Any(t => VehicleSocketService.IsEditable(t.Component)) || p.LightSurfaces.Count > 0)
+        if (p.TwinExhausts || p.Transforms.Any(t => VehicleSocketService.IsEditable(t.Component)) || p.LightSurfaces.Count > 0)
         {
             meshPackage ??= VehicleProjectService.Mesh(p);
             var mesh = Read(model is null ? nativeContent : content, model is null ? NativeMesh : meshPackage);
@@ -179,6 +184,8 @@ internal static class VehicleAssetService
             log("Vehicle launcher / light / exhaust sockets staged on a private mesh.");
         }
         var redirects = new Dictionary<string, string> { [NativeBlueprint] = VehicleProjectService.Blueprint(p), [NativeMetadata] = VehicleProjectService.Metadata(p), [NativeUi] = ui, [NativeMenu] = menu, [NativePlinth] = plinth, [NativeProgress] = VehicleProjectService.Progress(p) };
+        if (p.BoostColor is not null) redirects[VehicleBoostColorService.NativePawnData] = VehicleProjectService.PawnData(p);
+        foreach (var (from, to) in VehicleExhaustService.Redirects(p, donor)) redirects[from] = to;
         if (meshPackage is not null) redirects[NativeMesh] = meshPackage;
         if (summon is not null) redirects[summon.DonorMeshPackage] = summon.MeshPackage;
         foreach (var source in new[] { NativeBlueprint, NativeMetadata, NativeUi, NativeMenu, NativePlinth })
@@ -221,6 +228,8 @@ internal static class VehicleAssetService
                 }
                 ApplyTransforms(a, p.Transforms);
                 VehicleCustomizationService.Apply(a, p);
+                VehicleSoundService.Apply(a, p);
+                VehicleExhaustService.ApplyEngineEffects(a, p);
                 VehicleLightService.Apply(a, p.Lights);
                 VehicleLightService.ApplyAccent(a, p.AccentColor, gameplay: true);
                 VehicleLightSurfaceService.Apply(a, p);
@@ -250,10 +259,14 @@ internal static class VehicleAssetService
         var staged = Read(content, VehicleProjectService.Metadata(p));
         Require(NativeAssetTextPatch.GetGameplayTag(staged, "PawnTag") == VehicleProjectService.PawnTag(p) && NativeAssetTextPatch.GetGameplayTag(staged, "OwningCharacter") == p.OwnerTag, "Vehicle identity did not survive staging.");
         var bp = Read(content, VehicleProjectService.Blueprint(p));
+        if (p.BoostColor is not null)
+            VehicleBoostColorService.RequireRedirect(content, VehicleProjectService.Blueprint(p), VehicleProjectService.PawnData(p));
+        VehicleExhaustService.Verify(p, donor, content, bp);
         VehicleToyboxService.Verify(bp, p);
         VehicleToyboxService.Verify(Read(content, menu), p);
         VehicleToyboxService.Verify(Read(content, plinth), p);
         VehicleCustomizationService.Verify(bp, p);
+        VehicleSoundService.Verify(bp, p);
         VehicleLightService.Verify(bp, p.Lights);
         VehicleLightService.VerifyAccent(bp, p.AccentColor, gameplay: true);
         VehicleLightService.VerifyAccent(Read(content, menu), p.AccentColor, gameplay: false);

@@ -250,6 +250,7 @@ internal static class AppUpdateRegressionChecks
             }
         });
         AppUpdateFileRegressionChecks.Run(root, Check, Reject);
+        AppUpdatePatchRegressionChecks.Run(root, Check, Reject);
         log.WriteLine($"RESULT: {failed} failures. Fixtures retained at {root}");
         return failed == 0 ? 0 : 1;
     }

@@ -1793,36 +1793,8 @@ public sealed partial class MainForm
                     _toyboxTypeCombo.Items.Add("Texture cooker notes");
                     break;
                 case "Parts":
+                    _toyboxTypeCombo.Items.Add("All parts");
                     _toyboxTypeCombo.Items.Add("Native body profiles");
-                    if (_partIndex is null)
-                    {
-                        LoadPartIndexAndRefreshGrid(logIfMissing: false, refreshToybox: false);
-                    }
-
-                    if (_partIndex is null || _partIndex.Parts.Count == 0)
-                    {
-                        _toyboxTypeCombo.Items.Add("Build part index first");
-                    }
-                    else
-                    {
-                        _toyboxTypeCombo.Items.Add("<all parts>");
-                        foreach (var slot in _partIndex.Parts
-                            .Where(part => part.HasMesh)
-                            .Where(part => !IsGliderVisualPart(part))
-                            .Where(part => !part.Slot.Equals("Face", StringComparison.OrdinalIgnoreCase))
-                            .Select(part => part.Slot)
-                            .Where(slot => !string.IsNullOrWhiteSpace(slot))
-                            .Distinct(StringComparer.OrdinalIgnoreCase)
-                            .OrderBy(slot => SlotSortKey(slot, 0))
-                            .ThenBy(slot => slot, StringComparer.OrdinalIgnoreCase))
-                        {
-                            _toyboxTypeCombo.Items.Add(slot);
-                        }
-                    }
-                    // Attachment mesh metadata has a bundled fallback (no part index needed), while
-                    // sibling material lookups also merge the active extraction.
-                    _toyboxTypeCombo.Items.Add("Attachment: Hair");
-                    _toyboxTypeCombo.Items.Add("Attachment: Hat");
                     break;
                 case "Faces":
                     _toyboxTypeCombo.Items.Add("<all faces>");
@@ -2606,7 +2578,12 @@ public sealed partial class MainForm
 
         if (category == "Parts")
         {
-            var selectedSlot = _toyboxTypeCombo.SelectedItem?.ToString() ?? "<all parts>";
+            var selectedSlot = _toyboxTypeCombo.SelectedItem?.ToString() ?? "All parts";
+            if (selectedSlot.Equals("All parts", StringComparison.OrdinalIgnoreCase))
+            {
+                RefreshAttachmentAssetTiles();
+                return;
+            }
             if (selectedSlot.Equals("Native body profiles", StringComparison.OrdinalIgnoreCase))
             {
                 ShowVirtualTiles(
@@ -3659,9 +3636,19 @@ public sealed partial class MainForm
 
         IEnumerable<string> PartSources() => _partIndex is null
             ? Enumerable.Empty<string>()
-            : _partIndex.Parts.Where(p => p.HasMesh && !IsGliderVisualPart(p) && !p.Slot.Equals("Face", StringComparison.OrdinalIgnoreCase))
-                .Select(p => p.CharacterFolder).Where(s => !string.IsNullOrWhiteSpace(s))
-                .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s, StringComparer.OrdinalIgnoreCase);
+            : _partIndex.Parts.Where(p => p.HasMesh)
+                 .Select(p => p.CharacterFolder).Where(s => !string.IsNullOrWhiteSpace(s))
+                 .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s, StringComparer.OrdinalIgnoreCase);
+
+        IEnumerable<string> AttachmentPoints() => new[] { "Unverified" }
+            .Concat(CustomStaticMeshImportService.AttachmentSlots.Select(slot => slot.Id))
+            .Concat(_currentProject?.SkinnedMeshes.Select(mesh => mesh.Component) ?? [])
+            .Concat(_partIndex?.Parts.Where(p => p.HasMesh)
+                .Select(p => p.Slot) ?? [])
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(s => s.Equals("Unverified", StringComparison.OrdinalIgnoreCase) ? "\uffff" : s,
+                StringComparer.OrdinalIgnoreCase);
 
         IEnumerable<string> GliderSources() => _partIndex is null
             ? Enumerable.Empty<string>()
@@ -3687,7 +3674,8 @@ public sealed partial class MainForm
                 _toyboxFilters.SetGroups(
                     new FilterGroup("Context", "Any context", new[] { "Playable", "Cutscene" }),
                     new FilterGroup("Mesh", "Any mesh", new[] { "Skeletal", "Static" }),
-                    new FilterGroup("Source", "Any source", new[] { "Your meshes" }.Concat(PartSources())));
+                    new FilterGroup("Source", "Any source", new[] { "Your meshes" }.Concat(PartSources())),
+                    new FilterGroup("Attachment point", "Any point", AttachmentPoints()));
                 break;
             case "Equipment":
                 // Family (who owns the gadget) is concrete + base-independent. (Native/Foreign is

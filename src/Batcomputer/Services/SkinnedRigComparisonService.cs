@@ -14,7 +14,7 @@ internal static class SkinnedRigComparisonService
         public bool Passed => Errors.Length == 0;
     }
 
-    internal static Report Compare(IReadOnlyList<SkinnedGlbExportService.Bone> expected, IReadOnlyList<SkinnedGlbExportService.Bone> actual)
+    internal static Report Compare(IReadOnlyList<SkinnedGlbExportService.Bone> expected, IReadOnlyList<SkinnedGlbExportService.Bone> actual, bool allowVehicleWheelRaise = false)
     {
         var errors = new List<string>(); var rows = new List<BoneResult>();
         if (actual.Count != expected.Count) errors.Add($"Rig has {actual.Count} bones; donor requires {expected.Count}. Remove exporter helper/leaf bones; keep the complete native rig.");
@@ -37,7 +37,8 @@ internal static class SkinnedRigComparisonService
             double degrees = length > 0 ? 2 * Math.Acos(Math.Clamp(Math.Abs(dot) / length, 0, 1)) * 180 / Math.PI : double.NaN;
             double scale = new[] { Math.Abs(a.Scale.X - b.Scale.X), Math.Abs(a.Scale.Y - b.Scale.Y), Math.Abs(a.Scale.Z - b.Scale.Z) }.Max();
             bool hierarchy = parentA != "<invalid>" && parentA == parentB;
-            bool pose = double.IsFinite(translation + rotation + scale + degrees) && translation <= .001 && rotation <= .00001 && scale <= .00001;
+            bool wheelRaise = allowVehicleWheelRaise && translation > .001 && VehicleWheelRaise.IsAllowed(expected, b, a);
+            bool pose = double.IsFinite(translation + rotation + scale + degrees) && (translation <= .001 || wheelRaise) && rotation <= .00001 && scale <= .00001;
             // A root scale changes every descendant's component-space bind pose. It must
             // match after cooking; the importer normalizes only the proven FBX unit case.
             rows.Add(new(a.Name, parentB, parentA, translation, degrees, rotation, scale, Values(b), Values(a), hierarchy && pose));
@@ -50,4 +51,24 @@ internal static class SkinnedRigComparisonService
 
     internal static void Write(string path, Report report) => AtomicFileUtil.WriteAllText(path,
         JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true, NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals }));
+}
+
+internal static class VehicleWheelRaise
+{
+    internal static bool IsAllowed(IReadOnlyList<SkinnedGlbExportService.Bone> rig, SkinnedGlbExportService.Bone native, SkinnedGlbExportService.Bone imported)
+    {
+        if (!native.Name.StartsWith("ChassisAttach_", StringComparison.Ordinal) || native.Parent < 0 || native.Parent >= rig.Count) return false;
+        var rotation = Quaternion.Identity;
+        var chain = new List<int>();
+        for (var index = native.Parent; index >= 0; index = rig[index].Parent)
+        {
+            if (index >= rig.Count || chain.Contains(index)) return false;
+            chain.Add(index);
+        }
+        foreach (var index in chain.AsEnumerable().Reverse()) rotation = Quaternion.Normalize(rotation * rig[index].Rotation);
+        var displacement = Vector3.Transform(imported.Translation - native.Translation, rotation);
+        return float.IsFinite(displacement.X + displacement.Y + displacement.Z) &&
+            Math.Abs(displacement.X) <= .001f && Math.Abs(displacement.Y) <= .001f &&
+            displacement.Z > 0 && displacement.Z <= 100f;
+    }
 }

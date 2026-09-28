@@ -1,4 +1,5 @@
 using Microsoft.Web.WebView2.WinForms;
+using System.Text.Json;
 
 namespace Batcomputer;
 
@@ -68,7 +69,25 @@ public sealed class ModelPreviewForm : AdaptiveForm
             _web.CoreWebView2.Settings.AreDevToolsEnabled = false;
             _web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
             ModelPreviewControl.ConfigureCharacterExportDownloads(_web, this, () => _virtualHost, () => !IsDisposed);
-            _web.CoreWebView2.WebMessageReceived += (_, message) => SaveViewerPlacement(message.WebMessageAsJson);
+            _web.CoreWebView2.WebMessageReceived += (_, message) =>
+            {
+                if (!message.Source.StartsWith($"https://{_virtualHost}/", StringComparison.OrdinalIgnoreCase)) return;
+                var json = message.WebMessageAsJson;
+                if (json.Length < 2_000)
+                {
+                    try
+                    {
+                        using var document = JsonDocument.Parse(json);
+                        if (document.RootElement.TryGetProperty("type", out var type) &&
+                            type.GetString() == "preview-character-animation" &&
+                            document.RootElement.TryGetProperty("package", out var package) &&
+                            package.ValueKind == JsonValueKind.String && package.GetString() is { Length: > 0 } path)
+                        { _ = SendCharacterAnimationAsync(path); return; }
+                    }
+                    catch (JsonException) { }
+                }
+                SaveViewerPlacement(json);
+            };
             _web.DefaultBackgroundColor = Theme.WindowBg;
             if (_folder is not null)
             {
@@ -100,6 +119,22 @@ public sealed class ModelPreviewForm : AdaptiveForm
                      + ex.Message,
             });
         }
+    }
+
+    private async Task SendCharacterAnimationAsync(string package)
+    {
+        if (_folder is null) return;
+        CharacterAnimationPreviewService.Bundle? bundle = null;
+        string? error = null;
+        try { bundle = await Task.Run(() => CharacterAnimationPreviewService.LoadBundle(_folder, package)); }
+        catch (Exception ex) { error = ex.Message.Split('\n')[0]; }
+        if (IsDisposed || _web.CoreWebView2 is not { } core) return;
+        try
+        {
+            var json = JsonSerializer.Serialize(bundle, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+            await core.ExecuteScriptAsync($"window.characterAnimationPreview?.bundleResult({JsonSerializer.Serialize(package)},{json},{JsonSerializer.Serialize(error)})");
+        }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine("Preview animation response: " + ex.Message); }
     }
 
     private void QueueUserDataCleanup()

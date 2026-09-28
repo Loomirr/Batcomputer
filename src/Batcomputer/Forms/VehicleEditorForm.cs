@@ -21,6 +21,7 @@ internal sealed class VehicleEditorForm : AdaptiveForm
     private bool _loadingTransform;
     private bool _transformDirty;
     private readonly List<VehicleAssetService.Component> _availableComponents = [];
+    private System.Media.SoundPlayer? _soundPreviewPlayer;
     internal VehicleProject? Result { get; private set; }
     private sealed record OwnerChoice(string Label, string Tag, string ProjectPath = "") { public override string ToString() => Label; }
 
@@ -31,6 +32,7 @@ internal sealed class VehicleEditorForm : AdaptiveForm
         ClientSize = new Size(1100, 720); MinimumSize = new Size(900, 620); AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = Theme.WindowBg; ForeColor = Theme.OnDark; Font = Theme.Body;
         FormClosing += (_, e) => { if (_busy) e.Cancel = true; };
+        FormClosed += (_, _) => _soundPreviewPlayer?.Dispose();
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16), ColumnCount = 1, RowCount = 3 };
         layout.ColumnStyles.Add(new(SizeType.Percent, 100)); layout.RowStyles.Add(new(SizeType.Absolute, 60)); layout.RowStyles.Add(new(SizeType.Percent, 100)); layout.RowStyles.Add(new(SizeType.Absolute, 56)); Controls.Add(layout);
         layout.Controls.Add(new Label { Text = "VEHICLE SETUP\n" + project.DisplayName, Dock = DockStyle.Fill, ForeColor = Theme.Gold }, 0, 0);
@@ -59,7 +61,7 @@ internal sealed class VehicleEditorForm : AdaptiveForm
         }
         _owner.SelectedItem = _owner.Items.Cast<OwnerChoice>().FirstOrDefault(o => o.Tag == project.OwnerTag && o.ProjectPath == project.OwnerCharacterProjectPath);
         Field("Character", _owner);
-        var drivingBase = new ThemedDropDown { Dock = DockStyle.Fill, Enabled = _working.Model is null && _working.SummonModel is null && _working.Transforms.Count == 0 && _working.MaterialOverrides.Count == 0 && _working.DisabledParts.Count == 0 && _working.Lights.Count == 0 && _working.AccentColor is null };
+        var drivingBase = new ThemedDropDown { Dock = DockStyle.Fill, Enabled = _working.Model is null && _working.SummonModel is null && _working.Transforms.Count == 0 && _working.MaterialOverrides.Count == 0 && VehicleLightService.HasOnlyDefaultDisabledLamps(_working, _native) && _working.Lights.Count == 0 && _working.AccentColor is null && _working.BoostColor is null && _working.BoostStyle.Length == 0 && !_working.TwinExhausts };
         _donorSelector = drivingBase; drivingBase.Enabled &= _working.ToyboxParts.Count == 0;
         foreach (var donor in VehicleDonorService.All) drivingBase.Items.Add(donor);
         drivingBase.SelectedItem = VehicleDonorService.Get(_working);
@@ -72,6 +74,8 @@ internal sealed class VehicleEditorForm : AdaptiveForm
                 drivingBase.SelectedItem = VehicleDonorService.Get(_working); return;
             }
             _working.DonorId = donor.Id; donorNote.Text = donor.Notes;
+            _working.DisabledParts.Clear();
+            VehicleLightService.DisableLampMeshes(_working, _native);
             if (!settingsOnly) await LoadDonorComponents();
         };
         Field("Driving base", drivingBase);
@@ -81,6 +85,106 @@ internal sealed class VehicleEditorForm : AdaptiveForm
         size.ValueChanged += (_, _) => _working.SizeMultiplier = (float)size.Value / 100;
         Field("Size % (experimental)", size);
         Field("", new Label { Text = "Scales the vehicle and attached parts. Check wheels, seats and collision in game.", Dock = DockStyle.Fill, ForeColor = Theme.OnDarkMuted }, 44);
+        var boostStyles = new ThemedDropDown { Dock = DockStyle.Fill };
+        boostStyles.Items.Add("Driving base boost");
+        foreach (var style in VehicleExhaustService.Styles) boostStyles.Items.Add(style);
+        boostStyles.SelectedItem = VehicleExhaustService.FindStyle(_working.BoostStyle) ?? (object)"Driving base boost";
+        var twin = new CheckBox { Text = "Two boost outlets (second outlet can be moved in the workshop)", Dock = DockStyle.Fill, Checked = _working.TwinExhausts, ForeColor = Theme.OnDark };
+        twin.CheckedChanged += (_, _) => {
+            if (VehicleExhaustService.FindStyle(_working.BoostStyle)?.Twin == true && !twin.Checked) { twin.Checked = true; return; }
+            _working.TwinExhausts = twin.Checked;
+            if (!twin.Checked) _working.Transforms.RemoveAll(t => t.Component == "socket:" + VehicleExhaustService.SecondSocket);
+            drivingBase.Enabled = false;
+        };
+        boostStyles.SelectedIndexChanged += (_, _) => {
+            _working.BoostStyle = boostStyles.SelectedItem is VehicleExhaustService.Style style ? style.Id : "";
+            if (VehicleExhaustService.FindStyle(_working.BoostStyle)?.Twin == true) twin.Checked = true;
+            twin.Enabled = VehicleExhaustService.FindStyle(_working.BoostStyle)?.Twin != true;
+            drivingBase.Enabled = false;
+        };
+        twin.Enabled = VehicleExhaustService.FindStyle(_working.BoostStyle)?.Twin != true;
+        Field("Boost style", boostStyles);
+        Field("", twin, 44);
+        void BoostSpeedField(string label, float? current, decimal native, decimal maximum, Action<float?> set)
+        {
+            var row = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
+            var custom = new CheckBox { Text = "Custom", AutoSize = true, Checked = current is not null, ForeColor = Theme.OnDark, Margin = new Padding(0, 12, 14, 0) };
+            var value = new NumericUpDown { Minimum = 1, Maximum = maximum, DecimalPlaces = 1, Increment = 1, Width = 110,
+                Value = Math.Clamp((decimal)(current ?? (float)native), 1, maximum), Enabled = current is not null };
+            custom.CheckedChanged += (_, _) => { value.Enabled = custom.Checked; set(custom.Checked ? (float)value.Value : null); };
+            value.ValueChanged += (_, _) => { if (custom.Checked) set((float)value.Value); };
+            row.Controls.Add(custom); row.Controls.Add(value);
+            row.Controls.Add(new Label { Text = custom.Checked ? "Applies only while boosting" : "Native boost curve", AutoSize = true, ForeColor = Theme.OnDarkMuted, Margin = new Padding(12, 12, 0, 0) });
+            Field(label, row, 46);
+        }
+        BoostSpeedField("Boost speed (mph)", _working.BoostTopSpeedMph, 90, 500, value => _working.BoostTopSpeedMph = value);
+        BoostSpeedField("Boost acceleration (G)", _working.BoostAccelerationGs, 6, 50, value => _working.BoostAccelerationGs = value);
+        var boostRow = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
+        var boostStatus = new Label { AutoSize = true, ForeColor = Theme.OnDarkMuted, TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(12, 10, 0, 0) };
+        var boostChoose = ActionButton("Choose color…", (_, _) =>
+        {
+            using var picker = new ColorDialog { FullOpen = true, Color = _working.BoostColor is { } c ? Color.FromArgb(c.R, c.G, c.B) : Color.Cyan };
+            if (picker.ShowDialog(this) != DialogResult.OK) return;
+            _working.BoostColor = new VehicleRgbColor { R = picker.Color.R, G = picker.Color.G, B = picker.Color.B };
+            boostStatus.Text = $"#{picker.Color.R:X2}{picker.Color.G:X2}{picker.Color.B:X2} · test in game";
+            drivingBase.Enabled = false;
+        });
+        boostRow.Controls.Add(boostChoose);
+        boostRow.Controls.Add(ActionButton("Use native", (_, _) => { _working.BoostColor = null; boostStatus.Text = "Native flame"; }));
+        boostStatus.Text = _working.BoostColor is { } boost ? $"#{boost.R:X2}{boost.G:X2}{boost.B:X2} · test in game" : "Native flame";
+        boostRow.Controls.Add(boostStatus);
+        boostChoose.Enabled = _working.DonorId == VehicleBoostColorService.SupportedDonor && _working.BoostStyle.Length == 0 && !_working.TwinExhausts;
+        Field("Boost flame", boostRow, 50);
+        Field("", new Label { Text = "Forever Batmobile only. Gives this custom car its own boost flame, start and cancel effects. Check the result in game.", Dock = DockStyle.Fill, ForeColor = Theme.OnDarkMuted }, 52);
+        drivingBase.SelectedIndexChanged += (_, _) => boostChoose.Enabled = _working.DonorId == VehicleBoostColorService.SupportedDonor && _working.BoostStyle.Length == 0 && !_working.TwinExhausts;
+        boostStyles.SelectedIndexChanged += (_, _) => boostChoose.Enabled = _working.DonorId == VehicleBoostColorService.SupportedDonor && _working.BoostStyle.Length == 0 && !_working.TwinExhausts;
+        twin.CheckedChanged += (_, _) => boostChoose.Enabled = _working.DonorId == VehicleBoostColorService.SupportedDonor && _working.BoostStyle.Length == 0 && !_working.TwinExhausts;
+        var sounds = new ThemedDropDown { Dock = DockStyle.Fill };
+        sounds.Items.Add("Driving base sounds");
+        foreach (var style in VehicleSoundService.Styles) sounds.Items.Add(style);
+        sounds.SelectedItem = VehicleSoundService.FindStyle(_working.SoundStyle) ?? (object)"Driving base sounds";
+        sounds.SelectedIndexChanged += (_, _) => _working.SoundStyle = sounds.SelectedItem is VehicleSoundService.Style style ? style.Id : "";
+        Field("Sound style", sounds);
+        var previewRow = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
+        var soundSlots = new ThemedDropDown { Width = 220 };
+        Button listen = null!;
+        listen = ActionButton("▶ Listen", async (_, _) => {
+            if (soundSlots.SelectedItem is not VehicleSoundService.Slot slot) return;
+            try
+            {
+                listen.Enabled = false;
+                var result = await Task.Run(() => {
+                    using var provider = ModelPreviewService.MakeProvider(AppSettings.Current.EffectiveGamePaksRoot(), AppSettings.Current.EffectiveUsmapPath()!);
+                    return VehicleSoundPreviewService.Wav(provider, slot.Event, Path.Combine(AppSettings.GeneratedRootFor(_projectRoot), "SoundPreview"));
+                });
+                if (result.Wav is null) Dialog.Info(this, "Sound preview", result.Problem ?? "No playable audio was found.");
+                else { _soundPreviewPlayer?.Dispose(); _soundPreviewPlayer = new System.Media.SoundPlayer(result.Wav); _soundPreviewPlayer.Play(); }
+            }
+            catch (Exception ex) { Dialog.Info(this, "Sound preview", ex.Message); }
+            finally { listen.Enabled = true; }
+        });
+        void RefreshSoundSlots()
+        {
+            var selected = (soundSlots.SelectedItem as VehicleSoundService.Slot)?.Label;
+            soundSlots.Items.Clear();
+            try
+            {
+                var slots = VehicleSoundService.FindStyle(_working.SoundStyle) is { } style
+                    ? VehicleSoundService.Slots(style)
+                    : VehicleSoundService.DonorSlots(VehicleAssetService.Read(_native, VehicleDonorService.Get(_working).Blueprint));
+                foreach (var slot in slots) soundSlots.Items.Add(slot);
+                soundSlots.SelectedItem = soundSlots.Items.Cast<VehicleSoundService.Slot>().FirstOrDefault(s => s.Label == selected)
+                    ?? soundSlots.Items.Cast<VehicleSoundService.Slot>().FirstOrDefault();
+            }
+            catch { /* Missing extraction does not prevent editing the sound style. */ }
+            listen.Enabled = soundSlots.Items.Count > 0;
+        }
+        previewRow.Controls.Add(soundSlots); previewRow.Controls.Add(listen);
+        Field("Preview sound", previewRow);
+        sounds.SelectedIndexChanged += (_, _) => RefreshSoundSlots();
+        drivingBase.SelectedIndexChanged += (_, _) => RefreshSoundSlots();
+        RefreshSoundSlots();
+        Field("", new Label { Text = "Swaps engine, ignition, shutdown and gear sounds together. Boost and spawn audio stay native when the style has no replacement.", Dock = DockStyle.Fill, ForeColor = Theme.OnDarkMuted }, 52);
         Field("", new Label { Text = "Stable ID. Custom character owners are included when building.", Dock = DockStyle.Fill, ForeColor = Theme.OnDarkMuted }, 52);
 
         var model = Page("Body & materials");

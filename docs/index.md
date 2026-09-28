@@ -8,8 +8,9 @@ Batcomputer handles the files and registration needed to package and install you
 
 !!! success "Batcomputer 1.0 is here"
     Get the [official 1.0 release](https://github.com/Loomirr/Batcomputer/releases/tag/v1.0.0),
-    or use the built-in updater if your version supports it. These guides cover 1.0;
-    experimental features are marked on their own pages. Keep a backup before upgrading.
+    or use the built-in updater if your version supports it. The [1.1 beta](releases/1.1.0-beta.1.md)
+    adds animation creation, viewer improvements, more Parts and vehicle tools. Enable beta
+    releases to try it; experimental features are marked in these guides. Keep a backup before upgrading.
 
 ## Start here
 
@@ -91,6 +92,7 @@ or the [Blender rig walkthrough](guides/blender-rig-preparation.md).
 
 - [Change a character's pawn-tag family](guides/character-identity.md) without renaming its project or display name.
 - [Choose the right donors](guides/choosing-donors.md), including Joker, Harley and NPC visuals.
+- [Browse attachment meshes](guides/attachment-catalog.md) and inspect their native wiring recipes.
 - [Import/Export](guides/import-export.md): which ZIP to give players and which to give creators.
 - [Review your edits](guides/review-changes.md) before building.
 - [Settings and performance](reference/settings.md): path indicators, preview quality and cleanup.

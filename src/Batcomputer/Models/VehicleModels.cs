@@ -11,6 +11,14 @@ public sealed class VehicleProject
     // Required for a custom owner; its default character is included with the vehicle.
     public string OwnerCharacterProjectPath { get; set; } = "";
     public string DonorId { get; set; } = "batmobile1995";
+    // Empty preserves the driving base's native audio wiring.
+    public string SoundStyle { get; set; } = "";
+    // Empty keeps the driving base's native boost effects.
+    public string BoostStyle { get; set; } = "";
+    public bool TwinExhausts { get; set; }
+    // Null retains the game's boost-speed curve (90 mph / 6 Gs).
+    public float? BoostTopSpeedMph { get; set; }
+    public float? BoostAccelerationGs { get; set; }
     public float SizeMultiplier { get; set; } = 1;
     public SkinnedMeshImport? Model { get; set; }
     public SkinnedMeshImport? SummonModel { get; set; }
@@ -22,6 +30,8 @@ public sealed class VehicleProject
     public List<string> DisabledParts { get; set; } = [];
     public List<VehicleLightSettings> Lights { get; set; } = [];
     public VehicleRgbColor? AccentColor { get; set; }
+    // Null retains the donor's native boost flame. Currently supported by the Forever Batmobile.
+    public VehicleRgbColor? BoostColor { get; set; }
     public List<VehicleLightSurface> LightSurfaces { get; set; } = [];
     public List<VehicleToyboxPart> ToyboxParts { get; set; } = [];
     public VehicleProject Clone() => JsonSerializer.Deserialize<VehicleProject>(JsonSerializer.Serialize(this))!;

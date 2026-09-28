@@ -71,6 +71,8 @@ public sealed partial class SettingsForm : AdaptiveForm
             new() { Key = "OodleRuntimeDllPath", Label = "Oodle runtime (local UE 5.6)", Section = "Tools", IsFile = true, Filter = "Oodle runtime|oo2core*_win64.dll|DLLs|*.dll|All files|*.*",
                 Get = s => string.IsNullOrWhiteSpace(s.OodleRuntimeDllPath) ? s.EffectiveOodleRuntimeDllPath() : s.OodleRuntimeDllPath,
                 Set = (s, v) => s.OodleRuntimeDllPath = v },
+            new() { Key = "VgmstreamExePath", Label = "vgmstream-cli (optional sound preview)", Section = "Tools", IsFile = true, Filter = "vgmstream-cli|vgmstream-cli.exe|Executables|*.exe|All files|*.*",
+                Get = s => s.VgmstreamExePath, Set = (s, v) => s.VgmstreamExePath = v },
             new() { Key = "UsmapPath", Label = "Mappings (.usmap)", Section = "Tools", IsFile = true, Filter = "Mappings|*.usmap|All files|*.*",
                 Get = s => s.UsmapPath, Set = (s, v) => s.UsmapPath = v },
             new() { Key = "UnrealEngineRoot", Label = "Unreal Engine 5.6 (Asset Registry writer)", Section = "Tools", IsFile = false, Filter = "",

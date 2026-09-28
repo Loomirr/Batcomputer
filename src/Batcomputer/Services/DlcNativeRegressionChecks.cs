@@ -36,6 +36,39 @@ internal static class DlcNativeRegressionChecks
             }
             foreach (var family in new[] { "Joker", "HarleyQuinn", "Batman" })
             {
+                var playablePackage = family == "Batman"
+                    ? "/Game/Characters/Minifig/Batman/BP_Batman_TheBatman2025_Playable"
+                    : $"/Game/AdditionalContent/VillainMode/Characters/Playables/{family}/BP_{family}_Default_Playable";
+                var gameplayDonor = AnimArchetypeGraftService.DetectDonor(
+                    Source(playablePackage), content, MappingsCache.Load(mappings!));
+                Require(BaseEligibilityService.IsGameplayDonorPackage(playablePackage) &&
+                        gameplayDonor is { Valid: true } &&
+                        !string.IsNullOrWhiteSpace(gameplayDonor.DprdPackage),
+                    family + " playable is no longer recognized as a complete gameplay donor");
+                if (family is "Joker" or "HarleyQuinn")
+                {
+                    var nativeGliderProject = new NativeSuitProject
+                    {
+                        PlayableTemplate = Template(playablePackage)
+                    };
+                    var glideStatus = new AnimArchetypeGraftService()
+                        .BaseGlideVisual(nativeGliderProject, out var glideComponent);
+                    Require(glideStatus == AnimArchetypeGraftService.GlideVisualStatus.Present &&
+                            glideComponent == "Cape",
+                        family + " native glide component is no longer available for replacement");
+                }
+                if (family is "Joker" or "HarleyQuinn")
+                {
+                    var folder = Path.GetDirectoryName(Source(playablePackage))!;
+                    foreach (var variant in Directory.EnumerateFiles(folder, "BP_*_Playable.uasset"))
+                    {
+                        var variantDonor = AnimArchetypeGraftService.DetectDonor(
+                            variant, content, MappingsCache.Load(mappings!));
+                        Require(variantDonor is { Valid: true } &&
+                                !string.IsNullOrWhiteSpace(variantDonor.DprdPackage),
+                            Path.GetFileNameWithoutExtension(variant) + " is not a complete gameplay donor");
+                    }
+                }
                 var dcmd = family == "Batman" ? "/Game/Characters/Minifig/Batman/DA_DCMD_Batman_TheBatman2025_Playable" :
                     $"/Game/AdditionalContent/VillainMode/Characters/Playables/{family}/DA_DCMD_{family}_Default_Playable";
                 var donor = NativeMetadataDonorService.TryRead(Template(dcmd), null, null, out var error)
@@ -124,6 +157,22 @@ internal static class DlcNativeRegressionChecks
                 }
                 Require(sourceHashes.All(p => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(p.Key))) == p.Value), "A source donor changed");
                 output.WriteLine($"PASS {family}: remove/replace/replay with {replacement}'s printed face preserves native Face, animation, SCS and class fields in playable + cutscene; source files unchanged");
+                if (family is "Joker" or "HarleyQuinn")
+                {
+                    // A regular replacement glider must generate its own DPRD even
+                    // when no equipment was changed on these native DLC donors.
+                    project.UseCustomArchetype = true;
+                    project.PartGrafts.Add(new SavedPartGraft { IsGlider = true });
+                    var gliderDependencies = new AnimArchetypeGraftService()
+                        .ApplyToPackagedRoot(project, patch.PatchedContentRoot);
+                    var generatedDprd = Path.Combine(patch.PatchedContentRoot,
+                        $"Mods/DlcFaceCheck{family}/Characters/DA_DPRD_DlcFaceCheck{family}.uasset"
+                            .Replace('/', Path.DirectorySeparatorChar));
+                    Require(gliderDependencies.Status == "ok" && File.Exists(generatedDprd),
+                        family + " glider failed to produce its generated DPRD: " +
+                        gliderDependencies.Error + " " + string.Join("; ", gliderDependencies.Log));
+                    output.WriteLine($"PASS {family}: replacement-glider dependency generates a mod-local DPRD");
+                }
                 if (family == "Batman")
                 {
                     string NonVoiceExports(string path)
@@ -156,6 +205,61 @@ internal static class DlcNativeRegressionChecks
                     output.WriteLine("PASS Nightwing dialogue on Batman scaffold: persisted, replay-idempotent, unrelated Blueprint exports and native sources unchanged");
                 }
             }
+            // NPC-only Satchel must be additive on a playable suit: an enemy Cape
+            // alias must not take the Batman cape/glider's component slot.
+            var satchelPlayable = Parts(Source(
+                    "/Game/Characters/Enemies/Arkham/BP_Arkham_Shotgun_B_Goon"))
+                .Single(part => part.MeshObjectName == "SK_TorsoA_Satchel");
+            var satchelCutscene = Parts(Source(
+                    "/Game/Characters/Enemies/Arkham/BP_Arkham_Shotgun_B_Cutscene"))
+                .Single(part => part.MeshObjectName == "SK_TorsoA_Satchel");
+            Require(satchelPlayable.Slot == "Costume" && satchelCutscene.Slot == "Costume" &&
+                    satchelPlayable.SemanticKind == "Satchel" &&
+                    satchelCutscene.SemanticKind == "Satchel",
+                "Satchel lost its safe Costume donor recipe");
+            var misleadingSatchel = Parts(Source("/Game/Characters/Enemies/TwoFace/BP_TwoFaceGang_Shotgun_A_Goon"))
+                .Single(part => part.MeshObjectName == "SK_TorsoA_Satchel");
+            Require(misleadingSatchel.Slot == "Cape" && !misleadingSatchel.IsLikelyGraftCandidate &&
+                    PartRecipeService.Confidence(misleadingSatchel).Level == PartRecipeService.RecipeConfidence.Unsafe,
+                "The misleading Cape-tagged Satchel usage was not retained as unsafe evidence");
+            var batmanMetadata = NativeMetadataDonorService.TryRead(
+                Template("/Game/Characters/Minifig/Batman/DA_DCMD_Batman_TheBatman2025_Playable"),
+                null, null, out var batmanMetadataError)
+                ?? throw new InvalidDataException(batmanMetadataError);
+            var satchelTarget = "/Game/Mods/SatchelCheck/";
+            var satchelProject = new NativeSuitProject
+            {
+                SlotId = "satchel_check",
+                DisplayName = "Satchel check",
+                PlayableTemplate = Template(batmanMetadata.PlayablePackagePath),
+                CutsceneTemplate = Template(batmanMetadata.CutscenePackagePath),
+                DcmdTemplate = Template(batmanMetadata.DcmdPackagePath),
+                TargetPackages = new()
+                {
+                    Playable = satchelTarget + "BP_SatchelCheck_Playable",
+                    Cutscene = satchelTarget + "BP_SatchelCheck_Cutscene",
+                    Dcmd = satchelTarget + "DA_DCMD_SatchelCheck_Playable"
+                }
+            };
+            var satchelPatch = new UAssetPatchService(outputRoot).CreateNameMapPatchedStage(satchelProject);
+            Require(satchelPatch.Status == "created", "Satchel test base could not be staged");
+            var satchelGraft = new PartGraftService(outputRoot,
+                    new NativeSuitPartIndex { Parts = [satchelPlayable, satchelCutscene] })
+                .CreateSelectedPartGraftedStage(satchelProject, satchelPlayable, satchelCutscene,
+                    "Satchel", "Costume", satchelPlayable.AttachSocket,
+                    preferDonorComponentShell: true);
+            Require(satchelGraft.PackageResults.Count == 2 &&
+                    satchelGraft.PackageResults.All(result => result.Success),
+                "Satchel graft failed: " + JsonSerializer.Serialize(satchelGraft));
+            foreach (var package in new[] { satchelProject.TargetPackages.Playable, satchelProject.TargetPackages.Cutscene })
+            {
+                var staged = Parts(Path.Combine(satchelGraft.GraftedContentRoot,
+                    package["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar)) + ".uasset");
+                Require(staged.Any(part => part.Slot == "Satchel" && part.MeshObjectName == "SK_TorsoA_Satchel") &&
+                        staged.Any(part => part.Slot == "Cape"),
+                    "Satchel did not coexist with Batman's original cape/glider");
+            }
+            output.WriteLine("PASS Satchel: authentic NPC Costume donor grafts to both roles without replacing Batman's cape/glider");
             var hats = AttachmentCatalogService.HatParts().ToArray();
             Require(hats.Any(p => p.MeshPackagePath.Contains("TaliaAlGhul_BatSuit") && !string.IsNullOrEmpty(p.AnimClassPackagePath)), "Talia BatSuit helmet or animation missing");
             foreach (var hood in new[] { "HoodSmall", "HoodFringe", "HoodFurlined" })

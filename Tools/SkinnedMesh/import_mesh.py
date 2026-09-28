@@ -53,10 +53,36 @@ native_root = next(b for b in expected if b["parent"] == -1)
 root_scale = poses[native_root["name"]].scale3d
 has_root_units = all(abs(v - 100.0) < 0.0001 for v in (root_scale.x, root_scale.y, root_scale.z)) and all(abs(v - 1.0) < 0.00001 for v in native_root["scale"])
 def translation_error(factor):
-    return max(math.dist(tuple(v * factor for v in (poses[b["name"]].translation.x, poses[b["name"]].translation.y, poses[b["name"]].translation.z)), b["translation"]) for b in expected)
+    stable = [b for b in expected if not (config.get("allow_wheel_raise") and b["name"].startswith("ChassisAttach_"))]
+    return max(math.dist(tuple(v * factor for v in (poses[b["name"]].translation.x, poses[b["name"]].translation.y, poses[b["name"]].translation.z)), b["translation"]) for b in stable)
 translation_factor = 1.0
 if has_root_units and translation_error(1.0) > 0.001 and translation_error(100.0) <= 0.001:
     translation_factor = 100.0
+def quat_mul(a, b):
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+    return (aw*bx + ax*bw + ay*bz - az*by,
+            aw*by - ax*bz + ay*bw + az*bx,
+            aw*bz + ax*by - ay*bx + az*bw,
+            aw*bw - ax*bx - ay*by - az*bz)
+def quat_rotate(q, v):
+    x, y, z, w = q
+    vx, vy, vz = v
+    return (2*(x*vx + y*vy + z*vz)*x + (w*w - x*x - y*y - z*z)*vx + 2*w*(y*vz - z*vy),
+            2*(x*vx + y*vy + z*vz)*y + (w*w - x*x - y*y - z*z)*vy + 2*w*(z*vx - x*vz),
+            2*(x*vx + y*vy + z*vz)*z + (w*w - x*x - y*y - z*z)*vz + 2*w*(x*vy - y*vx))
+rotation_cache = {-1: (0.0, 0.0, 0.0, 1.0)}
+def component_rotation(index):
+    if index not in rotation_cache:
+        bone = expected[index]
+        rotation_cache[index] = quat_mul(component_rotation(bone["parent"]), bone["rotation"])
+    return rotation_cache[index]
+def allowed_wheel_raise(bone, actual_translation):
+    if not config.get("allow_wheel_raise") or not bone["name"].startswith("ChassisAttach_") or bone["parent"] < 0:
+        return False
+    delta = tuple(actual_translation[i] - bone["translation"][i] for i in range(3))
+    dx, dy, dz = quat_rotate(component_rotation(bone["parent"]), delta)
+    return all(math.isfinite(v) for v in (dx, dy, dz)) and abs(dx) <= .001 and abs(dy) <= .001 and 0 < dz <= 100
 corrected_names, corrected_poses = [], []
 for bone in expected:
     name = bone["name"]
@@ -66,7 +92,9 @@ for bone in expected:
         raise RuntimeError("Native bone parent mismatch at " + name)
     transform = poses[name]
     t, q, s = transform.translation, transform.rotation, transform.scale3d
-    translation = math.dist(tuple(v * translation_factor for v in (t.x, t.y, t.z)), bone["translation"])
+    imported_translation = tuple(v * translation_factor for v in (t.x, t.y, t.z))
+    translation = math.dist(imported_translation, bone["translation"])
+    wheel_raise = translation > .001 and allowed_wheel_raise(bone, imported_translation)
     actual_q = (q.x, q.y, q.z, q.w)
     expected_q = bone["rotation"]
     dot = sum(a * b for a, b in zip(actual_q, expected_q))
@@ -75,12 +103,12 @@ for bone in expected:
     difference = max(abs(a - b) for a, b in zip(scales, bone["scale"]))
     finite = all(math.isfinite(v) for v in (*actual_q, *scales, translation, rotation))
     root_units = bone["parent"] == -1 and all(abs(b - 1.0) < 0.00001 for b in bone["scale"]) and all(abs(a - 100.0) < 0.0001 for a in scales)
-    if not finite or translation > 0.001 or rotation > 0.00001 or (difference > 0.00001 and not root_units):
+    if not finite or (translation > 0.001 and not wheel_raise) or rotation > 0.00001 or (difference > 0.00001 and not root_units):
         raise RuntimeError("Native rest-pose mismatch at %s: translation %.6g cm, rotation metric %.6g, scale difference %.6g. Preserve the donor rest pose." % (name, translation, rotation, difference))
     if root_units:
         root_correction = name
     corrected = unreal.Transform()
-    corrected.translation = unreal.Vector(*bone["translation"])
+    corrected.translation = unreal.Vector(*(imported_translation if wheel_raise else bone["translation"]))
     corrected.rotation = unreal.Quat(*bone["rotation"])
     corrected.scale3d = unreal.Vector(*bone["scale"])
     corrected_names.append(name)

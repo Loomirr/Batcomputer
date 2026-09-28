@@ -18,6 +18,11 @@ internal static class VehicleDonorService
         public string SummonMesh { get; init; } = "/Game/Models/Vehicles/Summon/SK_VEH_" + Stem + "_Summon";
         public string SummonSkeleton { get; init; } = "/Game/Models/Vehicles/Summon/SKEL_VEH_" + Stem + "_Summon";
         public bool HeadlightEditing { get; init; } = true;
+        public string? PawnData { get; init; }
+        public string? BoostData { get; init; }
+        public string ExhaustSocket { get; init; } = "VFX_Exhaust_01";
+        public string? BoostBlueprint => BoostData?.Replace("/AS_VehicleBoostData_", "/BP_VehicleBoostData_", StringComparison.Ordinal);
+        public IEnumerable<string> BoostPackages => PawnData is null || BoostData is null ? [] : [PawnData, BoostData, BoostBlueprint!];
         public string? RequiredDlc { get; init; }
         public string Notes { get; init; } = "Check fit, seats and driving in game.";
         public IReadOnlyList<VehicleAnimation> Animations { get; init; } = [];
@@ -30,7 +35,8 @@ internal static class VehicleDonorService
     private const string PlinthRoot = "/Game/LEGOGameplay/Mechanics/Batcave/VehiclePurchase/VehiclePlinthActors/";
     internal static readonly Donor[] All = [
         new("batmobile1995", "1995 Batman Forever Batmobile", "Batmobile1995_BatmanForever", PlinthRoot + "Batman/BP_VehiclePlinth_Batmobile_BatmanForever", true)
-        { Animations = [new("Canopy open", "/Game/Animation/Vehicles/Batmobile1995/Mechanics/A_Canopy_Open_Batmobile1995"), new("Canopy close", "/Game/Animation/Vehicles/Batmobile1995/Mechanics/A_Canopy_Close_Batmobile1995"), new("Canopy idle", "/Game/Animation/Vehicles/Batmobile1995/Mechanics/A_Canopy_Idle_Batmobile1995")] },
+        { PawnData = "/Game/Models/Vehicles/VEH_Batmobile1995_BatmanForever/DA_DPRD_Batmobile1995_BatmanForever_PawnData", BoostData = "/Game/Vehicles/Abilities/Boost/DataSets/AS_VehicleBoostData_BatmanForever1995",
+          Animations = [new("Canopy open", "/Game/Animation/Vehicles/Batmobile1995/Mechanics/A_Canopy_Open_Batmobile1995"), new("Canopy close", "/Game/Animation/Vehicles/Batmobile1995/Mechanics/A_Canopy_Close_Batmobile1995"), new("Canopy idle", "/Game/Animation/Vehicles/Batmobile1995/Mechanics/A_Canopy_Idle_Batmobile1995")] },
         new("batmobile1997", "1997 Batman & Robin Batmobile", "Batmobile1997_BatmanAndRobin", PlinthRoot + "Batman/BP_VehiclePlinth_Batmobile1997_BatmanAndRobin"),
         new("sportscarTalia", "Talia sports car", "SportsCar_Talia", PlinthRoot + "Talia/BP_VehiclePlinth_SportsCar1"),
         new("batmobile1989", "1989 Batmobile (experimental)", "Batmobile1989_Batman_Tt", PlinthRoot + "Batman/BP_VehiclePlinth_Batmobile1989")
@@ -39,6 +45,7 @@ internal static class VehicleDonorService
             Metadata = "/Game/Vehicles/DA_Vehicle_Batmobile1989", Ui = "/Game/Vehicles/DA_UI_Batmobile1989", Menu = "/Game/Vehicles/MenuActors/BP_MenuActor_Batmobile1989",
             SummonMesh = "/Game/Models/Vehicles/Summon/SK_VEH_Batmobile1989_BatmanBegins_TT_Summon", SummonSkeleton = "/Game/Models/Vehicles/Summon/SKEL_VEH_Batmobile1989_BatmanBegins_TT_Summon",
             HeadlightEditing = false, Notes = "Experimental. Hinged canopy and pop-up guns; no launcher sockets. Light controllers stay native.",
+            PawnData = "/Game/Models/Vehicles/VEH_Batmobile1989_Batman_Tt/DA_DPRD_Batmobile1989_Batman_Tt_PawnData", BoostData = "/Game/Vehicles/Abilities/Boost/DataSets/AS_VehicleBoostData_Batman1989", ExhaustSocket = "VFX_ExhaustBoost_01",
             Animations = [new("Canopy open", "/Game/Animation/Vehicles/Batmobile1989/A_Canopy_Open_Batmobile1989"), new("Canopy close", "/Game/Animation/Vehicles/Batmobile1989/A_Canopy_Close_Batmobile1989"), new("Canopy idle", "/Game/Animation/Vehicles/Batmobile1989/A_Canopy_Idle_Batmobile1989"), new("Launcher covers respawn", "/Game/Animation/Vehicles/Batmobile1989/A_RespawnLauncherCovers_Batmobile_1989"), new("Rocket launcher out", "/Game/Animation/Vehicles/Batmobile1989/A_RocketLauncher_Out_Batmobile_1989"), new("Rocket launcher shoot", "/Game/Animation/Vehicles/Batmobile1989/A_RocketLauncher_Shoot_Batmobile_1989"), new("Rocket launcher in", "/Game/Animation/Vehicles/Batmobile1989/A_RocketLauncher_In_Batmobile_1989")]
         },
         new("batmobile2005", "2005 Tumbler (experimental)", "Batmobile2005_BatmanBegins_Tt", PlinthRoot + "Batman/BP_VehiclePlinth_Tumbler")
@@ -47,6 +54,7 @@ internal static class VehicleDonorService
             SummonMesh = "/Game/Models/Vehicles/Summon/SK_VEH_Batmobile2005_BatmanBegins_TT_Summon", SummonSkeleton = "/Game/Models/Vehicles/Summon/SKEL_VEH_Batmobile2005_BatmanBegins_TT_Summon",
             Metadata = "/Game/Vehicles/DA_Vehicle_Batmobile2005", Ui = "/Game/Vehicles/DA_UI_Batmobile2005", Menu = "/Game/Vehicles/MenuActors/BP_MenuActor_Batmobile2005",
             HeadlightEditing = false, Notes = "Experimental. Canopy, wings, flaps and wipers. Light controllers stay native.",
+            PawnData = "/Game/Vehicles/DA_DPRD_Vehicle_Tumbler_PawnData", BoostData = "/Game/Vehicles/Abilities/Boost/DataSets/AS_VehicleBoostData_Tumbler",
             Animations = [new("Canopy open", "/Game/Animation/Vehicles/Batmobile2005/Mechanics/A_Canopy_Open"), new("Canopy close", "/Game/Animation/Vehicles/Batmobile2005/Mechanics/A_Canopy_Close"), new("Canopy idle", "/Game/Animation/Vehicles/Batmobile2005/Mechanics/A_Canopy_Idle")]
         },
         new("batmobilemonstertruck", "Batmobeast (Party Pack DLC, experimental)", "Batmobile_MonsterTruck", MonsterRoot + "/BP_VehiclePlinth_MonsterTruck")
@@ -69,13 +77,14 @@ internal static class VehicleDonorService
             SummonMesh = "/Game/Models/Vehicles/Summon/SK_VEH_Batbike2022_theBatman_Summon",
             SummonSkeleton = "/Game/Models/Vehicles/Summon/SKEL_VEH_Batbike2022_theBatman_Summon",
             HeadlightEditing = false,
+            PawnData = "/Game/Models/Vehicles/VEH_Batbike2022_theBatman/DA_DPRD_Batbike2022_Batman_PawnData", BoostData = "/Game/Vehicles/Abilities/Boost/DataSets/AS_VehicleBoostData_Bike_TwinExhausts_Generic",
             Notes = "Experimental two-wheeler. Uses Wheel_F and Wheel_B rather than four car-wheel bones; fit and test both rider seats, steering and ground clearance in game. Light controllers stay native."
         }
     ];
     internal static Donor Get(VehicleProject project) => All.SingleOrDefault(d => d.Id == project.DonorId)
         ?? throw new InvalidDataException("Unknown vehicle driving base. Open this project with a version that supports its donor.");
     private const string MonsterRoot = "/Game/AdditionalContent/DLC_Shared/Vehicles/VEH_Batmobile_MonsterTruck";
-    internal static IEnumerable<string> Packages => All.SelectMany(d => d.Required.Concat([d.SummonMesh, d.SummonSkeleton])).Distinct(StringComparer.OrdinalIgnoreCase);
+    internal static IEnumerable<string> Packages => All.SelectMany(d => d.Required.Concat([d.SummonMesh, d.SummonSkeleton]).Concat(d.BoostPackages)).Distinct(StringComparer.OrdinalIgnoreCase);
     internal static IEnumerable<string> ExtractionFilters => Packages.Select(ExtractionFilter);
     internal static string ExtractionFilter(string package)
     {

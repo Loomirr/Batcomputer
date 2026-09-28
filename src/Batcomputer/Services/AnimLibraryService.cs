@@ -17,8 +17,8 @@ internal sealed record AnimationImportSupportNode(
 /// <summary>
 /// The workspace-wide cooked-animation library. Registers, inspects, imports, and persists
 /// <see cref="AnimLibraryEntry"/> records so the user can pick a named animation when building
-/// an override instead of hand-typing a /Game path. The tool never cooks anims - it only
-/// catalogues assets the modder already cooked in Unreal. The library belongs to the workspace,
+/// an override instead of hand-typing a /Game path. Imported packs and Batcomputer-cooked
+/// animation drafts both enter this library. The library belongs to the workspace,
 /// never to an individual suit; suits reference only the packages they use. Pure data/service
 /// layer with no UI, so it survives the incoming UI redesign.
 /// </summary>

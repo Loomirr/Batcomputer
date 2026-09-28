@@ -36,7 +36,7 @@ public static class CustomCharacterRegistrationService
     }
 
     public static IReadOnlyList<RegistryPluginService.RegistryRow> Generate(string content, string nativeContent,
-        string mod, IReadOnlyList<NativeSuitProject> projects, Usmap maps)
+        string mod, IReadOnlyList<NativeSuitProject> projects, Usmap maps, IReadOnlyList<VehicleProject>? vehicles = null)
     {
         var rows = new List<RegistryPluginService.RegistryRow>();
         if (!UnrealPathUtil.IsValidIdentifier(mod)) throw new InvalidDataException("Registration requires a package-safe Mod ID.");
@@ -51,6 +51,12 @@ public static class CustomCharacterRegistrationService
             var definition = family.SingleOrDefault(CustomCharacterProjectService.IsCharacter)
                 ?? throw new InvalidDataException($"Character '{family.Key}' has no default definition in this release.");
             var identity = definition.CustomCharacter!;
+            var vehicleTag = identity.DefaultVehicleTag ?? "";
+            Require(CharacterVehicleChoiceService.IsValidTag(vehicleTag), "Invalid default vehicle tag for " + definition.DisplayName + ".");
+            if (vehicleTag.StartsWith("Pawns.Vehicle.Batcomputer.", StringComparison.Ordinal))
+                Require(vehicles?.Any(vehicle => VehicleProjectService.PawnTag(vehicle) == vehicleTag &&
+                    vehicle.OwnerTag == CustomCharacterProjectService.Scope(identity)) == true,
+                    "The default custom vehicle for '" + definition.DisplayName + "' must be enabled in this mod and owned by this character.");
             foreach (var project in family)
                 Require(CustomCharacterProjectService.IdentityError(project) is null &&
                     project.CustomCharacter!.DefinitionSlotId == definition.SlotId &&
@@ -62,6 +68,8 @@ public static class CustomCharacterRegistrationService
             Rename(group, GroupDonor, groupPackage);
             Require(NativeAssetTextPatch.SetGameplayTag(group, "BaseCharacterTag", CustomCharacterProjectService.Scope(identity)), "Group owner field is missing.");
             Require(NativeAssetTextPatch.SetGameplayTag(group, "DefaultCharacterVariant", definition.PawnTag), "Group default variant is missing.");
+            if (vehicleTag.Length > 0)
+                Require(NativeAssetTextPatch.SetGameplayTag(group, "DefaultVehicle", vehicleTag), "Group default vehicle field is missing.");
             Require(NativeAssetTextPatch.SetStringTableText(group, "DisplayName", StringTableGenService.ObjectPathFor(mod), NameKey(identity.CharacterId)), "Group display name is missing.");
             var symbol = CharacterSymbolService.Stage(content, nativeContent, mod, identity);
             if (!string.IsNullOrWhiteSpace(symbol))
@@ -72,6 +80,8 @@ public static class CustomCharacterRegistrationService
                 Require(NativeAssetTextPatch.GetSoftReference(check, "Symbol")?.PackageName == UnrealPathUtil.NormalizePackagePath(symbol), "Character symbol failed its written reference check.");
             Require(NativeAssetTextPatch.GetGameplayTag(check, "BaseCharacterTag") == CustomCharacterProjectService.Scope(identity) &&
                 NativeAssetTextPatch.GetGameplayTag(check, "DefaultCharacterVariant") == definition.PawnTag, "Character group failed its written identity check.");
+            if (vehicleTag.Length > 0)
+                Require(NativeAssetTextPatch.GetGameplayTag(check, "DefaultVehicle") == vehicleTag, "Character default vehicle did not survive staging.");
 
             var progressPackage = ProgressPackage(mod, identity.CharacterId);
             var progressFile = CopyDonor(nativeContent, content, ProgressDonor, progressPackage);

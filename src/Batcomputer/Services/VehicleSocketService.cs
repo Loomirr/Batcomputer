@@ -10,16 +10,16 @@ namespace Batcomputer;
 internal static class VehicleSocketService
 {
     internal static readonly string[] GadgetSockets = ["LauncherGadget_01", "LauncherGadget_02", "Grapple_01", "VFX_Shoot_01", "VFX_Shoot_02"];
-    internal static readonly string[] EffectSockets = ["VFX_Exhaust_01"];
+    internal static readonly string[] EffectSockets = ["VFX_Exhaust_01", "VFX_ExhaustBoost_01", VehicleExhaustService.SecondSocket];
     internal static IEnumerable<string> EditableSockets => GadgetSockets.Concat(EffectSockets);
     internal static bool IsEditable(string id) => id.StartsWith("socket:", StringComparison.Ordinal) && EditableSockets.Contains(id[7..], StringComparer.Ordinal);
     // Forever's outlet is socket-local +Z. This is preview geometry only; changing
     // the saved socket rotation to fix an arrow would rotate the working game VFX.
-    internal static float[] MarkerDirection(string socket) => socket == "VFX_Exhaust_01" ? [0, 0, 1] : [1, 0, 0];
+    internal static float[] MarkerDirection(string socket) => EffectSockets.Contains(socket) ? [0, 0, 1] : [1, 0, 0];
     internal static string Label(string socket) => socket switch {
         "LauncherGadget_01" => "Rocket launcher 1", "LauncherGadget_02" => "Rocket launcher 2",
         "Grapple_01" => "Grapple launcher", "VFX_Shoot_01" => "Firing reference 1", "VFX_Shoot_02" => "Firing reference 2",
-        "VFX_Exhaust_01" => "Boost / exhaust outlet", _ => socket
+        "VFX_Exhaust_01" or "VFX_ExhaustBoost_01" => "Boost / exhaust outlet", VehicleExhaustService.SecondSocket => "Second boost / exhaust outlet", _ => socket
     };
     internal static void Validate(VehicleProject project)
     {
@@ -43,7 +43,10 @@ internal static class VehicleSocketService
             .SingleOrDefault(e => e.Data.OfType<NamePropertyData>().Any(p => p.Name.ToString() == "SocketName" && p.Value.ToString() == name));
         if (existing is null)
         {
-            var source = Socket(skeleton, "Grapple_01");
+            var source = skeleton.Exports.OfType<NormalExport>().FirstOrDefault(e =>
+                    e.GetExportClassType()?.ToString() == "SkeletalMeshSocket" &&
+                    e.Data.OfType<NamePropertyData>().Any(p => p.Name.ToString() == "SocketName" && p.Value.ToString() == name))
+                ?? skeleton.Exports.OfType<NormalExport>().First(e => e.GetExportClassType()?.ToString() == "SkeletalMeshSocket");
             existing = new NormalExport { Asset = mesh, ObjectName = new FName(mesh, "BC_Socket_" + name),
                 ClassIndex = AttachmentClearanceService.RebaseImport(mesh, skeleton, source.ClassIndex),
                 TemplateIndex = AttachmentClearanceService.RebaseImport(mesh, skeleton, source.TemplateIndex),
@@ -81,8 +84,21 @@ internal static class VehicleSocketService
     internal static void Apply(UAsset mesh, UAsset skeleton, VehicleProject project)
     {
         Validate(project);
+        if (project.TwinExhausts)
+        {
+            var source = Socket(skeleton, VehicleDonorService.Get(project).ExhaustSocket);
+            var bone = source.Data.OfType<NamePropertyData>().Single(p => p.Name.ToString() == "BoneName").Value.ToString();
+            var edit = project.Transforms.SingleOrDefault(t => t.Component == "socket:" + VehicleExhaustService.SecondSocket)
+                ?? Transform(source, "socket:" + VehicleExhaustService.SecondSocket);
+            Set(mesh, skeleton, VehicleExhaustService.SecondSocket, bone, edit);
+        }
         foreach (var t in project.Transforms.Where(t => IsEditable(t.Component)))
         {
+            if (t.Component == "socket:" + VehicleExhaustService.SecondSocket)
+            {
+                VehicleAssetService.Require(project.TwinExhausts, "The second exhaust socket needs twin exhausts enabled.");
+                continue;
+            }
             var source = Socket(skeleton, t.Component[7..]);
             var bone = source.Data.OfType<NamePropertyData>().Single(p => p.Name.ToString() == "BoneName").Value.ToString();
             Set(mesh, skeleton, t.Component[7..], bone, t);
@@ -90,6 +106,8 @@ internal static class VehicleSocketService
     }
     internal static void Verify(UAsset mesh, VehicleProject project)
     {
+        if (project.TwinExhausts)
+            VehicleAssetService.Require(Socket(mesh, VehicleExhaustService.SecondSocket) is not null, "The second exhaust socket was not staged.");
         foreach (var t in project.Transforms.Where(t => IsEditable(t.Component)))
         {
             var actual = Transform(Socket(mesh, t.Component[7..]), t.Component);

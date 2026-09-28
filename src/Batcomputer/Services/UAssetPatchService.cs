@@ -90,9 +90,14 @@ public sealed class UAssetPatchService
         }
         try
         {
-            return File.ReadAllText(path).Trim().Equals(
-                BuildStageIdentity(project),
-                StringComparison.OrdinalIgnoreCase);
+            if (!File.ReadAllText(path).Trim().Equals(BuildStageIdentity(project), StringComparison.OrdinalIgnoreCase)) return false;
+            var content = Path.Combine(GuiOutputRoot, project.SlotId, "PatchedNameMapStage", "LEGOBatmanLotDK", "Content");
+            return RequiredPatchedPackages(project).All(package =>
+            {
+                var file = ExtractedPackagePathService.ResolvePackageUasset(content, package);
+                return file is not null && File.Exists(file) && new FileInfo(file).Length > 0 &&
+                    File.Exists(Path.ChangeExtension(file, ".uexp")) && new FileInfo(Path.ChangeExtension(file, ".uexp")).Length > 0;
+            });
         }
         catch (IOException)
         {
@@ -102,6 +107,16 @@ public sealed class UAssetPatchService
         {
             return false;
         }
+    }
+
+    internal static IReadOnlyList<string> RequiredPatchedPackages(NativeSuitProject project)
+    {
+        var packages = new List<string>();
+        if (project.PlayableTemplate is not null) packages.Add(project.TargetPackages.Playable);
+        if (project.CutsceneTemplate is not null) packages.Add(project.TargetPackages.Cutscene);
+        if (project.DcmdTemplate is not null) packages.Add(project.TargetPackages.Dcmd);
+        if (CustomArchetypePackage(project) is { } archetype) packages.Add(archetype);
+        return packages.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
     private string PatchedStageIdentityPath(NativeSuitProject project) =>

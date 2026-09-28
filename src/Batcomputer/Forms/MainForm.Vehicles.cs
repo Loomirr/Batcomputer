@@ -3,17 +3,54 @@ namespace Batcomputer;
 public sealed partial class MainForm
 {
     private VehicleProjectService VehicleService => new(_projectRootText.Text.Trim());
-    private void EditVehicle(string? path = null)
+    private async void EditVehicle(string? path = null)
     {
         try
         {
             var service = VehicleService;
-            var project = path is null ? new VehicleProject() : service.Load(path);
+            var project = path is null ? VehicleProjectService.CreateNew(AppSettings.Current.EffectiveExtractedContentRoot()) : service.Load(path);
+            IReadOnlyList<string> legacy = path is null ? [] : VehicleLegacyMeshRepairService.Pending(service.DirectoryFor(project), project);
+            if (legacy.Count > 0)
+            {
+                if (!Dialog.Confirm(this, "Rebuild this vehicle's saved mesh?",
+                    "The " + string.Join(" and ", legacy) + " was imported before the rig-scale correction. Batcomputer can rebuild it from the saved FBX and validate it against the native rig. This can take several minutes. Your materials, vehicle settings, original FBX and old cook are retained; the project changes only after every rebuild succeeds.",
+                    confirmText: "Rebuild and open", cancelText: "Not now")) return;
+                project = await RepairVehicleForPreview(service, project);
+            }
             using var editor = new VehicleWorkshopForm(service.DirectoryFor(project), project);
             if (editor.ShowDialog(this) != DialogResult.OK || editor.Result is not { } saved) return;
             service.Save(saved); AppendLog("Saved vehicle '" + saved.DisplayName + "' (ID " + saved.Id + ")."); RefreshToyboxTiles();
         }
         catch (Exception ex) { Dialog.Error(this, "Vehicle could not be opened or saved", ex.Message); }
+    }
+
+    private async Task<VehicleProject> RepairVehicleForPreview(VehicleProjectService service, VehicleProject project)
+    {
+        using var cancellation = new CancellationTokenSource();
+        using var progress = new AdaptiveDialogForm { Text = "Rebuilding vehicle mesh", ClientSize = new Size(620, 170),
+            MinimumSize = new Size(490, 170), StartPosition = FormStartPosition.CenterParent,
+            BackColor = Theme.WindowBg, ForeColor = Theme.OnDark, Font = Theme.Body, Padding = new Padding(16) };
+        var status = new Label { Dock = DockStyle.Fill, Text = "Preparing saved FBX…", ForeColor = Theme.OnDark, AutoEllipsis = true };
+        var cancel = new Button { Text = "Cancel", Width = 110 }; Theme.StyleDarkButton(cancel);
+        var footer = DialogActionFooter.Create(cancel);
+        progress.Controls.Add(status); progress.Controls.Add(footer);
+        var running = true;
+        cancel.Click += (_, _) => { cancellation.Cancel(); cancel.Enabled = false; status.Text = "Stopping the rebuild…"; };
+        progress.FormClosing += (_, e) => { if (running) { cancellation.Cancel(); e.Cancel = true; cancel.Enabled = false; status.Text = "Stopping the rebuild…"; } };
+        VehicleProject? result = null; Exception? failure = null;
+        progress.Shown += async (_, _) =>
+        {
+            try
+            {
+                result = await Task.Run(async () => await VehicleLegacyMeshRepairService.RepairAsync(service, project,
+                    message => { if (progress.IsHandleCreated && !progress.IsDisposed) progress.BeginInvoke(() => { if (!progress.IsDisposed) status.Text = message; }); }, cancellation.Token));
+            }
+            catch (Exception ex) { failure = ex; }
+            finally { running = false; progress.Close(); }
+        };
+        progress.ShowDialog(this);
+        if (failure is not null) throw failure;
+        return result ?? throw new OperationCanceledException("Vehicle mesh rebuild was cancelled.");
     }
     private void RefreshVehicleWorkspaceTiles()
     {
@@ -119,5 +156,16 @@ public sealed partial class MainForm
         if (!mod.Vehicles.Any(e => e.Enabled)) throw new InvalidDataException("No enabled vehicle to test.");
         var success = await BuildModAsync(modProjectPath);
         return new(success, _diagnostics.LogText, ExpectedModTrioPaths(ModBuildRoot(mod.ModId), mod.PackageBaseName));
+    }
+
+    internal (bool Success, string Detail) InstallBuiltVehicleModForCli(string projectRoot, string modProjectPath)
+    {
+        _batchMode = true;
+        _projectRootText.Text = Path.GetFullPath(projectRoot);
+        _projectService = new(_projectRootText.Text);
+        var mod = ModService.LoadMod(modProjectPath) ?? throw new InvalidDataException("Mod not found.");
+        if (!mod.Vehicles.Any(e => e.Enabled)) throw new InvalidDataException("No enabled vehicle to install.");
+        var result = InstallModCore(modProjectPath);
+        return (result.Status == ModInstallStatus.Complete, result.Detail + Environment.NewLine + _diagnostics.LogText);
     }
 }

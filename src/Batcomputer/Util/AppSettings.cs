@@ -29,6 +29,8 @@ public sealed class AppSettings
     // A user-owned oo2core runtime from their locally installed UE 5.6. This stays
     // outside Batcomputer and is never copied into a release or source repository.
     public string? OodleRuntimeDllPath { get; set; }
+    // Optional, user-supplied decoder for local Wwise sound previews; never bundled.
+    public string? VgmstreamExePath { get; set; }
 
     // .usmap mappings file for UAssetAPI (read/write cooked assets).
     public string? UsmapPath { get; set; }
@@ -86,7 +88,7 @@ public sealed class AppSettings
     public string PreviewQuality { get; set; } = "Balanced";
     public int VehicleDetailedPartBudget { get; set; } = 6;
     public int VehicleGeometryCacheLimitMb { get; set; } = 512;
-    public int VehicleCustomBodyPreviewLimitMb { get; set; } = 26;
+    public int VehicleCustomBodyPreviewLimitMb { get; set; } = 32;
     public int ViewerFrameRateLimit { get; set; } = 60;
     public bool VehicleSafePreviewMode { get; set; } = true;
     public bool ReviewGroupByCategory { get; set; } = true;
@@ -201,6 +203,8 @@ public sealed class AppSettings
 
     public string? EffectiveOodleRuntimeDllPath() =>
         UsableFile(OodleRuntimeDllPath) ?? OodleRuntimeFromEngine(EffectiveUnrealEngineRoot());
+
+    public string? EffectiveVgmstreamExePath() => UsableFile(VgmstreamExePath);
 
     public bool HasOodleCompressionPrerequisites()
     {

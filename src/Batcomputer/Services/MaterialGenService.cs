@@ -75,7 +75,16 @@ public sealed class MaterialGenService
             }
 
             var mappings = LoadMappings();
-            var asset = new UAsset(uassetPath, EngineVersion.VER_UE5_6, mappings, CustomSerializationFlags.SkipPreloadDependencyLoading);
+            // UAsset's path constructor opens split .uexp files read/write. Inspection must also
+            // work on read-only extracts and must never require write access to game assets.
+            using var bytes = new MemoryStream();
+            using (var source = File.OpenRead(uassetPath)) source.CopyTo(bytes);
+            var splitPath = Path.ChangeExtension(uassetPath, ".uexp");
+            var split = File.Exists(splitPath);
+            if (split) { using var source = File.OpenRead(splitPath); source.CopyTo(bytes); }
+            bytes.Position = 0;
+            using var reader = new AssetBinaryReader(bytes);
+            var asset = new UAsset(reader, EngineVersion.VER_UE5_6, mappings, split, CustomSerializationFlags.SkipPreloadDependencyLoading);
             info.SourcePackagePath = asset.FolderName?.ToString() ?? "";
             info.SourceStem = Path.GetFileNameWithoutExtension(uassetPath);
 

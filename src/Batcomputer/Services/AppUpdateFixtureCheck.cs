@@ -28,7 +28,7 @@ internal static class AppUpdateFixtureCheck
         }
         catch (Exception ex) { File.WriteAllText(report, "FAIL " + ex); return 1; }
     }
-    internal static int Run(string install, string? feed, bool fullZip = false)
+    internal static int Run(string install, string? feed, bool fullZip = false, bool changeReusedFile = false)
     {
         install = Path.GetFullPath(install);
         var report = Path.Combine(install,"updater-fixture-result.txt");
@@ -50,7 +50,23 @@ internal static class AppUpdateFixtureCheck
                 var stable = service.CheckAsync(false,timeout.Token).GetAwaiter().GetResult();
                 if (stable != null && AppVersion.IsPrerelease(stable.Version)) throw new InvalidDataException("Stable channel offered a prerelease.");
             }
+            string? modifiedFile = null, modifiedHash = null;
+            if (changeReusedFile)
+            {
+                var patch = selected.PatchPlan ?? throw new InvalidOperationException("This fixture must first select a patch.");
+                var changed = patch.Catalog.ChangedPaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var reused = patch.Catalog.Manifest.Files.First(f => !changed.Contains(f.Path) && f.Path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase));
+                modifiedFile = UpdatePaths.Resolve(install, reused.Path);
+                // Only an explicitly marked disposable fixture is changed. Simulate
+                // a dependency edited between Check and Download, never a real app.
+                using (var output = new FileStream(modifiedFile, FileMode.Append)) output.WriteByte(0x7f);
+                modifiedHash = AppUpdateService.Hash(modifiedFile);
+            }
             var staged = service.DownloadAsync(selected,AppUpdateInstaller.NewTransaction(install),null,timeout.Token).GetAwaiter().GetResult();
+            var usedPatch = File.Exists(Path.Combine(staged.Directory, "patch-update-summary.json"));
+            if (usedPatch != (selected.PatchPlan != null && !changeReusedFile)) throw new InvalidDataException("Unexpected update download route.");
+            if (changeReusedFile && (AppUpdateService.Hash(modifiedFile!) != modifiedHash || !File.Exists(Path.Combine(staged.Directory, "download.zip"))))
+                throw new InvalidDataException("Fallback changed the installation or failed to download the complete ZIP.");
             using(var exclusive=new FileStream(Path.Combine(install,AppUpdateInstaller.LockFile),FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None))AppUpdateInstaller.Apply(staged.Directory);
             foreach(var file in staged.Manifest.Files)AppUpdateService.VerifyFile(UpdatePaths.Resolve(install,file.Path),file);
             var start=new ProcessStartInfo(Path.Combine(install,"Batcomputer.exe")){UseShellExecute=false,CreateNoWindow=true,WorkingDirectory=install};start.ArgumentList.Add("--updater-test-runtime");
@@ -60,7 +76,8 @@ internal static class AppUpdateFixtureCheck
             using(var exclusive=new FileStream(Path.Combine(install,AppUpdateInstaller.LockFile),FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None))AppUpdateInstaller.Rollback(staged.Directory);
             if(AppUpdateService.ProductVersion(Path.Combine(install,"Batcomputer.exe"))!=original)throw new InvalidDataException("Rollback version mismatch.");
             if(AppUpdateService.Hash(settings)!=settingsHash||AppUpdateService.Hash(sentinel)!=sentinelHash)throw new InvalidDataException("Fixture data changed.");
-            File.WriteAllText(report,$"PASS {original} -> {staged.Manifest.Version} -> {original}\nSource: {(feed == null ? AppUpdateService.ReleasesPage : feed)}\nFull staged and installed manifests verified; updated app runtime executed without UI; rollback and settings/project preservation passed.\nTransaction: {staged.Directory}\n");
+            if (modifiedFile != null && AppUpdateService.Hash(modifiedFile) != modifiedHash) throw new InvalidDataException("Rollback did not restore the fixture's pre-install dependency.");
+            File.WriteAllText(report,$"PASS {original} -> {staged.Manifest.Version} -> {original}\nDownload: {(usedPatch ? "base-specific patch ZIP" : "complete ZIP")}{(changeReusedFile ? " (dependency changed after Check; safe fallback verified)" : "")}\nSource: {(feed == null ? AppUpdateService.ReleasesPage : feed)}\nFull staged and installed manifests verified; updated app runtime executed without UI; rollback and settings/project preservation passed.\nTransaction: {staged.Directory}\n");
             return 0;
         }
         catch(Exception ex){File.WriteAllText(report,"FAIL "+ex);return 1;}

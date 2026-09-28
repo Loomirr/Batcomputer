@@ -71,6 +71,8 @@ For a new unweighted model, select the mesh and then the armature, and use **Par
 | `Canopy` | The opening canopy and anything that should open with it. |
 | `SteeringWheel` | The interior steering wheel. |
 | `ChassisAttach_FL`, `ChassisAttach_FR`, `ChassisAttach_BL`, `ChassisAttach_BR` | Non-spinning wheel-mount pieces where appropriate. Compare the donor; do not use these for the tires. |
+
+For a custom body with larger tires, you may raise a `ChassisAttach_` wheel mount straight up in the vehicle's space by at most 100 cm. Do not move it sideways, rotate or scale it, or move the wheel bone beneath it. Batcomputer checks the complete cooked rest pose and accepts this narrow vehicle-body exception only; character and assembly rigs still require an exact donor pose. Check ride height, wheel contact, steering and suspension in game.
 | `Root`, `Chassis` | Preserve these hierarchy bones. Do not give them arbitrary weights just to fill every group. |
 
 There are 13 native driving bones. Every exported vertex needs a valid assignment, but every bone does **not** need weighted geometry.
@@ -100,6 +102,8 @@ Keep painted or permanently visible exhaust/flame geometry on its appropriate bo
 
 Export only the custom mesh and its complete donor armature as a **binary FBX**. Leave out reference meshes, lights, cameras and unrelated rigs. Disable extra leaf/end bones and animation baking. Keep all required native bones, including unweighted hierarchy bones. Preserve UVs and material slots.
 
+When you export the native vehicle reference, its adjacent Blender preparation script tags the mesh with the selected driving-base ID. Enable **Custom Properties** in Blender's FBX export options to keep that tag. Batcomputer will warn if you later import the FBX into a different driving base; you can still choose **Import anyway** if you intentionally re-rigged it. Untagged FBXs remain accepted.
+
 Use unit and axis settings that preserve the donor rest pose. A GLB-to-Blender-to-FBX round trip can change bone axes or introduce an extra root; looking correct in the viewport is not enough. Import a small trial first. Batcomputer checks the cooked hierarchy and rest transforms against the actual game rig. If that fails, fix the export rather than renaming bones or moving the rig until it passes. Batcomputer's import scale must stay **1.0000**. Fit your geometry to the reference rather than compensating with 0.01 or 100.
 
 When a cooked rig comparison fails, check `rig-comparison.json` beside the import logs. It lists the expected and actual parent and rest transform for each bone.
@@ -113,6 +117,10 @@ Back in the import window:
 
 **Reimport saved FBX** cooks Batcomputer's saved copy. To bring in new Blender edits, choose **Import / replace weighted FBX…** and select the new export.
 
+If you open a vehicle whose body was cooked before the rig-scale correction, choose **Rebuild and open**. Batcomputer validates a fresh cook of each affected saved FBX (including the separate summon body, if present), preserves the assigned materials and vehicle settings, and saves the vehicle only after every cook succeeds. The original FBXs and cooks remain in the project's import cache, and a backup of the previous vehicle recipe is saved beside its project JSON. A missing or changed saved FBX stops the migration without changing that recipe.
+
+Large custom bodies can exceed the workshop's safe-preview limit. In that case the workshop labels its donor-shell preview; the saved custom body and in-game build are unchanged. If your machine has enough memory, raise **Settings → Preview → Vehicle custom-body limit** and reopen the workshop. The first full conversion may take several minutes; later opens use the geometry cache.
+
 ## 6. Finish in the 3D workshop
 
 - **Materials:** click a surface, then **Change selected surface…**. Choose **Edit material** or **Create a copy**, set the color, and choose LEGO solid, metallic or transparent. **Keep current shader** preserves the current material; changing finish replaces its shader. **Choose from library…** opens Generated, Vehicle materials, Vehicle part materials and Base game. Base-game materials cannot be edited directly.
@@ -120,11 +128,25 @@ Back in the import window:
 - **Light surfaces:** select the lens slot and its **Light behavior**, or use **Use named light slots**, then review the assignments. This reuses existing native lamp controllers, not a new lighting system.
 - **Assembly:** position decorative parts and native light sources. Lens/glow geometry and the beam source are separate, so check both when moving a lamp. Preview hiding is not the same as removing a part from the build.
 - **Seats:** enable **Seated figures** and position driver/passenger. The preview uses native seated poses for The Batman 2025 and default Catwoman. It does not simulate driving hand adjustments, entry/exit or cape movement.
-- **Hardpoints:** position the native launcher, grapple and boost/exhaust markers. These move existing attachment points; they do not add weapon slots or change damage. The Forever boost marker uses the effect's local +Z direction. Independent boost-color authoring is not implemented.
+- **Hardpoints:** position the native launcher, grapple and boost/exhaust markers. These move existing attachment points; they do not add weapon slots or change damage. Twin exhausts add a second editable outlet that starts at the first outlet's position. The **Boost preview** button shows approximate flames at the chosen outlets; it is not the game's Niagara effect.
 
 The workshop uses vehicle axes: **X = forward/back, Y = left/right, Z = up/down**. Part axes rotate with the selected part. Materials and glow are approximate previews; check final appearance in-game.
 
 Choose **Save vehicle** to keep the workshop edits.
+
+### Boost and sound styles
+
+In **Vehicle setup → Vehicle**, **Boost style** offers ten native effect sets, including five twin-outlet options. Leave it at **Driving base boost** to retain the base effect. **Two boost outlets** can also be enabled with the base effect; move the second outlet in the 3D workshop. The editor builds private pawn/boost assets for this vehicle, so it does not replace another car's effects. Use **Boost preview** in the workshop to check outlet direction, then test the actual flames, gear-change effects and both outlets in game.
+
+**Boost speed** and **Boost acceleration** are separate optional controls. The game's native boost curve uses 90 mph and 6 Gs even when you tune ordinary driving speed higher. Enable **Custom** to give this vehicle private values while boosting; leaving them unchecked retains the native curve. Check both ordinary driving and boosting in game.
+
+**Sound style** offers 19 native vehicle audio sets. Engine loop, its RPM/load controls, ignition, shutdown and gear-change sound move together; surface/tyre sounds stay with the driving base. **Preview sound → Listen** can play a selected event locally. Plain PCM needs no extra tool; most game audio needs your own `vgmstream-cli.exe` path in **Settings → Tools**. Batcomputer does not ship the decoder, and mods do not package the game's audio. A preview may not represent every layered or synthesized in-game sound.
+
+### Boost flame color (Forever Batmobile test)
+
+Open **Vehicle setup → Vehicle → Boost flame → Choose color…** to recolor the 1995 Batman Forever Batmobile's boost flame, activation burst and cancellation effects. **Use native** removes the override. This is independent of ordinary exhaust socket placement and body paint. The workshop's flame preview is approximate, so verify the result while driving and boosting in game. For now, do not combine a custom boost color with a different boost style, twin exhausts or custom boost speed: those use separate private boost chains, and Batcomputer rejects the combination rather than silently producing conflicting assets.
+
+Batcomputer copies the donor's pawn data, boost data set and four effects into the custom vehicle's private packages. It redirects that car to the copies, leaving the original Forever Batmobile's boost alone. This does not change boost strength or handling. Other driving bases keep their native boost; Batcomputer rejects a color override on them until their effect wiring is verified. If the boost assets are missing, run **Refresh game assets → Add vehicle driving bases (quick)**, then rebuild.
 
 ### Native paint and older vehicles
 
@@ -135,6 +157,8 @@ New body imports get separate, editable copies of their assigned native material
 Material saves update the generated library immediately; **Save vehicle** keeps the assignment. Editing an existing material affects every surface using it. Create a copy when only the selected slot should change. Generated paint copies include their own color swatches, so recoloring one does not recolor another.
 
 To change a headlight, open **Lights**, select **Headlight beam 1** or **2**, and use **Beam color** and the position/rotation controls. Bulb/glow meshes are separate from the light cast onto the road. A marker labeled **reference** is only a socket, not an editable lamp controller; changing a decorative mesh's material does not create a functional headlight or brake light.
+
+New vehicles start with the donor's decorative bulb and glow meshes hidden, so those shapes do not float around a replacement body. This does not change existing saved vehicles or turn off their actual light sources. You can restore individual lamp meshes in the workshop parts list; assigning a light-surface role restores the LED mesh needed by that role automatically.
 
 Native paint uses the game's LEGO shader families and a private color swatch. The solid finish retains the native **Supports RedBrick Tinting** permutation. This is experimental: check appearance and Red Brick effects in-game before sharing a release. The preview is approximate, and retaining a shader setting does not prove every runtime effect works. **Flat** remains available for the older simple-color shader.
 

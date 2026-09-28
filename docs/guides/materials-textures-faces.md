@@ -269,6 +269,26 @@ The four UIMD icon fields do not all use the same size:
 - **Suit** uses **Suit selector icon** and the verified native **256px BC7 suit selector icon**
   profile.
 
+To make a starting image from the assembled character, open its **3D viewer → Icon studio**.
+Choose **Suit tile** for the torso image or one of the three portrait layouts, adjust framing,
+and **Save PNG**. The studio enlarges the tile to fill its preview; use **Actual pixels** to check
+the native 256px sharpness. Enlarging it in another image viewer will also make those pixels look soft. The export
+renders above the target size and downsamples for cleaner edges, but the native suit-selector
+texture is still 256px. Import the saved PNG in **Textures** with the matching icon type and
+assign it through **Set icons**. Saving from Icon studio alone does not change the project or
+replace an installed icon. Its materials and lighting are a preview approximation, so check the
+result in-game before release.
+
+For a saved suit, **Test suit icon cook** in Icon studio sends the current **Suit tile** render
+through the verified native 256px BC7 cooker and writes the PNG and cooked texture to a separate
+`Runtime/IconTests` folder. The result appears in the studio and log. This is a dry run: it does
+not add a texture to the suit, change any of its four icon paths, package a mod, or touch the game.
+When you are ready to keep it, choose **Use as suit icon** and confirm the project name and
+existing icon. Batcomputer cooks a new generated texture and assigns only the suit-selector icon
+in the saved project. The previous icon and its recipe remain available. You still need to build
+and install the mod to see the change in-game. **Save PNG** remains available for manual editing
+and import. Try the assignment on a duplicate suit first if you are comparing designs.
+
 Batcomputer keeps both choices available, but the icon assignment window only offers a generated
 texture to a field with the matching role. Old experimental BC7/DXT5 outputs may look plausible in
 an extractor while decoding incorrectly in-game. After cooking:
@@ -291,3 +311,41 @@ and use **Change cook profile** before building.
 Playable characters and modded suits with a usable body Color Mask can preview the base game's
 Red Brick colours in the 3D viewer. This changes only the preview. Batcomputer does not create,
 register, unlock, or package custom Red Bricks.
+
+## Movement previews in the 3D viewer
+
+Open a playable character or saved suit in the **3D viewer**, then choose **Motion** in the
+inspector. The viewer opens at Rest with normally visible parts shown. The searchable picker lists every `A_` sequence and `AM_` montage found under that
+character's base-game family, grouped by folder. **Idle**, **Walk**, and **Run** are cached for quick selection;
+other assets load from the installed game when selected. When matching body, hat, face and cape
+sequences exist, the viewer loads them together and samples them at the same normalized timeline
+position. Montages preview their first readable sequence segment, not the full montage or game
+event timing. Use **Play**, the scrub slider, speed control,
+and **Rest pose** to inspect the body and its attached parts. Face, cape and hat sequences target
+their own visible rigs when those meshes are present. A sequence for a rig absent from the current
+assembly (often a gadget or alternate prop) remains listed with an explanation instead of playing
+against the wrong mesh.
+With body clips, the bare head and face follow the head anchor and the cape follows its authored root
+if no matching cape sequence is present. Linked face, hat and cape sequences animate
+their own rigs while following the moving body; face clips also apply their sampled material
+curves so mouth and feature layers move with the bones. Asset-name pairing is approximate; the game
+AnimBlueprint may choose different tracks or timing in a particular state. Separate-display
+glider parts hide during motion and return at
+Rest pose. The viewer samples compatible sequences and keeps the root in place. It does not run
+Unreal's AnimBlueprint, montage composition, root motion,
+cloth, physics, or linked facial animation graph. This is a visual check, not a game-ready
+animation replacement; it does not change the project or installed mod.
+
+## Create an animation draft
+
+Choose **Create** in the same viewer to make a local animation draft on the character's native
+body rig. Find a bone, choose a frame on the 30 FPS timeline, and change its rotation or position
+offset. Changing a value sets a keyframe at that frame. Repeat on other frames and bones, then
+use **Play** to preview interpolation. **Remove key** deletes the selected bone's key at the
+current frame. Switching away from Create restores the normal Rest pose; returning keeps the
+draft and timeline position.
+
+**Save draft JSON** downloads editable keyframes, and **Open draft JSON** loads them on a matching
+rig. Keep the JSON as your working copy. This first editor does **not** create a cooked Unreal
+animation, save changes into the suit project, or alter the installed game. Cooking and applying
+custom clips are separate steps still in development.

@@ -1956,7 +1956,7 @@ public sealed partial class MainForm
             }
             var characterRows = CustomCharacterRegistrationService.Generate(stageContent,
                 AppSettings.Current.EffectiveExtractedContentRoot(), mod.ModId, preparedSuits,
-                mappings ?? throw new InvalidDataException("Character registration requires mappings."));
+                mappings ?? throw new InvalidDataException("Character registration requires mappings."), vehicles);
             timing.Mark("prepare and merge");
             var tagConfigPath = string.Empty;
 

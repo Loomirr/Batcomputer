@@ -51,6 +51,13 @@ can still be written. Build inputs/hashes are in `licenses/native/build-provenan
 
 ## Other notices
 
+The suit icon studio also uses the three.js r128 `RectAreaLightUniformsLib`
+helper (MIT, `licenses/three.js-LICENSE.txt`). Its linearly transformed cosine
+lookup data carries the notice in `licenses/ltc-area-light-LICENSE.txt`.
+Reference: *Real-Time Polygonal-Light Shading with Linearly Transformed Cosines*,
+Eric Heitz, Jonathan Dupuy, Stephen Hill and David Neubelt, ACM Transactions on
+Graphics (SIGGRAPH 2016), 35(4). [Project page](https://eheitzresearch.wordpress.com/415-2/).
+
 The existing notices for the CUE4Parse native helper, three.js and D-DIN font are
 kept in the `licenses` folder alongside this file. The source-built
 `CUE4Parse-Natives.dll` is recorded in `licenses/native/build-provenance.txt`,

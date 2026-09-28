@@ -496,11 +496,11 @@ public sealed class StageValidationService
 
         // Equipment-owned AbilitySets live on the ED's AbilitySetsToGrant and must not also be
         // appended to DPRD. Only character-side style/glider sets belong in this certificate.
-        var requiredSets = AbilityDependencyService.Build(
-                project,
-                donorFamily,
-                gameData.Db.Equipment)
-            .RequiredAbilitySets
+        var dependencyPlan = AbilityDependencyService.Build(
+            project,
+            donorFamily,
+            gameData.Db.Equipment);
+        var requiredSets = dependencyPlan.RequiredAbilitySets
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         var baseContract = new AnimArchetypeGraftService().BaseCapeGlideContract(project);
@@ -515,8 +515,11 @@ public sealed class StageValidationService
         {
             requiredSets.Add(GliderService.GlidingAbilitySetPackage);
         }
-        if (requiredSets.Count == 0 && project.EquipmentSlots.Count == 0 &&
-            !AbilityLoadoutService.HasCustomizations(project))
+        // The generator keeps the donor DPRD when a saved equipment slot still points
+        // to the donor's own item. Validate a mod DPRD only when the same resolved
+        // dependencies actually cause the archetype pipeline to generate one.
+        if (!RequiresGeneratedDprdCertificate(
+                project, donorFamily, requiredSets, dependencyPlan.RequiredGameplayEffects))
         {
             return;
         }
@@ -550,10 +553,7 @@ public sealed class StageValidationService
                     "The generated DPRD dependency certificate could not resolve the exact gameplay donor."));
                 return;
             }
-            var plan = AbilityDependencyService.Build(
-                project,
-                donorFamily,
-                gameData.Db.Equipment);
+            var plan = dependencyPlan;
             if (project.EquipmentSlots.Count > 0)
             {
                 var mutation = new AbilityAssetMutationService();
@@ -682,6 +682,15 @@ public sealed class StageValidationService
             }
         }
     }
+
+    internal static bool RequiresGeneratedDprdCertificate(
+        NativeSuitProject project,
+        string? donorFamily,
+        IReadOnlyCollection<string> requiredAbilitySets,
+        IReadOnlyCollection<string> requiredEffects) =>
+        AnimArchetypeGraftService.RequiresGeneratedDprdFromResolvedDependencies(
+            AnimArchetypeGraftService.RequiresGeneratedDprd(project, donorFamily),
+            requiredAbilitySets.Count > 0 || requiredEffects.Count > 0);
 
     private static void CheckAbilityDependencyDeclarations(
         NativeSuitProject project,

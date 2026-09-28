@@ -2077,7 +2077,8 @@ public sealed class AnimArchetypeGraftService
             var nativeAtSlot = exactKnown &&
                                donorSlots.TryGetValue(change.Slot, out var donorItem) &&
                                donorItem.Equals(equipment.Name, StringComparison.OrdinalIgnoreCase);
-            if (!nativeAtSlot && !string.IsNullOrWhiteSpace(equipment.EdPackage))
+            if ((!nativeAtSlot || change.Custom is not null) &&
+                !string.IsNullOrWhiteSpace(equipment.EdPackage))
             {
                 return true;
             }

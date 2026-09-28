@@ -208,6 +208,7 @@ internal sealed class AppUpdatesForm : AdaptiveForm
         _notes.Text = release?.Notes ?? "No newer compatible updater package was found in this channel. Older manual-only packages remain available in Release history.";
         _status.Text = release == null ? "No newer compatible update was found for this channel."
             : release.FilePlan is { } plan ? $"{release.Size / 1048576d:0.00} MB to download · reusing {plan.ReusedFiles} unchanged files. Full file payloads: {plan.FullSize / 1048576d:0.00} MB."
+            : release.PatchPlan is { } patch ? $"{release.Size / 1048576d:0.00} MB patch from {patch.Catalog.BaseVersion} · {patch.Catalog.ChangedPaths.Count} changed files. Full ZIP fallback: {patch.FullZipSize / 1048576d:0.00} MB."
             : $"{release.Size / 1048576d:0.0} MB · Download now, install when you're ready.";
         _track.Step = release == null ? 0 : 1; UpdateButtons();
     }

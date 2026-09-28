@@ -6,6 +6,32 @@ namespace Batcomputer;
 
 internal static class AppUpdatePackageService
 {
+    internal static string CreateWithPatchZip(string baseDirectory, string publishDirectory, string outputDirectory)
+    {
+        AppUpdateService.ValidatePayloadVersion(baseDirectory, AppUpdateService.ProductVersion(Path.Combine(baseDirectory, "Batcomputer.exe"))
+            ?? throw new InvalidDataException("Base executable has no product version."));
+        var archive = Create(publishDirectory, outputDirectory);
+        var manifest = JsonSerializer.Deserialize<UpdateManifest>(File.ReadAllText(Path.Combine(outputDirectory, AppUpdateService.ManifestName)), AppUpdateService.Json)!;
+        var baseVersion = AppUpdateService.ProductVersion(Path.Combine(baseDirectory, "Batcomputer.exe"))!.TrimStart('v', 'V').Split('+')[0];
+        var name = "Batcomputer-update-from-" + baseVersion + "-win-x64.zip";
+        var changed = manifest.Files.Where(f => !AppUpdateService.MatchesLocal(baseDirectory, new(f.Path, f.Size, f.Sha256, "", 0, ""))).Select(f => f.Path).ToList();
+        var path = Path.Combine(outputDirectory, name);
+        if (!System.Text.RegularExpressions.Regex.IsMatch(baseVersion, "^[0-9A-Za-z.-]+$")) throw new InvalidDataException("Invalid base version.");
+        using (var zip = new ZipArchive(new FileStream(path, FileMode.CreateNew), ZipArchiveMode.Create))
+        {
+            using (var writer = new StreamWriter(zip.CreateEntry(AppUpdateService.ManifestName).Open())) writer.Write(JsonSerializer.Serialize(manifest, AppUpdateService.Json));
+            foreach (var file in changed) zip.CreateEntryFromFile(UpdatePaths.Resolve(publishDirectory, file), file, CompressionLevel.Optimal);
+        }
+        var digest = AppUpdateService.Hash(path);
+        var catalog = new PatchUpdateCatalog(1, baseVersion, manifest, changed, name, new FileInfo(path).Length, digest);
+        AppUpdateService.ValidatePatchCatalog(catalog);
+        File.WriteAllText(path + ".sha256", digest.ToLowerInvariant() + "  " + name + Environment.NewLine);
+        var index = Path.Combine(outputDirectory, AppUpdateService.PatchCatalogName);
+        File.WriteAllText(index, JsonSerializer.Serialize(catalog, AppUpdateService.Json));
+        File.WriteAllText(index + ".sha256", AppUpdateService.Hash(index).ToLowerInvariant() + "  " + AppUpdateService.PatchCatalogName + Environment.NewLine);
+        return archive;
+    }
+
     internal static string CreateWithFilePayloads(string publishDirectory, string outputDirectory)
     {
         var archive = Create(publishDirectory, outputDirectory);

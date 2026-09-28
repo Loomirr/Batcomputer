@@ -10,10 +10,198 @@ internal static class VehicleRegressionChecks
         void Check(bool value, string text) => checks.Add((value, "vehicle: " + text));
         bool Throws(Action action) { try { action(); return false; } catch { return true; } }
         var p = new VehicleProject { Id = "ExampleCar", DisplayName = "Example car" };
+        var repairFixture = Path.Combine(Path.GetTempPath(), "BatcomputerVehicleRepair-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var projects = new VehicleProjectService(repairFixture);
+            var legacy = p.Clone();
+            legacy.Model = new SkinnedMeshImport { SourceRelativePath = "ImportedSkinnedMeshes/old/source.fbx",
+                CacheRelativePath = "ImportedSkinnedMeshes/old", SourceSha256 = new string('A', 64) };
+            var projectFile = projects.Save(legacy);
+            var cache = SkinnedMeshCookService.SafePath(projects.DirectoryFor(legacy), legacy.Model.CacheRelativePath);
+            Directory.CreateDirectory(cache);
+            File.WriteAllText(Path.Combine(cache, "validated.json"), JsonSerializer.Serialize(new SkinnedMeshCookService.CookManifest(
+                legacy.Model.SourceSha256, "", "", "", "", [], [], 0)));
+            Check(VehicleLegacyMeshRepairService.Pending(projects.DirectoryFor(legacy), legacy).SequenceEqual(["body"]),
+                "old body cooks are identified before preview");
+            var before = File.ReadAllBytes(projectFile);
+            Check(Throws(() => VehicleLegacyMeshRepairService.RepairAsync(projects, legacy, _ => { }).GetAwaiter().GetResult()) &&
+                File.ReadAllBytes(projectFile).SequenceEqual(before),
+                "a missing saved FBX fails without modifying the vehicle project");
+            File.WriteAllText(Path.Combine(cache, "validated.json"), JsonSerializer.Serialize(new SkinnedMeshCookService.CookManifest(
+                legacy.Model.SourceSha256, "", "", "", "", [], [], SkinnedMeshCookService.RigValidationVersion)));
+            Check(VehicleLegacyMeshRepairService.Pending(projects.DirectoryFor(legacy), legacy).Count == 0,
+                "current validated cooks do not prompt a rebuild");
+        }
+        finally
+        {
+            if (Directory.Exists(repairFixture) && FileSystemPathUtil.IsWithinDirectory(repairFixture, Path.GetTempPath()))
+                Directory.Delete(repairFixture, true);
+        }
+        Check(VehicleSoundService.Styles.Count == 19 && VehicleSoundService.Styles.Select(s => s.Id).Distinct(StringComparer.Ordinal).Count() == 19,
+            "nineteen distinct native vehicle sound styles are available");
+        Check(VehicleSoundPreviewService.EventId("Play_Veh_Engine_Player_Tumbler_Lp") == 0x6062E56F &&
+            VehicleSoundPreviewService.EventId("Play_Veh_Lawnmower_Engine_Lp") == 0x6B017336 &&
+            VehicleSoundPreviewService.EventId("PLAY_VEH_LAWNMOWER_ENGINE_LP") == VehicleSoundPreviewService.EventId("play_veh_lawnmower_engine_lp"),
+            "Wwise event hashing matches native vehicle banks regardless of case");
+        Check(VehicleSoundPreviewService.Wav(null!, "../escape", Path.GetTempPath()).Wav is null,
+            "sound preview refuses path-like event names before accessing its cache");
+        if (Directory.Exists(AppSettings.Current.EffectiveGamePaksRoot()) && File.Exists(AppSettings.Current.EffectiveUsmapPath()))
+        {
+            using var audioProvider = ModelPreviewService.MakeProvider(AppSettings.Current.EffectiveGamePaksRoot(), AppSettings.Current.EffectiveUsmapPath()!);
+            Check(VehicleSoundPreviewService.Sources(audioProvider, "Play_Veh_Engine_Player_Tumbler_Lp").Count > 0,
+                "sound preview locates the Tumbler engine media in native Wwise banks");
+        }
+        var soundRecipe = p.Clone(); soundRecipe.SoundStyle = "batmobile2005";
+        VehicleProjectService.ValidateIdentity(soundRecipe);
+        Check(VehicleSoundService.Applies(soundRecipe) && !VehicleSoundService.Applies(p) && p.SoundStyle == "",
+            "sound swaps are opt-in and old projects keep donor audio");
+        var boostRecipe = p.Clone(); boostRecipe.BoostStyle = "bvs-twin"; boostRecipe.TwinExhausts = true;
+        VehicleProjectService.ValidateIdentity(boostRecipe);
+        Check(VehicleExhaustService.Styles.Count == 10 && VehicleExhaustService.PrivateBoost(boostRecipe) && !VehicleExhaustService.PrivateBoost(p) &&
+            boostRecipe.Clone().TwinExhausts && boostRecipe.Clone().BoostStyle == "bvs-twin",
+            "ten native boost styles and twin-outlet settings are opt-in and roundtrip");
+        Check(VehicleWorkshopService.Boost(boostRecipe) is { Twin: true, Colour: "#ff8a2a" } preview &&
+            preview.Outlets.SequenceEqual(["VFX_Exhaust_01", "VFX_Exhaust_02"]),
+            "workshop boost preview follows the selected style and both editable outlets");
+        boostRecipe.TwinExhausts = false;
+        Check(Throws(() => VehicleProjectService.ValidateIdentity(boostRecipe)), "a twin boost style cannot lose its second outlet");
+        boostRecipe.TwinExhausts = true; boostRecipe.BoostColor = new() { R = 40, G = 80, B = 255 };
+        Check(Throws(() => VehicleProjectService.ValidateIdentity(boostRecipe)), "separate boost-style and recolor chains cannot collide");
+        boostRecipe.BoostColor = null; boostRecipe.BoostStyle = "unknown";
+        Check(Throws(() => VehicleProjectService.ValidateIdentity(boostRecipe)), "unknown boost styles fail before staging");
+        boostRecipe.BoostStyle = "bvs-twin"; boostRecipe.BoostTopSpeedMph = 145; boostRecipe.BoostAccelerationGs = 8;
+        VehicleProjectService.ValidateIdentity(boostRecipe);
+        Check(boostRecipe.Clone().BoostTopSpeedMph == 145 && boostRecipe.Clone().BoostAccelerationGs == 8,
+            "boost speed and acceleration settings survive recipe serialization");
+        boostRecipe.BoostTopSpeedMph = float.NaN;
+        Check(Throws(() => VehicleProjectService.ValidateIdentity(boostRecipe)), "non-finite boost speed fails before staging");
+        boostRecipe.BoostTopSpeedMph = 145;
+        soundRecipe.SoundStyle = "not-a-sound-style";
+        Check(Throws(() => VehicleProjectService.ValidateIdentity(soundRecipe)), "unknown sound styles fail before staging");
+        Check(VehicleLightService.IsLampMesh("H_LED_02_Mesh_GEN_VARIABLE") &&
+            VehicleLightService.IsLampMesh("B_Glow_01_Mesh_GEN_VARIABLE") &&
+            !VehicleLightService.IsLampMesh("H_Light_01_Light_GEN_VARIABLE") &&
+            !VehicleLightService.IsLampMesh("H_LED_02_Mesh_GEN_VARIABLE_Extra"),
+            "only decorative lamp mesh components get the new default");
+        var newWithoutExtraction = VehicleProjectService.CreateNew(Path.Combine(Path.GetTempPath(), "MissingVehicleExtraction-" + Guid.NewGuid().ToString("N")));
+        Check(newWithoutExtraction.DisabledParts.Count == 0 && p.DisabledParts.Count == 0,
+            "missing donor extraction does not block creation or change existing vehicle recipes");
+        var tagFixture = Path.Combine(Path.GetTempPath(), "BatcomputerBaseTag-" + Guid.NewGuid().ToString("N") + ".fbx");
+        try
+        {
+            File.WriteAllText(tagFixture, "; FBX 7.4.0 project file\nP: \"BatcomputerBase\", \"KString\", \"\", \"\", \"batmobile1995\"\n");
+            Check(FbxBaseTag.Read(tagFixture) == "batmobile1995", "ASCII FBX driving-base tag is read without Unreal");
+            File.WriteAllText(tagFixture, "; FBX 7.4.0 project file\nP: \"OtherProperty\", \"KString\", \"\", \"\", \"batmobile1995\"\n");
+            Check(FbxBaseTag.Read(tagFixture) is null, "untagged FBX preserves the existing import path");
+            File.WriteAllText(tagFixture, "; FBX 7.4.0 project file\nP: \"BatcomputerBase\", \"KString\", \"\", \"\", \"batmobile1995\"\nP: \"BatcomputerBase\", \"KString\", \"\", \"\", \"batmobile1989\"\n");
+            Check(Throws(() => FbxBaseTag.Read(tagFixture)), "conflicting FBX driving-base tags are rejected");
+        }
+        finally { File.Delete(tagFixture); }
+        var activeVehicleContent = AppSettings.Current.EffectiveExtractedContentRoot();
+        if (VehicleDonorService.PackageComplete(activeVehicleContent, VehicleAssetService.NativeBlueprint))
+        {
+            var defaultLamps = VehicleLightService.LampMeshes(VehicleAssetService.Read(activeVehicleContent, VehicleAssetService.NativeBlueprint));
+            var freshVehicle = VehicleProjectService.CreateNew(activeVehicleContent);
+            Check(defaultLamps.Count > 0 && freshVehicle.DisabledParts.ToHashSet(StringComparer.Ordinal).SetEquals(defaultLamps) &&
+                VehicleLightService.HasOnlyDefaultDisabledLamps(freshVehicle, activeVehicleContent),
+                "new vehicles hide exactly the lamp meshes found in their native blueprint");
+            soundRecipe.SoundStyle = "batmobile2005";
+            var soundBlueprint = VehicleAssetService.Read(activeVehicleContent, VehicleAssetService.NativeBlueprint);
+            VehicleSoundService.Apply(soundBlueprint, soundRecipe);
+            VehicleSoundService.Verify(soundBlueprint, soundRecipe);
+            Check(VehicleSoundService.DonorSlots(soundBlueprint).Any(slot => slot.Label == "Engine" && slot.Event == VehicleSoundService.FindStyle("batmobile2005")!.Engine),
+                "Tumbler engine and matching audio slots apply to the Forever blueprint");
+            foreach (var donorId in new[] { "batmobile1989", "batmobile2005" })
+            {
+                var another = p.Clone(); another.DonorId = donorId; another.TwinExhausts = true;
+                var baseCar = VehicleDonorService.Get(another);
+                if (!VehicleDonorService.PackageComplete(activeVehicleContent, baseCar.Mesh) || !VehicleDonorService.PackageComplete(activeVehicleContent, baseCar.Skeleton)) continue;
+                var mesh = VehicleAssetService.Read(activeVehicleContent, baseCar.Mesh);
+                VehicleSocketService.Apply(mesh, VehicleAssetService.Read(activeVehicleContent, baseCar.Skeleton), another);
+                Check(VehicleSocketService.Socket(mesh, VehicleExhaustService.SecondSocket) is not null,
+                    donorId + " gets a second outlet without assuming a Grapple socket");
+            }
+            var donor = VehicleDonorService.Get(boostRecipe);
+            var requiredBoost = donor.BoostPackages.Append(VehicleExhaustService.FindStyle(boostRecipe.BoostStyle)!.BoostBlueprint).Concat(VehicleBoostSpeedService.Packages);
+            if (requiredBoost.All(package => VehicleDonorService.PackageComplete(activeVehicleContent, package)))
+            {
+                var socketMesh = VehicleAssetService.Read(activeVehicleContent, donor.Mesh);
+                var socketSkeleton = VehicleAssetService.Read(activeVehicleContent, donor.Skeleton);
+                VehicleSocketService.Apply(socketMesh, socketSkeleton, boostRecipe);
+                Check(VehicleSocketService.Socket(socketMesh, VehicleExhaustService.SecondSocket) is not null,
+                    "the second outlet is created on a private mesh without changing the donor skeleton");
+                var baseTwin = p.Clone(); baseTwin.TwinExhausts = true;
+                var speedOnly = p.Clone(); speedOnly.BoostTopSpeedMph = 135;
+                var styleRecipes = VehicleExhaustService.Styles.Where(style => VehicleDonorService.PackageComplete(activeVehicleContent, style.BoostBlueprint))
+                    .Select(style => { var recipe = p.Clone(); recipe.BoostStyle = style.Id; recipe.TwinExhausts = style.Twin; return recipe; });
+                foreach (var recipe in styleRecipes.Concat([boostRecipe, baseTwin, speedOnly]))
+                {
+                    var temp = Path.Combine(Path.GetTempPath(), "BatcomputerBoostStage-" + Guid.NewGuid().ToString("N"));
+                    Directory.CreateDirectory(temp);
+                    try
+                    {
+                        void Save(UAssetAPI.UAsset asset, string package)
+                        {
+                            var file = SkinnedMeshCookService.SafePath(temp, package[6..] + ".uasset");
+                            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+                            asset.FolderName = new UAssetAPI.UnrealTypes.FString(package);
+                            asset.Write(file);
+                        }
+                        VehicleExhaustService.Stage(recipe, donor, activeVehicleContent, Save, _ => { });
+                        var bp = VehicleAssetService.Read(activeVehicleContent, donor.Blueprint);
+                        CustomEquipmentService.Rename(bp, VehicleExhaustService.Redirects(recipe, donor));
+                        VehicleExhaustService.ApplyEngineEffects(bp, recipe);
+                        Save(bp, VehicleProjectService.Blueprint(recipe));
+                        VehicleExhaustService.Verify(recipe, donor, temp, VehicleAssetService.Read(temp, VehicleProjectService.Blueprint(recipe)));
+                        Check(true, "Forever " + (recipe == baseTwin ? "native twin" : recipe == speedOnly ? "speed-only" : recipe.BoostStyle) +
+                            " boost survives staged package roundtrips");
+                    }
+                    finally { Directory.Delete(temp, true); }
+                }
+            }
+            foreach (var (donorId, styleId) in new[] { ("batmobile1989", "charger"), ("batmobile2005", "forever") })
+            {
+                var alternate = p.Clone(); alternate.DonorId = donorId; alternate.BoostStyle = styleId; alternate.TwinExhausts = true;
+                var driving = VehicleDonorService.Get(alternate);
+                var style = VehicleExhaustService.FindStyle(styleId)!;
+                if (!driving.BoostPackages.Append(style.BoostBlueprint).All(package => VehicleDonorService.PackageComplete(activeVehicleContent, package))) continue;
+                var stage = Path.Combine(Path.GetTempPath(), "BatcomputerBoostDonor-" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(stage);
+                try
+                {
+                    void Save(UAssetAPI.UAsset asset, string package)
+                    {
+                        var file = SkinnedMeshCookService.SafePath(stage, package[6..] + ".uasset");
+                        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+                        asset.FolderName = new UAssetAPI.UnrealTypes.FString(package);
+                        asset.Write(file);
+                    }
+                    VehicleExhaustService.Stage(alternate, driving, activeVehicleContent, Save, _ => { });
+                    var gameplay = VehicleAssetService.Read(activeVehicleContent, driving.Blueprint);
+                    CustomEquipmentService.Rename(gameplay, VehicleExhaustService.Redirects(alternate, driving));
+                    VehicleExhaustService.ApplyEngineEffects(gameplay, alternate);
+                    Save(gameplay, VehicleProjectService.Blueprint(alternate));
+                    VehicleExhaustService.Verify(alternate, driving, stage, VehicleAssetService.Read(stage, VehicleProjectService.Blueprint(alternate)));
+                    Check(true, donorId + " uses " + driving.ExhaustSocket + " with " + styleId + " effects in staged assets");
+                }
+                finally { Directory.Delete(stage, true); }
+            }
+        }
         var source = JsonSerializer.Serialize(p); var copy = p.Clone(); copy.DisplayName = "Renamed";
         Check(copy.LightSurfaces.Count == 0, "old vehicle recipes keep ordinary body surfaces by default");
+        Check(copy.BoostColor is null, "old vehicle recipes keep the native boost flame by default");
+        copy.BoostColor = new() { R = 38, G = 130, B = 255 };
+        Check(copy.Clone().BoostColor?.B == 255 && p.BoostColor is null, "boost color roundtrips without changing the source vehicle");
+        copy.BoostColor.R = -1; Check(Throws(() => VehicleProjectService.ValidateIdentity(copy)), "invalid boost RGB values fail closed");
+        copy.BoostColor.R = 38; copy.DonorId = "batmobile1997";
+        Check(Throws(() => VehicleProjectService.ValidateIdentity(copy)), "unverified driving bases cannot silently request a boost recolor");
+        copy = p.Clone();
+        Check(VehicleBoostColorService.Private(copy, VehicleBoostColorService.NativePawnData).StartsWith(VehicleProjectService.ContentRoot(copy) + "/", StringComparison.Ordinal) &&
+            VehicleBoostColorService.Packages.All(package => VehicleBoostColorService.Private(copy, package).StartsWith(VehicleProjectService.ContentRoot(copy) + "/", StringComparison.Ordinal)),
+            "boost-color assets are private to the vehicle, never native package overrides");
         Check(VehicleSocketService.GadgetSockets.Length == 5 && VehicleSocketService.GadgetSockets.All(s => VehicleSocketService.IsEditable("socket:" + s)), "the five verified launcher / grapple references are editable");
-        Check(VehicleSocketService.EffectSockets.SequenceEqual(new[] { "VFX_Exhaust_01" }) && VehicleSocketService.IsEditable("socket:VFX_Exhaust_01") && !VehicleSocketService.IsEditable("socket:VFX_Streak_01"), "boost exposes the verified shared exhaust outlet, not unverified effect points");
+        Check(VehicleSocketService.EffectSockets.SequenceEqual(new[] { "VFX_Exhaust_01", "VFX_ExhaustBoost_01", "VFX_Exhaust_02" }) && VehicleSocketService.IsEditable("socket:VFX_Exhaust_01") && !VehicleSocketService.IsEditable("socket:VFX_Streak_01"), "boost exposes native and second exhaust outlets, not unrelated effect points");
         copy.Transforms = [new() { Component = "socket:VFX_Exhaust_01", Z = 25, Pitch = 10 }]; VehicleProjectService.ValidateIdentity(copy);
         Check(copy.Clone().Transforms.Single().Pitch == 10, "boost outlet position and rotation survive recipe serialization");
         var exhaustMarker = VehicleSocketService.MarkerDirection("VFX_Exhaust_01");
@@ -35,6 +223,13 @@ internal static class VehicleRegressionChecks
         var lensScene = new VehicleWorkshopService.Scene(lens.Id, "lens-session", lens.DisplayName, [], [], [], []) { LightSurfaceChoices = [new(0, "Headlight_L", true, "", [0,0,0], "Headlight_L"), new(1, "BrakeLight_L", false, "moving bone", [0,0,0], "BrakeLight_L")] };
         string LensMessage(int slot) => JsonSerializer.Serialize(new { type = "vehicleWorkshopSave", vehicleId = lens.Id, session = "lens-session", transforms = Array.Empty<VehicleComponentTransform>(), lightSurfaces = new[] { new { slot, role = "Headlight_L" } } });
         Check(VehicleWorkshopForm.ReadPlacementMessage(lens, lensScene, LensMessage(0)).LightSurfaces.Single().Slot == 0, "bridge accepts a verified rigid lens section");
+        var lampPart = new VehicleWorkshopService.Part("H_LED_02_Mesh_GEN_VARIABLE", "Headlight LED", "Lights", "", "", "Body", true,
+            VehicleWorkshopService.Identity, new() { Component = "H_LED_02_Mesh_GEN_VARIABLE" }, new() { Component = "H_LED_02_Mesh_GEN_VARIABLE" }, [], "") { CanDisable = true };
+        var assignedLampScene = lensScene with { Parts = [lampPart] };
+        var assignedLampMessage = JsonSerializer.Serialize(new { type = "vehicleWorkshopSave", vehicleId = lens.Id, session = "lens-session",
+            transforms = Array.Empty<VehicleComponentTransform>(), disabledParts = new[] { lampPart.Id }, lightSurfaces = new[] { new { slot = 0, role = "Headlight_L" } } });
+        Check(!VehicleWorkshopForm.ReadPlacementMessage(lens, assignedLampScene, assignedLampMessage).DisabledParts.Contains(lampPart.Id),
+            "assigning a lens role restores its required native LED mesh");
         Check(Throws(() => VehicleWorkshopForm.ReadPlacementMessage(lens, lensScene, LensMessage(1))) && Throws(() => VehicleWorkshopForm.ReadPlacementMessage(lens, lensScene, LensMessage(55))), "bridge rejects moving-bone and fabricated lens sections");
         copy = p.Clone(); copy.DisplayName = "Renamed";
         Check(JsonSerializer.Serialize(p) == source && copy.Id == p.Id && VehicleProjectService.PawnTag(copy) == VehicleProjectService.PawnTag(p), "editing a copy preserves source data and stable selection identity");

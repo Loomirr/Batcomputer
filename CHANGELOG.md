@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.0-beta.1 — 2026-09-27
+
+- Adds character animation previews and an animation creator with bone gizmos, keyframes, a resizable timeline, synchronized playback and a draft-to-cooked-animation workflow.
+- Adds an optional suit icon studio with improved rendering and a non-destructive icon test.
+- Improves character material inheritance, LEGO/detail normals and face preview controls.
+- Expands All parts into a deduplicated attachment-first catalog with attachment-point filters, native wiring recipes and clearly labeled preview-only assets.
+- Adds vehicle sound/boost styles, twin boost outlets, boost tuning and preview, private flame-color edits, native paint workflows and custom-character default-vehicle choices.
+- Rebuilds legacy vehicle skeletal cooks from saved FBXs, preserving materials, settings and recovery copies.
+- Fixes saved-suit restoration losing generated Blueprint parent paths. Required stage package pairs are checked before a cache is accepted; missing generated parents never fall back to another stage.
+- Adds base-version patch ZIP support with verified local reuse and a full-ZIP fallback for future releases. This beta publishes only the full ZIP and checksum so original 1.0 clients can update directly.
+
 ## 1.0.0 — first official release
 
 - Replaces the Windows update-completion message box with the shared themed dialog, including the installed version, verification status, recovery guidance and a Back to workshop action. The prompt still appears only after confirmed startup and only once per update.

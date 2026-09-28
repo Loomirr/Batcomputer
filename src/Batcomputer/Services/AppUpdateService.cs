@@ -9,7 +9,7 @@ namespace Batcomputer;
 
 internal sealed record UpdateFile(string Path, long Size, string Sha256);
 internal sealed record UpdateManifest(int Schema, string Version, List<UpdateFile> Files);
-internal sealed record AppUpdateRelease(string Version, string Notes, Uri Download, long Size, string Sha256, FileUpdatePlan? FilePlan = null);
+internal sealed record AppUpdateRelease(string Version, string Notes, Uri Download, long Size, string Sha256, FileUpdatePlan? FilePlan = null, PatchUpdatePlan? PatchPlan = null);
 internal sealed record StagedAppUpdate(string Directory, UpdateManifest Manifest);
 
 /// <summary>Fixed-origin, bounded download + validated staging. Never writes application or user files.</summary>
@@ -84,6 +84,7 @@ internal sealed partial class AppUpdateService : IDisposable
                 ValidateUrl(download, metadata: false, redirected: false);
                 best = new(version, release.TryGetProperty("body", out var body) ? body.GetString() ?? "" : "",
                     download, size, digest[7..]);
+                if (_preferFileUpdates) best = await ReadPatchReleaseAsync(best, release, ct);
             }
             if (doc.RootElement.GetArrayLength() < pageSize) break;
         }
@@ -95,6 +96,7 @@ internal sealed partial class AppUpdateService : IDisposable
     {
         if (!IsSupportedRelease(release.Version)) throw new InvalidDataException("Pre-1.0 releases are legacy and cannot be downloaded through the updater.");
         if (release.FilePlan != null) return await DownloadFilesAsync(release, transaction, progress, ct);
+        if (release.PatchPlan != null) return await DownloadPatchAsync(release, transaction, progress, ct);
         Directory.CreateDirectory(transaction);
         UpdatePaths.RejectLinks(transaction);
         CheckSpace(transaction, release.Size + MaxExpandedSize);

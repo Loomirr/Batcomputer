@@ -54,6 +54,23 @@ internal static class SkinnedGlbRegressionChecks
         Check(!SkinnedRigComparisonService.Compare(bones, [bones[0]]).Passed && !SkinnedRigComparisonService.Compare(bones, [bones[0], bones[0]]).Passed,
             "rig comparison rejects missing and duplicate bones");
         Check(!SkinnedRigComparisonService.Compare(bones, [bones[0], bones[1] with { Rotation = new(float.NaN,0,0,1) }]).Passed, "rig comparison rejects non-finite rotations");
+        SkinnedGlbExportService.Bone[] vehicleRig = [
+            new("Root", -1, Vector3.Zero, Quaternion.CreateFromAxisAngle(Vector3.UnitX, .7f), Vector3.One),
+            new("ChassisAttach_FL", 0, new(20, 10, 5), Quaternion.Identity, Vector3.One),
+            new("Wheel_FL", 1, new(0, 0, -5), Quaternion.Identity, Vector3.One)];
+        var localRaise = Vector3.Transform(Vector3.UnitZ * 25, Quaternion.Inverse(vehicleRig[0].Rotation));
+        var raised = vehicleRig.ToArray(); raised[1] = raised[1] with { Translation = raised[1].Translation + localRaise };
+        Check(!SkinnedRigComparisonService.Compare(vehicleRig, raised).Passed && SkinnedRigComparisonService.Compare(vehicleRig, raised, allowVehicleWheelRaise: true).Passed,
+            "vehicle-only wheel mounts may rise in component-space Z while the wheel child stays native");
+        raised[1] = raised[1] with { Translation = vehicleRig[1].Translation + Vector3.UnitX * 25 };
+        Check(!SkinnedRigComparisonService.Compare(vehicleRig, raised, allowVehicleWheelRaise: true).Passed,
+            "sideways wheel-mount movement is not treated as a larger tire");
+        raised[1] = raised[1] with { Translation = vehicleRig[1].Translation + Vector3.Transform(Vector3.UnitZ * 101, Quaternion.Inverse(vehicleRig[0].Rotation)) };
+        Check(!SkinnedRigComparisonService.Compare(vehicleRig, raised, allowVehicleWheelRaise: true).Passed,
+            "wheel-mount raise remains bounded to one meter");
+        raised = vehicleRig.ToArray(); raised[2] = raised[2] with { Translation = raised[2].Translation + Vector3.UnitZ };
+        Check(!SkinnedRigComparisonService.Compare(vehicleRig, raised, allowVehicleWheelRaise: true).Passed,
+            "wheel and other animation bones must retain their native local pose");
         return results;
     }
 }

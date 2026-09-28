@@ -23,6 +23,8 @@ public static class PartRecipeService
         bool Has(string value) => probe.Contains(value, StringComparison.OrdinalIgnoreCase);
         bool Tag(string value) => tags.Any(t => t.Equals(value, StringComparison.OrdinalIgnoreCase));
 
+        if (Has("SK_TorsoA_Satchel")) return "Satchel";
+
         if (Has("SM_HAIR") || Has("SK_HAIR") ||
             Has("SlickBack") || Has("SweptBack") || Has("WidowsPeak") ||
             Has("CombOver") || Has("ShortCoiled") || Has("Balding") ||
@@ -77,6 +79,11 @@ public static class PartRecipeService
     /// </summary>
     public static (RecipeConfidence Level, string Reason) Confidence(NativeSuitPartRecord part)
     {
+        if (part.Slot.Equals("Cape", StringComparison.OrdinalIgnoreCase) &&
+            (part.MeshObjectName.Equals("SK_TorsoA_Satchel", StringComparison.OrdinalIgnoreCase) ||
+             part.MeshPackagePath.EndsWith("/SK_TorsoA_Satchel", StringComparison.OrdinalIgnoreCase)))
+            return (RecipeConfidence.Unsafe,
+                "this Satchel is mounted through a Cape component; choose a Costume usage instead to avoid replacing a real cape.");
         var hasClass = !string.IsNullOrWhiteSpace(part.ComponentClass);
         var hasMeshKind = !string.IsNullOrWhiteSpace(part.MeshKind);
         var isStaticClass = part.ComponentClass.Contains("StaticMesh", StringComparison.OrdinalIgnoreCase);

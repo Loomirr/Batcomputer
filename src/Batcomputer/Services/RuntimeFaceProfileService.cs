@@ -11,6 +11,7 @@ public static class RuntimeFaceProfileService
 {
     public sealed record FaceProfile(
         string RigHash,
+        string PawnClassPath,
         string FaceMeshPath,
         string MaterialPath,
         IReadOnlyDictionary<string, float> Scalars,
@@ -21,14 +22,19 @@ public static class RuntimeFaceProfileService
 
     public sealed class ProfileSet
     {
-        private readonly Dictionary<string, FaceProfile> _byMaterialPath;
+        private readonly Dictionary<string, FaceProfile> _byCharacterAndMaterial;
 
-        internal ProfileSet(Dictionary<string, FaceProfile> byMaterialPath) => _byMaterialPath = byMaterialPath;
+        internal ProfileSet(Dictionary<string, FaceProfile> byCharacterAndMaterial) => _byCharacterAndMaterial = byCharacterAndMaterial;
 
-        public int Count => _byMaterialPath.Count;
+        public int Count => _byCharacterAndMaterial.Count;
 
-        public bool TryGet(string? materialPath, out FaceProfile profile) =>
-            _byMaterialPath.TryGetValue(NormalizeAssetPath(materialPath), out profile!);
+        public bool TryGet(string? materialPath, string? pawnClassPath, string? faceMeshPath, out FaceProfile profile)
+        {
+            profile = null!;
+            var key = ProfileKey(materialPath, pawnClassPath);
+            return !string.IsNullOrEmpty(key) && _byCharacterAndMaterial.TryGetValue(key, out profile!)
+                   && profile.FaceMeshPath == NormalizeAssetPath(faceMeshPath);
+        }
     }
 
     private sealed class CaptureProfile
@@ -36,8 +42,17 @@ public static class RuntimeFaceProfileService
         [JsonPropertyName("rig_hash")]
         public string RigHash { get; set; } = "";
 
+        [JsonPropertyName("pawn")]
+        public CapturePawn? Pawn { get; set; }
+
         [JsonPropertyName("components")]
         public List<CaptureComponent>? Components { get; set; }
+    }
+
+    private sealed class CapturePawn
+    {
+        [JsonPropertyName("class_path")]
+        public string ClassPath { get; set; } = "";
     }
 
     private sealed class CaptureComponent
@@ -115,6 +130,15 @@ public static class RuntimeFaceProfileService
             {
                 return;
             }
+            var pawnClassPath = NormalizeAssetPath(capture?.Pawn?.ClassPath);
+            var faceMeshPath = NormalizeAssetPath(face?.SkeletalMesh);
+            var profileKey = ProfileKey(materialPath, pawnClassPath);
+            if (string.IsNullOrEmpty(profileKey) || string.IsNullOrEmpty(faceMeshPath))
+            {
+                // A material can be shared by many characters. A capture with no character or
+                // mesh identity is unsafe as a general neutral-pose override.
+                return;
+            }
 
             var scalars = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
             var vectors = new Dictionary<string, Vector3>(StringComparer.OrdinalIgnoreCase);
@@ -147,9 +171,10 @@ public static class RuntimeFaceProfileService
                 return;
             }
 
-            profiles[materialPath] = new FaceProfile(
+            profiles[profileKey] = new FaceProfile(
                 capture?.RigHash ?? Path.GetFileNameWithoutExtension(file),
-                NormalizeAssetPath(face?.SkeletalMesh),
+                pawnClassPath,
+                faceMeshPath,
                 materialPath,
                 scalars,
                 vectors);
@@ -158,6 +183,30 @@ public static class RuntimeFaceProfileService
         {
             Console.WriteLine($"  runtime face profile skipped '{Path.GetFileName(file)}': {ex.Message.Split('\n')[0]}");
         }
+    }
+
+    private static string ProfileKey(string? materialPath, string? pawnClassPath)
+    {
+        var material = NormalizeAssetPath(materialPath);
+        var pawn = NormalizeAssetPath(pawnClassPath);
+        return string.IsNullOrEmpty(material) || string.IsNullOrEmpty(pawn) ? "" : pawn + "|" + material;
+    }
+
+    internal static bool VerifyIdentitySelection()
+    {
+        const string material = "/Game/Characters/Face/MI_FACE_Batman_NoEyes.MI_FACE_Batman_NoEyes";
+        const string mesh = "/Game/Characters/Face/SK_LEGOface.SK_LEGOface";
+        const string capturedPawn = "/DLC_GoldenAgeBatman/Characters/BP_Batman_DC27_Playable";
+        const string otherPawn = "/Game/Mods/Electric/Characters/BP_Batman_Electric_Playable";
+        var profile = new FaceProfile("rig", NormalizeAssetPath(capturedPawn), NormalizeAssetPath(mesh),
+            NormalizeAssetPath(material), new Dictionary<string, float>(), new Dictionary<string, Vector3>());
+        var set = new ProfileSet(new Dictionary<string, FaceProfile>(StringComparer.OrdinalIgnoreCase)
+        {
+            [ProfileKey(material, capturedPawn)] = profile,
+        });
+        return set.TryGet(material, "BlueprintGeneratedClass " + capturedPawn + ".BP_Batman_DC27_Playable_C", mesh, out _)
+               && !set.TryGet(material, otherPawn, mesh, out _)
+               && !set.TryGet(material, capturedPawn, "/Game/Other/SK_LEGOface", out _);
     }
 
     private static bool TryReadVector(Match match, out Vector3 vector)
@@ -181,10 +230,10 @@ public static class RuntimeFaceProfileService
         }
 
         var path = value.Replace('\\', '/');
-        var gameIndex = path.IndexOf("/Game/", StringComparison.OrdinalIgnoreCase);
-        if (gameIndex >= 0)
+        var firstAssetSlash = path.IndexOf('/');
+        if (firstAssetSlash > 0)
         {
-            path = path[gameIndex..];
+            path = path[firstAssetSlash..];
         }
         var separator = path.IndexOfAny(['|', '\'', ' ']);
         if (separator >= 0)

@@ -191,6 +191,8 @@ internal sealed class VehicleWorkshopForm : AdaptiveForm
             result.LightSurfaces = JsonSerializer.Deserialize<List<VehicleLightSurface>>(surfaces.GetRawText(), options) ?? throw new InvalidDataException("Missing light surface assignments.");
             foreach (var binding in result.LightSurfaces)
                 if (binding is null || !scene.LightSurfaceChoices.Any(s => s.Slot == binding.Slot && s.CanAssign)) throw new InvalidDataException("Choose a rigid Body-weighted light surface.");
+            foreach (var binding in result.LightSurfaces)
+                result.DisabledParts.RemoveAll(name => name == VehicleLightSurfaceService.Roles.Single(role => role.Id == binding.Role).Component);
         }
         VehicleProjectService.ValidateIdentity(result); return result;
     }

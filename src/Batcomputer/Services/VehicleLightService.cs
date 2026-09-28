@@ -17,6 +17,45 @@ internal static class VehicleLightService
     private static string _mapKey = "";
     private static Usmap? _maps;
     internal static bool IsSource(string id) => id is "H_Light_01_Light_GEN_VARIABLE" or "H_Light_02_Light_GEN_VARIABLE" or "R_Light_01_Light_GEN_VARIABLE" or "R_Light_02_Light_GEN_VARIABLE";
+    internal static bool IsLampMesh(string name)
+    {
+        var parts = name.Split('_');
+        return parts.Length == 6 && parts[0] is ("C" or "H" or "R" or "B") &&
+            parts[1] is ("Glow" or "LED") && parts[2].Length == 2 && parts[2].All(char.IsAsciiDigit) &&
+            parts[3] == "Mesh" && parts[4] == "GEN" && parts[5] == "VARIABLE";
+    }
+    internal static IReadOnlyList<string> LampMeshes(UAsset blueprint) => blueprint.Exports.OfType<NormalExport>()
+        .Where(e => e.GetExportClassType()?.ToString() == "StaticMeshComponent" && IsLampMesh(e.ObjectName.ToString()))
+        .Select(e => e.ObjectName.ToString()).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+    internal static void DisableLampMeshes(VehicleProject project, string nativeContent)
+    {
+        try
+        {
+            var donor = VehicleDonorService.Get(project);
+            foreach (var name in LampMeshes(VehicleAssetService.Read(nativeContent, donor.Blueprint)))
+                if (!project.DisabledParts.Contains(name, StringComparer.Ordinal)) project.DisabledParts.Add(name);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // An unavailable extraction must not prevent creating a vehicle. Build validation
+            // will still require the donor package before any game content is staged.
+        }
+    }
+    internal static bool HasOnlyDefaultDisabledLamps(VehicleProject project, string nativeContent)
+    {
+        if (project.DisabledParts.Count == 0) return true;
+        try
+        {
+            var donor = VehicleDonorService.Get(project);
+            var names = LampMeshes(VehicleAssetService.Read(nativeContent, donor.Blueprint));
+            return project.DisabledParts.Count == names.Count &&
+                project.DisabledParts.ToHashSet(StringComparer.Ordinal).SetEquals(names);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return false;
+        }
+    }
     internal static bool SupportsBeam(VehicleDonorService.Donor donor, string id) => IsSource(id) && (donor.FullWorkshop || donor.HeadlightEditing && id.StartsWith("H_", StringComparison.Ordinal));
     internal static VehicleLightSettings ReadDefaults(string id, Newtonsoft.Json.Linq.JToken? properties)
     {

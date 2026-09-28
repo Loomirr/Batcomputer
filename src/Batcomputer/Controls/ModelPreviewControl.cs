@@ -49,6 +49,46 @@ public sealed class ModelPreviewControl : UserControl
 
     /// <summary>Raised when the in-viewer part mover asks the host to persist an alignment.</summary>
     public event EventHandler<PreviewPlacementSaveRequestedEventArgs>? PlacementSaveRequested;
+    internal event EventHandler<PreviewSuitIconTestRequestedEventArgs>? SuitIconTestRequested;
+    internal event EventHandler<PreviewSuitIconTestRequestedEventArgs>? SuitIconApplyRequested;
+    private async Task SendCharacterAnimationAsync(string package)
+    {
+        var folder = _pendingFolder;
+        var web = _web;
+        if (string.IsNullOrWhiteSpace(folder) || web?.CoreWebView2 is null) return;
+        CharacterAnimationPreviewService.Bundle? bundle = null;
+        string? error = null;
+        try { bundle = await Task.Run(() => CharacterAnimationPreviewService.LoadBundle(folder, package)); }
+        catch (Exception ex) { error = ex.Message.Split('\n')[0]; }
+        if (IsDisposed || !ReferenceEquals(web, _web) || !string.Equals(folder, _pendingFolder, StringComparison.OrdinalIgnoreCase) ||
+            web.CoreWebView2 is not { } core) return;
+        try
+        {
+            var json = JsonSerializer.Serialize(bundle, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+            await core.ExecuteScriptAsync($"window.characterAnimationPreview?.bundleResult({JsonSerializer.Serialize(package)},{json},{JsonSerializer.Serialize(error)})");
+        }
+        catch (Exception ex) { Debug.WriteLine("Preview animation response: " + ex.Message); }
+    }
+    internal async Task NotifySuitIconTestAsync(bool success, string message)
+    {
+        if (_web?.CoreWebView2 is not { } core) return;
+        try
+        {
+            var result = JsonSerializer.Serialize(new { success, message });
+            await core.ExecuteScriptAsync($"window.characterIconStudio?.testResult({result})");
+        }
+        catch (Exception ex) { Debug.WriteLine("Preview icon-test acknowledgement: " + ex.Message); }
+    }
+    internal async Task NotifySuitIconApplyAsync(bool success, string message)
+    {
+        if (_web?.CoreWebView2 is not { } core) return;
+        try
+        {
+            var result = JsonSerializer.Serialize(new { success, message });
+            await core.ExecuteScriptAsync($"window.characterIconStudio?.applyResult({result})");
+        }
+        catch (Exception ex) { Debug.WriteLine("Preview icon-apply acknowledgement: " + ex.Message); }
+    }
     internal event Action<string>? VehicleWorkshopMessageReceived;
     internal static bool IsVehicleWorkshopMessage(string? type) => type is "vehicleWorkshopSave" or "vehicleWorkshopReady" or "vehicleWorkshopError" or "vehicleWorkshopSettings" or "vehicleWorkshopCopyMaterial" or "vehicleWorkshopRiders" or "vehicleWorkshopToybox" or "vehicleWorkshopSurface" or "vehicleWorkshopLoadPart";
     internal async Task ShowVehicleRidersAsync(string json)
@@ -189,13 +229,25 @@ public sealed class ModelPreviewControl : UserControl
         uri.StartsWith($"blob:https://{host}/", StringComparison.OrdinalIgnoreCase) &&
         Path.GetExtension(path).Equals(".glb", StringComparison.OrdinalIgnoreCase);
 
+    internal static bool IsCharacterIconDownload(string uri, string host, string path) =>
+        uri.StartsWith($"blob:https://{host}/", StringComparison.OrdinalIgnoreCase) &&
+        Path.GetExtension(path).Equals(".png", StringComparison.OrdinalIgnoreCase) &&
+        Path.GetFileName(path).StartsWith("Suit-icon-", StringComparison.Ordinal);
+
+    internal static bool IsAnimationDraftDownload(string uri, string host, string path) =>
+        uri.StartsWith($"blob:https://{host}/", StringComparison.OrdinalIgnoreCase) &&
+        Path.GetFileName(path).EndsWith(".animation-draft.json", StringComparison.OrdinalIgnoreCase);
+
     internal static void ConfigureCharacterExportDownloads(WebView2 web, Control owner, Func<string> currentHost, Func<bool> isCurrent)
     {
         web.CoreWebView2.DownloadStarting += (_, download) =>
         {
             download.Cancel = true;
             download.Handled = true;
-            if (!IsCharacterExportDownload(download.DownloadOperation.Uri, currentHost(), download.ResultFilePath)) return;
+            var icon = IsCharacterIconDownload(download.DownloadOperation.Uri, currentHost(), download.ResultFilePath);
+            var draft = IsAnimationDraftDownload(download.DownloadOperation.Uri, currentHost(), download.ResultFilePath);
+            if (!icon && !draft && !IsCharacterExportDownload(download.DownloadOperation.Uri, currentHost(), download.ResultFilePath)) return;
+            var suggestedName = icon || draft ? Path.GetFileName(download.ResultFilePath) : "Character-assembled.glb";
             var host = currentHost();
             var deferral = download.GetDeferral();
             try
@@ -207,12 +259,13 @@ public sealed class ModelPreviewControl : UserControl
                         if (owner.IsDisposed || host != currentHost() || !isCurrent()) return;
                         using var dialog = new SaveFileDialog
                         {
-                            Title = "Export assembled character", Filter = "glTF binary (*.glb)|*.glb",
-                            DefaultExt = "glb", AddExtension = true, OverwritePrompt = true,
-                            FileName = "Character-assembled.glb",
+                            Title = icon ? "Save suit icon" : draft ? "Save animation draft" : "Export assembled character",
+                            Filter = icon ? "PNG image (*.png)|*.png" : draft ? "Animation draft (*.json)|*.json" : "glTF binary (*.glb)|*.glb",
+                            DefaultExt = icon ? "png" : draft ? "json" : "glb", AddExtension = true, OverwritePrompt = true,
+                            FileName = suggestedName,
                         };
                         if (dialog.ShowDialog(owner) != DialogResult.OK) return;
-                        if (!Path.GetExtension(dialog.FileName).Equals(".glb", StringComparison.OrdinalIgnoreCase)) return;
+                        if (!Path.GetExtension(dialog.FileName).Equals(icon ? ".png" : draft ? ".json" : ".glb", StringComparison.OrdinalIgnoreCase)) return;
                         download.ResultFilePath = dialog.FileName;
                         download.Cancel = false;
                     }
@@ -237,6 +290,10 @@ public sealed class ModelPreviewControl : UserControl
             var env = await Microsoft.Web.WebView2.Core.CoreWebView2Environment.CreateAsync(
                 browserExecutableFolder: null, userDataFolder: userData);
             await web.EnsureCoreWebView2Async(env);
+            // Only the embedded workspace has a project-aware icon-test handler. Standalone
+            // read-only preview windows use the same page but must not offer this action.
+            await web.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
+                "window.BATCOMPUTER_ICON_TEST_HOST=true;");
             var browserProcessId = web.CoreWebView2.BrowserProcessId;
             if (!_active || !ReferenceEquals(web, _web))
             {
@@ -267,14 +324,48 @@ public sealed class ModelPreviewControl : UserControl
 
     private void HandleWebMessage(string json)
     {
-        if (json.Length < 256_000 && IsHandleCreated && !IsDisposed)
+        if (json.Length < 1_600_000 && IsHandleCreated && !IsDisposed)
         {
             try
             {
                 using var document = JsonDocument.Parse(json);
-                if (document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String &&
-                    IsVehicleWorkshopMessage(type.GetString()))
-                    BeginInvoke(() => { if (!IsDisposed) VehicleWorkshopMessageReceived?.Invoke(json); });
+                if (document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String)
+                {
+                    if (type.GetString() is "test-suit-icon" or "apply-suit-icon")
+                    {
+                        var applying = type.GetString() == "apply-suit-icon";
+                        try
+                        {
+                            var root = document.RootElement;
+                            var layout = root.GetProperty("layout").GetString() ?? "";
+                            if (layout.Length is < 1 or > 160)
+                                throw new InvalidDataException("The icon request did not identify a saved suit.");
+                            var png = SuitIconDryRunService.DecodePngDataUrl(root.GetProperty("png").GetString() ?? "");
+                            BeginInvoke(() =>
+                            {
+                                if (IsDisposed) return;
+                                var request = new PreviewSuitIconTestRequestedEventArgs(layout, png);
+                                if (applying) SuitIconApplyRequested?.Invoke(this, request);
+                                else SuitIconTestRequested?.Invoke(this, request);
+                            });
+                        }
+                        catch (Exception ex) when (ex is InvalidDataException or KeyNotFoundException or InvalidOperationException or FormatException)
+                        {
+                            if (applying) _ = NotifySuitIconApplyAsync(false, "Suit icon assignment rejected: " + ex.Message);
+                            else _ = NotifySuitIconTestAsync(false, "Suit icon test rejected: " + ex.Message);
+                        }
+                        return;
+                    }
+                    if (type.GetString() == "preview-character-animation" && json.Length < 2_000 &&
+                        document.RootElement.TryGetProperty("package", out var package) && package.ValueKind == JsonValueKind.String)
+                    {
+                        var value = package.GetString();
+                        if (!string.IsNullOrWhiteSpace(value)) _ = SendCharacterAnimationAsync(value);
+                        return;
+                    }
+                    if (json.Length < 256_000 && IsVehicleWorkshopMessage(type.GetString()))
+                        BeginInvoke(() => { if (!IsDisposed) VehicleWorkshopMessageReceived?.Invoke(json); });
+                }
             }
             catch (JsonException) { /* Ignore malformed viewer messages. */ }
         }
@@ -397,6 +488,12 @@ public sealed class ModelPreviewControl : UserControl
         }
         base.Dispose(disposing);
     }
+}
+
+internal sealed class PreviewSuitIconTestRequestedEventArgs(string layoutKey, byte[] pngBytes) : EventArgs
+{
+    internal string LayoutKey { get; } = layoutKey;
+    internal byte[] PngBytes { get; } = pngBytes;
 }
 
 public sealed record PreviewCustomMeshTransform(

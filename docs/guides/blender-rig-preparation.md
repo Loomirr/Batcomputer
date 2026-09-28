@@ -19,7 +19,7 @@ its mesh. Repeatedly applying 0.01 or 100 does not repair inconsistent bind tran
 1. Select the imported **armature object** in Object Mode.
 2. Open Blender's **Scripting** workspace and use the Text Editor's **Open** action to load the supplied Python file.
 3. Read the script, then choose **Run Script**. Only run the helper shipped with your Batcomputer download or reference export.
-4. The armature object should now be named **Armature**. The bones keep their native names, including **Root**.
+4. The armature object should now be named **Armature**. The bones keep their native names. Full-character rigs use **Root**; some attachment rigs use **AttachRoot**.
 
 The helper prepares the rig's FBX rest-space basis and enables an in-front stick display with bone
 names. It does not create weights or add/remove game bones. It refuses to run twice on the same
@@ -27,9 +27,9 @@ prepared armature. If you need to start again, reimport the untouched reference 
 that safeguard and running it again.
 
 !!! note "Object name versus bone name"
-    Rename the armature **object**, not the Root bone or every bone inside it.
+    Rename the armature **object**, not the Root or AttachRoot bone or every bone inside it.
     An object named after your model can be imported as an unwanted extra root.
-    A tiny Root marker at the feet is normal; the **whole hierarchy** should still fit the body.
+    A tiny Root marker at the feet is normal for a full-character rig; the **whole hierarchy** should still fit the body. An attachment reference may have AttachRoot instead.
 
 ## Fit and weight the custom mesh
 

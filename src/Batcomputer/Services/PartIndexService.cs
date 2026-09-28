@@ -7,11 +7,17 @@ namespace Batcomputer;
 
 public sealed class PartIndexService
 {
-    // v7 also records the mappings revision: fixing an outdated .usmap must invalidate
-    // recipes parsed with it, even when the extraction stays in the same directory.
-    public const int CurrentIndexSchemaVersion = 7;
+    // v11 retains every observed usage, including misleading Cape-tagged Satchel
+    // components, and recognizes the native Costume slot. The attachment browser
+    // marks unsafe usages instead of erasing Blueprint evidence.
+    // The index also tracks mappings revisions so an updated .usmap invalidates recipes.
+    public const int CurrentIndexSchemaVersion = 11;
 
-    private static readonly string[] CharacterRigFolders = { "Minifig", "Smallfig", "Playables" };
+    // These Blueprints carry native component recipes for reusable minifig attachments.
+    // Do not scan Equipment/Creatures/BigFig here: those are not interchangeable
+    // character-part donors.
+    private static readonly string[] CharacterRigFolders =
+        { "Minifig", "Smallfig", "Playables", "Enemies", "Civilians", "Bosses" };
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -36,6 +42,7 @@ public sealed class PartIndexService
         "Torso1",
         "Torso2",
         "Hip",
+        "Costume",
         // Hair/hat/head-topper attachments are ordinary static-mesh SCS
         // components (SM_HAIR_*/SM_HAT_* from Content/Characters/Attachments).
         // Treating them as visual slots lets the existing part graft swap them.
@@ -83,7 +90,7 @@ public sealed class PartIndexService
             index.Errors.Add(new NativeSuitPartScanError
             {
                 Uasset = Path.Combine(contentRoot, "Characters"),
-                Error = "No extracted Minifig, Smallfig or Playables character root was found, including under AdditionalContent."
+                Error = "No extracted character donor root was found (Minifig, Smallfig, Playables, Enemies, Civilians or Bosses), including under AdditionalContent."
             });
             SavePartIndex(index);
             return index;
@@ -298,6 +305,8 @@ public sealed class PartIndexService
                 : ResolveObjectRef(imports, exports, GetInt(componentTemplate, "ClassIndex")).ObjectName;
 
             var meshRef = ResolveFirstMesh(imports, exports, componentData, out var meshKind);
+            // Preserve even misleading usages for inspection. Graft confidence and the
+            // attachment browser keep the Cape-tagged Satchel out of one-click actions.
             var animClassRef = ResolveObjectRef(imports, exports, GetPropertyObjectIndex(componentData, "AnimClass"));
             var materialRefs = GetPropertyObjectArray(componentData, "OverrideMaterials")
                 .Select(index => ResolveObjectRef(imports, exports, index))
@@ -344,7 +353,9 @@ public sealed class PartIndexService
                 // Spine, SM_* props, etc.). Only the root/body SCS nodes are excluded;
                 // every other mesh-bearing component gets a recipe the user can inspect
                 // and attempt to graft.
-                IsLikelyGraftCandidate = hasMesh && !IsNonVisualRootSlot(slot),
+                IsLikelyGraftCandidate = hasMesh && !IsNonVisualRootSlot(slot) &&
+                    !(slot.Equals("Cape", StringComparison.OrdinalIgnoreCase) &&
+                      meshRef.ObjectName.Equals("SK_TorsoA_Satchel", StringComparison.OrdinalIgnoreCase)),
                 SemanticKind = semanticKind,
                 TemplatePackagePath = sourcePackagePath,
                 TemplateUasset = assetPath,

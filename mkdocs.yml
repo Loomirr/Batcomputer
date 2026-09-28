@@ -73,6 +73,7 @@ nav:
       - Change a character's identity: guides/character-identity.md
       - Character game modes: guides/character-modes.md
       - Character 3D workshop: guides/character-workshop.md
+      - Browse parts and attachment recipes: guides/attachment-catalog.md
       - Update or repair a suit: guides/update-repair-suit.md
       - Review and remove edits: guides/review-changes.md
       - Back up and move a workspace: guides/backups-and-moving.md
@@ -94,6 +95,9 @@ nav:
       - Compatibility and limits: reference/compatibility.md
       - Frequently asked questions: reference/faq.md
       - Changelog: reference/changelog.md
+      - Release notes:
+          - 1.1 Beta 1: releases/1.1.0-beta.1.md
+          - 1.0 stable: releases/1.0.0.md
       - Third-party notices: reference/third-party-notices.md
   - Help:
       - Troubleshooting: help/troubleshooting.md
