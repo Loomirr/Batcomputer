@@ -76,7 +76,6 @@ Unknown shader families and mask/ORM layouts are not guessed. LEGOface normal in
 `T_Dummy_NML`; use the **Face helpers** for eye/lash/brow/mouth visibility. Replacing a shared
 lash artwork atlas with a blank texture can affect its eye data too. This button does not
 compile new face zones or change switches, scalars, transparency modes or material parents.
-See the [native dummy map audit](../research/native-dummy-textures.md).
 
 ## Faces
 
