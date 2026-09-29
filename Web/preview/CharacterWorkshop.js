@@ -52,6 +52,10 @@ window.BatcomputerCharacterWorkshop = function ({ THREE, scene, camera, controls
     onTabChanged: id => { if (id === 'creator') animationCreator.enter(); else animationCreator.leave(); },
     whole: () => { isolated = false; applyVisibility(); focus(parts); } });
   layout.moveExport(exportButton);
+  if (window.PREVIEW_OPEN_DRAFT_ID) {
+    layout.setTab('creator');
+    animationCreator.openLibraryDraft(window.PREVIEW_OPEN_DRAFT_ID);
+  }
   window.characterIconStudio = window.BatcomputerCharacterIconStudio({ THREE, scene, root: root || sceneRoot(), loaded, complete,
     withNeutralFace: () => { const restoreDraft = animationCreator.withRestPose(); const restoreMotion = animationPreview.withRestPose(); const restoreFace = withNeutralFace?.();
       return () => { restoreFace?.(); restoreMotion?.(); restoreDraft?.(); }; },

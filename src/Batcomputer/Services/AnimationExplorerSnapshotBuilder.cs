@@ -17,7 +17,9 @@ internal static class AnimationExplorerSnapshotBuilder
         NativeSuitProject? project,
         AnimLibrary library,
         CharacterAnimationSnapshot? characterGraph,
-        string? search = null)
+        string? search = null,
+        bool simplified = false,
+        string filter = "all")
     {
         ArgumentNullException.ThrowIfNull(library);
 
@@ -29,9 +31,12 @@ internal static class AnimationExplorerSnapshotBuilder
 
         var roots = new List<AnimationExplorerNode>
         {
-            characterGraph is null ? BuildCurrentSuit(project) : BuildCurrentCharacter(characterGraph),
+            characterGraph is null ? BuildCurrentSuit(project) : simplified ? BuildSimpleCharacter(characterGraph) : BuildCurrentCharacter(characterGraph),
             BuildImportedAnimations(library),
         };
+
+        if (filter != "all")
+            roots = roots.Select(root => FilterTargets(root, filter)).OfType<AnimationExplorerNode>().ToList();
 
         var query = search?.Trim();
         if (!string.IsNullOrWhiteSpace(query))
@@ -46,6 +51,51 @@ internal static class AnimationExplorerSnapshotBuilder
         var imported = library.Entries.Count;
         var healthy = library.Entries.Count(CanApply);
         return new AnimationExplorerSnapshot(roots, imported, healthy);
+    }
+
+    private static AnimationExplorerNode BuildSimpleCharacter(CharacterAnimationSnapshot graph)
+    {
+        var groups = new Dictionary<string, List<AnimationExplorerNode>>(StringComparer.OrdinalIgnoreCase);
+        void Add(string group, CharacterAnimationTargetSnapshot target, CharacterAnimationSlotSnapshot? slot)
+        {
+            if (!groups.TryGetValue(group, out var rows)) groups[group] = rows = [];
+            var nativeName = FriendlyAssetName(target.OriginalObjectName);
+            var context = slot is { ContextTags.Count: > 0 } ? " · " + string.Join(" + ", slot.ContextTags.Select(FriendlyContext)) : "";
+            var title = slot is null ? nativeName : FriendlyAction(slot.ActionTag) + context + " · " + nativeName;
+            rows.Add(BuildCharacterTarget(target, slot) with {
+                Title = title,
+                Value = target.IsOverridden ? "→ " + FriendlyAssetName(target.EffectiveObjectName) : "Donor",
+            });
+        }
+        foreach (var target in graph.LocomotionSequences) Add("Movement & idles", target, null);
+        foreach (var set in graph.Sets)
+            foreach (var slot in set.Slots)
+                foreach (var target in slot.Targets)
+                    Add((set.Kind == CharacterAnimationSetKind.Layer ? "Layers · " : "Actions · ") + ValueOr(set.Category, "Other"), target, slot);
+        var children = groups.Select(group => new AnimationExplorerNode(AnimationExplorerNodeKind.Group,
+            group.Key, $"{group.Value.Count} animations", ChildNodes: group.Value.OrderBy(row => row.Title, StringComparer.OrdinalIgnoreCase).ToList())).ToList();
+        if (graph.Diagnostics.Count > 0)
+            children.Add(new(AnimationExplorerNodeKind.Group, "Scan notes", ChildNodes: graph.Diagnostics.Select(item =>
+                new AnimationExplorerNode(AnimationExplorerNodeKind.Diagnostic, FriendlyDiagnostic(item), item.PackagePath, Diagnostic: item)).ToList()));
+        return new(AnimationExplorerNodeKind.Section, "Current character", graph.SuitName, ChildNodes: children);
+    }
+
+    private static AnimationExplorerNode? FilterTargets(AnimationExplorerNode node, string filter)
+    {
+        if (node.Kind == AnimationExplorerNodeKind.ImportedAnimation) return filter == "library" ? node : null;
+        if (node.CharacterTarget is { } target)
+        {
+            var keep = filter switch {
+                "changed" => target.IsOverridden,
+                "movement" => target.ReferenceKind == CharacterAnimationReferenceKind.LocomotionSequence,
+                "actions" => target.ReferenceKind == CharacterAnimationReferenceKind.AnimFile,
+                "layers" => target.ReferenceKind == CharacterAnimationReferenceKind.LayerAnimation,
+                _ => false,
+            };
+            return keep ? node : null;
+        }
+        var children = node.Children.Select(child => FilterTargets(child, filter)).OfType<AnimationExplorerNode>().ToList();
+        return children.Count == 0 ? null : node with { Children = children };
     }
 
     private static AnimationExplorerNode BuildCurrentCharacter(CharacterAnimationSnapshot graph)
@@ -528,7 +578,9 @@ internal static class AnimationExplorerSnapshotBuilder
             .ToList();
 
         var matchesSelf = node.Title.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                          node.Value.Contains(query, StringComparison.OrdinalIgnoreCase);
+                          node.Value.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                          (node.CharacterTarget is { } target && new[] { target.OriginalPackage, target.EffectivePackage, target.OwnerPackage, node.CharacterSlot?.ActionTag ?? "", string.Join(" ", node.CharacterSlot?.ContextTags ?? []) }
+                              .Any(value => value.Contains(query, StringComparison.OrdinalIgnoreCase)));
         if (!matchesSelf && children.Count == 0)
         {
             return null;

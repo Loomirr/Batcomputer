@@ -1,96 +1,128 @@
 namespace Batcomputer;
 
-/// <summary>Private editing session. Only an accepted recipe reaches the suit settings.</summary>
-public sealed class WeaponModelEditorForm : AdaptiveForm
+/// <summary>Private editing session. Only an accepted, baked recipe reaches suit settings.</summary>
+public partial class WeaponModelEditorForm : AdaptiveForm
 {
     private readonly ModelPreviewControl _viewer = new() { Dock = DockStyle.Fill };
-    private readonly Label _status = new() { AutoSize = true, MaximumSize = new Size(340, 0) };
-    private readonly DataGridView _materials = new() { Dock = DockStyle.Fill, AutoGenerateColumns = false, AllowUserToAddRows = false, AllowUserToDeleteRows = false };
+    private readonly Label _status = new() { Dock = DockStyle.Fill, ForeColor = Theme.OnDarkMuted, TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true };
+    private readonly Label _source = new() { AutoSize = true, MaximumSize = new(340, 0), ForeColor = Theme.OnDark };
+    private readonly ItemMaterialSlotsControl _materials = new();
+    private readonly ItemInspectorPages _inspector = new();
+    private readonly ItemMaterialSlotsControl _nativeMaterials = new(true);
+    private string _referencePackage;
     private readonly List<NumericUpDown> _numbers = [];
-    private readonly CheckBox _original = new() { Text = "Show original weapon", Checked = true, AutoSize = true };
+    private readonly CheckBox _original = new() { Text = "Show native reference", Checked = true, AutoSize = true };
     private readonly CheckBox _custom = new() { Text = "Show custom model", Checked = true, AutoSize = true };
-    private readonly System.Windows.Forms.Timer _timer = new() { Interval = 450 };
+    private readonly System.Windows.Forms.Timer _timer = new() { Interval = 350 };
+    private readonly Button _save;
     private WeaponModelRecipe? _working;
     private string? _folder;
+    private ModelPreviewService.ItemMaterialPreviewSession? _materialSession;
+    private IReadOnlyList<(int Slot, string Name, string Package)> _nativeSlots = [];
     private int _revision;
-    private bool _busy;
-    private bool _refreshPending;
-    private readonly Button _save;
+    private bool _busy, _refreshPending, _binding, _saving;
     public WeaponModelRecipe? Result { get; private set; }
 
-    public WeaponModelEditorForm(string reference, WeaponModelRecipe? existing, bool equipment = false)
+    public WeaponModelEditorForm(string reference, WeaponModelRecipe? existing, bool equipment = false, HeldItemSettings? extraProp = null)
     {
-        _working = existing?.Clone();
-        Text = equipment ? "Batcomputer — Equipment model workshop" : "Batcomputer — Weapon workshop";
-        if (equipment) _original.Text = "Show original equipment model";
-        ClientSize = new Size(1220, 840); MinimumSize = new Size(980, 720);
+        _referencePackage = reference; _working = existing?.Clone(); _prop = extraProp?.Clone(); PropResult = extraProp?.Clone();
+        // Older prop drafts could override slot 0 after baking an OBJ. Move that effective
+        // assignment into this private model draft so the Materials panel edits what is built.
+        if (_prop is { MaterialPackage.Length: > 0 } && _working?.Materials.FirstOrDefault(m => m.Slot == 0) is { } surface)
+        { surface.MaterialPath = _prop.MaterialPackage; _prop.MaterialPackage = ""; }
+        Text = extraProp is not null ? "Batcomputer — Extra held prop" : equipment ? "Batcomputer — Equipment model workshop" : "Batcomputer — Weapon workshop";
+        ClientSize = new(1280, 850); MinimumSize = new(1000, 680); StartPosition = FormStartPosition.CenterParent;
         BackColor = Theme.WindowBg; ForeColor = Theme.OnDark; Font = Theme.Body;
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 3, Padding = new Padding(14) };
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 390)); root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 78)); root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 70));
-        Controls.Add(root);
-        var header = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Padding = new Padding(6, 0, 0, 8) };
-        header.Controls.Add(new Label { Text = equipment ? "EQUIPMENT MODEL WORKSHOP" : "WEAPON WORKSHOP", ForeColor = Theme.Gold, Font = new Font(Font.FontFamily, 18, FontStyle.Bold), AutoSize = true }, 0, 0);
-        header.Controls.Add(new Label { Text = "Import your model · align against the original · validate the game-ready mesh", AutoSize = true, ForeColor = Theme.OnDarkMuted }, 0, 1);
-        root.Controls.Add(header, 0, 0); root.SetColumnSpan(header, 2);
-        var previewCard = new Panel { Dock = DockStyle.Fill, BackColor = Theme.CardBg, Padding = new Padding(1), Margin = new Padding(10, 0, 0, 0) };
-        previewCard.Controls.Add(_viewer); root.Controls.Add(previewCard, 1, 1);
-        var panel = new FlowLayoutPanel { Dock = DockStyle.Fill, BackColor = Theme.CardBg, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, Padding = new Padding(14), Margin = Padding.Empty };
-        root.Controls.Add(panel, 0, 1);
-        void Section(string title) => panel.Controls.Add(new Label { Text = title, ForeColor = Theme.Gold, AutoSize = true, Margin = new Padding(3, 15, 3, 8) });
-        Button Button(string text, EventHandler click) { var b = new Button { Text = text, Width = 340, Height = 38, AutoEllipsis = true }; Theme.StyleDarkButton(b); b.Click += click; panel.Controls.Add(b); return b; }
-        Section("01  MODEL & VISIBILITY");
-        Button("Import / replace OBJ…", (_, _) => Import());
-        panel.Controls.Add(_original); panel.Controls.Add(_custom);
-        Section("02  ALIGNMENT");
-        panel.Controls.Add(new Label { Text = "Offsets in Unreal cm · rotation in degrees\nOBJ is centered before alignment. Axes mark mesh-local zero, not the hand grip.", ForeColor = Theme.OnDarkMuted, AutoSize = true, MaximumSize = new Size(340, 0) });
-        foreach (var (name, min, max, value) in new[] { ("Scale", .001m, 1000m, (decimal)(_working?.Scale ?? 1)),
-            ("Offset X", -10000m, 10000m, (decimal)(_working?.X ?? 0)), ("Offset Y", -10000m, 10000m, (decimal)(_working?.Y ?? 0)),
-            ("Offset Z", -10000m, 10000m, (decimal)(_working?.Z ?? 0)), ("Pitch", -360m, 360m, (decimal)(_working?.Pitch ?? 0)),
-            ("Yaw", -360m, 360m, (decimal)(_working?.Yaw ?? 0)), ("Roll", -360m, 360m, (decimal)(_working?.Roll ?? 0)) })
+        Icon = EmbeddedAssets.LoadIcon(Theme.CurrentVisualTheme.IconAsset) ?? Icon;
+        var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new(16), ColumnCount = 1, RowCount = 3 };
+        root.RowStyles.Add(new(SizeType.Absolute, 78)); root.RowStyles.Add(new(SizeType.Percent, 100)); root.RowStyles.Add(new(SizeType.AutoSize)); Controls.Add(root);
+        root.Controls.Add(ItemWorkshopUi.Header(extraProp is not null ? "Extra held prop" : equipment ? "Equipment model workshop" : "Weapon workshop", "Set up your model, placement and materials in one workspace. Nothing changes in-game until you save and rebuild."));
+        var split = new SplitContainer { Dock = DockStyle.Fill, Size = new(1248, 680), SplitterDistance = 840, SplitterWidth = 8, Panel1MinSize = 380, Panel2MinSize = 360, BackColor = Theme.WindowBg };
+        split.Panel1.Controls.Add(_viewer); var pages = _inspector; split.Panel2.Controls.Add(pages); root.Controls.Add(split, 0, 1);
+        var model = ItemInspectorPages.ScrollPage(); var alignment = ItemInspectorPages.ScrollPage();
+        if (_prop is not null) pages.Add("Prop", BuildPropPage());
+        var materialHost = new Panel { Dock = DockStyle.Fill }; materialHost.Controls.Add(_materials); materialHost.Controls.Add(_nativeMaterials);
+        pages.Add("Model", model); pages.Add("Align", alignment); pages.Add("Materials", materialHost);
+        var import = ItemWorkshopUi.Button("Import OBJ…", true); import.Width = 305; import.Click += (_, _) => Import();
+        var remove = ItemWorkshopUi.Button("Use original model"); remove.Click += (_, _) => { _working = null; FillMaterials(); Queue(); };
+        model.Controls.Add(ItemWorkshopUi.Section("Model source", "Keep the original or import your own OBJ. Importing never changes the original's size or hides it.", import, _source, remove));
+        _original.Text = "Original model"; _custom.Text = "Your imported model";
+        model.Controls.Add(ItemWorkshopUi.Section("Compare models", "The original starts faded so the overlap is readable. Change its appearance in the viewer. Visibility choices stay as you set them.", _original, _custom));
+        model.Controls.Add(ItemWorkshopUi.Section("Camera ≠ model size", "Frame custom / original / both only changes the camera. Size · E changes the mesh that will be baked. Match original size is optional—not automatic."));
+        if (_prop is not null) AddPropAdvancedModelControls(model);
+        model.Controls.Add(ItemWorkshopUi.Section("Apply when ready", equipment ? "Collision and projectile behavior remain native. Save the parent editor and rebuild after applying." : "Attack timing, sockets and hitboxes remain native. Save the parent editor and rebuild after applying."));
+        alignment.Controls.Add(ItemWorkshopUi.Note("Mesh alignment\nDrag the 3D handles: W move · R rotate · E size. Switch World / Local axes or enable Snap in the viewer. Sizing is uniform.\nFields use Unreal centimeters and degrees. The gizmo follows the centered OBJ, not the hand grip; native attack sockets and collision are unchanged."));
+        foreach (var (name, min, max) in new[] { ("Uniform scale", .001m, 1000m), ("Position X (cm)", -10000m, 10000m), ("Position Y (cm)", -10000m, 10000m), ("Position Z (cm)", -10000m, 10000m), ("Pitch (°)", -360m, 360m), ("Yaw (°)", -360m, 360m), ("Roll (°)", -360m, 360m) })
         {
-            var row = new FlowLayoutPanel { Width = 340, Height = 36 };
-            row.Controls.Add(new Label { Text = name, Width = 90, Height = 28, TextAlign = ContentAlignment.MiddleLeft });
-            var n = new NumericUpDown { Minimum = min, Maximum = max, DecimalPlaces = 3, Increment = .1m, Value = Math.Clamp(value, min, max), Width = 225,
-                BackColor = Theme.PanelBg, ForeColor = Theme.OnDark, BorderStyle = BorderStyle.FixedSingle };
-            row.Controls.Add(n); panel.Controls.Add(row); _numbers.Add(n); n.ValueChanged += (_, _) => Queue();
+            var row = new TableLayoutPanel { Width = 330, Height = 44, ColumnCount = 2 }; row.ColumnStyles.Add(new(SizeType.Percent, 45)); row.ColumnStyles.Add(new(SizeType.Percent, 55));
+            row.Controls.Add(new Label { Text = name, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft });
+            var n = new NumericUpDown { Dock = DockStyle.Fill, Minimum = min, Maximum = max, DecimalPlaces = 3, Increment = .1m, BackColor = Theme.PanelBg, ForeColor = Theme.OnDark, Value = min > 0 ? 1 : 0 };
+            row.Controls.Add(n, 1, 0); alignment.Controls.Add(row); _numbers.Add(n); n.ValueChanged += (_, _) => { if (!_binding) Queue(); };
         }
-        Section("03  MATERIAL ASSIGNMENTS");
-        var gridPanel = new Panel { Width = 340, Height = 165 }; panel.Controls.Add(gridPanel); gridPanel.Controls.Add(_materials);
-        _materials.Columns.Add(new DataGridViewTextBoxColumn { Name = "Slot", HeaderText = "OBJ material", ReadOnly = true, Width = 110 });
-        _materials.Columns.Add(new DataGridViewTextBoxColumn { Name = "Package", HeaderText = "Material package", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
-        Theme.StyleGrid(_materials);
-        _materials.CellEndEdit += (_, _) => Queue();
-        _original.CheckedChanged += (_, _) => Queue(); _custom.CheckedChanged += (_, _) => Queue();
-        _save = Button("Validate bake && use model", async (_, _) => await SaveAsync());
-        Theme.StyleGoldButton(_save);
-        var cancel = Button("Cancel", (_, _) => { DialogResult = DialogResult.Cancel; Close(); });
-        var footer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Padding = new Padding(0, 14, 0, 0) };
-        footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110)); footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 260));
-        _status.AutoSize = false; _status.MaximumSize = Size.Empty; _status.Dock = DockStyle.Fill; _status.TextAlign = ContentAlignment.MiddleLeft; _status.ForeColor = Theme.OnDarkMuted;
-        cancel.Dock = DockStyle.Fill; _save.Dock = DockStyle.Fill;
-        footer.Controls.Add(_status, 0, 0); footer.Controls.Add(cancel, 1, 0); footer.Controls.Add(_save, 2, 0);
-        root.Controls.Add(footer, 0, 2); root.SetColumnSpan(footer, 2);
-        panel.Controls.Add(new Label { Text = (equipment ? "OBJ baking reuses a donor collision shell; it does not fit collision or retune projectiles. " : "Collision, hitboxes and damage stay native. ") + "Material preview uses slot colors, not final game shaders. " +
-            (equipment ? "Save the Equipment workshop, then rebuild your mod to package the model." : "Save the parent ability editor, then rebuild your suit to package the model."), AutoSize = true, MaximumSize = new Size(320, 0) });
-        FillMaterials();
+        var reset = ItemWorkshopUi.Button("Reset alignment"); alignment.Controls.Add(reset);
+        var units = new ThemedDropDown { Name = "ImportUnits", Width = 305, Height = 36 };
+        units.Items.AddRange(["Centimeters · scale 1", "Meters / Blender units · scale 100", "Millimeters · scale 0.1", "Inches · scale 2.54"]); units.SelectedIndex = 0;
+        var applyUnits = ItemWorkshopUi.Button("Set import scale"); applyUnits.Name = "ImportUnitsApply";
+        applyUnits.Click += (_, _) => { if (_working is not null && !_busy && units.SelectedIndex >= 0) _numbers[0].Value = new[] { 1m, 100m, .1m, 2.54m }[units.SelectedIndex]; };
+        alignment.Controls.Add(ItemWorkshopUi.Section("Import size help", "OBJ files do not store units. If a Blender model appears tiny, use meters as a starting scale. This button replaces your size multiplier; camera framing never does.", units, applyUnits));
+        reset.Click += (_, _) => { SetNumbers(new()); Queue(); }; SetNumbers(_working ?? new());
+        _materials.Changed += () => Queue(); _original.CheckedChanged += (_, _) => Queue(); _custom.CheckedChanged += (_, _) => Queue();
+        _save = ItemWorkshopUi.Button(_prop is not null ? "Use prop" : "Validate & use model", true); var cancel = ItemWorkshopUi.Button("Cancel"); cancel.DialogResult = DialogResult.Cancel;
+        if (_prop is not null) { _save.Name = "PropApplyButton"; AcceptButton = _save; }
+        root.Controls.Add(ItemWorkshopUi.Footer(_status, cancel, _save), 0, 2);
+        CancelButton = cancel; _save.Click += async (_, _) => await SaveAsync(); FillMaterials();
         _timer.Tick += async (_, _) => { _timer.Stop(); await RefreshAsync(); };
-        Shown += async (_, _) =>
-        {
-            _busy = true; _save.Enabled = false; _status.Text = "Loading native weapon…";
-            try { _folder = await Task.Run(() => WeaponModelService.CreateViewer(reference)); if (IsDisposed) return; await _viewer.ShowFolderAsync(_folder); _status.Text = "Import a model or adjust the saved model."; }
-            catch (Exception ex) { if (!IsDisposed) _status.Text = "Reference failed: " + ex.Message; }
-            finally { _busy = false; if (!IsDisposed) { _save.Enabled = _folder is not null; Queue(); } }
-        };
+        _viewer.ItemWorkshopTransformChanged += ApplyViewerTransform;
+        _nativeMaterials.Changed += () => { if (_prop is not null) { _prop.MaterialPackage = _nativeMaterials.Overrides.FirstOrDefault(m => m.Slot == 0)?.Package ?? ""; Queue(); } };
+        Shown += async (_, _) => { Theme.UseDarkTitleBar(this); await LoadReferenceAsync(); };
         FormClosing += (_, e) => { if (_busy) { e.Cancel = true; _status.Text = "Please wait for the current operation to finish."; } };
-        FormClosed += (_, _) => _timer.Dispose();
+        FormClosed += (_, _) => { _timer.Dispose(); _materialSession?.Dispose(); };
     }
-
+    private async Task LoadReferenceAsync()
+    {
+        if (_busy) return; _timer.Stop(); _busy = true; _save.Enabled = _inspector.Enabled = false; _status.Text = "Loading original model and materials…";
+        try
+        {
+            var reference = _referencePackage; var overrides = _prop is { MaterialPackage.Length: > 0 } ? new[] { new NativeHeldMaterialOverride { Slot = 0, Package = _prop.MaterialPackage } } : null;
+            var folder = await Task.Run(() => WeaponModelService.CreateViewer(reference));
+            _materialSession?.Dispose(); _folder = folder; _nativeSlots = WeaponModelService.NativeSlots(folder); _materialSession = new(folder);
+            _nativeMaterials.SetSlots(_nativeSlots.Where(s => s.Slot == 0), overrides ?? []);
+            await _viewer.ShowFolderAsync(folder); _status.Text = "Original stays at game size. Import an OBJ, then compare and align it.";
+        }
+        catch (Exception ex)
+        {
+            _folder = null; _materialSession?.Dispose(); _materialSession = null; _nativeSlots = [];
+            _status.Text = "Original preview unavailable; settings stay editable: " + ex.Message;
+            _viewer.ShowMessage(_status.Text); // Never display the previous donor as the newly chosen model.
+        }
+        finally { _busy = false; _save.Enabled = _prop is not null || (_folder is not null && _working is not null); _inspector.Enabled = true; FillMaterials(); Queue(); }
+    }
+    internal void ApplyViewerTransform(ItemWorkshopTransform change)
+    {
+        if (_saving || _working is null || change.Effect) return;
+        if (change.Revision == _revision)
+        {
+            _binding = true;
+            try { ItemWorkshopTransform.Bind(_numbers, new[] { change.Scale }.Concat(change.Offset).Concat(change.Rotation)); }
+            finally { _binding = false; }
+        }
+        // A rejected stale gesture also republishes the current fields to unlock/resync the viewer.
+        Queue();
+    }
+    private void SetNumbers(WeaponModelRecipe r)
+    {
+        _binding = true; var v = new[] { r.Scale, r.X, r.Y, r.Z, r.Pitch, r.Yaw, r.Roll };
+        for (var i = 0; i < v.Length; i++) _numbers[i].Value = float.IsFinite(v[i]) ? (decimal)Math.Clamp(v[i], (float)_numbers[i].Minimum, (float)_numbers[i].Maximum) : _numbers[i].Minimum;
+        _binding = false;
+    }
     private void Queue() { if (_busy) { _refreshPending = true; return; } if (_folder is not null) { _timer.Stop(); _timer.Start(); } }
     private void FillMaterials()
     {
-        _materials.Rows.Clear();
-        if (_working is not null) foreach (var m in _working.Materials) _materials.Rows.Add(m.SourceMaterialName, m.MaterialPath);
+        var slots = _working?.Materials ?? [];
+        _materials.SetSlots(slots.Select(m => (m.Slot, m.SourceMaterialName, m.MaterialPath)), slots.Select(m => new NativeHeldMaterialOverride { Slot = m.Slot, Package = m.MaterialPath }));
+        _materials.Visible = _prop is null || _working is not null; _nativeMaterials.Visible = _prop is not null && _working is null;
+        _source.Text = _working is null ? $"Original: {UnrealPathUtil.AssetName(_referencePackage)}" : $"Your model: {_working.SourceName}\nOriginal: {UnrealPathUtil.AssetName(_referencePackage)}\n{slots.Count} model surface(s) · check import units in Align";
+        _save.Text = _prop is not null ? (_working is null ? "Use prop" : "Validate & use prop") : "Validate & use model";
     }
     private void Import()
     {
@@ -99,54 +131,53 @@ public sealed class WeaponModelEditorForm : AdaptiveForm
         if (picker.ShowDialog(this) != DialogResult.OK) return;
         try
         {
-            if (new FileInfo(picker.FileName).Length > WeaponModelService.MaximumSourceLength) throw new InvalidDataException("OBJ must be smaller than 8 MB.");
-            var slots = StaticMeshObjProbeService.InspectObjMaterialSlots(picker.FileName);
-            var candidate = new WeaponModelRecipe { SourceName = Path.GetFileName(picker.FileName), ObjText = File.ReadAllText(picker.FileName),
-                Materials = slots.Select(s => new CustomStaticMeshMaterialSlot { Slot = s.Slot, SourceMaterialName = s.SourceMaterialName,
-                    StableSlotName = s.StableSlotName, MaterialPath = "/Game/Models/Props/Materials/Mi_LEGO_Bake_Katana" }).ToList() };
-            _working = candidate; FillMaterials(); Queue();
+            var defaults = _nativeSlots.Select(s => (s.Slot, s.Name, Package: _nativeMaterials.Overrides.FirstOrDefault(m => m.Slot == s.Slot)?.Package ?? s.Package)).ToArray();
+            _working = WeaponModelService.ImportObj(picker.FileName, _working is null ? null : ReadRecipe(), defaults);
+            if (_prop is not null)
+            {
+                _prop.MaterialPackage = ""; // Imported slots now own their material assignments.
+                _nativeMaterials.SetSlots(_nativeSlots.Where(s => s.Slot == 0), []);
+            }
+            FillMaterials(); SetNumbers(_working); _inspector.Select("Align"); Queue();
         }
         catch (Exception ex) { Dialog.Info(this, "Model could not be imported", ex.Message); }
     }
-    private WeaponModelRecipe ReadRecipe()
+    internal WeaponModelRecipe ReadRecipe()
     {
-        if (_working is null) throw new InvalidDataException("Import an OBJ first.");
-        _materials.EndEdit(); var r = _working.Clone();
-        var v = _numbers.Select(n => (float)n.Value).ToArray();
+        if (_working is null) throw new InvalidOperationException("Import an OBJ first.");
+        var r = _working.Clone(); var v = _numbers.Select(n => (float)n.Value).ToArray();
         r.Scale = v[0]; r.X = v[1]; r.Y = v[2]; r.Z = v[3]; r.Pitch = v[4]; r.Yaw = v[5]; r.Roll = v[6];
-        for (var i = 0; i < r.Materials.Count; i++) r.Materials[i].MaterialPath = _materials.Rows[i].Cells[1].Value?.ToString()?.Trim() ?? "";
+        var assignments = _materials.Overrides.ToDictionary(m => m.Slot, m => m.Package);
+        foreach (var m in r.Materials) m.MaterialPath = assignments.GetValueOrDefault(m.Slot) ?? "";
         WeaponModelService.Validate(r); return r;
     }
     private async Task RefreshAsync()
     {
-        if (_busy || _folder is null) return;
-        _busy = true;
+        if (_busy || _folder is null) return; _busy = true; _save.Enabled = false;
         try
         {
-            if (_working is null)
-                AtomicFileUtil.WriteAllText(Path.Combine(_folder, "weapon.json"), System.Text.Json.JsonSerializer.Serialize(new { original = _original.Checked, custom = _custom.Checked, revision = 0 }));
-            else
-            {
-                var r = ReadRecipe(); var original = _original.Checked; var custom = _custom.Checked; var revision = ++_revision;
-                await Task.Run(() => WeaponModelService.Preview(r, _folder, original, custom, revision));
-                _status.Text = $"{r.SourceName} · {r.Materials.Count} material slots · preview updated";
-            }
+            var original = _original.Checked; var custom = _custom.Checked; var revision = ++_revision;
+            if (_working is null && _prop is not null && _materialSession is not null) await Task.Run(() => WeaponModelService.PreviewNative(_folder, _nativeMaterials.Overrides, original, revision, _materialSession));
+            else if (_working is null) AtomicFileUtil.WriteAllText(Path.Combine(_folder, "weapon.json"), System.Text.Json.JsonSerializer.Serialize(new { original, custom, revision }));
+            else { var r = ReadRecipe(); await Task.Run(() => WeaponModelService.Preview(r, _folder, original, custom, revision, _materialSession)); _status.Text = $"{r.SourceName} · materials and alignment updated"; }
         }
-        catch (Exception ex) { _status.Text = ex.Message; }
-        finally { _busy = false; if (_refreshPending) { _refreshPending = false; Queue(); } }
+        catch (Exception ex) { _status.Text = "Preview: " + ex.Message; await _viewer.NotifyItemWorkshopPreviewFailedAsync(_status.Text); }
+        finally { _busy = false; _save.Enabled = _working is not null || _prop is not null; if (_refreshPending) { _refreshPending = false; Queue(); } }
     }
     private async Task SaveAsync()
     {
-        if (_busy || _folder is null) return;
-        _timer.Stop();
+        if (_busy || (_folder is null && _prop is null)) return; _timer.Stop();
         try
         {
-            var r = ReadRecipe(); _busy = true; _save.Enabled = false; _status.Text = "Validating cooked mesh…";
-            var content = Path.Combine(_folder, "Bake", Guid.NewGuid().ToString("N"));
-            await Task.Run(() => WeaponModelService.Bake(r, AppSettings.Current.EffectiveExtractedContentRoot(), AppSettings.Current.EffectiveUsmapPath()!, content, "/Game/Mods/WeaponEditorValidation/SM_Weapon"));
-            Result = r; _busy = false; DialogResult = DialogResult.OK; Close();
+            var r = _working is null ? null : ReadRecipe();
+            var prop = _prop is null ? null : ReadProp(r); if (prop is not null) { var errors = HeldItemService.Validate([prop]); if (errors.Count > 0) throw new InvalidDataException(string.Join("\n", errors)); }
+            if (r is null && prop is null) throw new InvalidOperationException("Import a model first.");
+            _busy = _saving = true; _save.Enabled = _inspector.Enabled = false; _status.Text = "Validating model and settings…";
+            await _viewer.SetItemWorkshopEditingAsync(false);
+            if (r is not null) { var content = Path.Combine(_folder ?? Path.GetTempPath(), "Batcomputer-ItemBake", Guid.NewGuid().ToString("N")); await Task.Run(() => WeaponModelService.Bake(r, AppSettings.Current.EffectiveExtractedContentRoot(), AppSettings.Current.EffectiveUsmapPath()!, content, "/Game/Mods/WeaponEditorValidation/SM_Weapon")); }
+            Result = r; if (prop is not null) PropResult = prop; _busy = false; DialogResult = DialogResult.OK; Close();
         }
         catch (Exception ex) { _status.Text = "Bake failed: " + ex.Message; }
-        finally { _busy = false; if (!IsDisposed) _save.Enabled = true; }
+        finally { _busy = _saving = false; if (!IsDisposed) { _save.Enabled = _inspector.Enabled = true; await _viewer.SetItemWorkshopEditingAsync(true); if (_refreshPending) { _refreshPending = false; Queue(); } } }
     }
 }

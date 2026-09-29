@@ -6,6 +6,7 @@ internal static class AbilityLoadoutRegressionChecks
     public static void Run(List<string> failures, TextWriter output)
     {
         HeldItemRegressionChecks.Run(failures, output);
+        NativeHeldItemRegressionChecks.Run(failures, output);
         PlayerMeleeAdapterRegressionChecks.Run(failures, output);
         var presentedSword = new AbilityLoadoutProfile { FightingStyleId = SwordCombatService.StyleId,
             SwordCombat = new() { CustomModel = new() { SourceName = "Sword.obj" } } };

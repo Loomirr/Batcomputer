@@ -44,7 +44,7 @@ window.BatcomputerCharacterWorkshopShell = function ({ THREE, scene, root, camer
     ['materials', 'Surfaces', ['partuv', 'matedit'], 'Inspect maps, UV sets and face layers. These controls do not edit saved materials.'],
     ['face', 'Face', ['exprwrap', 'facelayers'], 'Preview facial expressions and isolate printed layers; these controls do not change game animations or saved materials.'],
     ['animations', 'Motion', ['cw-animations'], 'Search this character’s base-game animation family. Playback and scrubbing do not change the suit or game.'],
-    ['creator', 'Create', ['cw-animation-creator'], 'Author native-body bone keyframes on a local draft timeline. Save a JSON draft; game animation cooking is not available yet.'],
+    ['creator', 'Create', ['cw-animation-creator'], 'Preview and edit your native-body drafts. Save to Your animations, then cook and assign a character slot from Animations.'],
     ['scene', 'Scene', ['redbrick'], 'Lighting and Red Brick previews do not change your mod.']]) {
     tabButtons.set(id, button(tabs, title, () => setTab(id)));
     const section = el('section', host); sections.set(id, section); el('p', section, description).className = 'cw-note';
@@ -108,7 +108,7 @@ window.BatcomputerCharacterWorkshopShell = function ({ THREE, scene, root, camer
   window.addEventListener('pagehide', () => { observer.disconnect(); grid.geometry.dispose(); grid.material.dispose(); }, { once: true });
   if (window.innerWidth < 700) shell.classList.add('cw-hide-inspector');
   setTab('placement'); resize();
-  return { resize, setInspector,
+  return { resize, setInspector, setTab,
     reportError(message) { status.textContent = 'Preview issue: ' + message + ' · see Diagnostics'; status.classList.add('cw-warning'); },
     select(part) {
       rows.forEach((row, id) => { row.classList.toggle('active', id === part?.id); row.setAttribute('aria-pressed', String(id === part?.id)); });

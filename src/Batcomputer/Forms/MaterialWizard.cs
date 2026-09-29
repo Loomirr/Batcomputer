@@ -190,40 +190,44 @@ public sealed partial class MaterialWizard : AdaptiveForm
             BackColor = Theme.CardBg, BorderColor = Theme.LineSoft, CornerRadius = Theme.RadiusSm
         };
         textureCard.Controls.Add(MakeFieldLabel("GENERATED TEXTURE", 14, 13, innerWidth - 28));
-        _generatedTextureCombo.SetBounds(14, 31, 300, 34);
-        _generatedTextureCombo.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        var textureTools = new TableLayoutPanel { Name = "TextureAssignmentTools", Left = 14, Top = 31, Width = innerWidth - 28, Height = 36,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right, ColumnCount = 5, RowCount = 1, Margin = Padding.Empty };
+        textureTools.ColumnStyles.Add(new(SizeType.Percent, 100));
+        textureTools.RowStyles.Add(new(SizeType.Percent, 100));
+        for (var i = 0; i < 4; i++) textureTools.ColumnStyles.Add(new(SizeType.AutoSize));
+        _generatedTextureCombo.Dock = DockStyle.Fill;
         _generatedTextureCombo.Placeholder = "Select generated texture";
         PopulateGeneratedTextureCombo();
-        textureCard.Controls.Add(_generatedTextureCombo);
+        textureTools.Controls.Add(_generatedTextureCombo, 0, 0); textureCard.Controls.Add(textureTools);
         var useTexture = new Button
         {
-            Text = "Use selected", Left = 322, Top = 31, Width = 130, Height = 34,
-            Anchor = AnchorStyles.Top | AnchorStyles.Right
+            Text = "Use selected", AutoSize = true, MinimumSize = new(90, 34), Dock = DockStyle.Fill
         };
         Theme.StyleDarkButton(useTexture);
         useTexture.Click += (_, _) => UseGeneratedTextureForSelectedParam();
-        textureCard.Controls.Add(useTexture);
+        textureTools.Controls.Add(useTexture, 1, 0);
+        var dummyTexture = new Button { Name = "SetDummyTexture", Text = "Set dummy", AutoSize = true, MinimumSize = new(90, 34), Dock = DockStyle.Fill,
+            AccessibleDescription = "Assigns a compatible shipped placeholder texture. Unlike Set None, this keeps a real texture reference." };
+        Theme.StyleDarkButton(dummyTexture);
+        dummyTexture.Click += (_, _) => SetSelectedTextureDummy(); textureTools.Controls.Add(dummyTexture, 2, 0);
+        _toolTips.SetToolTip(dummyTexture, "Select a texture row. Uses a type-correct game dummy for supported EoM/LEGOface inputs. Blank = inherit; Set None = null.");
         var clearTexture = new Button
         {
             Text = "Set None",
-            Left = 460,
-            Top = 31,
-            Width = 116,
-            Height = 34,
-            Anchor = AnchorStyles.Top | AnchorStyles.Right,
+            AutoSize = true, MinimumSize = new(80, 34), Dock = DockStyle.Fill,
             AccessibleDescription = "Explicitly writes a null texture reference for the selected texture parameter."
         };
         Theme.StyleDarkButton(clearTexture);
         clearTexture.Click += (_, _) => ClearSelectedTextureParam();
-        textureCard.Controls.Add(clearTexture);
+        textureTools.Controls.Add(clearTexture, 3, 0);
         var copyTexture = new Button
         {
-            Text = "Copy path", Left = 584, Top = 31, Width = 138, Height = 34,
-            Anchor = AnchorStyles.Top | AnchorStyles.Right
+            Text = "Copy path", AutoSize = true, MinimumSize = new(85, 34), Dock = DockStyle.Fill
         };
         Theme.StyleDarkButton(copyTexture);
         copyTexture.Click += (_, _) => CopySelectedGeneratedTexturePath();
-        textureCard.Controls.Add(copyTexture);
+        textureTools.Controls.Add(copyTexture, 4, 0);
+        foreach (Control control in textureTools.Controls) control.Margin = new(3, 0, 3, 0);
         textureCard.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
 
         _faceHelpersCard = BuildFaceHelpersCard(padding, innerWidth);
@@ -1492,6 +1496,7 @@ public sealed partial class MaterialWizard : AdaptiveForm
 
         return effective
             .Where(pair => !string.IsNullOrWhiteSpace(pair.Value))
+            .Where(pair => !MaterialDummyTextureService.IsFlatNormal(pair.Value))
             .GroupBy(pair => pair.Value, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.Select(pair => pair.Key)
                 .Distinct(StringComparer.OrdinalIgnoreCase)

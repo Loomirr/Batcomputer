@@ -205,6 +205,20 @@ public static class CharacterAnimationGraphRegressionChecks
             failures,
             output);
 
+        var browserGraph = new CharacterAnimationSnapshot("test", "Test", "Test", "", "",
+            [new("set", 0, CharacterAnimationSetKind.Montage, "Traversal", montageSlots[0].SetPackage,
+                montageSlots[0].SetPackage, false, "", overriddenSlots)], [], []);
+        static IEnumerable<AnimationExplorerNode> Descendants(IEnumerable<AnimationExplorerNode> nodes) =>
+            nodes.SelectMany(node => new[] { node }.Concat(Descendants(node.Children)));
+        var simple = AnimationExplorerSnapshotBuilder.Build(new NativeSuitProject(), new AnimLibrary(), browserGraph, simplified: true);
+        var simpleTargets = Descendants(simple.Roots).Where(n => n.CharacterTarget is not null).Select(n => n.CharacterTarget!.TargetId).ToArray();
+        Check(simpleTargets.Order().SequenceEqual(overriddenSlots.SelectMany(s => s.Targets).Select(t => t.TargetId).Order()),
+            "simple animation tree preserves every exact target including reused assets and contexts", failures, output);
+        var changed = AnimationExplorerSnapshotBuilder.Build(new NativeSuitProject(), new AnimLibrary(), browserGraph, simplified: true, filter: "changed");
+        Check(Descendants(changed.Roots).Count(n => n.CharacterTarget is not null) == 1 &&
+              Descendants(changed.Roots).Where(n => n.CharacterTarget is not null).All(n => n.CharacterTarget!.IsOverridden),
+            "changed animation filter contains only assigned replacements", failures, output);
+
         var shiftedSavedOverride = new AnimationSlotOverride
         {
             Kind = "Montage",

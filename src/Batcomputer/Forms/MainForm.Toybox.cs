@@ -1826,7 +1826,7 @@ public sealed partial class MainForm
                     break;
                 case "Animations":
                     _toyboxTypeCombo.Items.Add("Character animations");
-                    _toyboxTypeCombo.Items.Add("Imported animation library");
+                    _toyboxTypeCombo.Items.Add("Your animations");
                     _toyboxTypeCombo.Items.Add("Advanced: whole-set swaps");
                     _toyboxTypeCombo.Items.Add("Reference: montage sets");
                     _toyboxTypeCombo.Items.Add("Reference: layer sets");

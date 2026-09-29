@@ -75,10 +75,28 @@ internal static class HeldItemService
     internal static bool ValidPackage(string path) => !string.IsNullOrWhiteSpace(path) && path.StartsWith('/') &&
         path.Split('/').Skip(1).All(p => p.Length > 0 && p.All(c => char.IsLetterOrDigit(c) || c is '_' or '-')) &&
         ExtractedPackagePathService.IsContentPackagePath(path);
+    internal static IReadOnlyList<HeldItemHand> Hands(HeldItemHand hand) => hand switch {
+        HeldItemHand.Right => [HeldItemHand.Right],
+        HeldItemHand.Left => [HeldItemHand.Left],
+        HeldItemHand.Both => [HeldItemHand.Right, HeldItemHand.Left],
+        _ => []
+    };
+    internal static string HandLabel(HeldItemHand hand) => hand switch {
+        HeldItemHand.Right => "Right hand", HeldItemHand.Left => "Left hand", HeldItemHand.Both => "Both hands", _ => "Invalid hand"
+    };
+    internal static string SlotPriority(HeldItemSettings item) => item.PreferOverAnimationEmptyHands ? "Epic" : "Medium";
+    internal static PropertyData[] SelectManagedHands(PropertyData[] nativeItems, HeldItemHand hand)
+    {
+        var hands = Hands(hand);
+        if (nativeItems.Length != 2 || hands.Count == 0)
+            throw new InvalidDataException("Native managed hand slots changed or hand selection is invalid; refresh assets and update Batcomputer.");
+        return hands.Select(h => nativeItems[(int)h]).ToArray();
+    }
     internal static IReadOnlyList<string> Validate(IReadOnlyList<HeldItemSettings> items)
     {
         var errors = new List<string>();
-        if (items.Count > 2 || items.GroupBy(i => i.Hand).Any(g => g.Count() > 1)) errors.Add("Use at most one independent held item per hand.");
+        if (items.Count > 2 || items.SelectMany(i => Hands(i.Hand)).GroupBy(h => h).Any(g => g.Count() > 1))
+            errors.Add("Use at most one independent held item per hand. A Both hands item occupies both slots.");
         if (items.GroupBy(i => i.Id, StringComparer.OrdinalIgnoreCase).Any(g => g.Count() > 1)) errors.Add("Held-item IDs must be unique.");
         foreach (var item in items) {
             errors.AddRange(HeldItemEffectService.Validate(item.Effects));
@@ -90,7 +108,7 @@ internal static class HeldItemService
         }
         return errors;
     }
-    internal static bool SupportsSword(HeldItemSettings item) => item.Hand == HeldItemHand.Right &&
+    internal static bool SupportsSword(HeldItemSettings item) => Hands(item.Hand).Contains(HeldItemHand.Right) &&
         item.Visibility != HeldWeaponVisibility.OutsideCombat && Templates.Any(t => t.Id == item.TemplateId && t.Melee);
 
     internal static void Generate(AbilityLoadoutProfile profile, string extracted, string staged, string mod,
@@ -120,7 +138,15 @@ internal static class HeldItemService
                 });
                 c.Write(weapon, actorPackage);
             }
-            if (!string.IsNullOrWhiteSpace(item.MaterialPackage)) {
+            if (item.CustomModel is { } customModel) {
+                // The OBJ writer retains the verified donor's material references. Apply the
+                // workshop's assignments on the component, as native-item/equipment editors do;
+                // otherwise a valid custom mesh silently renders with WorldGridMaterial.
+                NativeHeldItemService.SetMaterials(weapon, weaponMesh, customModel.Materials
+                    .OrderBy(m => m.Slot).Select(m => new NativeHeldMaterialOverride { Slot = m.Slot, Package = m.MaterialPath }).ToList(),
+                    c, staged, replaceAll: true);
+            }
+            else if (!string.IsNullOrWhiteSpace(item.MaterialPackage)) {
                 var material = c.Clone(item.MaterialPackage, root + "/MI_HeldItem");
                 var type = material.Exports.FirstOrDefault(e => e.GetExportClassType()?.ToString() is "Material" or "MaterialInstanceConstant")?.GetExportClassType()?.ToString();
                 if (type is null) throw new InvalidDataException("Held-item material is not a Material/MaterialInstanceConstant.");
@@ -134,10 +160,18 @@ internal static class HeldItemService
             var held = c.Clone("/Game/Characters/Abilities/LAMManagedAbilities/GA_Item_Batons", root + "/GA_HeldItem");
             var cdo = held.Exports.OfType<NormalExport>().Single(e => e.ObjectName.ToString().StartsWith("Default__"));
             var managed = cdo.Data.OfType<ArrayPropertyData>().Single(p => p.Name.ToString() == "ManagedItems");
-            if (managed.Value.Length != 2) throw new InvalidDataException("Native managed hand slots changed; refresh assets and update Batcomputer.");
-            managed.Value = [managed.Value[(int)item.Hand]];
+            managed.Value = SelectManagedHands(managed.Value, item.Hand);
             var actor = SwordCombatService.Obj(held, actorPackage, actorName + "_C", "/Script/Engine", "BlueprintGeneratedClass");
-            ((StructPropertyData)managed.Value[0]).Value.OfType<ObjectPropertyData>().Single(p => p.Name.ToString() == "ItemActorClass").Value = actor;
+            foreach (var entry in managed.Value.Cast<StructPropertyData>())
+            {
+                entry.Value.OfType<ObjectPropertyData>().Single(p => p.Name.ToString() == "ItemActorClass").Value = actor;
+                var request = (NormalExport)entry.Value.OfType<ObjectPropertyData>().Single(p => p.Name.ToString() == "SlotRequestData").Value.ToExport(held);
+                var location = (NormalExport)request.Data.OfType<ObjectPropertyData>().Single(p => p.Name.ToString() == "PrimarySlotData").Value.ToExport(held);
+                // Do not raise global native priorities or remove empty-hand abilities. This affects
+                // only this suit-local prop, only when its saved recipe explicitly opts in.
+                if (item.PreferOverAnimationEmptyHands)
+                    location.Data.OfType<EnumPropertyData>().Single(p => p.Name.ToString() == "Priority").Value = new FName(held, SlotPriority(item));
+            }
             cdo.CreateBeforeSerializationDependencies.Add(actor);
             cdo.Data.RemoveAll(p => p.Name.ToString() is "GetOutAnim" or "PutAwayAnim" or "ActivationOwnedTags");
             // A decorative prop must not set baton pose tags or switch the character's animation context.
@@ -164,7 +198,7 @@ internal static class HeldItemService
             grant.Value.OfType<StructPropertyData>().Single(p => p.Name.ToString() == "InputTag").Value.OfType<NamePropertyData>().Single().Value = new FName(set, "None");
             data.CreateBeforeSerializationDependencies.Add(ga); c.Write(set, SetPackage(mod, item));
             ordered.Add(SetPackage(mod, item));
-            log.Add($"Held item: {item.Name}, {item.Hand} hand, {item.Visibility}; independent of fighting style.");
+            log.Add($"Held item: {item.Name}, {HandLabel(item.Hand)}, {item.Visibility}; {SlotPriority(item)} hand priority; independent of fighting style.");
         }
         if (items.Count > 0) { var written = mutation.SetDprdAbilitySets(dprdPath, ordered); if (!written.Success) throw new InvalidDataException(written.Error); }
         if (!Verify(profile, extracted, staged, mod, mappings, out var error)) throw new InvalidDataException(error);
@@ -182,22 +216,32 @@ internal static class HeldItemService
                 var held = c.ReadStaged(root + "/GA_HeldItem");
                 var cdo = held.Exports.OfType<NormalExport>().Single(e => e.ObjectName.ToString().StartsWith("Default__"));
                 var managed = cdo.Data.OfType<ArrayPropertyData>().Single(p => p.Name.ToString() == "ManagedItems");
-                if (managed.Value.Length != 1) throw new InvalidDataException("Expected one managed item per grant.");
-                var entry = (StructPropertyData)managed.Value[0];
-                if (SwordCombatService.Package(held, entry.Value.OfType<ObjectPropertyData>().Single(p => p.Name.ToString() == "ItemActorClass").Value) != ActorPackage(mod, item)) throw new InvalidDataException("Wrong held actor.");
-                var request = (NormalExport)entry.Value.OfType<ObjectPropertyData>().Single(p => p.Name.ToString() == "SlotRequestData").Value.ToExport(held);
-                var location = (NormalExport)request.Data.OfType<ObjectPropertyData>().Single(p => p.Name.ToString() == "PrimarySlotData").Value.ToExport(held);
-                var tag = location.Data.OfType<StructPropertyData>().Single(p => p.Name.ToString() == "SlotTag").Value.OfType<NamePropertyData>().Single().Value.ToString();
-                if (tag != (item.Hand == HeldItemHand.Right ? "LAM.RightHand" : "LAM.LeftHand")) throw new InvalidDataException("Wrong held hand.");
+                var hands = Hands(item.Hand);
+                if (managed.Value.Length != hands.Count) throw new InvalidDataException("Wrong number of managed hand slots.");
+                for (var index = 0; index < hands.Count; index++) {
+                    var entry = (StructPropertyData)managed.Value[index];
+                    if (SwordCombatService.Package(held, entry.Value.OfType<ObjectPropertyData>().Single(p => p.Name.ToString() == "ItemActorClass").Value) != ActorPackage(mod, item)) throw new InvalidDataException("Wrong held actor.");
+                    var request = (NormalExport)entry.Value.OfType<ObjectPropertyData>().Single(p => p.Name.ToString() == "SlotRequestData").Value.ToExport(held);
+                    var location = (NormalExport)request.Data.OfType<ObjectPropertyData>().Single(p => p.Name.ToString() == "PrimarySlotData").Value.ToExport(held);
+                    var tag = location.Data.OfType<StructPropertyData>().Single(p => p.Name.ToString() == "SlotTag").Value.OfType<NamePropertyData>().Single().Value.ToString();
+                    if (tag != (hands[index] == HeldItemHand.Right ? "LAM.RightHand" : "LAM.LeftHand")) throw new InvalidDataException("Wrong held hand.");
+                    if (location.Data.OfType<EnumPropertyData>().Single(p => p.Name.ToString() == "Priority").Value.ToString() != SlotPriority(item))
+                        throw new InvalidDataException("Held prop hand priority does not match its saved opt-in setting.");
+                    if (request.Data.OfType<StructPropertyData>().Where(p => p.Name.ToString() == "TagsToPushToOwnerWhenAttached")
+                        .SelectMany(p => p.Value.OfType<GameplayTagContainerPropertyData>()).SelectMany(p => p.Value)
+                        .Any(t => t.ToString() == "Animation.Equipment.Batons"))
+                        throw new InvalidDataException("Held prop changes baton animation context.");
+                }
                 string[] Tags(string prop) => cdo.Data.OfType<StructPropertyData>().FirstOrDefault(p => p.Name.ToString() == prop)?.Value.OfType<GameplayTagContainerPropertyData>().Single().Value.Select(t => t.ToString()).ToArray() ?? [];
                 if (!Tags("ASCOwnedTagsToGetOutItem").SequenceEqual(RequestTags(item.Visibility, RequestTag(mod, item))) || !Tags("ASCOwnedTagsToBlockItem").SequenceEqual(BlockTags(item.Visibility)) ||
                     !Tags("ActivationOwnedTags").SequenceEqual(Persistent(item.Visibility) ? RequestTags(item.Visibility, RequestTag(mod, item)) : [])) throw new InvalidDataException("Held-item visibility mismatch.");
-                if (Tags("AbilityTags").Contains("Animation.Equipment.Batons") || request.Data.OfType<StructPropertyData>().Where(p => p.Name.ToString() == "TagsToPushToOwnerWhenAttached").SelectMany(p => p.Value.OfType<GameplayTagContainerPropertyData>()).SelectMany(p => p.Value).Any(t => t.ToString() == "Animation.Equipment.Batons")) throw new InvalidDataException("Held prop changes baton animation context.");
+                if (Tags("AbilityTags").Contains("Animation.Equipment.Batons")) throw new InvalidDataException("Held prop changes baton animation context.");
                 var template = Templates.Single(t => t.Id == item.TemplateId);
                 var actor = c.ReadStaged(ActorPackage(mod, item)); var mesh = actor.Exports.OfType<NormalExport>().Single(e => e.ObjectName.ToString() == template.MeshComponent);
                 HeldItemEffectService.Verify(actor, item);
                 if (SwordCombatService.Package(actor, mesh.Data.OfType<ObjectPropertyData>().Single(p => p.Name.ToString() == "StaticMesh").Value) != root + "/SM_HeldItem") throw new InvalidDataException("Wrong held mesh.");
                 if (!template.Melee) VerifyPassiveActor(actor, mesh);
+                if (item.CustomModel is { } customModel) VerifyCustomModelMaterials(actor, mesh, customModel);
                 if (template.PrimitiveData is { } expected && !(mesh.Data.OfType<StructPropertyData>().Single(p => p.Name.ToString() == "CustomPrimitiveData").Value
                     .OfType<ArrayPropertyData>().Single().Value.OfType<FloatPropertyData>().Select(p => p.Value).SequenceEqual(expected))) throw new InvalidDataException("Held prop lost native material primitive data.");
                 c.ReadStaged(root + "/SM_HeldItem");
@@ -217,5 +261,17 @@ internal static class HeldItemService
         var collision = mesh.Data.OfType<StructPropertyData>().Single(p => p.Name.ToString() == "BodyInstance");
         if (collision.Value.OfType<NamePropertyData>().Single(p => p.Name.ToString() == "CollisionProfileName").Value.ToString() != "NoCollision")
             throw new InvalidDataException("Passive held prop must preserve NoCollision.");
+    }
+
+    internal static void VerifyCustomModelMaterials(UAsset actor, NormalExport component, WeaponModelRecipe recipe)
+    {
+        var expected = recipe.Materials.OrderBy(m => m.Slot).ToArray();
+        var overrides = component.Data.OfType<ArrayPropertyData>().SingleOrDefault(p => p.Name.ToString() == "OverrideMaterials");
+        if (overrides?.Value.Length != expected.Length)
+            throw new InvalidDataException("Custom held-item material assignments were not written to its component.");
+        for (var slot = 0; slot < expected.Length; slot++)
+            if (overrides.Value[slot] is not ObjectPropertyData property ||
+                !string.Equals(SwordCombatService.Package(actor, property.Value), UnrealPathUtil.NormalizePackagePath(expected[slot].MaterialPath), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException($"Custom held-item material slot {slot} does not match the workshop assignment.");
     }
 }

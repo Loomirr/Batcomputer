@@ -504,16 +504,20 @@ public sealed class StaticMeshObjProbeService
         {
             var section = mesh.Sections[sectionIndex];
             var indexOffset = checked((int)binary.Length);
-            WriteIndices(binary, section.Indices);
+            // ParseObj supplies reverse-winding twins for the cooked Unreal shell. glTF's
+            // doubleSided material already draws the back, so exporting those twins as well
+            // makes two coplanar surfaces compete with opposite lighting in every preview.
+            var previewIndices = section.Indices.Where((_, index) => index % 6 < 3).ToArray();
+            WriteIndices(binary, previewIndices);
             var indexLength = checked((int)binary.Length - indexOffset);
             Align4(binary);
 
             var bufferView = bufferViews.Count;
             bufferViews.Add(new { buffer = 0, byteOffset = indexOffset, byteLength = indexLength, target = 34963 });
             var accessor = accessors.Count;
-            accessors.Add(new { bufferView, componentType = 5123, count = section.Indices.Count, type = "SCALAR" });
+            accessors.Add(new { bufferView, componentType = 5123, count = previewIndices.Length, type = "SCALAR" });
             var material = materials.Count;
-            materials.Add(new { name = section.StableSlotName });
+            materials.Add(new { name = section.StableSlotName, doubleSided = true });
             primitives.Add(new
             {
                 attributes = new Dictionary<string, int>
@@ -1551,7 +1555,10 @@ public sealed class StaticMeshObjProbeService
             var primitives = root.GetProperty("meshes")[0].GetProperty("primitives");
             return materials.GetArrayLength() == 2 && primitives.GetArrayLength() == 2 &&
                    materials[0].GetProperty("name").GetString() == "BC_SLOT_000_Metal" &&
-                   materials[1].GetProperty("name").GetString() == "BC_SLOT_001_Black_Plastic";
+                   materials[1].GetProperty("name").GetString() == "BC_SLOT_001_Black_Plastic" &&
+                   materials.EnumerateArray().All(material => material.GetProperty("doubleSided").GetBoolean()) &&
+                   root.GetProperty("accessors")[primitives[0].GetProperty("indices").GetInt32()].GetProperty("count").GetInt32() == 3 &&
+                   root.GetProperty("accessors")[primitives[1].GetProperty("indices").GetInt32()].GetProperty("count").GetInt32() == 6;
         }
         catch
         {

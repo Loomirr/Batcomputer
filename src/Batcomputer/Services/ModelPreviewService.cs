@@ -53,7 +53,7 @@ public static class ModelPreviewService
         PreviewDiagnosticSink.Value?.Invoke(message);
     }
 
-    private const string GameContentFilePrefix = "LEGOBatmanLotDK/Content/";
+    private const string GameContentFilePrefix = PreviewMountPathService.GameContentFilePrefix;
 
     internal static DefaultFileProvider MakeProvider(
         string paksDir,
@@ -78,6 +78,7 @@ public static class ModelPreviewService
         provider.Initialize();
         provider.SubmitKey(new FGuid(), new FAesKey(ZeroAes));
         AddLooseContentOverlays(provider, looseContentRoots);
+        PreviewMountPathService.RegisterGameFeatureMounts(provider);
         return provider;
     }
 
@@ -102,10 +103,11 @@ public static class ModelPreviewService
                 var directory = new DirectoryInfo(root);
                 bool canonical = directory.Name.Equals("Content", StringComparison.OrdinalIgnoreCase) &&
                     directory.Parent?.Name.Equals("LEGOBatmanLotDK", StringComparison.OrdinalIgnoreCase) == true;
+                var versions = new VersionContainer(EGame.GAME_UE5_6);
                 using var loose = new DefaultFileProvider(
                     canonical ? directory.Parent!.Parent!.FullName : root,
                     SearchOption.AllDirectories,
-                    new VersionContainer(EGame.GAME_UE5_6),
+                    versions,
                     StringComparer.OrdinalIgnoreCase);
                 loose.Initialize();
                 if (loose.LooseFileCount == 0)
@@ -113,10 +115,7 @@ public static class ModelPreviewService
                     continue;
                 }
 
-                var files = loose.Files.Where(pair => !canonical || pair.Key.StartsWith(GameContentFilePrefix, StringComparison.OrdinalIgnoreCase)).ToDictionary(
-                    pair => canonical ? pair.Key : GameContentFilePrefix + pair.Key.TrimStart('/', '\\').Replace('\\', '/'),
-                    pair => pair.Value,
-                    StringComparer.OrdinalIgnoreCase);
+                var files = PreviewMountPathService.LooseContentFiles(directory, loose.Files, versions);
                 provider.Files.AddFiles(files, long.MaxValue - index);
                 Console.WriteLine($"  preview overlay: {loose.LooseFileCount} asset(s) from {root}");
             }
@@ -158,6 +157,48 @@ public static class ModelPreviewService
     /// <summary>Convenience for a single mesh.</summary>
     public static string BuildPreview(string paksDir, string usmapPath, string objectPath)
         => BuildPreview(paksDir, usmapPath, new[] { objectPath });
+
+    internal static string BuildItemPreview(string objectPath, string? outputDirectory)
+    {
+        var settings = AppSettings.Current;
+        using var provider = MakeProvider(settings.EffectiveGamePaksRoot()!, settings.EffectiveUsmapPath()!,
+            [settings.EffectiveExportContentRoot(), new ToolMaterialLibraryService(settings.EffectiveProjectRoot()).ContentRoot]);
+        return BuildPreviewCore(provider, [new PreviewPart(objectPath, AttachToHead: false)], outputDirectory: outputDirectory);
+    }
+
+    /// <summary>One isolated item editor's material resolver. Reuses character shading and caches
+    /// exports so changing alignment never remounts the game or re-decodes textures.</summary>
+    internal sealed class ItemMaterialPreviewSession(string folder) : IDisposable
+    {
+        private DefaultFileProvider? _provider;
+        private readonly Dictionary<string, JsonElement> _cache = new(StringComparer.OrdinalIgnoreCase);
+        private IReadOnlyList<string>? _roots;
+        internal JsonElement Resolve(string package)
+        {
+            package = UnrealPathUtil.NormalizePackagePath(package);
+            if (_cache.TryGetValue(package, out var cached)) return cached;
+            var settings = AppSettings.Current;
+            _roots ??= new[] { settings.EffectiveExportContentRoot(), new ToolMaterialLibraryService(settings.EffectiveProjectRoot()).ContentRoot };
+            _provider ??= MakeProvider(settings.EffectiveGamePaksRoot()!, settings.EffectiveUsmapPath()!, _roots);
+            var fallback = ReadLocalMaterialFallback(package, _roots, settings.EffectiveProjectRoot(), new Dictionary<string, string>());
+            var material = LoadPreviewMaterial(_provider, package);
+            if (material is null && fallback is null) throw new InvalidDataException("Material is unavailable for preview: " + package);
+            material ??= LoadPreviewMaterial(_provider, fallback!.ParentMaterialPath);
+            var relative = "materials/" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(package.ToUpperInvariant())))[..16];
+            var destination = Path.Combine(folder, relative); Directory.CreateDirectory(destination);
+            var sl = ResolveSlot(_provider, material, destination, fallback);
+            string? PathFor(string? path) => path is null ? null : relative + "/" + path.Replace('\\', '/');
+            var result = JsonSerializer.SerializeToElement(new {
+                tex = PathFor(sl.Texture), nrm = PathFor(sl.Normal), mmr = PathFor(sl.Mmr), alpha = PathFor(sl.Alpha),
+                hide = sl.Hidden, cut = sl.Cutout, nrm2 = PathFor(sl.Nrm2), ao = PathFor(sl.Ao), rough = sl.Roughness,
+                metal = sl.Metalness, mask = PathFor(sl.ColourMask), rao = PathFor(sl.Rao), material = package,
+                micro = PathFor(sl.MicroNormal), microTile = sl.MicroTile, microStrength = sl.MicroStrength,
+                col = sl.Colour is { } c ? $"#{c.R:X2}{c.G:X2}{c.B:X2}" : null
+            });
+            _cache[package] = result; return result;
+        }
+        public void Dispose() { _provider?.Dispose(); _provider = null; _cache.Clear(); }
+    }
 
     /// <summary>
     /// The bare head piece. Also runtime-assigned, and separate from both the face print
@@ -596,6 +637,18 @@ public static class ModelPreviewService
                 .Where(imported => imported is not null)
                 .Select(imported => imported!.Name)
                 .Where(name => !string.IsNullOrWhiteSpace(name));
+        }
+
+        if (package is CUE4Parse.UE4.Assets.Package legacy)
+        {
+            // Loose authoring stages are legacy split packages, not IoPackages. Child
+            // component templates can contain only material overrides; their parent still
+            // supplies the mesh. Keep qualified package imports rather than guessing a body.
+            return legacy.ImportMap
+                .Where(import => import.OuterIndex?.IsNull == true && import.ClassName.Text.Equals("Package", StringComparison.OrdinalIgnoreCase))
+                .Select(import => import.ObjectName.Text)
+                .Where(ExtractedPackagePathService.IsContentPackagePath)
+                .Distinct(StringComparer.OrdinalIgnoreCase);
         }
 
         return Array.Empty<string>();
@@ -1044,7 +1097,7 @@ public static class ModelPreviewService
 
         var layoutKey = ViewerLayoutService.SuitKey(project);
 
-        return BuildPreviewCharacter(
+        var folder = BuildPreviewCharacter(
             paksDir,
             usmapPath,
             basePath,
@@ -1063,6 +1116,9 @@ public static class ModelPreviewService
                 .Equals(NativeBodyProfileService.IntentionallyAbsentHeadPolicy, StringComparison.OrdinalIgnoreCase) != true,
             RedBrickTints = redBrickTints ?? Array.Empty<PreviewRedBrickTint>(),
         }, looseContentRoots: previewContentRoots);
+        try { new AnimationDraftLibraryService(projectRoot).WritePreview(folder, project); }
+        catch (Exception ex) { diagnostics?.Invoke("Your animation drafts are unavailable: " + ex.Message); }
+        return folder;
     }
 
     private static bool HasLoosePackage(IEnumerable<string> contentRoots, string? packagePath)
@@ -1084,7 +1140,13 @@ public static class ModelPreviewService
 
     private static IReadOnlyList<string> PreviewSuitContentRoots(NativeSuitProject project, string projectRoot)
     {
-        var roots = new List<string> { AppSettings.Current.EffectiveExportContentRoot() };
+        // The workspace library is the current authored material, not an older copy left in
+        // an export/whole-suit stage. Mount it directly, even before the suit has been rebuilt.
+        var roots = new List<string>
+        {
+            new ToolMaterialLibraryService(projectRoot).ContentRoot,
+            AppSettings.Current.EffectiveExportContentRoot()
+        };
         var generatedRoot = Path.Combine(
             AppSettings.GeneratedRootFor(projectRoot),
             "NativeSuitGuiProjects",
@@ -3539,6 +3601,23 @@ public static class ModelPreviewService
         try { if (material is UMaterialInterface native) native.GetParams(parameters, EMaterialFormat.AllLayers); }
         catch { /* Fall back to explicitly serialized instance parameters below. */ }
         shading = shading with { MaterialPath = (assignedMaterial ?? material).GetPathName() };
+        // Tt LEGO props use named mesh-normal/AO inputs, not the character DNRM/NRM contract.
+        // These are real inherited parameters (Catwoman's claw is one example); don't feed
+        // shader control atlases or default placeholder textures into the albedo.
+        if (parameters.Textures.ContainsKey("-  Normal Tex"))
+        {
+            UTexture2D? PropTexture(string name) => parameters.Textures.GetValueOrDefault(name) is UTexture2D texture &&
+                !texture.Name.Equals("DefaultTexture", StringComparison.OrdinalIgnoreCase) ? texture : null;
+            var propNormal = parameters.Switches.GetValueOrDefault("Normal", true) ? PropTexture("-  Normal Tex") : null;
+            var propAo = parameters.Switches.GetValueOrDefault("Ambient Occlusion", true) ? PropTexture("-  Ambient Occlusion Tex") : null;
+            shading = shading with {
+                Texture = shading.Texture ?? ExportBaseColourTexture(PropTexture("-  Base Colour Tex"), previewDir),
+                Normal = shading.Normal ?? ExportTexture(propNormal, previewDir, isNormal: true),
+                Ao = shading.Ao ?? ExportTexture(propAo, previewDir, isNormal: false),
+                Roughness = shading.Roughness ?? (parameters.Scalars.TryGetValue("Roughness", out var propRoughness) ? Math.Clamp(propRoughness, 0, 1) : null),
+                Metalness = shading.Metalness ?? (parameters.Scalars.TryGetValue("Metallic", out var propMetallic) ? Math.Clamp(propMetallic, 0, 1) : null)
+            };
+        }
         if (IsEomSurface(material))
         {
             if (parameters.Switches.GetValueOrDefault("MicroDetailSystem_On/Off"))

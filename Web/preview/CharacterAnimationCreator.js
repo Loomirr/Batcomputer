@@ -16,7 +16,12 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
   const fps = 30;
   let durationFrames = 60, frame = 0, selectedBone = bones.has('Chest') ? 'Chest' : [...bones.keys()][0], active = false, playing = false, last = 0, loop = true, dragging = false;
   let clipName = 'New animation', clipDescription = '', playbackRate = 1, zoom = 1, dirty = false, reelDirty = true;
-  let copiedKey = null, lastReelFrame = -1;
+  let copiedKey = null, lastReelFrame = -1, lastUiFrame = -1, keysDirty = true, keyCount = 0;
+  const markersByFrame = new Map(), selectedKeysByFrame = new Map();
+  const playheads = [];
+  let combatWindows = [], selectedWindow = '', sourceAnimationPackage = '';
+  let libraryDraftId = '', libraryEntries = window.PREVIEW_USER_ANIMATIONS || [];
+  let revision = 0, draftGeneration = 0, pendingLibrarySave = null;
   const undoStack = [], redoStack = [];
   const dock = document.createElement('div'); dock.className = 'cw-creator-dock'; dock.hidden = true;
   dock.innerHTML = '<div class="cw-creator-resize" role="separator" tabindex="0" aria-label="Resize animation timeline" aria-orientation="horizontal" aria-valuemin="160" title="Drag up or down to resize the animation timeline"><span></span></div>' +
@@ -32,11 +37,19 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
     '<div class="cw-creator-scroll"><div class="cw-creator-ruler"></div><div class="cw-creator-reel" aria-label="Animation keyframe tracks"></div></div>';
   panel.innerHTML = '<div class="cw-creator-heading"><strong>Animation studio</strong><span class="draft-indicator">Draft</span></div>' +
     '<small>Animate the native body rig. Save a draft to keep your work; a draft is not a cooked game animation.</small>' +
+    '<div class="cw-creator-section">YOUR ANIMATIONS</div>' +
+    '<label>Show<select class="library-filter" aria-label="Your animation filter"><option value="all">All your drafts</option><option value="used">On this character</option><option value="ready">Cooked drafts</option></select></label>' +
+    '<input type="search" class="library-search" aria-label="Search your animations" placeholder="Search your animations or assigned slots…">' +
+    '<label>Draft<select class="library-picker" aria-label="Your animations"></select></label>' +
+    '<small class="library-info"></small><div class="cw-creator-buttons"><button class="library-open" type="button">Preview / edit</button><button class="library-save" type="button">Save to your animations</button></div>' +
+    '<small>Private to this workspace. “On this character” shows saved slot assignments, not the donor’s default animations. Build to apply changes in-game.</small>' +
     '<div class="cw-creator-section">CLIP</div>' +
     '<label>Name<input class="clip-name" aria-label="Animation clip name" maxlength="64" value="New animation"></label>' +
     '<label>Purpose<input class="clip-description" aria-label="Animation clip description" maxlength="160" placeholder="e.g. relaxed idle, wave, victory…"></label>' +
     '<label>Length · seconds<input type="number" class="length" aria-label="Animation length" min="0.1" max="30" step="0.1" value="2"></label>' +
     '<small>30 frames per second · 0.1–30 seconds. The timeline below the character controls playback.</small>' +
+    '<div class="cw-creator-buttons"><button type="button" class="from-motion">Edit selected Motion clip</button></div>' +
+    '<small>Select a loaded body animation in Motion first. This copies its poses into editable keys; it does not copy gameplay notifies.</small>' +
     '<div class="cw-creator-section">RIG · SELECT A JOINT</div>' +
     '<label>Find bone<input type="search" aria-label="Find animation bone" placeholder="Search bones…"></label>' +
     '<label>Bone<select aria-label="Animation bone"></select></label>' +
@@ -65,6 +78,14 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
     '<div class="cw-creator-buttons"><button type="button" class="clear-track">Clear bone track</button><button type="button" class="undo">Undo</button><button type="button" class="redo">Redo</button></div>' +
     '<small>Keys for selected bone</small><div class="keys"></div>' +
     '<small>Shortcuts: W move · R rotate · E scale · K key · Space play · ←/→ one frame · Shift+←/→ five frames · Ctrl+Z/Y undo/redo · Ctrl+S save.</small>' +
+    '<div class="cw-creator-section">COMBAT TIMING · PREVIEW DRAFT</div>' +
+    '<small>Plan active hit windows against the pose. These markers are not game damage events; native notify integration is still required before cooking combat timing.</small>' +
+    '<label>Hit window<select class="combat-window" aria-label="Combat hit window"></select></label>' +
+    '<div class="cw-creator-buttons"><button class="add-window" type="button">Add hit window here</button><button class="remove-window" type="button">Remove window</button></div>' +
+    '<label>Label<input class="combat-label" aria-label="Hit window label" maxlength="48"></label>' +
+    '<label>Hand<select class="combat-hand" aria-label="Hit window hand"><option value="right">Right hand</option><option value="left">Left hand</option><option value="both">Both hands</option></select></label>' +
+    ['start','hit','end'].map(field=>`<label>${field==='hit'?'Contact':field[0].toUpperCase()+field.slice(1)} frame<input type="number" class="combat-${field}" aria-label="Hit window ${field} frame" min="0" step="1"><button type="button" class="combat-set-${field}">Use playhead</button></label>`).join('') +
+    '<small class="combat-state" role="status"></small>' +
     '<div class="cw-creator-section">FILE</div>' +
     '<div class="cw-creator-buttons"><button type="button" class="new">New draft</button><button type="button" class="save">Save draft JSON…</button>' +
     '<button type="button" class="load">Open draft JSON…</button></div>' +
@@ -81,6 +102,48 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
   const boneList = panel.querySelector('.cw-creator-bone-list');
   const inputs = [...panel.querySelectorAll('input[data-kind]')];
   const file = panel.querySelector('.file');
+  const libraryPicker = panel.querySelector('.library-picker'), libraryInfo = panel.querySelector('.library-info');
+  function libraryDetails() {
+    const entry = libraryEntries.find(item => item.id === libraryPicker.value);
+    libraryInfo.textContent = entry ? `${entry.status} · ${(entry.durationFrames / fps).toFixed(2)}s` +
+      (entry.usedBy.length ? ` · On this character: ${entry.usedBy.join(', ')}` : ' · Not assigned to this character') +
+      (entry.rigSignature !== rigSignature ? ' · Different rig; cannot open here' : '') : 'Save or import a draft to add it to your private library.';
+    panel.querySelector('.library-open').disabled = !entry?.available || entry.rigSignature !== rigSignature;
+  }
+  function refreshLibrary(entries = libraryEntries) {
+    libraryEntries = entries; const selected = libraryPicker.value || libraryDraftId;
+    const filter = panel.querySelector('.library-filter').value, query = panel.querySelector('.library-search').value.toLowerCase().trim();
+    libraryPicker.replaceChildren();
+    for (const entry of entries) {
+      const displayName = entry.name.replace(/_/g, ' ').replace(/ Retarget$/i, '');
+      if (filter === 'used' && !entry.usedBy.length || filter === 'ready' && entry.status !== 'Cooked' ||
+        query && !`${entry.name} ${displayName} ${entry.character} ${entry.usedBy.join(' ')}`.toLowerCase().includes(query)) continue;
+      const option = document.createElement('option'); option.value = entry.id;
+      option.textContent = `${entry.usedBy.length ? '● ' : ''}${displayName} · ${entry.status}`; option.title = entry.name; libraryPicker.appendChild(option);
+    }
+    if ([...libraryPicker.options].some(option => option.value === selected)) libraryPicker.value = selected;
+    libraryDetails();
+  }
+  libraryPicker.onchange = libraryDetails;
+  panel.querySelector('.library-filter').onchange = () => refreshLibrary();
+  panel.querySelector('.library-search').oninput = () => refreshLibrary();
+  panel.querySelector('.library-open').onclick = async () => {
+    const entry = libraryEntries.find(item => item.id === libraryPicker.value); if (!entry?.available) return;
+    try {
+      const response = await fetch(entry.file + '?v=' + Date.now()); if (!response.ok) throw new Error('Draft source is unavailable.');
+      const json = await response.text(); if (new Blob([json]).size > 2000000) throw new Error('Draft exceeds 2 MB.');
+      if (await openDraft(JSON.parse(json), entry.name)) { libraryDraftId = entry.id; pose(); }
+    } catch (error) { status.textContent = 'Could not open library draft: ' + error.message; }
+  };
+  panel.querySelector('.library-save').disabled = !window.BATCOMPUTER_ANIMATION_LIBRARY_HOST || !window.chrome?.webview || !window.PREVIEW_CAN_SAVE_PLACEMENTS;
+  panel.querySelector('.library-save').onclick = () => {
+    const draft = draftDocument();
+    if (new Blob([JSON.stringify(draft)]).size > 2000000) { status.textContent = 'Draft exceeds 2 MB.'; return; }
+    panel.querySelector('.library-save').disabled = true;
+    pendingLibrarySave = {revision,generation:draftGeneration};
+    status.textContent = 'Saving to your private animation library…';
+    window.chrome.webview.postMessage({type:'save-animation-draft',layoutKey:window.PREVIEW_LAYOUT_KEY,id:libraryDraftId,draft});
+  };
   const identity = new THREE.Quaternion();
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
   const rounded = value => Math.abs(value) < .0000005 ? 0 : Number(value.toFixed(4));
@@ -128,18 +191,19 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
     else if (event.key === 'Home') { event.preventDefault(); applyDockHeight(160, true); }
     else if (event.key === 'End') { event.preventDefault(); applyDockHeight(dock.parentElement?.clientHeight || current, true); }
   });
-  function snapshot() { return { durationFrames, clipName, clipDescription,
+  function snapshot() { return { durationFrames, clipName, clipDescription, sourceAnimationPackage, combatWindows:combatWindows.map(value=>({...value})), selectedWindow,
     tracks:[...tracks].map(([name, values]) => [name, values.map(key => ({ frame:key.frame, p:[...key.p], q:[...key.q], s:[...(key.s || [1,1,1])], interpolation:key.interpolation || 'linear' }))]) }; }
   function pushUndo() { undoStack.push(snapshot()); if (undoStack.length > 50) undoStack.shift(); redoStack.length = 0; refreshHistory(); }
   function restoreSnapshot(value) {
     durationFrames = value.durationFrames; clipName = value.clipName; clipDescription = value.clipDescription;
+    sourceAnimationPackage = value.sourceAnimationPackage || ''; combatWindows = (value.combatWindows || []).map(item=>({...item})); selectedWindow = value.selectedWindow || '';
     tracks.clear(); for (const [name, values] of value.tracks) tracks.set(name, values);
     panel.querySelector('.clip-name').value = clipName; panel.querySelector('.clip-description').value = clipDescription;
     length.value = String(durationFrames / fps); frame = clamp(frame, 0, durationFrames); playing = false;
     reelDirty = true; pose(); markDirty(); refreshHistory();
   }
   function refreshHistory() { panel.querySelector('.undo').disabled = !undoStack.length; panel.querySelector('.redo').disabled = !redoStack.length; }
-  function markDirty() { dirty = true; panel.querySelector('.draft-indicator').textContent = 'Unsaved draft'; }
+  function markDirty() { revision++; dirty = true; keysDirty = true; panel.querySelector('.draft-indicator').textContent = 'Unsaved draft'; }
   const gizmo = new THREE.TransformControls(camera, renderer.domElement);
   gizmo.setSize(.7); gizmo.setSpace('local'); gizmo.setMode('translate'); gizmo.visible = false; scene.add(gizmo);
   const jointGeometry = new THREE.SphereGeometry(.019, 8, 6);
@@ -151,7 +215,13 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
     marker.renderOrder = 20; marker.visible = false; scene.add(marker); joints.set(name, marker);
   }
   let showJoints = false;
-  const timelineResize = new ResizeObserver(() => { if (active) { reelDirty = true; refresh(); } });
+  let timelineWidth = -1;
+  const timelineResize = new ResizeObserver(() => {
+    // Height/scrollbar changes do not change the time-to-pixel scale. Do not rebuild
+    // thousands of diamonds in response to the layout produced by that rebuild.
+    const width = reelScroll.clientWidth;
+    if (active && width !== timelineWidth) { timelineWidth = width; reelDirty = true; refresh(); }
+  });
   timelineResize.observe(reelScroll);
   const raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
   function updateJoints() {
@@ -224,7 +294,7 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
 
   function selectBone(name) {
     if (!bones.has(name)) return;
-    selectedBone = name; find.value = ''; fillBones(); attachBone(); reelDirty = true; refresh();
+    selectedBone = name; keysDirty = true; find.value = ''; fillBones(); attachBone(); reelDirty = true; refresh();
   }
   panel.querySelector('.focus-joint').onclick = () => {
     const target = bones.get(selectedBone)?.getWorldPosition(new THREE.Vector3());
@@ -265,23 +335,30 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
       button.onclick = () => selectBone(name);
       boneList.appendChild(button);
     }
-    if (previousSelection !== selectedBone) { reelDirty = true; attachBone(); }
+    if (previousSelection !== selectedBone) { keysDirty = true; reelDirty = true; attachBone(); }
     refresh();
   }
+  const sampled = new Map([...bones.keys()].map(name => [name, {
+    p:new THREE.Vector3(), q:new THREE.Quaternion(), s:new THREE.Vector3(1,1,1)
+  }]));
+  const nextPosition = new THREE.Vector3(), nextRotation = new THREE.Quaternion(), nextScale = new THREE.Vector3();
+  const neutralKey = { frame:0, p:[0,0,0], q:[0,0,0,1], s:[1,1,1] };
   function sample(name, at) {
     const track = tracks.get(name) || [];
-    if (!track.length || at <= 0 && track[0].frame > 0) return { p:new THREE.Vector3(), q:identity.clone(), s:new THREE.Vector3(1,1,1) };
-    const right = track.find(key => key.frame >= at);
-    const left = track.filter(key => key.frame <= at).at(-1);
-    if (!right) return { p:new THREE.Vector3(...track.at(-1).p), q:new THREE.Quaternion(...track.at(-1).q), s:new THREE.Vector3(...(track.at(-1).s || [1,1,1])) };
-    if (left && left.frame === right.frame) return { p:new THREE.Vector3(...left.p), q:new THREE.Quaternion(...left.q), s:new THREE.Vector3(...(left.s || [1,1,1])) };
-    const start = left || { frame:0, p:[0,0,0], q:[0,0,0,1], s:[1,1,1] };
+    const value = sampled.get(name);
+    let low = 0, high = track.length;
+    while (low < high) { const mid = (low + high) >>> 1; if (track[mid].frame < at) low = mid + 1; else high = mid; }
+    const right = track[low], left = track[low - 1];
+    const start = right?.frame === at ? right : left || neutralKey;
+    value.p.fromArray(start.p); value.q.fromArray(start.q); value.s.fromArray(start.s || neutralKey.s);
+    if (!right || right.frame === at || !track.length || at <= 0) return value;
     let mix = clamp((at - start.frame) / (right.frame - start.frame), 0, 1);
     if (start.interpolation === 'hold') mix = 0;
     else if (start.interpolation === 'smooth') mix = mix * mix * (3 - 2 * mix);
-    return { p:new THREE.Vector3(...start.p).lerp(new THREE.Vector3(...right.p), mix),
-      q:new THREE.Quaternion(...start.q).slerp(new THREE.Quaternion(...right.q), mix),
-      s:new THREE.Vector3(...(start.s || [1,1,1])).lerp(new THREE.Vector3(...(right.s || [1,1,1])), mix) };
+    value.p.lerp(nextPosition.fromArray(right.p), mix);
+    value.q.slerp(nextRotation.fromArray(right.q), mix);
+    value.s.lerp(nextScale.fromArray(right.s || neutralKey.s), mix);
+    return value;
   }
   function applyRest() {
     bones.forEach((bone, name) => { const saved = rest.get(name);
@@ -296,9 +373,10 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
       bone.quaternion.copy(saved.q).multiply(value.q);
       bone.scale.copy(saved.s).multiply(value.s); });
     preview.followBodyPose?.(false);
-    root.updateMatrixWorld(true);
     updateJoints();
-    refresh();
+    // Pose evaluation stays continuous. The inspector only needs a new integer
+    // timeline frame; editing/scrubbing always refreshes immediately.
+    if (!playing || Math.round(frame) !== lastUiFrame) refresh();
   }
   function currentValues() {
     const value = sample(selectedBone, frame);
@@ -306,18 +384,23 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
     return { position:value.p.toArray(), rotation:[euler.x, euler.y, euler.z].map(v => v * 180 / Math.PI), scale:value.s.toArray() };
   }
   function refresh() {
+    refreshCombat();
     timeline.max = String(durationFrames); timeline.value = String(Math.round(frame));
     dockTimeline.max = String(durationFrames); dockTimeline.value = String(Math.round(frame));
-    reel.style.setProperty('--playhead', `${clamp(frame / durationFrames * 100, 0, 100)}%`);
+    // Updating an inherited CSS variable on the reel invalidates the computed
+    // style of every diamond. Only these small overlay elements actually move.
+    const playheadPosition = `${clamp(frame / durationFrames * 100, 0, 100)}%`;
+    for (const playhead of playheads) playhead.style.left = playheadPosition;
     const frameNumber = dock.querySelector('.frame-number');
     frameNumber.max = String(durationFrames);
     if (document.activeElement !== frameNumber) frameNumber.value = String(Math.round(frame));
-    time.textContent = `${(frame / fps).toFixed(2)} / ${(durationFrames / fps).toFixed(2)} s · frame ${Math.round(frame)} · ${[...tracks.values()].reduce((n, track) => n + track.length, 0)} keys`;
+    if (keysDirty || reelDirty) keyCount = [...tracks.values()].reduce((n, track) => n + track.length, 0);
+    time.textContent = `${(frame / fps).toFixed(2)} / ${(durationFrames / fps).toFixed(2)} s · frame ${Math.round(frame)} · ${keyCount} keys`;
     dock.querySelector('.dock-time').textContent = `${Math.round(frame)} / ${durationFrames} · ${(frame / fps).toFixed(2)}s`;
     play.textContent = playing ? 'Pause' : 'Play';
     dock.querySelector('.dock-play').textContent = playing ? '❚❚ Pause' : '▶ Play';
     const values = currentValues();
-    for (const input of inputs) input.value = String(rounded(values[input.dataset.kind][Number(input.dataset.axis)]));
+    for (const input of inputs) if (document.activeElement !== input) input.value = String(rounded(values[input.dataset.kind][Number(input.dataset.axis)]));
     const track = tracks.get(selectedBone) || [];
     const currentKey = track.find(key => key.frame === Math.round(frame));
     remove.disabled = panel.querySelector('.copy-key').disabled = !currentKey;
@@ -325,18 +408,24 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
     panel.querySelector('.clear-track').disabled = !track.length;
     panel.querySelector('.interpolation').disabled = !currentKey;
     panel.querySelector('.interpolation').value = currentKey?.interpolation || 'linear';
-    keys.replaceChildren();
+    if (keysDirty || reelDirty) {
+    keysDirty = false; keys.replaceChildren(); selectedKeysByFrame.clear();
     for (const key of track) {
       const button = document.createElement('button'); button.type = 'button'; button.textContent = `${(key.frame / fps).toFixed(2)} s`;
       button.className = key.frame === Math.round(frame) ? 'active' : '';
       button.onclick = () => { playing = false; frame = key.frame; pose(); };
       keys.appendChild(button);
+      selectedKeysByFrame.set(key.frame, button);
     }
     if (!track.length) keys.textContent = 'No keys on this bone.';
+    }
+    selectedKeysByFrame.get(lastUiFrame)?.classList.remove('active');
+    selectedKeysByFrame.get(Math.round(frame))?.classList.add('active');
+    lastUiFrame = Math.round(frame);
     if (reelDirty) refreshReel();
     else if (Math.round(frame) !== lastReelFrame) {
-      for (const marker of reel.querySelectorAll('.cw-key-marker'))
-        marker.classList.toggle('active', Number(marker.dataset.frame) === Math.round(frame));
+      for (const marker of markersByFrame.get(lastReelFrame) || []) marker.classList.remove('active');
+      for (const marker of markersByFrame.get(Math.round(frame)) || []) marker.classList.add('active');
       lastReelFrame = Math.round(frame);
     }
   }
@@ -344,7 +433,7 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
     reelDirty = false; lastReelFrame = Math.round(frame);
     const visible = [...tracks].filter(([, values]) => values.length).map(([name]) => name);
     if (!visible.includes(selectedBone)) visible.unshift(selectedBone);
-    reel.replaceChildren();
+    reel.replaceChildren(); markersByFrame.clear(); playheads.length = 0;
     const ruler = dock.querySelector('.cw-creator-ruler'); ruler.replaceChildren();
     const railWidth = Math.max(220, reelScroll.clientWidth - 126, durationFrames * 3 * zoom);
     ruler.style.width = `${railWidth + 125}px`;
@@ -352,17 +441,43 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
       const tick = document.createElement('span'); tick.textContent = `${second}s`;
       tick.style.left = `${125 + second * fps / durationFrames * railWidth}px`; ruler.appendChild(tick);
     }
+    for (const window of combatWindows) {
+      const row = document.createElement('div'); row.className = 'cw-creator-lane cw-combat-lane'; row.style.width = `${railWidth + 125}px`; row.dataset.windowId=window.id;
+      const label = document.createElement('button'); label.type='button'; label.textContent=window.name; label.title=`${window.hand} · frames ${window.start}–${window.end}`;
+      label.onclick=()=>{selectedWindow=window.id;seek(window.hit);};
+      const rail=document.createElement('div');rail.className='cw-creator-lane-rail';
+      addPlayhead(rail);
+      const range=document.createElement('span');range.className='cw-combat-range';range.style.left=`${window.start/durationFrames*100}%`;range.style.width=`${(window.end-window.start)/durationFrames*100}%`;rail.appendChild(range);
+      rail.onclick=event=>{if(event.target===rail||event.target===range)seek(Math.round((event.clientX-rail.getBoundingClientRect().left)/rail.clientWidth*durationFrames));};
+      for(const field of ['start','hit','end']) {
+        const marker=document.createElement('button');marker.type='button';marker.className='cw-combat-marker '+field;marker.style.left=`${window[field]/durationFrames*100}%`;
+        marker.title=`${window.name} ${field} · frame ${window[field]}`;marker.setAttribute('aria-label',marker.title);marker.textContent=field==='hit'?'◆':field==='start'?'[':']';
+        marker.onclick=()=>{selectedWindow=window.id;seek(window[field]);};
+        marker.onpointerdown=event=>{
+          if(event.button!==0)return;event.preventDefault();event.stopPropagation();
+          const bounds=rail.getBoundingClientRect(),startX=event.clientX,old=window[field];let destination=old,moved=false;
+          const move=pointer=>{if(!moved&&Math.abs(pointer.clientX-startX)<4)return;moved=true;destination=clamp(Math.round((pointer.clientX-bounds.left)/bounds.width*durationFrames),0,durationFrames);marker.style.left=`${destination/durationFrames*100}%`;};
+          const up=()=>{globalThis.removeEventListener('pointermove',move);globalThis.removeEventListener('pointerup',up);globalThis.removeEventListener('pointercancel',cancel);
+            selectedWindow=window.id;if(moved)changeWindow(field,destination);else seek(old);};
+          const cancel=()=>{globalThis.removeEventListener('pointermove',move);globalThis.removeEventListener('pointerup',up);reelDirty=true;refresh();};
+          globalThis.addEventListener('pointermove',move);globalThis.addEventListener('pointerup',up,{once:true});globalThis.addEventListener('pointercancel',cancel,{once:true});
+        };rail.appendChild(marker);
+      }row.append(label,rail);reel.appendChild(row);
+    }
     for (const name of visible) {
       const row = document.createElement('div'); row.className = 'cw-creator-lane' + (name === selectedBone ? ' selected' : '');
       row.style.width = `${railWidth + 125}px`;
       const label = document.createElement('button'); label.type = 'button'; label.textContent = name; label.title = `Select ${name}`;
       label.onclick = () => selectBone(name);
       const rail = document.createElement('div'); rail.className = 'cw-creator-lane-rail';
+      addPlayhead(rail);
       rail.onclick = event => { if (event.target !== rail) return; seek(Math.round((event.clientX - rail.getBoundingClientRect().left) / rail.clientWidth * durationFrames)); };
       for (const key of tracks.get(name) || []) {
         const marker = document.createElement('button'); marker.type = 'button'; marker.className = 'cw-key-marker' + (key.frame === Math.round(frame) ? ' active' : '');
         marker.title = `${name} · frame ${key.frame}`; marker.setAttribute('aria-label', marker.title); marker.style.left = `${key.frame / durationFrames * 100}%`;
         marker.dataset.frame = String(key.frame);
+        if (!markersByFrame.has(key.frame)) markersByFrame.set(key.frame, []);
+        markersByFrame.get(key.frame).push(marker);
         marker.onclick = () => { selectBone(name); seek(key.frame); };
         marker.onpointerdown = event => {
           if (event.button !== 0) return;
@@ -396,7 +511,57 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
       row.append(label, rail); reel.appendChild(row);
     }
   }
+  function addPlayhead(rail) {
+    const playhead = document.createElement('span'); playhead.className = 'cw-creator-playhead';
+    playhead.style.left = `${clamp(frame / durationFrames * 100, 0, 100)}%`; rail.appendChild(playhead); playheads.push(playhead);
+  }
   function seek(value) { playing = false; frame = clamp(value, 0, durationFrames); pose(); }
+  function validateCombat(value, duration) {
+    if(value===undefined)return [];
+    if(value?.schema!=='batcomputer.combat-timing.v1'||value.previewOnly!==true||!Array.isArray(value.windows)||value.windows.length>16)
+      throw new Error('Invalid preview combat timing metadata.');
+    const ids=new Set();return value.windows.map(item=>{
+      if(typeof item.id!=='string'||!/^[a-zA-Z0-9_-]{1,64}$/.test(item.id)||ids.has(item.id)||typeof item.name!=='string'||!item.name.trim()||item.name.length>48||
+        !['left','right','both'].includes(item.hand)||![item.start,item.hit,item.end].every(Number.isInteger)||item.start<0||item.start>=item.end||item.hit<item.start||item.hit>item.end||item.end>duration)
+        throw new Error('Hit windows need unique IDs and start ≤ contact ≤ end within the clip.');
+      ids.add(item.id);return {id:item.id,name:item.name,start:item.start,hit:item.hit,end:item.end,hand:item.hand};
+    });
+  }
+  function refreshCombat() {
+    const picker=panel.querySelector('.combat-window'),item=combatWindows.find(value=>value.id===selectedWindow);
+    if(picker.options.length!==combatWindows.length||[...picker.options].some((option,index)=>option.value!==combatWindows[index].id||option.textContent!==combatWindows[index].name)) {
+      picker.replaceChildren();for(const value of combatWindows){const option=document.createElement('option');option.value=value.id;option.textContent=value.name;picker.appendChild(option);}
+    }
+    picker.value=selectedWindow;picker.disabled=!combatWindows.length;panel.querySelector('.remove-window').disabled=!item;panel.querySelector('.add-window').disabled=combatWindows.length>=16||Math.round(frame)>=durationFrames;
+    for(const field of ['start','hit','end','label','hand']) {
+      const input=panel.querySelector('.combat-'+field);input.disabled=!item;
+      if(document.activeElement!==input)input.value=item?(field==='label'?item.name:item[field]):'';
+      if(['start','hit','end'].includes(field)){input.max=String(durationFrames);panel.querySelector('.combat-set-'+field).disabled=!item;}
+    }
+    const activeWindows=combatWindows.filter(value=>frame>=value.start&&frame<=value.end);
+    panel.querySelector('.combat-state').textContent=activeWindows.length?'Active preview: '+activeWindows.map(value=>`${value.name} · ${value.hand}${Math.round(frame)===value.hit?' · CONTACT':''}`).join(', '):'No active hit window at this frame. Preview markers only.';
+    for(const marker of reel.querySelectorAll('.cw-combat-range')) marker.classList.toggle('active',activeWindows.some(value=>marker.parentElement.parentElement.dataset.windowId===value.id));
+  }
+  function changeWindow(field,value) {
+    const item=combatWindows.find(item=>item.id===selectedWindow);if(!item)return;
+    const candidate={...item,[field==='label'?'name':field]:value};
+    try{validateCombat({schema:'batcomputer.combat-timing.v1',previewOnly:true,windows:[candidate]},durationFrames);}
+    catch(error){panel.querySelector('.combat-'+field).value=field==='label'?item.name:item[field];status.textContent=error.message;reelDirty=true;refresh();return;}
+    pushUndo();Object.assign(item,candidate);markDirty();reelDirty=true;playing=false;pose();
+  }
+  panel.querySelector('.combat-window').onchange=event=>{selectedWindow=event.target.value;refresh();};
+  panel.querySelector('.add-window').onclick=()=>{
+    const start=Math.round(frame);if(start>=durationFrames||combatWindows.length>=16)return;
+    pushUndo();const end=Math.min(durationFrames,start+6),id='hit_'+Date.now().toString(36)+'_'+combatWindows.length;
+    combatWindows.push({id,name:'Hit '+(combatWindows.length+1),start,hit:Math.round((start+end)/2),end,hand:'right'});selectedWindow=id;markDirty();reelDirty=true;pose();
+  };
+  panel.querySelector('.remove-window').onclick=()=>{if(!selectedWindow)return;pushUndo();combatWindows=combatWindows.filter(item=>item.id!==selectedWindow);selectedWindow=combatWindows[0]?.id||'';markDirty();reelDirty=true;pose();};
+  for(const field of ['start','hit','end']) {
+    panel.querySelector('.combat-'+field).onchange=event=>changeWindow(field,Number(event.target.value));
+    panel.querySelector('.combat-set-'+field).onclick=()=>changeWindow(field,Math.round(frame));
+  }
+  panel.querySelector('.combat-label').onchange=event=>changeWindow('label',event.target.value.trim());
+  panel.querySelector('.combat-hand').onchange=event=>changeWindow('hand',event.target.value);
   function setKey(p, q, s = [1,1,1], record = true) {
     if (record) pushUndo();
     const at = Math.round(frame), track = tracks.get(selectedBone) || [];
@@ -435,7 +600,7 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
   dock.querySelector('.loop').onchange = event => { loop = event.target.checked; };
   length.onchange = () => {
     const requested = Math.round(Number(length.value) * fps);
-    const lastKey = Math.max(0, ...[...tracks.values()].flatMap(track => track.map(key => key.frame)));
+    const lastKey = Math.max(0, ...combatWindows.map(item=>item.end), ...[...tracks.values()].flatMap(track => track.map(key => key.frame)));
     if (!Number.isInteger(requested) || requested < 3 || requested > 900 || requested < lastKey) {
       length.value = String(durationFrames / fps);
       status.textContent = 'Length must be 0.1–30 seconds and include every existing keyframe.'; return;
@@ -496,7 +661,8 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
   };
   panel.querySelector('.new').onclick = () => {
     if (dirty && !window.confirm('Discard the unsaved animation draft and start a new one?')) return;
-    tracks.clear(); undoStack.length = 0; redoStack.length = 0; copiedKey = null; refreshHistory();
+    tracks.clear(); draftGeneration++; libraryDraftId = ''; undoStack.length = 0; redoStack.length = 0; copiedKey = null; refreshHistory();
+    combatWindows=[];selectedWindow='';sourceAnimationPackage='';
     clipName = 'New animation'; clipDescription = ''; durationFrames = 60; frame = 0; playing = false; loop = true;
     dock.querySelector('.loop').checked = true;
     selectedBone = bones.has('Chest') ? 'Chest' : [...bones.keys()][0];
@@ -505,12 +671,23 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
     dirty = false; panel.querySelector('.draft-indicator').textContent = 'New draft';
     reelDirty = true; pose(); status.textContent = 'New rest-pose draft. Choose a bone and frame to start keying.';
   };
-  panel.querySelector('.save').onclick = () => {
+  function draftDocument() {
     clipName = panel.querySelector('.clip-name').value.trim() || clipName;
     clipDescription = panel.querySelector('.clip-description').value.trim();
-    const draft = { schema:'batcomputer.animation-draft.v1', name:clipName, description:clipDescription, fps, durationFrames, loop, rigSignature,
+    return { schema:'batcomputer.animation-draft.v1', name:clipName, description:clipDescription, fps, durationFrames, loop, rigSignature,
+      ...(libraryDraftId ? {libraryDraftId} : {}),
+      sourceAnimationPackage, combatTiming:{schema:'batcomputer.combat-timing.v1',previewOnly:true,windows:combatWindows.map(item=>({...item}))},
       tracks:[...tracks].filter(([, keys]) => keys.length).map(([bone, keys]) => ({ bone, keys })) };
-    const url = URL.createObjectURL(new Blob([JSON.stringify(draft, null, 2)], { type:'application/json' }));
+  }
+  panel.querySelector('.save').onclick = () => {
+    const draft = draftDocument();
+    const json = JSON.stringify(draft, (_key, value) => typeof value === 'number' ? Math.round(value * 1e8) / 1e8 : value);
+    const blob = new Blob([json], { type:'application/json' });
+    if (blob.size > 2000000) {
+      status.textContent = 'Draft exceeds the 2 MB import/cook limit. Shorten the clip or remove unused bone keys before saving.';
+      return;
+    }
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a'); link.href = url;
     link.download = (clipName.replace(/[^a-z0-9_-]+/gi, '_').replace(/^_+|_+$/g, '') || 'Batcomputer-animation') + '.animation-draft.json'; link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -518,10 +695,9 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
     status.textContent = `Saved ${draft.tracks.length} bone track(s) as a draft JSON. This is not a cooked game animation.`;
   };
   panel.querySelector('.load').onclick = () => file.click();
-  file.onchange = async () => {
-    try {
-      if (!file.files?.length) return;
-      const draft = JSON.parse(await file.files[0].text());
+  async function openDraft(draft, fallbackName='Imported animation') {
+      const importedCombat=validateCombat(draft.combatTiming,draft.durationFrames);
+      if(draft.loop!==undefined&&typeof draft.loop!=='boolean')throw new Error('Invalid loop setting.');
       if (draft.schema !== 'batcomputer.animation-draft.v1' || draft.rigSignature !== rigSignature || draft.fps !== fps ||
           !Number.isInteger(draft.durationFrames) || draft.durationFrames < 3 || draft.durationFrames > 900 ||
           !Array.isArray(draft.tracks) || draft.tracks.length > bones.size)
@@ -534,7 +710,8 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
         const keys = track.keys.map(key => {
           if (!Number.isInteger(key.frame) || key.frame <= previous || key.frame > draft.durationFrames || key.frame < 0 ||
               !Array.isArray(key.p) || key.p.length !== 3 || !Array.isArray(key.q) || key.q.length !== 4 ||
-              ![...key.p, ...key.q].every(value => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 10) ||
+              !key.p.every(value => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 5) ||
+              !key.q.every(value => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 1.01) ||
               key.s !== undefined && (!Array.isArray(key.s) || key.s.length !== 3 ||
                 !key.s.every(value => typeof value === 'number' && Number.isFinite(value) && value >= .05 && value <= 5)) ||
               key.interpolation && !['linear','smooth','hold'].includes(key.interpolation))
@@ -546,21 +723,33 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
         });
         imported.set(track.bone, keys);
       }
-      if (dirty && !window.confirm('Replace the unsaved animation draft with this file?')) return;
+      if (dirty && !window.confirm('Replace the unsaved animation draft with this file?')) return false;
       tracks.clear(); imported.forEach((keys, bone) => tracks.set(bone, keys));
+      combatWindows=importedCombat;selectedWindow=combatWindows[0]?.id||'';sourceAnimationPackage=typeof draft.sourceAnimationPackage==='string'?draft.sourceAnimationPackage:'';
       durationFrames = draft.durationFrames; length.value = String(durationFrames / fps); frame = 0; playing = false;
       loop = draft.loop === true; dock.querySelector('.loop').checked = loop;
-      clipName = typeof draft.name === 'string' ? draft.name.slice(0,64) : file.files[0].name.replace(/\.json$/i,'');
+      clipName = typeof draft.name === 'string' ? draft.name.slice(0,64) : fallbackName;
       clipDescription = typeof draft.description === 'string' ? draft.description.slice(0,160) : '';
       panel.querySelector('.clip-name').value = clipName;
       panel.querySelector('.clip-description').value = clipDescription;
       dirty = false; panel.querySelector('.draft-indicator').textContent = 'Loaded draft';
+      draftGeneration++;
+      libraryDraftId = typeof draft.libraryDraftId === 'string' ? draft.libraryDraftId : '';
       undoStack.length = 0; redoStack.length = 0; refreshHistory(); reelDirty = true;
       selectedBone = draft.tracks[0]?.bone || selectedBone; find.value = ''; fillBones();
       if (active) { pose(); attachBone(); } else refresh();
       status.textContent = `Loaded ${imported.size} bone track(s). Draft only; no game assets changed.`;
+      return true;
+  }
+  file.onchange = async () => {
+    try { if(!file.files?.length)return;if(file.files[0].size>2000000)throw new Error('Draft must be smaller than 2 MB.');
+      await openDraft(JSON.parse(await file.files[0].text()),file.files[0].name.replace(/\.json$/i,''));
     } catch (error) { status.textContent = 'Could not open draft: ' + error.message; }
     finally { file.value = ''; }
+  };
+  panel.querySelector('.from-motion').onclick=async()=>{
+    try{await openDraft(preview.editableBodyDraft(rigSignature,rest));pose();}
+    catch(error){status.textContent='Could not edit Motion clip: '+error.message;}
   };
   const keydown = event => {
     if (!active || /^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName) || event.target.isContentEditable || dragging || event.altKey) return;
@@ -568,7 +757,7 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
     if (event.ctrlKey || event.metaKey) {
       if (key === 'z') { event.preventDefault(); panel.querySelector(event.shiftKey ? '.redo' : '.undo').click(); }
       else if (key === 'y') { event.preventDefault(); panel.querySelector('.redo').click(); }
-      else if (key === 's') { event.preventDefault(); panel.querySelector('.save').click(); }
+      else if (key === 's') { event.preventDefault(); panel.querySelector(panel.querySelector('.library-save').disabled ? '.save' : '.library-save').click(); }
       return;
     }
     if (key === ' ') { event.preventDefault(); play.click(); }
@@ -586,8 +775,19 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
   };
   window.addEventListener('keydown', keydown);
   window.addEventListener('pagehide', () => window.removeEventListener('keydown', keydown), { once:true });
-  fillBones(); refreshHistory();
+  fillBones(); refreshHistory(); refreshLibrary();
   return { panel, dock, gizmo,
+    async openLibraryDraft(id) { const entry = libraryEntries.find(item => item.id === id); if (!entry) return;
+      libraryPicker.value = id; await panel.querySelector('.library-open').onclick(); },
+    librarySaved(id, entries, error) {
+      panel.querySelector('.library-save').disabled = false;
+      if (error) { status.textContent = 'Could not save draft: ' + error; return; }
+      refreshLibrary(entries || []);
+      if (pendingLibrarySave?.generation !== draftGeneration) { status.textContent = 'The previous draft was saved privately. This new draft is unchanged.'; return; }
+      libraryDraftId = id;
+      if (pendingLibrarySave.revision === revision) { dirty = false; panel.querySelector('.draft-indicator').textContent = 'Saved to your animations'; }
+      status.textContent = dirty ? 'Saved the requested version. Your newer edits still need saving.' : 'Saved privately to Your animations. Cooking and character assignment are separate steps.';
+    },
     enter() { active = true; preview.rest(); document.querySelector('#cw-viewport')?.appendChild(dock); dock.hidden = false;
       applyDockHeight(requestedDockHeight);
       window.characterMeshEditor?.select(null); reelDirty = true; pose(); attachBone();

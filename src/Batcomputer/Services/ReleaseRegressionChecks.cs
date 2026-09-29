@@ -12,6 +12,12 @@ internal static class ReleaseRegressionChecks
     public static int Run(TextWriter output)
     {
         var failures = new List<string>();
+        foreach (var result in MaterialDummyRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
+        foreach (var result in ItemWorkshopRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
+        foreach (var result in PreviewMaterialRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
         foreach (var result in CharacterSymbolRegressionChecks.Run())
             Check(result.Passed, result.Description, failures, output);
         foreach (var result in TakedownRegressionChecks.Run())
@@ -5634,6 +5640,9 @@ internal static class ReleaseRegressionChecks
         TextureCookRegressionChecks.Run(failures, output);
         AnimationImportRegressionChecks.Run(failures, output);
         AnimationDraftRegressionChecks.Run(failures, output);
+        AnimationSkeletonRemapRegressionChecks.Run(failures, output);
+        AnimationDraftLibraryRegressionChecks.Run(failures, output);
+        AnimationCookedPoseValidationRegressionChecks.Run(failures, output);
         AttachmentCatalogRegressionChecks.Run(failures, output);
         CharacterAnimationGraphRegressionChecks.Run(failures, output);
         DcmdReferenceRegressionChecks.Run(failures, output);

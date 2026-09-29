@@ -465,7 +465,8 @@ public sealed partial class MainForm
         string objectPath,
         string label,
         NativeSuitProject? project = null,
-        bool allowBaseGameRedBrickPreview = false)
+        bool allowBaseGameRedBrickPreview = false,
+        string? animationDraftId = null)
     {
         var loadGeneration = ++_viewerLoadGeneration;
         var viewer = _viewer;
@@ -549,6 +550,9 @@ public sealed partial class MainForm
             {
                 return;
             }
+            viewer.ConfigureAnimationLibrary(settings.EffectiveProjectRoot(), project);
+            if (!string.IsNullOrWhiteSpace(animationDraftId))
+                File.AppendAllText(Path.Combine(folder, "models.js"), "\nwindow.PREVIEW_OPEN_DRAFT_ID=" + System.Text.Json.JsonSerializer.Serialize(animationDraftId) + ";");
             await viewer.ShowFolderAsync(folder);
             _viewerStatus.Text = project is null
                 ? $"{label} - drag to orbit, scroll to zoom."
@@ -825,6 +829,12 @@ public sealed partial class MainForm
             mesh.RotationRoll);
 
     /// <summary>Jumps to the viewer tab and loads the current suit with its saved edits.</summary>
+    private void ViewAnimationDraftIn3D(string id)
+    {
+        if (_currentProject?.PlayableTemplate is null) { Dialog.Info(this, "Open a character first", "Choose the character whose native body rig you want to preview."); return; }
+        SelectWorkspaceFolder(WorkspaceFolder.Viewer);
+        ShowCharacterInViewer(string.Empty, _currentProject.DisplayName, _currentProject, animationDraftId:id);
+    }
     private void ViewCurrentSuitIn3D()
     {
         SelectWorkspaceFolder(WorkspaceFolder.Viewer);

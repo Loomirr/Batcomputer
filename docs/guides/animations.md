@@ -36,6 +36,27 @@ controllers.
 
 ## Pose and keyframe a draft in the 3D viewer
 
+### Your animations
+
+Open **Animations → Your animations** for the workspace's editable drafts and cooked clips.
+Filter by **All your animations**, **On this character**, or **Cooked / ready**. Assignment badges
+describe the current suit's configured slots; build/install the suit before expecting changes
+in-game. Click a draft to open the current character directly in **Create** for preview/editing.
+Right-click a draft for **Cook this draft**, or use **Edit character animations** to assign a
+cooked version to a specific slot.
+
+In the viewer's **Create** inspector, **Your animations** provides the same searchable draft list,
+its status and the names of the slots using it. Choose **Preview / edit** without navigating to a
+JSON file. **Save to your animations** stores a private workspace-owned copy; **Save draft JSON**
+still exports a separate file. **Import animation draft** adds an existing JSON without changing
+its original file. Cooking a draft automatically links its cooked version to this list.
+
+Drafts and cooked versions are different: editing a draft does not replace the animation currently
+on a suit. Older assigned versions stay visible; the edited draft is marked **cook again** until
+you cook and deliberately assign the new version. Different-rig drafts and missing sources stay
+listed but cannot be opened on this rig. Dense clips retain all keys during playback; their
+timeline/key buttons are reused rather than rebuilt on every frame.
+
 Open a character's **3D viewer**, then choose **Create** in the inspector. This is a local animation
 studio for the native LEGOfig body rig. It opens in rest pose and does not modify the suit, the game,
 or an imported animation. The parts list folds away to give the model and timeline more room; use
@@ -61,6 +82,33 @@ is remembered. With the grip focused, Up/Down changes the height by keyboard.
 Useful shortcuts while the 3D viewport has focus: `W` moves, `R` rotates, `E` scales, `K` adds a key,
 Space starts or pauses, Left/Right steps one frame (Shift steps five), and Ctrl+Z/Ctrl+Y undo/redo.
 
+### Edit motion from an existing clip
+
+In **Motion**, select and load a body animation, then open **Create** and choose
+**Edit selected Motion clip**. Batcomputer samples the displayed CharacterMesh0 motion at 30 fps
+into editable native-rig keys. Adjust the joints, retime keys and save a new draft. The original
+animation remains untouched. Body clips must be 0.1–30 seconds; face, cape and montage-only clips
+are not imported into this body editor. Gameplay notifies are not copied with the pose samples.
+
+Drafts are limited to 2 MB for both reopening and cooking. Saved values retain eight decimal
+places; compact JSON avoids storing viewer floating-point noise. An oversized draft stays unsaved
+and explains that the clip needs shortening or unused keys need removing. Dense imported key
+lists scroll inside their own area so the remaining controls stay reachable.
+
+### Plan combat timing in the viewer
+
+**Combat timing · preview draft** adds named windows to the same animation timeline. Choose the
+right hand, left hand or both, then set **Start**, **Contact** and **End** by frame number, by
+**Use playhead**, or by dragging the three orange timeline handles. Start must precede End, with
+Contact inside that interval. Scrubbing/playing shows which windows are active against the pose.
+Windows support Undo/Redo and survive saving/reopening the draft; up to 16 windows are supported.
+
+These are **preview planning markers, not in-game hitboxes or damage events**. Native LOTDK
+hit-frame/hitbox notifies also encode sockets, combat metadata and damage effects. Their gameplay
+adapter is not implemented yet. Cooking a draft with nonempty combat windows stops with an
+explanation rather than silently discarding the timing. Keep the timed authoring draft; make a
+separate copy and explicitly remove the markers if you want to cook only its body motion now.
+
 The editor saves a draft JSON first. To make it playable in a mod:
 
 1. Save the draft from **Create** in the 3D viewer. Saving does not change the suit or game.
@@ -69,6 +117,9 @@ The editor saves a draft JSON first. To make it playable in a mod:
    in Settings. Batcomputer validates the draft against the installed game's rig, cooks an
    `AnimSequence` in an isolated Unreal project, connects it to the native skeleton, and adds it
    to this workspace's animation library. You do not need to run Unreal commands yourself.
+   Bone tracks are matched by name, with matching parents/rest transforms required. The final
+   cooked poses are decoded and compared against the draft before library import; changing only
+   a skeleton package path is not enough to validate a rig.
 3. In **Edit character animations**, select the exact suit animation slot and choose the cooked
    library entry. Build the suit, then test that action in-game. No other slot is changed.
 
@@ -109,6 +160,24 @@ Imported package files are not copied into every build. Batcomputer stages an im
 and its required support packages only when the current suit references it.
 
 ## Safe test flow
+
+### Character animation tree
+
+Open **Character animation tree** on the Animations page. **Simple tree** groups readable
+MAS/LAS targets by action category and keeps movement/idles together; **Native hierarchy**
+retains the source-set structure. Reused assets remain separate targets when their action,
+context, variant or owner differs. **Changed on this character** isolates saved replacements.
+
+Select a target, then search the inline replacement list. Filter to **Your cooked clips** or
+**Base game**, choose a compatible entry and press **Apply selected**. **Show unavailable
+imports** explains why an imported entry cannot be selected. **Reset to donor** restores the
+selected target. These actions retain the existing transactional suit-save and build path.
+
+This browser describes readable animation sets and locomotion references, not the entire
+gameplay ability state machine. Ability-owned combat graphs and their hitbox/notify contracts
+are not yet editable here. A converted combat sequence alone is not a ready-to-use attack montage.
+
+### In-game checks
 
 1. Start with one sequence or montage on a duplicate test suit.
 2. Confirm the target row, required class, source rig, and replacement in Animation Explorer.

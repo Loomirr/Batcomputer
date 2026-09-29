@@ -90,7 +90,7 @@
 #cw-animation-creator>.timeline{width:100%;padding:0;accent-color:var(--cw-gold)}
 #cw-animation-creator .cw-creator-buttons{display:flex;gap:5px;margin:10px 0}
 #cw-animation-creator .cw-creator-buttons button{flex:1;min-width:0;text-align:center;font-size:11px;padding:7px 5px}
-#cw-animation-creator .keys{display:flex;gap:4px;flex-wrap:wrap;min-height:28px;color:var(--cw-muted);font-size:11px}
+#cw-animation-creator .keys{display:flex;gap:4px;flex-wrap:wrap;min-height:28px;max-height:120px;overflow:auto;scrollbar-width:thin;color:var(--cw-muted);font-size:11px}
 #cw-animation-creator .keys button{font-size:10px;padding:4px 6px}
 #cw-animation-creator .keys button.active{border-color:var(--cw-gold);color:var(--cw-gold)}
 #cw-animation-creator .cw-creator-tools button.active{border-color:var(--cw-gold);color:var(--cw-gold);background:#ffda4313}
@@ -116,14 +116,19 @@
 .cw-creator-ruler{height:20px;position:relative;color:var(--cw-muted);font-size:9px;min-width:100%}
 .cw-creator-ruler span{position:absolute;transform:translateX(-50%)}
 .cw-creator-reel{min-width:100%}
+#cw-animation-creator .library-search{width:100%;box-sizing:border-box;margin:5px 0}
 .cw-creator-lane{display:grid;grid-template-columns:120px minmax(0,1fr);align-items:center;gap:5px;min-height:27px;border-bottom:1px solid #37414f}
 #character-workshop .cw-creator-lane>button{background:none;border:0;border-radius:0;padding:4px 5px;color:var(--cw-muted);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cw-creator-lane>button{position:sticky;left:0;z-index:1;background:#202a36!important}
 .cw-creator-lane.selected{background:#ffda430d}.cw-creator-lane.selected>button{color:var(--cw-gold)!important}
 .cw-creator-lane-rail{height:24px;position:relative;cursor:crosshair;background:repeating-linear-gradient(90deg,#ffffff10 0 1px,transparent 1px 10%)}
-.cw-creator-lane-rail::after{content:"";position:absolute;z-index:1;left:var(--playhead,0%);top:0;bottom:0;width:1px;background:#fff7c4b0;pointer-events:none}
+.cw-creator-playhead{position:absolute;z-index:1;top:0;bottom:0;width:1px;background:#fff7c4b0;pointer-events:none}
 #character-workshop .cw-key-marker{position:absolute;top:6px;width:12px;height:12px;min-width:0;padding:0;border:1px solid #fff2a0;border-radius:2px;background:var(--cw-gold);transform:translateX(-50%) rotate(45deg);box-shadow:0 0 6px #0008}
 #character-workshop .cw-key-marker.active{background:#fff;border-color:#fff}
+.cw-combat-range{position:absolute;top:4px;height:16px;background:#e36c3344;border:1px solid #ff9a55;box-sizing:border-box;pointer-events:none}
+.cw-combat-range.active{background:#ff984b88}
+#character-workshop .cw-combat-marker{position:absolute;top:0;height:24px;min-width:14px;padding:0 2px;transform:translateX(-50%);border:0;background:#311d16;color:#ffbd85;z-index:2;font-size:12px}
+#character-workshop .cw-combat-marker.hit{color:#fff;background:#c85921}
 @media(max-width:700px){.cw-creator-dock{left:5px;right:5px;bottom:5px}.cw-creator-transport strong{display:none}.cw-creator-transport .dock-time{min-width:60px}}
 #character-workshop footer{display:flex;align-items:center;gap:10px;justify-content:space-between;border-top:1px solid var(--cw-border);padding:4px 12px;color:var(--cw-muted);font-size:10px}
 #character-workshop footer span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

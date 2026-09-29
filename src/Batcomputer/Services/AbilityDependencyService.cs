@@ -291,6 +291,7 @@ public static class AbilityDependencyService
                 issues.Add(new AbilityDependencyIssue(AbilityDependencySeverity.Error, error));
         var heldItems = HeldItemService.Resolve(profile);
         foreach (var error in HeldItemService.Validate(heldItems)) issues.Add(new AbilityDependencyIssue(AbilityDependencySeverity.Error, error));
+        foreach (var error in NativeHeldItemService.Validate(profile?.NativeHeldItems ?? [])) issues.Add(new(AbilityDependencySeverity.Error, error));
         if (SwordCombatService.Enabled(profile) && !heldItems.Any(HeldItemService.SupportsSword))
             issues.Add(new(AbilityDependencySeverity.Error, "Player weapon combat needs a right-hand melee item visible during attacks. Add one in Held items; choosing this style does not add an item automatically."));
         if (heldItems.Count > 0 && !SwordCombatService.Enabled(profile))

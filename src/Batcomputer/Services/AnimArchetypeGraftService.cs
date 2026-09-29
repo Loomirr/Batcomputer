@@ -1693,6 +1693,9 @@ public sealed class AnimArchetypeGraftService
                 if (HeldItemService.Independent(project.AbilityLoadout))
                     HeldItemService.Generate(project.AbilityLoadout!, extractedRoot, patchedContentRoot, mod, customDprdUasset, mappings!, result.Log);
 
+                if (project.AbilityLoadout is { NativeHeldItems.Count: > 0 } nativeProfile)
+                    NativeHeldItemService.Generate(nativeProfile, extractedRoot, patchedContentRoot, mod, customDprdUasset, mappings!, result.Log);
+
                 if (!VerifyStagedDependencyCertificate(
                         project,
                         donor,
@@ -1817,6 +1820,18 @@ public sealed class AnimArchetypeGraftService
             if (!HeldItemService.Verify(project.AbilityLoadout, extractedRoot, stagedRoot, mod, LoadMappings()!, out error)) return false;
         }
         var actualDprd = mutation.InspectDprdAbilitySets(stagedDprdUasset);
+        if (project.AbilityLoadout is { NativeHeldItems.Count: > 0 } nativeProfile)
+        {
+            try {
+                NativeHeldItemService.Verify(nativeProfile, extractedRoot, stagedRoot, mod, expectedSets, LoadMappings()!);
+                var rewritten = NativeHeldItemService.RewriteSetPackages(nativeProfile, expectedSets, extractedRoot, stagedRoot, mod, LoadMappings()!);
+                if (!string.IsNullOrEmpty(bridgePackage)) {
+                    var bridgeIndex = expectedSets.FindIndex(p => p.Equals(bridgePackage, StringComparison.OrdinalIgnoreCase));
+                    if (bridgeIndex >= 0) bridgePackage = rewritten[bridgeIndex];
+                }
+                expectedSets = rewritten.ToList();
+            } catch (Exception ex) { error = ex.Message; return false; }
+        }
         var actualSets = actualDprd.AbilitySets.Select(reference => reference.PackagePath).ToList();
         if (!actualDprd.Success ||
             !actualSets.SequenceEqual(expectedSets, StringComparer.OrdinalIgnoreCase))
@@ -1880,7 +1895,7 @@ public sealed class AnimArchetypeGraftService
                 return false;
             }
             var actualAbilities = bridge.GameplayAbilities.Select(grant => grant.PackagePath).ToList();
-            var missingBridge = bridgeAbilities.Where(required =>
+            var missingBridge = bridgeAbilities.Select(required => NativeHeldItemService.RedirectAbility(project.AbilityLoadout, mod, required)).Where(required =>
                 !actualAbilities.Contains(required, StringComparer.OrdinalIgnoreCase)).ToList();
             var staleBridge = plan.GameplayAbilitiesToRemove.Where(removed =>
                 actualAbilities.Contains(removed, StringComparer.OrdinalIgnoreCase)).ToList();

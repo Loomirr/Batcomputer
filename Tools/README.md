@@ -7,3 +7,9 @@ Batcomputer keeps its helper tools in this folder so a portable release can be u
 - `BatcomputerRegistryWriter` contains Batcomputer's small UE 5.6 Asset Registry writer. The portable includes a verified module for Epic's current UE 5.6 build and keeps the source as a fallback for a different engine `BuildId`. Batcomputer copies the project to a short per-user cache so Unreal's generated paths stay within its Windows limit.
 
 These helpers contain no game files or extracted game assets.
+
+Local character experiments and supplied/imported assets are private authoring data,
+not public beta content. Keep their models, textures, animations, test paks, reports
+and screenshots in ignored local artifact/workspace folders. Public demonstration
+content should use basic LOTDK-specific examples only; do not include another
+game's imported character assets or conversions in the application or documentation.

@@ -159,12 +159,15 @@ public sealed partial class MainForm
     }
 
     internal (bool Success, string Detail) InstallBuiltVehicleModForCli(string projectRoot, string modProjectPath)
+        => InstallBuiltModForCli(projectRoot, modProjectPath, requireVehicle: true);
+
+    internal (bool Success, string Detail) InstallBuiltModForCli(string projectRoot, string modProjectPath, bool requireVehicle = false)
     {
         _batchMode = true;
         _projectRootText.Text = Path.GetFullPath(projectRoot);
         _projectService = new(_projectRootText.Text);
         var mod = ModService.LoadMod(modProjectPath) ?? throw new InvalidDataException("Mod not found.");
-        if (!mod.Vehicles.Any(e => e.Enabled)) throw new InvalidDataException("No enabled vehicle to install.");
+        if (requireVehicle && !mod.Vehicles.Any(e => e.Enabled)) throw new InvalidDataException("No enabled vehicle to install.");
         var result = InstallModCore(modProjectPath);
         return (result.Status == ModInstallStatus.Complete, result.Detail + Environment.NewLine + _diagnostics.LogText);
     }

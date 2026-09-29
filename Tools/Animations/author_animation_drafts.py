@@ -73,10 +73,14 @@ def interpolate(keys, frame):
         ]
     return position, rotation, scale
 
+asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
+# A transform-only SkeletonModifier edit normalizes the mesh, not its USkeleton.
+# The caller separately validates the actual normalized mesh and the sole known
+# imported Root x100 metadata artifact, remaps by USkeleton names, then decodes
+# every cooked frame against this draft on the native runtime skeleton.
 factory = unreal.AnimSequenceFactory()
 factory.set_editor_property("target_skeleton", mesh.get_editor_property("skeleton"))
 factory.set_editor_property("preview_skeletal_mesh", mesh)
-asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
 results = []
 for source in config["drafts"]:
     draft = json.loads(Path(source).read_text(encoding="utf-8"))

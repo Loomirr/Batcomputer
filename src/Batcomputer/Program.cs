@@ -1155,9 +1155,11 @@ internal static class Program
             return context.ExitCode;
         }
 
-        if (args.Length == 3 && args[0].Equals("--install-built-vehicle-mod", StringComparison.OrdinalIgnoreCase))
+        if (args.Length == 3 && (args[0].Equals("--install-built-mod", StringComparison.OrdinalIgnoreCase) ||
+            args[0].Equals("--install-built-vehicle-mod", StringComparison.OrdinalIgnoreCase)))
         {
-            using var context = new HeadlessModBuildContext(args[1], "", args[2], installOnly: true);
+            using var context = new HeadlessModBuildContext(args[1], "", args[2], installOnly: true,
+                requireVehicle: args[0].Equals("--install-built-vehicle-mod", StringComparison.OrdinalIgnoreCase));
             Application.Run(context);
             return context.ExitCode;
         }
@@ -1273,16 +1275,18 @@ internal static class Program
         private readonly string _suitProjectPath;
         private readonly string _modProjectPath;
         private readonly bool _installOnly;
+        private readonly bool _requireVehicle;
         private bool _started;
 
         public int ExitCode { get; private set; } = 1;
 
-        public HeadlessModBuildContext(string projectRoot, string suitProjectPath, string modProjectPath, bool installOnly = false)
+        public HeadlessModBuildContext(string projectRoot, string suitProjectPath, string modProjectPath, bool installOnly = false, bool requireVehicle = false)
         {
             _projectRoot = projectRoot;
             _suitProjectPath = suitProjectPath;
             _modProjectPath = modProjectPath;
             _installOnly = installOnly;
+            _requireVehicle = requireVehicle;
             _form = new MainForm
             {
                 ShowInTaskbar = false,
@@ -1310,7 +1314,7 @@ internal static class Program
             {
                 if (_installOnly)
                 {
-                    var installed = _form.InstallBuiltVehicleModForCli(_projectRoot, _modProjectPath);
+                    var installed = _form.InstallBuiltModForCli(_projectRoot, _modProjectPath, _requireVehicle);
                     Console.WriteLine(installed.Detail.TrimEnd());
                     ExitCode = installed.Success ? 0 : 1;
                     return;

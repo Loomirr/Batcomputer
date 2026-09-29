@@ -301,6 +301,9 @@ public static class CustomCharacterProjectService
             .Concat(source.CustomStaticMeshes.SelectMany(mesh => mesh.MaterialSlots.Select(material => material.MaterialPath).Append(mesh.MaterialPath)))
             .Concat(source.SkinnedMeshes.Concat(EquipmentSkinnedModelService.Models(source)).SelectMany(mesh => mesh.Materials.Select(material => material.MaterialPath)))
             .Concat(items.SelectMany(item => (item.CustomModel?.Materials ?? []).Select(material => material.MaterialPath).Append(item.MaterialPackage)))
+            .Concat((source.AbilityLoadout?.NativeHeldItems ?? []).SelectMany(item =>
+                (item.CustomModel?.Materials ?? []).Select(material => material.MaterialPath)
+                .Concat(item.Materials.Select(material => material.Package)).Append(item.ReplacementMeshPackage)))
             .Concat(equipmentParts.SelectMany(part => (part.Model?.Materials ?? []).Select(material => material.MaterialPath).Append(part.ReplacementPackage)))
             .Concat(source.EquipmentSlots.Select(slot => slot.Custom?.HudIcon?.SdfPackage ?? ""))
             .Append(source.GliderMaterial)

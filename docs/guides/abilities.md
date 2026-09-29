@@ -94,6 +94,12 @@ Test each new item/hand/visibility combination during gameplay and transitions b
 Visibility options are **Always held**, **Only while attacking**, **During combat or attacks**,
 and **Hide during combat / attacks**. The last option also hides during empty-space attacks.
 Native hand-slot priority and `Status.BlockItemGA` are retained for competing gadgets/actions.
+For permanent cosmetic claws, the prop workspace also offers **Keep prop over animation
+empty-hand requests** under **Hand priority · advanced**. This opt-in raises only that prop's
+saved hand requests from Medium to Epic, above the native High-priority empty-hand animation
+requests. It does not remove native abilities, bypass `Status.BlockItemGA`, or add hitboxes.
+Other Epic-priority items can still compete, and props can overlap carried objects/gadgets;
+test attacks, climbing, gadgets and transitions in-game. Leave it off for normal props.
 Always/outside-combat items use independently registered request tags, not the native baton
 request or animation-context tags. New combinations and hide-during-combat still need in-game testing.
 
@@ -103,12 +109,19 @@ right-hand item visible during attacks. Saving/building blocks an adapter config
 that item. Other styles can carry decorative props, with a warning about native weapon conflicts.
 Cosmetic examples do not satisfy the adapter's required melee hitbox, even if the model looks like a weapon.
 
-The custom weapon editor is available from **Held items → Edit item → Open model editor**.
-Import an OBJ, align it with numeric position/rotation/scale controls, toggle the original/custom
-models, and assign a cooked material package per OBJ material slot. **Validate bake & use model**
-checks the cooked mesh; save both parent editors and rebuild the suit to package it. Source geometry
-and alignment are stored in the suit project. This first editor uses neutral/slot-color preview
-shaders and mesh-local origin axes, not a calibrated hand-grip preview. Collision and hitboxes are
+Choose **Right hand**, **Left hand**, or **Both hands** for an extra prop. Both hands uses two native
+hand slots with one shared model/material/alignment/visibility recipe and occupies both extra-prop
+slots. It does not mirror the geometry or grant new attacks. For different left/right grips or
+models, use two separate single-hand props. Native attack items can still take priority.
+
+Extra props open directly in a single model workspace from **Held items → Extra props → Edit prop**.
+The **Prop** panel controls the name, hand (including Both hands), visibility and native behavior donor;
+**Model**, **Align** and **Materials** control the imported mesh in that same window.
+Import an OBJ, align it with draggable 3D handles or numeric position/rotation/scale controls,
+toggle the original/custom models, and assign a cooked material package per OBJ material slot. **Validate & use prop**
+checks a custom cooked mesh; accept Held items, save the Ability editor and rebuild the suit to package it. Source geometry
+and alignment are stored in the suit project. The viewer resolves game materials under studio
+lighting and uses mesh-local origin axes, not a calibrated hand-grip preview. Collision and hitboxes are
 not resized with the model. See [weapon editor details](weapon-model-editor-plan.md).
 
 1. Open **Abilities → Held items**, add the item, and choose **Use held items**.
@@ -164,6 +177,9 @@ markers, not Unreal's Niagara renderer. Seeing an effect in this preview is not 
 is safe to package. A working native baton trail does not validate unrelated fire, frost or smoke
 systems, which may require runtime owner parameters and controllers.
 
+Select an effect in the list to attach the move/rotate/size handles to its placement marker.
+These handles change only that effect's mesh-local placement, not the weapon's OBJ alignment.
+
 ### On-hit status settings (experimental)
 
 Leave **Combat settings → Behavior → On-hit status** at **None** for normal builds. The experimental
@@ -176,6 +192,105 @@ animation dependencies instead of importing the donor's entire character Ability
 stops if any required set, effect, held item, equipment entry, or animation parent cannot be proved
 in the generated assets. Test every attack, traversal transition, equipment action, respawn, and
 clean restart before sharing one of these combinations.
+
+## Replacing a character's native held items
+
+Open **Abilities → Held items → Native items** to inspect managed actors from the active
+ability grants. This is source-derived, not a list guessed from the character's name. Disabled
+sets and removed grants are excluded; fighting-style held-item bridges are included. Each
+managed slot and owned mesh component is listed separately. Catwoman's two claws, for example,
+share a native actor but have independent left- and right-hand slots.
+
+- **Edit appearance** accepts a cooked static mesh, or imports an OBJ directly into its item preview,
+  assign its materials and align its geometry. Custom model materials belong in that editor.
+- **Materials** lists surfaces and their assignments; choose a material for each surface.
+  **Use original** clears the selected override and preserves the native component's material.
+- **Override component placement** edits position in centimetres, rotation in degrees and
+  per-axis scale, relative to the native parent. Leaving it off preserves native placement.
+- **Hide visuals** clears only that component's mesh binding. It does not remove attacks,
+  animation tags, the managed actor or its hand-slot request. Other components/effects on a
+  multi-part actor can remain visible.
+- **Reset changes** clears that binding's saved override. Edit both hands for matching claws.
+
+The native draw/hide tags are displayed for inspection and retained, along with attack timing,
+sockets and collision rules. Model size does not resize hitboxes. Builds clone the edited
+controllers, actors and granting sets into the suit's namespace; base-game assets and other
+characters are not replaced. Accept the Held items dialog, then save the Ability workshop and
+rebuild the mod. Opening a dialog does not install anything or edit the donor.
+
+Skinned/specialized meshes and actors without direct owned bindings are **inspect only**;
+their rigs or dynamic visual logic need a dedicated adapter. **Scan details** reports missing
+or unreadable active packages. This menu is not an exhaustive list of temporary actors spawned
+by gameplay; equipment/gadgets still have their own Equipment workflow. If you switch to a
+style that no longer grants an edited controller, restore its stale edit before building.
+
+For a custom claw-equipped character using Catwoman as the donor, customize each `GA_Item_CatClaws` static mesh row
+with the appropriate claw model. Start with native draw/hide behavior and test both hands,
+attacks, gadgets, character switching and respawning in-game. Cooked roundtrip validation is
+not a substitute for that runtime test.
+
+### Models and material previews
+
+The Held items browser separates **Native items** from **Extra props**. Search the native
+list by item, ability or attachment slot. Select a row to see its timing, edit support and
+technical identity; **Edit appearance** opens an isolated 3D item preview. Technical package paths
+and native draw/hide tags are behind **Technical details**, separate from the appearance summary.
+
+In the native-item editor, **Import custom OBJ** opens the file picker and loads your model in
+the same viewer—no second workshop. **Materials** edits the active native or imported model's
+slots. **Placement** provides live OBJ scale, centimeter offsets and degree rotations; use
+the original-model checkbox to compare the meshes. Replacing the OBJ preserves
+alignment and assignments for matching source material names. Canceling the picker changes nothing.
+
+The advanced native component placement controls on that same panel override the transform
+relative to the original parent, separately from OBJ alignment. Component placement is not
+displayed in this isolated mesh preview; test the grip and attachment on the character or
+in-game. **Hide visuals** retains native behavior. For a cooked mesh, **Use original** in Materials
+clears only the selected slot override. **Use cooked mesh instead** discards the custom model
+draft and restores the native mesh/material controls.
+
+The weapon/equipment model workshop has a resizable preview and **Model**, **Align** and
+**Materials** panels. Import the OBJ, align its centered mesh with the reference using scale,
+centimeter offsets and degree rotations, then choose materials. **Choose material** searches both your
+material library and game materials; enable **Your materials only** in the assignment panel to open
+the picker scoped to your library. You can change that scope inside the picker. **Apply to all**
+assigns the selection to every OBJ slot. Surface labels show the source OBJ material names.
+Exact package paths remain available in the picker for advanced use. Materials are assigned
+by stable OBJ slot identity, not by display name.
+
+Previews use resolved color textures, normal maps, packed roughness/metalness, AO and applicable
+LEGO/micro-detail layers—the same material resolver as the character viewer. They approximate
+game shaders under studio lighting, not gameplay effects or exact in-game lighting. Imported
+OBJs need authored UVs to display mapped textures correctly. Unavailable materials show a
+preview error; choosing a material does not generate or repair it.
+
+Both model workshops and the inline native-item editor share draggable 3D handles on the custom
+OBJ's centered origin: **W** moves, **R** rotates, and **E** sizes. Use the on-screen tool buttons
+when focus is in a numeric field. **World / Local axes** changes the handle orientation, not the
+saved coordinate system; fields always use Unreal XYZ centimeters and Pitch / Yaw / Roll degrees.
+World handle colors use the viewer basis: red X, green up (Unreal Z), blue depth (Unreal -Y).
+Size is proportional; nonuniform stretching is not supported by the saved OBJ recipe. **Snap**
+uses 1 cm movement, 15° rotation and 0.1 size increments. **Reset transform** restores unit size,
+zero offsets and zero rotations. Numeric fields update when you release a drag, and numeric edits
+update those same handles. Alignment changes reuse geometry instead of exporting on each movement.
+
+Importing preserves both visibility choices and the original's size. The original is faded when
+both models are shown; switch its appearance to materials or wireframe in the viewer. **Frame both**,
+**Frame custom** and **Frame original** move only the camera, never the saved mesh. Dimensions in the
+bottom readout are actual centimeters, not camera zoom. The original donor may be much larger than
+your prop; for example, the plant-spray donor is not a claw-sized model.
+
+OBJ files do not store units. **Align → Import size help** explicitly sets a starting multiplier
+for centimeters, meters, millimeters or inches; it replaces the current scale without changing offsets
+or rotations. **Match original size** explicitly matches the longest current bounding-box dimension,
+and **Center on original** moves the custom model to the original's bounding-box center. Neither
+changes the original. They are optional starting aids, not proof that a grip or hitbox is correct.
+
+Press **F** to frame the selected camera target, or use the camera view, grid, axes and light controls.
+Assign an imported OBJ's materials in its active **Materials** panel, not as native component overrides.
+**Validate & use item** in the native-item editor (or **Validate & use model** in the separate
+weapon/equipment workshop) bakes a private validation mesh before returning the recipe. Accept
+the parent editors, save and rebuild to apply it. Canceling leaves the saved project untouched.
 
 ## Equipment and upgrades
 

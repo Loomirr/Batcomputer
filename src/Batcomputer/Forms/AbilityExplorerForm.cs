@@ -219,11 +219,24 @@ public sealed class AbilityExplorerForm : AdaptiveForm
         };
         var heldItems = new Button { Text = "Held items…", Dock = DockStyle.Fill, Margin = new Padding(0, 5, 8, 0) };
         Theme.StyleDarkButton(heldItems);
-        heldItems.Click += (_, _) => {
-            using var editor = new HeldItemsForm(HeldItemService.Resolve(_working));
-            if (editor.ShowDialog(this) != DialogResult.OK) return;
-            _working.HeldItems = editor.Result.Select(i => i.Clone()).ToList(); _resetToDonor = false;
-            _search.Clear(); _view.SelectedIndex = 0; RebuildTree();
+        heldItems.Click += async (_, _) => {
+            heldItems.Enabled = false; heldItems.Text = "Reading native items…";
+            try {
+                var snapshot = CloneProfile(_working);
+                var fingerprint = AbilityLoadoutService.ConfigurationFingerprint(snapshot);
+                var inspection = await Task.Run(() => NativeHeldItemService.Inspect(snapshot, _catalog));
+                if (IsDisposed) return;
+                if (AbilityLoadoutService.ConfigurationFingerprint(_working) != fingerprint) {
+                    Dialog.Info(this, "Loadout changed", "Your ability loadout changed while its native items were being read. Open Held items again to inspect the current loadout.");
+                    return;
+                }
+                using var editor = new HeldItemsForm(HeldItemService.Resolve(_working), _working.NativeHeldItems, inspection);
+                if (editor.ShowDialog(this) != DialogResult.OK) return;
+                _working.HeldItems = editor.Result.Select(i => i.Clone()).ToList();
+                _working.NativeHeldItems = editor.NativeResult.Select(i => i.Clone()).ToList(); _resetToDonor = false;
+                _search.Clear(); _view.SelectedIndex = 0; RebuildTree();
+            } catch (Exception ex) { if (!IsDisposed) Dialog.Warn(this, "Native held items", ex.Message); }
+            finally { if (!IsDisposed) { heldItems.Enabled = true; heldItems.Text = "Held items…"; } }
         };
         var extraTools = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
         extraTools.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50)); extraTools.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
@@ -962,6 +975,7 @@ public sealed class AbilityExplorerForm : AdaptiveForm
         _working.FightingStyleId = "";
         _working.SwordCombat = null;
         _working.HeldItems = [];
+        _working.NativeHeldItems = [];
         _working.DonorDprdPackage = Normalize(_catalog.DonorDprdPackage);
         _working.DonorAbilitySetFingerprint = _catalog.DonorAbilitySetFingerprint;
         _working.DonorAbilitySetPackages = _catalog.InheritedAbilitySets
@@ -1048,6 +1062,7 @@ public sealed class AbilityExplorerForm : AdaptiveForm
         var inherited = _catalog.InheritedAbilitySets.Select(set => Normalize(set.PackagePath)).ToList();
         if (!string.IsNullOrWhiteSpace(_working.FightingStyleId)) return true;
         if (HeldItemService.Resolve(_working).Count > 0) return true;
+        if (_working.NativeHeldItems.Count > 0) return true;
         if (!enabled.SequenceEqual(inherited, StringComparer.OrdinalIgnoreCase)) return true;
         return _working.AbilitySets.Any(set =>
             set.AddedGameplayAbilities.Count > 0 || set.RemovedGameplayAbilities.Count > 0 || !set.Enabled);
@@ -1160,6 +1175,7 @@ public sealed class AbilityExplorerForm : AdaptiveForm
         FightingStyleId = source.FightingStyleId ?? "",
         SwordCombat = source.SwordCombat?.Clone(),
         HeldItems = source.HeldItems?.Select(i => i.Clone()).ToList(),
+        NativeHeldItems = source.NativeHeldItems.Select(i => i.Clone()).ToList(),
         AllowUnsafeCoreEdits = source.AllowUnsafeCoreEdits,
         AbilitySets = (source.AbilitySets ?? new List<AbilitySetSelection>()).Select(set => new AbilitySetSelection
         {

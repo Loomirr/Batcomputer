@@ -245,5 +245,37 @@ window.BatcomputerCharacterAnimationPreview = function ({ THREE, loaded, root, d
       last = performance.now(); sync(); };
   }
   sync();
-  return { panel, update, rest: restButton.onclick, followBodyPose, withRestPose, bundleResult, clipResult };
+  function editableBodyDraft(rigSignature, reference) {
+    if (!clip || (clip.targetPart || 'CharacterMesh0') !== 'CharacterMesh0')
+      throw new Error('Select and load a CharacterMesh0 animation in Motion first. Face/cape/montage-only clips need their own rig editor.');
+    const frames = Math.round(duration() * 30);
+    if (frames < 3 || frames > 900) throw new Error('Editable body clips must be between 0.1 and 30 seconds.');
+    const savedTime = time, wasPlaying = playing;
+    playing = false;
+    const tracks = [...bones].map(([bone]) => ({ bone, keys:[] }));
+    try {
+      for (let frame = 0; frame <= frames; frame++) {
+        pose(frame / frames * duration());
+        for (const track of tracks) {
+          const bone = bones.get(track.bone), base = reference.get(track.bone);
+          if (!base) throw new Error('The selected clip does not match the editor body rig.');
+          const p = bone.position.clone().sub(base.p), q = base.q.clone().invert().multiply(bone.quaternion).normalize();
+          const s = bone.scale.clone().divide(base.s);
+          // q/-q describe the same rotation. Keep adjacent samples in one hemisphere.
+          const previous = track.keys.at(-1)?.q;
+          if (previous && previous.reduce((sum, value, axis) => sum + value * q.toArray()[axis], 0) < 0)
+            q.set(-q.x,-q.y,-q.z,-q.w);
+          // Viewer matrices carry floating-point noise. Keep sub-micrometre / sub-degree
+          // precision without inflating a short editable clip beyond the draft size limit.
+          const compact = values => values.map(value => Math.round(value * 1e8) / 1e8);
+          track.keys.push({frame,p:compact(p.toArray()),q:compact(q.toArray()),s:compact(s.toArray()),interpolation:'linear'});
+        }
+      }
+      return {schema:'batcomputer.animation-draft.v1',name:(clip.label || selectedPackage.split('/').at(-1) || 'Imported motion').slice(0,64),
+        description:'Editable 30 fps body-motion sample; native gameplay notifies are not copied.',
+        sourceAnimationPackage:selectedPackage,fps:30,durationFrames:frames,loop:loop.checked,rigSignature,
+        tracks:tracks.filter(track => track.keys.some(key => key.p.some(v=>Math.abs(v)>1e-7) || Math.abs(key.q[3])<.99999999 || key.s.some(v=>Math.abs(v-1)>1e-7)))};
+    } finally { reset(); root.updateMatrixWorld(true); time = savedTime; pose(savedTime); playing = wasPlaying; last = performance.now(); sync(); }
+  }
+  return { panel, update, rest: restButton.onclick, followBodyPose, withRestPose, bundleResult, clipResult, editableBodyDraft };
 };

@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using CUE4Parse.UE4.Assets.Exports.Animation;
 using CUE4Parse.UE4.Assets.Exports.SkeletalMesh;
 
 namespace Batcomputer;
@@ -41,6 +43,7 @@ internal static class AnimationDraftCookService
         object[] donorBones;
         string[] boneNames;
         string rigSignature;
+        string nativeSkeletonIdentity;
         using (var provider = SkinnedMeshCookService.OpenProvider())
         {
             var native = provider.LoadPackageObject<USkeletalMesh>(NativeMesh);
@@ -55,12 +58,24 @@ internal static class AnimationDraftCookService
                 rotation = new[] { bone.Rotation.X, bone.Rotation.Y, bone.Rotation.Z, bone.Rotation.W },
                 scale = new[] { bone.Scale.X, bone.Scale.Y, bone.Scale.Z }
             }).ToArray();
+            var skeleton = provider.LoadPackageObject<USkeleton>(NativeSkeleton);
+            nativeSkeletonIdentity = JsonSerializer.Serialize(AnimationSkeletonRemapService.Bones(skeleton.ReferenceSkeleton)
+                .Select(bone => new
+                {
+                    bone.Name, bone.Parent,
+                    translation = new[] { bone.Translation.X, bone.Translation.Y, bone.Translation.Z },
+                    rotation = new[] { bone.Rotation.X, bone.Rotation.Y, bone.Rotation.Z, bone.Rotation.W },
+                    scale = new[] { bone.Scale.X, bone.Scale.Y, bone.Scale.Z }
+                }));
         }
         var draftBytes = File.ReadAllBytes(draftPath);
         if (draftBytes.Length is 0 or > 2_000_000) throw new InvalidDataException("Animation draft must be smaller than 2 MB.");
         using var draft = JsonDocument.Parse(draftBytes);
         var name = ValidateDraft(draft.RootElement, rigSignature, boneNames);
-        var hash = Convert.ToHexString(SHA256.HashData(draftBytes))[..12];
+        ValidateCombatTiming(draft.RootElement, draft.RootElement.GetProperty("durationFrames").GetInt32(), requireCookable: true);
+        byte[] referenceHash;
+        using (var referenceStream = File.OpenRead(referenceFbx)) referenceHash = SHA256.HashData(referenceStream);
+        var hash = CookIdentity(draftBytes, referenceHash, rigSignature + "\0" + nativeSkeletonIdentity);
         var safeName = new string(name.Where(c => char.IsAsciiLetterOrDigit(c) || c == '_').ToArray()).Trim('_');
         if (safeName.Length == 0) safeName = "Motion";
         if (safeName.Length > 28) safeName = safeName[..28].TrimEnd('_');
@@ -72,6 +87,7 @@ internal static class AnimationDraftCookService
             entry.PackagePath.Equals(packagePath, StringComparison.OrdinalIgnoreCase) && entry.IsAvailable);
         if (previous is not null)
         {
+            new AnimationDraftLibraryService(projectRoot).Import(draftPath, package: packagePath);
             log("This exact draft is already cooked and ready in the animation library.");
             return new Result(previous, "", libraryService.LibraryRoot, true);
         }
@@ -96,9 +112,13 @@ internal static class AnimationDraftCookService
         }));
         var sourceCopy = Path.Combine(cookRoot, "source.fbx");
         File.Copy(referenceFbx, sourceCopy);
+        using (var sourceStream = File.OpenRead(sourceCopy))
+            if (!referenceHash.AsSpan().SequenceEqual(SHA256.HashData(sourceStream)))
+                throw new InvalidDataException("The reference FBX changed while preparing the cook. Retry with the saved file.");
         var draftCopy = Path.Combine(cookRoot, "draft.json");
         File.WriteAllBytes(draftCopy, draftBytes);
         var temporaryMesh = "/Game/Mods/BatcomputerAnimations/Temp/SK_" + hash;
+        var temporarySkeleton = temporaryMesh + "_Skeleton";
         File.WriteAllText(Path.Combine(cookRoot, "import.json"), JsonSerializer.Serialize(new
         {
             source = sourceCopy, scale = 1, package = temporaryMesh, donor_bones = donorBones,
@@ -143,12 +163,13 @@ internal static class AnimationDraftCookService
         {
             var item = report.RootElement.EnumerateArray().Single();
             if (item.GetProperty("name").GetString() != assetName ||
-                item.GetProperty("skeleton").GetString() != temporaryMesh + "_Skeleton." + Path.GetFileName(temporaryMesh) + "_Skeleton")
+                item.GetProperty("skeleton").GetString() != temporarySkeleton + "." + Path.GetFileName(temporarySkeleton))
                 throw new InvalidDataException("Unreal authored a different animation or skeleton than requested.");
         }
         await RunUnreal("cook", "-run=Cook", "-TargetPlatform=Windows", "-CookDir=" + Path.Combine(cookRoot, "Content", "Mods"),
             "-NoDefaultMaps", "-NoAlwaysCookMaps", "-SkipEditorContent", "-SkipZenStore");
-        var cookedFolder = Path.Combine(cookRoot, "Saved", "Cooked", "Windows", "AnimCook", "Content", "Mods", "BatcomputerAnimations", "Animations");
+        var cookedContent = Path.Combine(cookRoot, "Saved", "Cooked", "Windows", "AnimCook", "Content");
+        var cookedFolder = Path.Combine(cookedContent, "Mods", "BatcomputerAnimations", "Animations");
         var cookedUasset = Path.Combine(cookedFolder, assetName + ".uasset");
         if (!File.Exists(cookedUasset) || !File.Exists(Path.Combine(cookedFolder, assetName + ".uexp")))
             throw new InvalidDataException("The cooked animation pair is incomplete. See " + reportDirectory);
@@ -158,13 +179,52 @@ internal static class AnimationDraftCookService
             if (File.Exists(source)) File.Copy(source, Path.Combine(reportDirectory, assetName + extension));
         }
         var importedUasset = Path.Combine(reportDirectory, assetName + ".uasset");
-        log("Connecting the cooked animation to the game's native LEGOfig skeleton…");
-        if (Program.RepathNameMap(importedUasset, temporaryMesh + "_Skeleton", NativeSkeleton) != 0 ||
-            Program.RepathNameMap(importedUasset, Path.GetFileName(temporaryMesh) + "_Skeleton", "SKEL_LEGOfig") != 0)
+        log("Matching cooked animation tracks to the game's native bone names…");
+        AnimationSkeletonRemapService.Result remap;
+        using (var provider = ModelPreviewService.MakeProvider(AppSettings.Current.EffectiveGamePaksRoot()!,
+                   AppSettings.Current.EffectiveUsmapPath()!, [cookedContent]))
+        {
+            var sequence = provider.LoadPackageObject<UAnimSequence>(packagePath);
+            var importedSkeleton = sequence.Skeleton?.Load<USkeleton>()
+                ?? throw new InvalidDataException("The cooked animation has no imported skeleton.");
+            var nativeSkeleton = provider.LoadPackageObject<USkeleton>(NativeSkeleton);
+            var authorMesh = provider.LoadPackageObject<USkeletalMesh>(temporaryMesh);
+            remap = AnimationSkeletonRemapService.RemapCookedTrackTable(importedUasset, sequence, importedSkeleton, nativeSkeleton, authorMesh);
+        }
+        File.WriteAllText(Path.Combine(reportDirectory, "native-track-remap.json"), JsonSerializer.Serialize(remap, JsonOptions));
+        log($"Matched {remap.Tracks.Length} tracks; corrected {remap.ChangedTracks} skeleton indices without changing compressed motion.");
+        if (Program.RepathNameMap(importedUasset, temporarySkeleton, NativeSkeleton) != 0 ||
+            Program.RepathNameMap(importedUasset, Path.GetFileName(temporarySkeleton), "SKEL_LEGOfig") != 0)
             throw new InvalidDataException("The cooked animation could not be bound to the native skeleton.");
+        // Re-read the final serialized pair before exposing it in the library. A correct
+        // skeleton path alone does not prove that tracks address the intended joints.
+        var validationContent = Path.Combine(reportDirectory, "NativeValidation", "LEGOBatmanLotDK", "Content");
+        var validationFolder = Path.Combine(validationContent, "Mods", "BatcomputerAnimations", "Animations");
+        Directory.CreateDirectory(validationFolder);
+        foreach (var extension in new[] { ".uasset", ".uexp", ".ubulk" })
+            if (File.Exists(Path.ChangeExtension(importedUasset, extension)))
+                File.Copy(Path.ChangeExtension(importedUasset, extension), Path.Combine(validationFolder, assetName + extension));
+        using (var provider = ModelPreviewService.MakeProvider(AppSettings.Current.EffectiveGamePaksRoot()!,
+                   AppSettings.Current.EffectiveUsmapPath()!, [validationContent]))
+        {
+            var sequence = provider.LoadPackageObject<UAnimSequence>(packagePath);
+            var skeleton = sequence.Skeleton?.Load<USkeleton>()
+                ?? throw new InvalidDataException("The rebound animation has no native skeleton.");
+            var indices = sequence.CompressedTrackToSkeletonMapTable.Select(track => track.BoneTreeIndex).ToArray();
+            var bones = skeleton.ReferenceSkeleton.FinalRefBoneInfo;
+            if (!skeleton.GetPathName().Equals(NativeSkeleton + ".SKEL_LEGOfig", StringComparison.OrdinalIgnoreCase) ||
+                !indices.SequenceEqual(remap.Tracks.Select(track => track.TargetIndex)) ||
+                !indices.Select(index => bones[index].Name.Text).SequenceEqual(remap.Tracks.Select(track => track.Bone), StringComparer.Ordinal))
+                throw new InvalidDataException("The final cooked animation's bone mapping failed verification.");
+            log("Decoding the final native-rig poses and comparing every bone/frame to the draft…");
+            var poses = AnimationCookedPoseValidationService.Validate(importedUasset, sequence, skeleton, draft.RootElement);
+            File.WriteAllText(Path.Combine(reportDirectory, "native-pose-validation.json"), JsonSerializer.Serialize(poses, JsonOptions));
+            log($"Verified {poses.Samples} bone/frame poses (maximum error {poses.MaxPositionCm:G4} cm / {poses.MaxRotationDegrees:G4} degrees).");
+        }
         var entry = libraryService.ImportCookedFile(library, assetName, importedUasset, packagePath, "authored-draft", "Character");
         if (!entry.IsAvailable || !entry.Skeleton.Equals(NativeSkeleton, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("The cooked animation was quarantined: " + string.Join("; ", entry.HealthIssues));
+        new AnimationDraftLibraryService(projectRoot).Import(draftPath, package: packagePath);
         log("Ready in the animation library. Choose an individual slot in Edit character animations.");
         workspace.Complete = true;
         return new Result(entry, importedUasset, reportDirectory, false);
@@ -210,7 +270,52 @@ internal static class AnimationDraftCookService
                     throw new InvalidDataException("The draft has an unsupported key transition.");
             }
         }
+        ValidateCombatTiming(draft, duration.GetInt32());
         return name;
+    }
+
+    internal static string CookIdentity(byte[] draftBytes, byte[] referenceHash, string rigSignature)
+    {
+        // A draft-only cache key can reuse a cook authored against a different FBX or an
+        // obsolete skeleton-binding algorithm. Keep those earlier assets distinct.
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        hash.AppendData(Encoding.UTF8.GetBytes(AnimationSkeletonRemapService.Revision + "\0" + rigSignature + "\0"));
+        hash.AppendData(referenceHash);
+        hash.AppendData(draftBytes);
+        return Convert.ToHexString(hash.GetHashAndReset())[..12];
+    }
+
+    internal static void ValidateCombatTiming(JsonElement draft, int duration, bool requireCookable = false)
+    {
+        if (!draft.TryGetProperty("combatTiming", out var timing)) return;
+        if (timing.ValueKind != JsonValueKind.Object ||
+            !timing.TryGetProperty("schema", out var schema) || schema.ValueKind != JsonValueKind.String || schema.GetString() != "batcomputer.combat-timing.v1" ||
+            !timing.TryGetProperty("previewOnly", out var preview) || preview.ValueKind != JsonValueKind.True ||
+            !timing.TryGetProperty("windows", out var windows) || windows.ValueKind != JsonValueKind.Array || windows.GetArrayLength() > 16)
+            throw new InvalidDataException("The draft has invalid preview combat timing metadata.");
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var window in windows.EnumerateArray())
+        {
+            if (window.ValueKind != JsonValueKind.Object ||
+                !window.TryGetProperty("id", out var idValue) || idValue.ValueKind != JsonValueKind.String ||
+                !window.TryGetProperty("name", out var labelValue) || labelValue.ValueKind != JsonValueKind.String ||
+                !window.TryGetProperty("hand", out var handValue) || handValue.ValueKind != JsonValueKind.String ||
+                !window.TryGetProperty("start", out var startValue) || startValue.ValueKind != JsonValueKind.Number || !startValue.TryGetInt32(out var start) ||
+                !window.TryGetProperty("hit", out var hitValue) || hitValue.ValueKind != JsonValueKind.Number || !hitValue.TryGetInt32(out var hit) ||
+                !window.TryGetProperty("end", out var endValue) || endValue.ValueKind != JsonValueKind.Number || !endValue.TryGetInt32(out var end))
+                throw new InvalidDataException("Combat windows require an ID, label, hand, and integer start/contact/end frames.");
+            var id = idValue.GetString()!;
+            var label = labelValue.GetString()!;
+            var hand = handValue.GetString();
+            if (id.Length is < 1 or > 64 || id.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('_' or '-')) || !ids.Add(id) ||
+                string.IsNullOrWhiteSpace(label) || label.Length > 48 || hand is not ("left" or "right" or "both") ||
+                start < 0 || start >= end || hit < start || hit > end || end > duration)
+                throw new InvalidDataException("Combat windows require unique IDs and start ≤ contact ≤ end within the clip.");
+        }
+        // Authored motion cannot silently turn a preview marker into game damage. LOTDK's
+        // native hit-frame/hitbox notifies also encode sockets, effects and combat contract data.
+        if (requireCookable && windows.GetArrayLength() > 0)
+            throw new InvalidDataException("Combat timing markers are currently preview-only. Save the draft to retain them; native hit-notify integration is required before cooking these windows. For a motion-only cook, explicitly remove the markers from a separate copy.");
     }
 
     private static void ValidateVector(JsonElement vector, int length, double minimum, double maximum)

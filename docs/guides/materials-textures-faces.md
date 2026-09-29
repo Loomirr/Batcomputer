@@ -57,6 +57,27 @@ Use templates as compatibility rules, not just visual presets:
 Batcomputer warns when a selected template targets another mesh family. Do not force a standard
 LEGOface recipe onto SuperheroFace, or the reverse, simply because both assets are faces.
 
+### Set dummy, Set None, or inherit
+
+Select a texture row in Material Forge and press **Set dummy** to assign a compatible, built-in
+game placeholder. No PNG import/cook is needed. This changes only that row's private override;
+generate the material, save the project and rebuild to apply it.
+
+- **Blank override:** inherit the base material's texture.
+- **Set None:** write an explicit null texture reference. This is not a neutral data map.
+- **Set dummy:** keep a real, correctly packed game texture reference with constant data.
+
+For supported EoM inputs, CT uses `T_Dummy_CTUV`, RAO uses `T_Dummy_RAO`, NRM/DNRM use
+`T_Dummy_Norm`, and MMR uses `T_Dummy_MMR`. Base colour uses white; colour-ID maps use black;
+emissive uses black. Removing a donor-shaped normal does not remove geometric normals or the
+other micro/decal layers. Dummy RAO/MMR still have constant roughness, not zero roughness.
+
+Unknown shader families and mask/ORM layouts are not guessed. LEGOface normal inputs use
+`T_Dummy_NML`; use the **Face helpers** for eye/lash/brow/mouth visibility. Replacing a shared
+lash artwork atlas with a blank texture can affect its eye data too. This button does not
+compile new face zones or change switches, scalars, transparency modes or material parents.
+See the [native dummy map audit](../research/native-dummy-textures.md).
+
 ## Faces
 
 Replacing a standard face should preserve the native animated component instead of deleting it

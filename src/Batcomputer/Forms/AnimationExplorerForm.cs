@@ -7,7 +7,7 @@ namespace Batcomputer;
 /// locomotion sequence used by the selected gameplay donor alongside the imported animation
 /// library. Mutations are requested from the owner so project saves stay transactional.
 /// </summary>
-public sealed class AnimationExplorerForm : AdaptiveForm
+public sealed partial class AnimationExplorerForm : AdaptiveForm
 {
     private readonly NativeSuitProject? _project;
     private readonly AnimLibrary _library;
@@ -53,9 +53,9 @@ public sealed class AnimationExplorerForm : AdaptiveForm
             .GroupBy(entry => entry.Id, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
 
-        Text = "Animation Explorer";
+        Text = "Character animations";
         StartPosition = FormStartPosition.CenterParent;
-        ClientSize = new Size(1120, 720);
+        ClientSize = new Size(1240, 820);
         MinimumSize = new Size(820, 560);
         AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = Theme.WindowBg;
@@ -112,6 +112,7 @@ public sealed class AnimationExplorerForm : AdaptiveForm
 
         _replace.Click += (_, _) => RequestReplace();
         _reset.Click += (_, _) => RequestReset();
+        WireBrowserEvents();
     }
 
     private Control BuildHeader()
@@ -141,7 +142,7 @@ public sealed class AnimationExplorerForm : AdaptiveForm
         layout.Controls.Add(new Label
         {
             Dock = DockStyle.Fill,
-            Text = "ANIMATION EXPLORER",
+            Text = "CHARACTER ANIMATIONS",
             Font = Theme.Eyebrow,
             ForeColor = Theme.Animations,
             TextAlign = ContentAlignment.BottomLeft,
@@ -149,7 +150,7 @@ public sealed class AnimationExplorerForm : AdaptiveForm
         layout.Controls.Add(new Label
         {
             Dock = DockStyle.Fill,
-            Text = "Browse every readable character action, layer, and locomotion sequence; select one exact target to replace or restore.",
+            Text = "Choose an animation in the tree, search your own or base-game replacements, then apply it here.",
             Font = Theme.Caption,
             ForeColor = Theme.OnDarkMuted,
             TextAlign = ContentAlignment.TopLeft,
@@ -188,8 +189,8 @@ public sealed class AnimationExplorerForm : AdaptiveForm
             BackColor = Theme.WindowBg,
             Margin = Padding.Empty,
         };
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 48));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 52));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.Controls.Add(BuildTreeCard(), 0, 0);
         layout.Controls.Add(BuildDetailCard(), 1, 0);
@@ -211,11 +212,12 @@ public sealed class AnimationExplorerForm : AdaptiveForm
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 5,
             BackColor = Color.Transparent,
         };
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
         card.Controls.Add(layout);
@@ -235,6 +237,7 @@ public sealed class AnimationExplorerForm : AdaptiveForm
         _search.Font = Theme.Body;
         Theme.StyleDarkInput(_search);
         layout.Controls.Add(_search, 0, 1);
+        layout.Controls.Add(BuildTreeFilters(), 0, 2);
 
         _tree.Dock = DockStyle.Fill;
         _tree.BackColor = Theme.SlateDark;
@@ -247,13 +250,13 @@ public sealed class AnimationExplorerForm : AdaptiveForm
         _tree.ShowRootLines = false;
         _tree.ItemHeight = Math.Max(24, TextRenderer.MeasureText("Ag", Theme.Body).Height + 7);
         _tree.Font = Theme.Body;
-        layout.Controls.Add(_tree, 0, 2);
+        layout.Controls.Add(_tree, 0, 3);
 
         _summary.Dock = DockStyle.Fill;
         _summary.Font = Theme.Caption;
         _summary.ForeColor = Theme.OnDarkMuted;
         _summary.TextAlign = ContentAlignment.BottomLeft;
-        layout.Controls.Add(_summary, 0, 3);
+        layout.Controls.Add(_summary, 0, 4);
         return card;
     }
 
@@ -272,13 +275,14 @@ public sealed class AnimationExplorerForm : AdaptiveForm
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 5,
             BackColor = Color.Transparent,
         };
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 35));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 65));
         card.Controls.Add(layout);
 
         layout.Controls.Add(new Label
@@ -315,11 +319,12 @@ public sealed class AnimationExplorerForm : AdaptiveForm
         _details.BorderStyle = BorderStyle.None;
         _details.BackColor = Theme.SlateDark;
         _details.ForeColor = Theme.OnDarkMuted;
-        _details.Font = Theme.Mono;
+        _details.Font = Theme.Body;
         _details.WordWrap = true;
         _details.DetectUrls = false;
         surface.Controls.Add(_details);
         layout.Controls.Add(surface, 0, 3);
+        layout.Controls.Add(BuildReplacementBrowser(), 0, 4);
 
         ShowNode(null);
         return card;
@@ -340,7 +345,7 @@ public sealed class AnimationExplorerForm : AdaptiveForm
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
         _applyHint.Dock = DockStyle.Fill;
-        _applyHint.Text = "Select an animation under Current character, then choose Replace…";
+        _applyHint.Text = "Select a character animation, then pick its replacement on the right.";
         _applyHint.Font = Theme.Caption;
         _applyHint.ForeColor = Theme.OnDarkMuted;
         _applyHint.TextAlign = ContentAlignment.MiddleLeft;
@@ -357,7 +362,7 @@ public sealed class AnimationExplorerForm : AdaptiveForm
             Margin = new Padding(8, 0, 8, 0),
         };
         ConfigureApplyButton(_reset, "Reset to donor", primary: false);
-        ConfigureApplyButton(_replace, "Replace…", primary: true);
+        ConfigureApplyButton(_replace, "Apply selected", primary: true);
         actions.Controls.Add(_reset);
         actions.Controls.Add(_replace);
         layout.Controls.Add(actions, 1, 0);
@@ -397,11 +402,14 @@ public sealed class AnimationExplorerForm : AdaptiveForm
     private void RebuildTree()
     {
         var previousEntry = _selectedEntry?.Id;
+        var previousTarget = _selectedTarget?.TargetId;
         var snapshot = AnimationExplorerSnapshotBuilder.Build(
             _project,
             _library,
             _characterGraph,
-            _search.Text);
+            _search.Text,
+            simplified: _treeMode.SelectedIndex == 0,
+            filter: SelectedTreeFilter());
 
         _tree.BeginUpdate();
         try
@@ -432,6 +440,11 @@ public sealed class AnimationExplorerForm : AdaptiveForm
                 : previousEntry;
             _initialSelectionApplied = true;
             SelectEntryNode(desired);
+            if (!string.IsNullOrWhiteSpace(previousTarget))
+            {
+                var selected = FindNode(_tree.Nodes, item => (item.Tag as AnimationExplorerNode)?.CharacterTarget?.TargetId == previousTarget);
+                if (selected is not null) { _tree.SelectedNode = selected; selected.EnsureVisible(); }
+            }
 
             if (_tree.SelectedNode is null && _tree.Nodes.Count > 0)
             {
@@ -455,6 +468,7 @@ public sealed class AnimationExplorerForm : AdaptiveForm
             _selectedSlot = null;
             SetTargetButtons(null);
             _detailTitle.Text = "No matches";
+            LoadReplacementChoices(null);
             _detailSubtitle.Text = "Try an action, context, character, package, rig or animation name.";
             _details.Text = "Nothing in the current character graph or imported animation library matched this search.";
         }
@@ -501,6 +515,7 @@ public sealed class AnimationExplorerForm : AdaptiveForm
             _selectedTarget = null;
             _selectedSlot = null;
             _detailTitle.Text = "Choose a character animation";
+            LoadReplacementChoices(null);
             _detailSubtitle.Text = "Its exact action/context target and current asset will appear here.";
             _details.Text =
                 "Current character\n" +
@@ -516,6 +531,7 @@ public sealed class AnimationExplorerForm : AdaptiveForm
             : null;
         _selectedTarget = node.CharacterTarget;
         _selectedSlot = node.CharacterSlot;
+        LoadReplacementChoices(_selectedTarget);
 
         _detailTitle.Text = node.Title;
         _detailSubtitle.Text = node.Value;
@@ -527,11 +543,11 @@ public sealed class AnimationExplorerForm : AdaptiveForm
                          AnimationExplorerSnapshotBuilder.CanReplaceTarget(_selectedTarget);
         SetTargetButtons(canReplace ? _selectedTarget : null);
         _applyHint.Text = canReplace
-            ? $"Replace {FriendlyTargetName(_selectedTarget!)} with a compatible base-game or imported animation."
+            ? "Choose a replacement on the right. Applying saves this suit's assignment; build the mod to use it in-game."
             : _project is null
                 ? "Open a suit before editing its character animations."
                 : _selectedEntry is not null
-                    ? "Imported entries are sources. Select a target under Current character, then choose Replace…"
+                    ? "Imported entries are sources. Select a character target, then pick a replacement on the right."
                     : "Select an individual animation target—not its group or context row—to replace it.";
     }
 
@@ -641,7 +657,8 @@ public sealed class AnimationExplorerForm : AdaptiveForm
         {
             return;
         }
-        ReplaceRequested?.Invoke(this, new AnimationExplorerTargetRequestedEventArgs(_selectedTarget, _selectedSlot));
+        if (SelectedReplacement is not { CanSelect: true } candidate) return;
+        ReplaceRequested?.Invoke(this, new AnimationExplorerTargetRequestedEventArgs(_selectedTarget, _selectedSlot) { Candidate = candidate });
     }
 
     private void RequestReset()
@@ -655,7 +672,8 @@ public sealed class AnimationExplorerForm : AdaptiveForm
 
     private void SetTargetButtons(CharacterAnimationTargetSnapshot? target)
     {
-        _replace.Enabled = target is not null;
+        _replace.Enabled = target is not null && SelectedReplacement is { CanSelect: true } choice &&
+            !choice.PackagePath.Equals(target.EffectivePackage, StringComparison.OrdinalIgnoreCase);
         _reset.Enabled = target?.IsOverridden == true;
     }
 
@@ -793,6 +811,7 @@ public sealed class AnimationExplorerForm : AdaptiveForm
 
 public sealed class AnimationExplorerTargetRequestedEventArgs : EventArgs
 {
+    public AnimationReplacementCandidate? Candidate { get; init; }
     public AnimationExplorerTargetRequestedEventArgs(
         CharacterAnimationTargetSnapshot target,
         CharacterAnimationSlotSnapshot? slot)

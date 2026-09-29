@@ -814,6 +814,7 @@ public sealed partial class MainForm
             {
                 var path = UnrealPathUtil.NormalizePackagePath(material.PackagePath);
                 var isFace = material.Kind.Equals("Face", StringComparison.OrdinalIgnoreCase);
+                var presentation = MaterialTilePresentationService.Describe(path, material, isFace, shared: true);
                 return isFace
                     ? BuildFaceMaterialTile(
                         path,
@@ -824,12 +825,12 @@ public sealed partial class MainForm
                     : new VirtualTilePanel.Tile
                     {
                         Section = "TOOL MATERIAL LIBRARY",
-                        Title = UnrealPathUtil.AssetName(path).Replace("MI_", ""),
-                        Subtitle = "shared tool MI · drag to apply",
+                        Title = presentation.Title,
+                        Subtitle = presentation.Subtitle,
                         Accent = Theme.Materials,
                         DragPayload = new ToyboxDragPayload { Kind = "material", MaterialPath = path },
                         MenuFactory = () => BuildToolMaterialLibraryMenu(path),
-                        ToolTip = $"Available to every suit in this workspace.\n{path}\nSource: {material.SourceMaterialPackagePath}",
+                        ToolTip = "Available to every suit in this workspace.\n" + presentation.ToolTip,
                     };
             }).ToList();
             ShowVirtualTiles(
@@ -844,7 +845,7 @@ public sealed partial class MainForm
             var mod = ExtractModFolder(_targetPlayableText.Text.Trim());
             var hasBase = !string.IsNullOrWhiteSpace(mod);
             var header = hasBase
-                ? $"Materials you generated for slot [{_toyboxSlotLabel}]. Drag a tile onto a slot to apply it; right-click to edit. Use '＋ Create' for a new one, or switch the dropdown to a game folder to pull base-game MIs."
+                ? $"Materials you generated for slot [{_toyboxSlotLabel}]. Some recipes create separate Gameplay and Cutscene materials. Drag a tile onto a slot to apply it; right-click to edit. Use '＋ Create' for a new one, or switch the dropdown to a game folder to pull base-game MIs."
                 : "All generated materials. Set a base suit before creating or assigning a material.";
             var tiles = new List<VirtualTilePanel.Tile>
             {
@@ -868,6 +869,9 @@ public sealed partial class MainForm
             {
                 var name = UnrealPathUtil.AssetName(miPath);
                 var isFace = IsFaceMaterialPackage(miPath);
+                var entry = _currentProject?.GeneratedMaterials?.FirstOrDefault(material =>
+                    UnrealPathUtil.NormalizePackagePath(material.PackagePath).Equals(miPath, StringComparison.OrdinalIgnoreCase));
+                var presentation = MaterialTilePresentationService.Describe(miPath, entry, isFace);
                 if (!MatchesToyboxSearch(search, name, miPath))
                 {
                     continue;
@@ -875,8 +879,9 @@ public sealed partial class MainForm
 
                 tiles.Add(new VirtualTilePanel.Tile
                 {
-                    Title = name.Replace("MI_", ""),
-                    Subtitle = isFace ? "your face MI · apply to Face" : "your MI · drag to apply",
+                    Title = presentation.Title,
+                    Subtitle = presentation.Subtitle,
+                    ToolTip = presentation.ToolTip,
                     Accent = isFace ? Theme.Faces : Theme.Materials,
                     DragPayload = new ToyboxDragPayload { Kind = "material", MaterialPath = miPath, FaceOnly = isFace },
                     MenuFactory = () => isFace

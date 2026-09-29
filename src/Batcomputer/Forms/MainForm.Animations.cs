@@ -14,6 +14,7 @@ namespace Batcomputer;
 public sealed partial class MainForm
 {
     private bool _animationImportInProgress;
+    private string _yourAnimationFilter = "all";
 
     /// <summary>
     /// Browses animation building blocks and shows the current suit's composition.
@@ -28,7 +29,7 @@ public sealed partial class MainForm
 
         // The project-owned animation library is useful even before a suit has a base or the
         // extracted game-data catalogue is ready. Keep it independent from native set browsing.
-        if (type is "Imported animation library" or "Imported animations")
+        if (type is "Your animations" or "Imported animation library" or "Imported animations")
         {
             RefreshImportedAnimationTiles();
             return;
@@ -139,7 +140,7 @@ public sealed partial class MainForm
         var on = _currentProject?.UseCustomArchetype == true;
 
         var intro = FullWidthNote(
-            "Start with Edit character animations. It shows every action, montage, animation-blueprint layer, and locomotion slot inherited from this suit's gameplay donor, then lets you choose a compatible base-game or imported replacement.\n" +
+            "Open the character animation tree to browse readable action, montage, animation-blueprint layer, and locomotion slots. Filter to changed slots, then search your cooked clips or compatible base-game replacements in the same window.\n" +
             "Imported packs only add choices to the workspace library. Whole-set family swaps and the custom-archetype switch remain available below as advanced tools.");
         var introTextHeight = TextRenderer.MeasureText(
             intro.Text,
@@ -150,8 +151,8 @@ public sealed partial class MainForm
         _toyboxTileFlow.Controls.Add(intro);
 
         var explorerTile = MakeTile(
-            "Edit character animations",
-            "all character slots · base-game + imported replacements",
+            "Character animation tree",
+            "browse by action · changed slots · inline replacements",
             () => OpenAnimationExplorer(),
             Theme.Animations);
         explorerTile.Width = 420;
@@ -190,9 +191,9 @@ public sealed partial class MainForm
         _toyboxTileFlow.Controls.Add(cookDraftTile);
 
         var libraryTile = MakeTile(
-            "Imported animation library",
-            importedCount > 0 ? $"{importedCount} ready · browse library" : "library is empty",
-            () => SelectComboValue(_toyboxTypeCombo, "Imported animation library"),
+            "Your animations",
+            "drafts, cooked clips and character assignments",
+            () => SelectComboValue(_toyboxTypeCombo, "Your animations"),
             Theme.Animations);
         libraryTile.Width = 210;
         libraryTile.Height = 104;
@@ -245,6 +246,24 @@ public sealed partial class MainForm
 
     private void RefreshImportedAnimationTiles()
     {
+        var workspace = _projectRootText.Text.Trim();
+        var drafts = new AnimationDraftLibraryService(workspace);
+        var usage = AnimationDraftLibraryService.Usage(_currentProject);
+        foreach (var (value, label) in new[] { ("all", "All your animations"), ("used", "On this character"), ("ready", "Cooked / ready") })
+        {
+            var filterTile = MakeTile(label, _yourAnimationFilter == value ? "selected" : "click to filter", () =>
+            { _yourAnimationFilter = value; RefreshToyboxTiles(); }, _yourAnimationFilter == value ? Theme.Animations : Theme.OnDarkMuted);
+            filterTile.Width = 210; filterTile.Height = 64; _toyboxTileFlow.Controls.Add(filterTile);
+        }
+        _toyboxTileFlow.SetFlowBreak(_toyboxTileFlow.Controls[^1], true);
+        var importDraft = MakeTile("+ Import animation draft", "keep a private editable copy", () =>
+        {
+            using var dialog = new OpenFileDialog { Title = "Add a draft to Your animations", Filter = "Animation draft (*.json)|*.json", CheckFileExists = true };
+            if (dialog.ShowDialog(this) != DialogResult.OK) return;
+            try { drafts.Import(dialog.FileName, _currentProject); RefreshToyboxTiles(); }
+            catch (Exception ex) { Dialog.Error(this, "Could not import draft", ex.Message); }
+        }, Theme.Animations, dashed:true);
+        importDraft.Width = 210; importDraft.Height = 104; _toyboxTileFlow.Controls.Add(importDraft);
         var importTile = MakeTile(
             "+ Import animation pack",
             "pick any file from the cooked trio",
@@ -289,13 +308,35 @@ public sealed partial class MainForm
         }
 
         var search = CurrentToyboxSearch();
+        try
+        {
+            var views = drafts.Views(_currentProject);
+            _toyboxTileFlow.Controls.Add(FullWidthNote("Your editable drafts · click to preview/edit on the current character. “On this character” means saved assignments; build to apply them in-game."));
+            foreach (var draft in views.Where(item => (_yourAnimationFilter != "used" || item.UsedBy.Length > 0) &&
+                         (_yourAnimationFilter != "ready" || item.Status == "Cooked") &&
+                         MatchesToyboxSearch(search, item.Name, item.Character, string.Join(" ", item.UsedBy))))
+            {
+                var tile = MakeTile(draft.Name.Replace('_', ' '), draft.Status + (draft.UsedBy.Length > 0 ? $" · on this character ({draft.UsedBy.Length} slots)" : " · not assigned"),
+                    () => ViewAnimationDraftIn3D(draft.Id), draft.Available ? Theme.Animations : Color.FromArgb(220,120,60));
+                tile.Width = 240; tile.Height = 104;
+                tile.Enabled = draft.Available;
+                var menu = new ContextMenuStrip();
+                menu.Items.Add("Preview / edit", null, (_, _) => ViewAnimationDraftIn3D(draft.Id));
+                menu.Items.Add("Cook this draft…", null, (_, _) => _ = CookAnimationDraftAsync(Path.Combine(drafts.Root, draft.Id + ".json")));
+                tile.ContextMenuStrip = menu; _toyboxTileFlow.Controls.Add(tile);
+            }
+        }
+        catch (Exception ex) { _toyboxTileFlow.Controls.Add(FullWidthNote("Draft library unavailable: " + ex.Message)); }
         var entries = library.Entries
+            .Where(entry => _yourAnimationFilter != "used" || usage.ContainsKey(UnrealPathUtil.NormalizePackagePath(entry.PackagePath)))
+            .Where(entry => _yourAnimationFilter != "ready" || IsManagedAnimationEntry(entry))
             .Where(entry => MatchesToyboxSearch(
                 search,
                 entry.Name,
                 entry.PackagePath,
                 entry.Skeleton,
-                entry.HealthStatus))
+                entry.HealthStatus,
+                string.Join(" ", usage.GetValueOrDefault(UnrealPathUtil.NormalizePackagePath(entry.PackagePath)) ?? [])))
             .OrderByDescending(entry => entry.IsAvailable)
             .ThenBy(entry => entry.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -303,7 +344,7 @@ public sealed partial class MainForm
         var ready = entries.Count(IsManagedAnimationEntry);
         var unavailable = entries.Count(entry => !entry.IsAvailable);
         _toyboxTileFlow.Controls.Add(FullWidthNote(
-            $"Animation library · {ready} ready" +
+            $"Cooked animation library · {ready} ready" +
             (unavailable > 0 ? $" · {unavailable} kept out for safety" : "") +
             ". Click an animation to inspect its authored rig and connected packages. " +
             "Apply compatible choices from Edit character animations."));
@@ -317,6 +358,7 @@ public sealed partial class MainForm
             var status = healthy
                 ? $"ready · {rig} · {entry.SupportPackages.Count} support"
                 : $"{(string.IsNullOrWhiteSpace(entry.HealthStatus) ? "unavailable" : entry.HealthStatus)} · {rig}";
+            if (usage.TryGetValue(UnrealPathUtil.NormalizePackagePath(entry.PackagePath), out var assigned)) status += $" · on this character ({assigned.Length} slots)";
             var tile = MakeTile(
                 healthy ? entry.Name : "⚠ " + entry.Name,
                 status,
@@ -359,7 +401,7 @@ public sealed partial class MainForm
         explorer.ReplaceRequested += (_, request) =>
         {
             var projectBeforeSave = _currentProject;
-            if (ReplaceAnimationFromExplorer(request.Target, request.Slot, library))
+            if (ReplaceAnimationFromExplorer(request.Target, request.Slot, library, request.Candidate))
             {
                 explorer.RefreshFromProject();
             }
@@ -388,7 +430,8 @@ public sealed partial class MainForm
     private bool ReplaceAnimationFromExplorer(
         CharacterAnimationTargetSnapshot target,
         CharacterAnimationSlotSnapshot? slot,
-        AnimLibrary library)
+        AnimLibrary library,
+        AnimationReplacementCandidate? selectedCandidate = null)
     {
         if (BlockSynchronousEditWhileLoadedProjectRestores("Applying the imported animation"))
         {
@@ -408,11 +451,14 @@ public sealed partial class MainForm
             return false;
         }
 
-        using var picker = new AnimationReplacementPickerForm(target, library);
-        if (picker.ShowDialog(this) != DialogResult.OK || picker.SelectedCandidate is not { } candidate)
+        var candidate = selectedCandidate;
+        if (candidate is null)
         {
-            return false;
+            using var picker = new AnimationReplacementPickerForm(target, library);
+            if (picker.ShowDialog(this) != DialogResult.OK) return false;
+            candidate = picker.SelectedCandidate;
         }
+        if (candidate is null || !candidate.CanSelect || !candidate.AssetClass.Equals(AnimationReplacementCatalogService.AcceptedClass(target), StringComparison.OrdinalIgnoreCase)) return false;
         if (candidate.PackagePath.Equals(target.EffectivePackage, StringComparison.OrdinalIgnoreCase))
         {
             Dialog.Info(this, "Animation is already selected",
@@ -876,7 +922,7 @@ public sealed partial class MainForm
     }
 
     /// <summary>Cook one 3D-viewer draft and put the verified AnimSequence in the workspace library.</summary>
-    private async Task CookAnimationDraftAsync()
+    private async Task CookAnimationDraftAsync(string? selectedDraftPath = null)
     {
         if (_animationImportInProgress)
         {
@@ -895,7 +941,8 @@ public sealed partial class MainForm
             Filter = "Batcomputer animation draft (*.animation-draft.json;*.json)|*.animation-draft.json;*.json",
             CheckFileExists = true
         };
-        if (draftDialog.ShowDialog(this) != DialogResult.OK) return;
+        if (selectedDraftPath is null && draftDialog.ShowDialog(this) != DialogResult.OK) return;
+        var draftPath = selectedDraftPath ?? draftDialog.FileName;
         using var fbxDialog = new OpenFileDialog
         {
             Title = "Choose a prepared native LEGOfig body FBX (used only as a temporary cook rig)",
@@ -904,14 +951,14 @@ public sealed partial class MainForm
         };
         if (fbxDialog.ShowDialog(this) != DialogResult.OK) return;
 
-        using var progress = new AnimationImportProgressForm(Path.GetFileName(draftDialog.FileName));
+        using var progress = new AnimationImportProgressForm(Path.GetFileName(draftPath));
         _animationImportInProgress = true;
         progress.Show(this);
         try
         {
             progress.SetPhase("Checking the draft", "Matching its bones to the installed game's native LEGOfig rig…");
             var result = await Task.Run(() => AnimationDraftCookService.CookAndImportAsync(
-                projectRoot, draftDialog.FileName, fbxDialog.FileName,
+                projectRoot, draftPath, fbxDialog.FileName,
                 line =>
                 {
                     if (IsHandleCreated && !IsDisposed)
@@ -1143,7 +1190,7 @@ public sealed partial class MainForm
                     "Check Diagnostics for the exact package and re-cook/re-import it before building a suit.",
                     windowTitle: "Animations");
             }
-            SelectComboValue(_toyboxTypeCombo, "Imported animation library");
+            SelectComboValue(_toyboxTypeCombo, "Your animations");
             RefreshToyboxTiles();
         }
         catch (Exception ex)

@@ -24,12 +24,55 @@ public sealed class AbilityLoadoutProfile
     // Null is the legacy bundled-sword format. An explicit empty list means no held items.
     // Do not initialize this property: old JSON must remain distinguishable from an intentional removal.
     public List<HeldItemSettings>? HeldItems { get; set; }
+    public List<NativeHeldItemEdit> NativeHeldItems { get; set; } = [];
     public bool AllowUnsafeCoreEdits { get; set; }
     public List<AbilitySetSelection> AbilitySets { get; set; } = new();
 }
 
 public enum HeldWeaponVisibility { WhileAttacking, InCombat, Always, OutsideCombat }
-public enum HeldItemHand { Right, Left }
+// Keep saved Right=0 / Left=1 identities stable; Both uses both native managed hand slots.
+public enum HeldItemHand { Right = 0, Left = 1, Both = 2 }
+
+/// <summary>Exact native managed-item visual binding. Does not remove attack grants or replace global assets.</summary>
+public sealed class NativeHeldItemEdit
+{
+    public string AbilityPackage { get; set; } = "";
+    public int ManagedItemIndex { get; set; }
+    public string ActorPackage { get; set; } = "";
+    public string ExportName { get; set; } = "";
+    public string MeshProperty { get; set; } = "";
+    public string OriginalMeshPackage { get; set; } = "";
+    public string AssetClass { get; set; } = "";
+    public string SourceFingerprint { get; set; } = "";
+    public bool Hide { get; set; }
+    public string ReplacementMeshPackage { get; set; } = "";
+    public List<NativeHeldMaterialOverride> Materials { get; set; } = [];
+    public WeaponModelRecipe? CustomModel { get; set; }
+    public NativeHeldTransform? Transform { get; set; }
+    public string Key => AbilityPackage + "|" + ManagedItemIndex + "|" + ExportName + "|" + MeshProperty;
+    public NativeHeldItemEdit Clone() => new() { AbilityPackage = AbilityPackage, ManagedItemIndex = ManagedItemIndex,
+        ActorPackage = ActorPackage, ExportName = ExportName, MeshProperty = MeshProperty, OriginalMeshPackage = OriginalMeshPackage,
+        AssetClass = AssetClass, SourceFingerprint = SourceFingerprint, Hide = Hide, ReplacementMeshPackage = ReplacementMeshPackage,
+        Materials = Materials.Select(m => new NativeHeldMaterialOverride { Slot = m.Slot, Package = m.Package }).ToList(),
+        CustomModel = CustomModel?.Clone(), Transform = Transform is null ? null : Transform with { } };
+}
+public sealed class NativeHeldMaterialOverride
+{
+    public int Slot { get; set; }
+    public string Package { get; set; } = "";
+}
+public sealed record NativeHeldTransform
+{
+    public float X { get; set; }
+    public float Y { get; set; }
+    public float Z { get; set; }
+    public float Pitch { get; set; }
+    public float Yaw { get; set; }
+    public float Roll { get; set; }
+    public float ScaleX { get; set; } = 1;
+    public float ScaleY { get; set; } = 1;
+    public float ScaleZ { get; set; } = 1;
+}
 
 /// <summary>Independent suit-local held prop. Does not select combat animations or grant attacks.</summary>
 public sealed class HeldItemSettings
@@ -39,12 +82,16 @@ public sealed class HeldItemSettings
     public string TemplateId { get; set; } = "sword";
     public HeldItemHand Hand { get; set; }
     public HeldWeaponVisibility Visibility { get; set; } = HeldWeaponVisibility.Always;
+    // Explicit opt-in: animation empty-hand requests use High; ordinary props retain Medium.
+    // This does not bypass Status.BlockItemGA, alter native controllers or add combat hitboxes.
+    public bool PreferOverAnimationEmptyHands { get; set; }
     public string MeshPackage { get; set; } = "/Game/Models/Props/SM_Katana";
     public string MaterialPackage { get; set; } = "";
     public WeaponModelRecipe? CustomModel { get; set; }
     public List<HeldItemEffectSettings> Effects { get; set; } = [];
     public HeldItemSettings Clone() => new() { Id = Id, Name = Name, TemplateId = TemplateId, Hand = Hand,
-        Visibility = Visibility, MeshPackage = MeshPackage, MaterialPackage = MaterialPackage, CustomModel = CustomModel?.Clone(), Effects = (Effects ?? []).Select(e => e.Clone()).ToList() };
+        Visibility = Visibility, PreferOverAnimationEmptyHands = PreferOverAnimationEmptyHands,
+        MeshPackage = MeshPackage, MaterialPackage = MaterialPackage, CustomModel = CustomModel?.Clone(), Effects = (Effects ?? []).Select(e => e.Clone()).ToList() };
 }
 
 /// <summary>Cosmetic Niagara placement in native mesh-local centimetres. Activation follows the held actor.</summary>

@@ -46,6 +46,37 @@ public sealed class ModelPreviewControl : UserControl
     private uint? _browserProcessId;
     private string? _userDataFolder;
     private int _rendererVersion;
+    private string? _animationWorkspace;
+    private NativeSuitProject? _animationCharacter;
+    internal void ConfigureAnimationLibrary(string workspace, NativeSuitProject? character)
+    {
+        _animationWorkspace = workspace;
+        _animationCharacter = character;
+    }
+    private async Task SaveAnimationDraftAsync(string json, string? id, string layoutKey)
+    {
+        var folder = _pendingFolder; var web = _web; var character = _animationCharacter; var workspace = _animationWorkspace;
+        if (character is null || string.IsNullOrWhiteSpace(workspace) || string.IsNullOrWhiteSpace(folder) || layoutKey != ViewerLayoutService.SuitKey(character)) return;
+        string? error = null; AnimationDraftLibraryService.Entry? entry = null; AnimationDraftLibraryService.View[]? views = null;
+        try
+        {
+            var service = new AnimationDraftLibraryService(workspace);
+            entry = await Task.Run(() => service.Save(json, character, id));
+            views = service.Views(character);
+            // Refresh only the small private draft files; do not rebuild meshes or navigate.
+            foreach (var view in views.Where(item => item.Available && item.Id == entry.Id))
+            {
+                var destination = Path.Combine(folder!, "drafts"); Directory.CreateDirectory(destination);
+                File.Copy(Path.Combine(service.Root, view.Id + ".json"), Path.Combine(destination, view.Id + ".json"), true);
+            }
+        }
+        catch (Exception ex) { error = ex.Message.Split('\n')[0]; }
+        if (IsDisposed || folder != _pendingFolder || !ReferenceEquals(web, _web) || web?.CoreWebView2 is not { } core) return;
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        try { await core.ExecuteScriptAsync("window.characterAnimationCreator?.librarySaved(" + JsonSerializer.Serialize(entry?.Id) + "," +
+            JsonSerializer.Serialize(views, options) + "," + JsonSerializer.Serialize(error) + ")"); }
+        catch (Exception ex) { Debug.WriteLine("Animation library save response: " + ex.Message); }
+    }
 
     /// <summary>Raised when the in-viewer part mover asks the host to persist an alignment.</summary>
     public event EventHandler<PreviewPlacementSaveRequestedEventArgs>? PlacementSaveRequested;
@@ -90,6 +121,19 @@ public sealed class ModelPreviewControl : UserControl
         catch (Exception ex) { Debug.WriteLine("Preview icon-apply acknowledgement: " + ex.Message); }
     }
     internal event Action<string>? VehicleWorkshopMessageReceived;
+    internal event Action<ItemWorkshopTransform>? ItemWorkshopTransformChanged;
+    internal async Task NotifyItemWorkshopPreviewFailedAsync(string message)
+    {
+        if (_web?.CoreWebView2 is not { } core) return;
+        try { await core.ExecuteScriptAsync($"window.itemWorkshopEditor?.previewFailed({JsonSerializer.Serialize(message)})"); }
+        catch (Exception ex) { Debug.WriteLine("Item workshop preview error: " + ex.Message); }
+    }
+    internal async Task SetItemWorkshopEditingAsync(bool enabled)
+    {
+        if (_web?.CoreWebView2 is not { } core) return;
+        try { await core.ExecuteScriptAsync($"window.itemWorkshopEditor?.setEnabled({(enabled ? "true" : "false")})"); }
+        catch (Exception ex) { Debug.WriteLine("Item workshop editing state: " + ex.Message); }
+    }
     internal static bool IsVehicleWorkshopMessage(string? type) => type is "vehicleWorkshopSave" or "vehicleWorkshopReady" or "vehicleWorkshopError" or "vehicleWorkshopSettings" or "vehicleWorkshopCopyMaterial" or "vehicleWorkshopRiders" or "vehicleWorkshopToybox" or "vehicleWorkshopSurface" or "vehicleWorkshopLoadPart";
     internal async Task ShowVehicleRidersAsync(string json)
     {
@@ -293,7 +337,7 @@ public sealed class ModelPreviewControl : UserControl
             // Only the embedded workspace has a project-aware icon-test handler. Standalone
             // read-only preview windows use the same page but must not offer this action.
             await web.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
-                "window.BATCOMPUTER_ICON_TEST_HOST=true;");
+                "window.BATCOMPUTER_ICON_TEST_HOST=true;window.BATCOMPUTER_ANIMATION_LIBRARY_HOST=true;");
             var browserProcessId = web.CoreWebView2.BrowserProcessId;
             if (!_active || !ReferenceEquals(web, _web))
             {
@@ -324,13 +368,28 @@ public sealed class ModelPreviewControl : UserControl
 
     private void HandleWebMessage(string json)
     {
-        if (json.Length < 1_600_000 && IsHandleCreated && !IsDisposed)
+        if (json.Length < 2_100_000 && IsHandleCreated && !IsDisposed)
         {
             try
             {
                 using var document = JsonDocument.Parse(json);
                 if (document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String)
                 {
+                    if (type.GetString() == "save-animation-draft")
+                    {
+                        var value = document.RootElement;
+                        if (value.TryGetProperty("draft", out var draft) && draft.ValueKind == JsonValueKind.Object &&
+                            value.TryGetProperty("layoutKey", out var layout) && layout.ValueKind == JsonValueKind.String)
+                            _ = SaveAnimationDraftAsync(draft.GetRawText(), value.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String ? id.GetString() : null, layout.GetString() ?? "");
+                        return;
+                    }
+                    if (type.GetString() == "item-workshop-transform")
+                    {
+                        var folder = _pendingFolder;
+                        if (ItemWorkshopTransform.TryParse(json, out var change))
+                            BeginInvoke(() => { if (!IsDisposed && folder == _pendingFolder) ItemWorkshopTransformChanged?.Invoke(change); });
+                        return;
+                    }
                     if (type.GetString() is "test-suit-icon" or "apply-suit-icon")
                     {
                         var applying = type.GetString() == "apply-suit-icon";
