@@ -12,6 +12,18 @@ internal static class ReleaseRegressionChecks
     public static int Run(TextWriter output)
     {
         var failures = new List<string>();
+        foreach (var result in HeldItemToggleRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
+        foreach (var result in GameplayAnimationGraphRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
+        foreach (var result in AnimationSpawnedItemRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
+        foreach (var result in CharacterRebaseRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
+        foreach (var result in CharacterVoiceRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
+        foreach (var result in FaceAnimationRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
         foreach (var result in MaterialDummyRegressionChecks.Run())
             Check(result.Passed, result.Description, failures, output);
         foreach (var result in ItemWorkshopRegressionChecks.Run())
@@ -60,6 +72,8 @@ internal static class ReleaseRegressionChecks
         foreach (var result in SavedSuitRestoreRegressionChecks.Run())
             Check(result.Passed, result.Description, failures, output);
         foreach (var result in CustomEquipmentRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
+        foreach (var result in EquipmentRemovalRegressionChecks.Run())
             Check(result.Passed, result.Description, failures, output);
         Check(GameAssetRefreshService.AllCharacterFilters.Contains(GameAssetRefreshService.KatanaMeshFilter) &&
               GameAssetRefreshService.DeveloperResearchFilters.Contains(GameAssetRefreshService.KatanaMeshFilter),

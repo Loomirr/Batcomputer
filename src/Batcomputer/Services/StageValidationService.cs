@@ -73,6 +73,11 @@ public sealed class StageValidationService
         CheckGliderAnimInjection(project, findings);
         CheckAbilityDependencyDeclarations(project, findings);
         CheckRequiredAbilitySets(project, findings);
+        if (project.GameplayAnimationGraphs.Count > 0)
+        {
+            try { GameplayAnimationGraphService.VerifyStaged(project, _projectRoot, _contentRoot); }
+            catch (Exception ex) { findings.Add(new("ERROR", "Saved gameplay animation graph is incomplete: " + ex.Message)); }
+        }
         CheckEquipmentDependencies(project, findings);
         CheckGliderDependencies(project, characterAssets, findings);
         return findings;
@@ -576,6 +581,11 @@ public sealed class StageValidationService
                     var exact = true;
                     foreach (var change in project.EquipmentSlots)
                     {
+                        if (change.Remove)
+                        {
+                            if (change.Slot < 0 || change.Slot >= expectedEquipment.Count || change.Custom is not null) exact = false;
+                            continue;
+                        }
                         var equipment = gameData.FindEquipment(change.Gadget);
                         if (equipment is null || string.IsNullOrWhiteSpace(equipment.EdPackage) ||
                             change.Slot < 0 || change.Slot >= expectedEquipment.Count)
@@ -587,6 +597,9 @@ public sealed class StageValidationService
                             ? UnrealPathUtil.NormalizePackagePath(equipment.EdPackage)
                             : CustomEquipmentService.DefinitionPackage(project, change.Custom);
                     }
+                    if (exact)
+                        foreach (var removal in project.EquipmentSlots.Where(c => c.Remove).OrderByDescending(c => c.Slot))
+                            expectedEquipment.RemoveAt(removal.Slot);
                     var actualEquipment = stagedEquipment.Equipment.OrderBy(entry => entry.Index)
                         .Select(entry => entry.IsNull ? "" : UnrealPathUtil.NormalizePackagePath(entry.PackagePath))
                         .ToList();
@@ -652,6 +665,8 @@ public sealed class StageValidationService
                     " Refresh the game-data catalog or choose a resolvable gadget before packaging."));
                 continue;
             }
+
+            if (change.Remove) continue;
 
             // SavedChangeResolutionError established that this catalog record has its required ETA.
             var resolvedEquipment = equipment!;
@@ -2596,6 +2611,8 @@ public sealed class StageValidationService
               !string.IsNullOrWhiteSpace(donor.AnimClassObjectName)
                 ? donor.AnimClassPackagePath + "." + donor.AnimClassObjectName
                 : "";
+        if (componentName.Equals("Face", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(project.FaceAnimationBlueprintPackage))
+            expectedAnimPath = project.FaceAnimationBlueprintPackage + "." + UnrealPathUtil.AssetName(project.FaceAnimationBlueprintPackage) + "_C";
         if (string.IsNullOrWhiteSpace(expectedAnimPath))
         {
             if (anim is not null && !anim.Value.IsNull())

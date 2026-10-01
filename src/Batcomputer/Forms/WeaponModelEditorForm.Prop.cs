@@ -5,7 +5,7 @@ public partial class WeaponModelEditorForm
     private HeldItemSettings? _prop;
     private TextBox? _propName, _propMesh;
     private ThemedDropDown? _propTemplate, _propHand, _propVisibility;
-    private CheckBox? _propPreferOverEmptyHands;
+    private CheckBox? _propPreferOverEmptyHands, _propHideWhileGliding;
     internal HeldItemSettings? PropResult { get; private set; }
 
     private Control BuildPropPage()
@@ -19,6 +19,8 @@ public partial class WeaponModelEditorForm
         page.Controls.Add(ItemWorkshopUi.Section("Prop identity", "Name this addition. It is separate from the character's existing ability items.", _propName));
         page.Controls.Add(ItemWorkshopUi.Section("Where to hold it", "Both hands shares the model and alignment; it does not mirror geometry. Use separate props for different grips.", _propHand));
         page.Controls.Add(ItemWorkshopUi.Section("When to show it", "Native gadgets can still take priority over extra hand props.", _propVisibility));
+        _propHideWhileGliding = new CheckBox { Text = "Hide while gliding", AutoSize = true, Checked = p.HideWhileGliding };
+        page.Controls.Add(ItemWorkshopUi.Section("Traversal visibility", "Temporarily hides this prop during the native gliding state. After gliding, its normal visibility and hand priority apply again.", _propHideWhileGliding));
         _propPreferOverEmptyHands = new CheckBox { Text = "Keep prop over animation empty-hand requests", AutoSize = true,
             MaximumSize = new(300, 0), Checked = p.PreferOverAnimationEmptyHands };
         page.Controls.Add(ItemWorkshopUi.Section("Hand priority · advanced", "Useful for claws: lets this prop beat High-priority empty-hand animations. Native block tags still hide it; other Epic-priority items may compete. Can overlap gadgets or carried objects. Off keeps native prop priority.", _propPreferOverEmptyHands));
@@ -68,6 +70,7 @@ public partial class WeaponModelEditorForm
         p.TemplateId = _propTemplate!.SelectedIndex >= 0 ? HeldItemService.Templates[_propTemplate.SelectedIndex].Id : "";
         p.Hand = (HeldItemHand)_propHand!.SelectedIndex; p.Visibility = (HeldWeaponVisibility)_propVisibility!.SelectedIndex;
         p.PreferOverAnimationEmptyHands = _propPreferOverEmptyHands!.Checked;
+        p.HideWhileGliding = _propHideWhileGliding!.Checked;
         p.MeshPackage = _propMesh!.Text.Trim(); p.CustomModel = model?.Clone(); return p;
     }
 }

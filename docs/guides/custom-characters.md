@@ -25,6 +25,18 @@ Open the character and choose **Add a suit**, or use **Suits → Use your charac
 
 The new project opens in **Suits**, with a copied design and `Pawns.Playable.Ragman.NoHood`. Change its parts or abilities independently. The default character project is automatically included when building a mod containing this child suit. A missing or explicitly disabled parent blocks the build with a dependency message. Characters with saved child suits cannot be deleted from the tool until those suits are removed.
 
+## Refresh a suit from its character
+
+Save the character's latest changes, then open its additional suit and choose **Base → Rebase from character** (also available in the overflow menu). Review the sections and choose **Rebase suit**:
+
+- **Inherit everything** takes all saved character sections, including abilities/held items, equipment, animation selections, parts/materials, glider setup and icons. The suit keeps its own name, ID and roster entry.
+- Unchecked sections stay suit-specific. Overrides are kept by whole section, not merged field by field. Kept sections remain overrides until you explicitly inherit them again.
+- New suits track the recipe they inherited. Older suits require a manual first review. Sections containing editable files start unchecked because edits made directly to those files cannot reliably be detected from recipe history.
+
+Rebasing saves a previous-recipe backup and copies editable sources into a fresh revision without overwriting earlier sources. Cooked animation-library selections retain their library identities so their cached dependencies can still be staged. Rebuild the mod after the generated stage finishes refreshing. Character-wide vehicle, modes and symbol continue to come from the definition at build time.
+
+This is an explicit refresh, not a live link. It inherits saved Batcomputer settings; it does not reconstruct experimental changes made only inside installed PAKs, and voice-workshop drafts are not runtime voices. Missing sources or invalid combinations still need repair before the mod can build.
+
 ## What ships
 
 Home keeps **Characters** and **Suits** in separate sections; a character includes its default suit, while additional variants remain suit projects. **Manage content** controls which saved projects are included in a mod. The release screen and top bar count characters and suits separately. Copying a design does not remove the original suit from an existing mod.
@@ -43,10 +55,32 @@ installation when updating the same mod; independent characters need unique iden
 For an existing character, you can [change its pawn-tag family](character-identity.md) without
 changing its fixed ID or display name. The tutorial includes the Ivy/Freeze collision case.
 
+## Character emblems
+
+Emblems are separate from full-colour suit portraits. On the character definition, open
+**Character symbol** and choose the native 128×64 grayscale profile. A 512×256 PNG is a
+useful source size; square artwork is fitted without stretching. Leave transparent margins
+on every edge and make any cutouts transparent too. The importer uses **alpha**, not RGB:
+opaque black is still part of the silhouette, and changing the painted colour does not tint
+the game emblem.
+
+The cooker creates a single-channel, linear signed-distance field (`PF_G8`, no sRGB).
+The native material turns that field into a white fill with a black border; it does not
+display the original PNG's colours or background. Start with the native border value
+**0.30**. This is a shader parameter, not a pixel width or source-image opacity. The
+editor's outline is an approximation: the game also supplies UI scaling/sharpening.
+The native HUD's `SetEmblem` Blueprint updates the `Icon` texture on its own dynamic
+material, rather than replacing that material with the character's symbol material.
+Consequently, the menu border override is not a guaranteed per-character HUD border
+override. The HUD's rectangular character-name backplate is separate artwork too;
+transparency in an emblem cannot erase that backplate.
+Rebuild the entire mod after changing an emblem or updating its cooker, then check it
+in the character menu and HUD. Changing the recipe alone does not update installed PAKs.
+
 ## Current boundaries
 
 - Scripted story cutscene casting is **not supported** for new characters. Compatible cutscene Blueprint assets are still generated as part of the normal metadata/loading structure; this does not grant a story role.
-- New voices, dialogue, mission permissions, new skeletons, and unlock challenges aren't supported yet.
+- Custom recordings at existing voice triggers are supported through [Character voices](abilities.md#character-voices). New story dialogue, mission permissions, new skeletons, and unlock challenges aren't supported yet.
 - Variants start unlocked. Custom character symbols are supported separately from portraits and suit icons; rebuild the character definition and its mod after changing the symbol. Native upgrade-menu behavior remains donor-based.
 - On a character definition, open **Character vehicle** to keep the donor default, choose an available native vehicle, choose a custom vehicle owned by that character, or select **No default vehicle**. A custom vehicle must also be enabled in the same mod. This controls the character group's default vehicle; it does not disable separately enabled vehicle projects. To ship no custom vehicle at all, leave those projects disabled in the mod. Rebuild and test character selection/summoning in game after changing this setting.
 - Choose Normal, Mayhem or Both in [Character identity & modes](character-modes.md). This is separate from the visual base; Mayhem requires the installed DLC and updated LOTDKExpanded runtime, not a separate helper DLL.

@@ -71,6 +71,8 @@ internal static class HeldItemService
     };
     internal static string[] BlockTags(HeldWeaponVisibility mode) => mode == HeldWeaponVisibility.OutsideCombat
         ? ["Status.BlockItemGA", "Status.InCombat", "Abilities.Combat.MeleeAttack"] : ["Status.BlockItemGA"];
+    internal static string[] BlockTags(HeldItemSettings item) => item.HideWhileGliding
+        ? [..BlockTags(item.Visibility), "Status.Gliding"] : BlockTags(item.Visibility);
     internal static bool Persistent(HeldWeaponVisibility mode) => mode is HeldWeaponVisibility.Always or HeldWeaponVisibility.OutsideCombat;
     internal static bool ValidPackage(string path) => !string.IsNullOrWhiteSpace(path) && path.StartsWith('/') &&
         path.Split('/').Skip(1).All(p => p.Length > 0 && p.All(c => char.IsLetterOrDigit(c) || c is '_' or '-')) &&
@@ -180,8 +182,8 @@ internal static class HeldItemService
                     foreach (var tags in property.Value.OfType<GameplayTagContainerPropertyData>()) tags.Value = tags.Value.Where(t => t.ToString() != "Animation.Equipment.Batons").ToArray();
             }
             SetTags(held, cdo, "ASCOwnedTagsToGetOutItem", RequestTags(item.Visibility, RequestTag(mod, item)));
-            SetTags(held, cdo, "ASCOwnedTagsToBlockItem", BlockTags(item.Visibility));
-            if (Persistent(item.Visibility)) {
+            SetTags(held, cdo, "ASCOwnedTagsToBlockItem", BlockTags(item));
+            if (Persistent(item.Visibility) && !(profile.HeldItemToggle is { Enabled: true } toggle && toggle.ItemId == item.Id)) {
                 var owned = (StructPropertyData)cdo.Data.Single(p => p.Name.ToString() == "ASCOwnedTagsToGetOutItem").Clone();
                 owned.Name = new FName(held, "ActivationOwnedTags"); cdo.Data.Add(owned);
             }
@@ -233,8 +235,8 @@ internal static class HeldItemService
                         throw new InvalidDataException("Held prop changes baton animation context.");
                 }
                 string[] Tags(string prop) => cdo.Data.OfType<StructPropertyData>().FirstOrDefault(p => p.Name.ToString() == prop)?.Value.OfType<GameplayTagContainerPropertyData>().Single().Value.Select(t => t.ToString()).ToArray() ?? [];
-                if (!Tags("ASCOwnedTagsToGetOutItem").SequenceEqual(RequestTags(item.Visibility, RequestTag(mod, item))) || !Tags("ASCOwnedTagsToBlockItem").SequenceEqual(BlockTags(item.Visibility)) ||
-                    !Tags("ActivationOwnedTags").SequenceEqual(Persistent(item.Visibility) ? RequestTags(item.Visibility, RequestTag(mod, item)) : [])) throw new InvalidDataException("Held-item visibility mismatch.");
+                if (!Tags("ASCOwnedTagsToGetOutItem").SequenceEqual(RequestTags(item.Visibility, RequestTag(mod, item))) || !Tags("ASCOwnedTagsToBlockItem").SequenceEqual(BlockTags(item)) ||
+                    !Tags("ActivationOwnedTags").SequenceEqual(Persistent(item.Visibility) && !(profile.HeldItemToggle is { Enabled: true } toggle && toggle.ItemId == item.Id) ? RequestTags(item.Visibility, RequestTag(mod, item)) : [])) throw new InvalidDataException("Held-item visibility mismatch.");
                 if (Tags("AbilityTags").Contains("Animation.Equipment.Batons")) throw new InvalidDataException("Held prop changes baton animation context.");
                 var template = Templates.Single(t => t.Id == item.TemplateId);
                 var actor = c.ReadStaged(ActorPackage(mod, item)); var mesh = actor.Exports.OfType<NormalExport>().Single(e => e.ObjectName.ToString() == template.MeshComponent);

@@ -31,6 +31,7 @@ public sealed class AppSettings
     public string? OodleRuntimeDllPath { get; set; }
     // Optional, user-supplied decoder for local Wwise sound previews; never bundled.
     public string? VgmstreamExePath { get; set; }
+    public string? VoiceEncoderExePath { get; set; }
 
     // .usmap mappings file for UAssetAPI (read/write cooked assets).
     public string? UsmapPath { get; set; }
@@ -204,7 +205,9 @@ public sealed class AppSettings
     public string? EffectiveOodleRuntimeDllPath() =>
         UsableFile(OodleRuntimeDllPath) ?? OodleRuntimeFromEngine(EffectiveUnrealEngineRoot());
 
-    public string? EffectiveVgmstreamExePath() => UsableFile(VgmstreamExePath);
+    public string? EffectiveVgmstreamExePath() => UsableFile(VgmstreamExePath)
+        ?? UsableFile(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Batcomputer", "Tools", "vgmstream", "vgmstream-cli.exe"))
+        ?? UsableFile(Path.Combine(AppContext.BaseDirectory, "Tools", "vgmstream", "vgmstream-cli.exe"));
 
     public bool HasOodleCompressionPrerequisites()
     {

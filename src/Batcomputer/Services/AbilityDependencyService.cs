@@ -261,7 +261,7 @@ public static class AbilityDependencyService
         var effectiveEquipmentSlots = new Dictionary<int, string>(donorEquipmentSlots);
         foreach (var change in explicitEquipmentChanges)
         {
-            effectiveEquipmentSlots[change.Slot] = change.Gadget ?? "";
+            effectiveEquipmentSlots[change.Slot] = change.Remove ? "" : change.Gadget ?? "";
         }
         var donorEquipmentNames = donorEquipmentSlots.Values
             .Where(name => !string.IsNullOrWhiteSpace(name))
@@ -290,8 +290,13 @@ public static class AbilityDependencyService
             foreach (var error in PlayerMeleeAdapterService.Validate(profile!))
                 issues.Add(new AbilityDependencyIssue(AbilityDependencySeverity.Error, error));
         var heldItems = HeldItemService.Resolve(profile);
+        if (profile is not null)
+            try { HeldItemToggleService.Validate(profile); }
+            catch (Exception ex) { issues.Add(new(AbilityDependencySeverity.Error, "Held-item toggle: " + ex.Message)); }
         foreach (var error in HeldItemService.Validate(heldItems)) issues.Add(new AbilityDependencyIssue(AbilityDependencySeverity.Error, error));
         foreach (var error in NativeHeldItemService.Validate(profile?.NativeHeldItems ?? [])) issues.Add(new(AbilityDependencySeverity.Error, error));
+        if (profile is not null)
+            foreach (var error in AnimationSpawnedItemService.Validate(profile)) issues.Add(new(AbilityDependencySeverity.Error, error));
         if (SwordCombatService.Enabled(profile) && !heldItems.Any(HeldItemService.SupportsSword))
             issues.Add(new(AbilityDependencySeverity.Error, "Player weapon combat needs a right-hand melee item visible during attacks. Add one in Held items; choosing this style does not add an item automatically."));
         if (heldItems.Count > 0 && !SwordCombatService.Enabled(profile))
@@ -474,6 +479,12 @@ public static class AbilityDependencyService
 
         foreach (var change in explicitEquipmentChanges)
         {
+            if (change.Remove)
+            {
+                if (change.Custom is not null)
+                    issues.Add(new(AbilityDependencySeverity.Error, "Removed equipment cannot also contain a custom equipment recipe."));
+                continue;
+            }
             if (!equipment.TryGetValue(change.Gadget ?? "", out var item))
             {
                 issues.Add(new AbilityDependencyIssue(
@@ -785,7 +796,7 @@ public static class AbilityDependencyService
         var exactDonorKnown = TryReadDonorRuntimeEquipmentSlots(project, catalog, out var effectiveSlots);
         foreach (var change in project.EquipmentSlots.Where(change => change.Slot >= 0))
         {
-            effectiveSlots[change.Slot] = change.Gadget ?? "";
+            effectiveSlots[change.Slot] = change.Remove ? "" : change.Gadget ?? "";
         }
         equipmentNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var name in effectiveSlots.Values.Where(name => !string.IsNullOrWhiteSpace(name)))

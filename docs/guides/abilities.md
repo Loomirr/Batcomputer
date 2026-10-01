@@ -6,6 +6,47 @@ Open **Abilities**, then choose **Edit suit abilities**.
 Every edit is suit-local. Batcomputer clones the required DPRD and AbilitySet assets into the mod;
 it does not rewrite the donor, another suit, or the installed game.
 
+## Character voices
+
+### Animation voice triggers
+
+In the character viewer's **Animation studio**, use **Voice cues → Add voice here**
+at the desired playhead frame. Choose normal, small or heavy attack effort, or jump
+effort. Change **Frame**, use **Use playhead**, or **Remove voice** to adjust it.
+Voice markers appear on the timeline and are included in draft save/open and undo/redo.
+
+Save the draft, cook it through the animation import workflow, assign the cooked
+clip, then build the mod. Cooking adds native dialogue requests; it does not embed
+a particular character's recording. The character's current voice routing supplies
+the sound, including a selected custom voice profile. An unsupported category on
+that character can still be silent. The viewer shows timing but does not play voices.
+
+Add a cue to the sequence **or** its montage, not both. Imported Motion poses do
+not copy existing gameplay notifications. Existing voiced cooked clips are rejected
+by the cue writer to avoid stacking triggers; edit and recook the original draft.
+Combat hit windows remain separate preview metadata and still require native hit
+integration before cooking; voice cues alone are supported by the normal cook path.
+
+Open **Abilities → Character voices** to inspect the gameplay donor's native voice categories
+and recordings. The list includes conditional conversation branches; partner dialogue is shown
+as read-only, and discovery warnings identify incomplete scans. This is not a complete inventory
+of every story scene or native-code-triggered line.
+
+- The voice studio separates **Choose a voice slot**, **Choose your recording**, and **Assign to this slot**. Search either side, choose a readable category, or filter slots by their draft assignment. **This character only** hides partner lines by default; turn it off to inspect them read-only.
+- Use **Original**, **Assigned**, or **Recording** to listen. The waveform displays the decoded PCM and playback time. **Stop audio** also cancels a pending playback request, so an old selection cannot start playing later.
+- Native playback needs `vgmstream-cli`. **Audio setup…** selects a locally installed executable. Batcomputer also detects `%LOCALAPPDATA%/Batcomputer/Tools/vgmstream/vgmstream-cli.exe` or `Tools/vgmstream/vgmstream-cli.exe` beside the application. Keep the decoder's supporting DLLs alongside it. No decoder is bundled in the release.
+- **Import WAVs…** or **Import folder…** copies 16-bit PCM WAV recordings into the workspace
+  library without changing their sources. An optional `catalog.json` array with `file`, `id`,
+  `category`, and `text` fields supplies names, categories and searchable transcripts.
+- Select a voice slot and an imported recording, then choose **Use selected recording**. The first assignment creates a profile if needed; **New profile** creates an additional draft. **Silence line** marks an unwanted line as silent in the draft without deleting its source recording. **Use original** removes either choice and restores inheritance. Use **Silenced in draft** to review muted lines; partner dialogue remains read-only. Technical paths, proposed identity and scan warnings are under **Details…**.
+- **Save voice draft** retains the profile under `Generated/VoiceWorkshop` (or the existing `_generated` workspace). Importing or saving alone does not select a voice for your suit.
+- **Encoder…** selects a local `wav2wem.exe`. Voice builds also require the configured `vgmstream-cli` decoder, retoc, mappings, game files, and UnrealPak from Unreal Engine. The encoder and recordings are not bundled with Batcomputer.
+- **Use for builds** explicitly selects the saved profile for this suit. **Build mod** clones its dialogue routing and events into private mod paths, encodes assigned recordings, and packages the private media. **Use native voice** disables this for subsequent builds without deleting the profile. Installation remains separate.
+- **Silence line** builds a silent recording while preserving the event branch and its timing. Unassigned lines keep their native recording references. If multiple linked branches share one recording name, they must use the same assignment; incompatible or partner-linked edits stop the build instead of changing other speakers.
+- A child suit can inherit the selected profile through **Rebase from character → Voice profile**. Unrelated characters cannot select that profile at build time.
+
+This replaces audio at existing triggers; it does not create missing dialogue triggers in imported animations. Some categories only play under particular gameplay conditions. Test your built mod in-game. Native game packages and shared sound banks are never overwritten.
+
 ## Edit the loadout
 
 The **Current loadout** view shows the donor's AbilitySets in their exact authored order. The
@@ -292,7 +333,39 @@ Assign an imported OBJ's materials in its active **Materials** panel, not as nat
 weapon/equipment workshop) bakes a private validation mesh before returning the recipe. Accept
 the parent editors, save and rebuild to apply it. Canceling leaves the saved project untouched.
 
+## Animation-spawned items
+
+Open **Held items → Animation items** to inspect temporary static meshes spawned by
+readable animation notifications. These are separate from normal ability items and
+extra held props. Search by animation, mesh or attachment slot; Ctrl/Shift selects
+several events, including paired hands and different phases of an action.
+
+Use **Use extra prop** to reuse a prop's baked mesh and assigned materials, **Use cooked
+mesh** for an exact static-mesh package, or **Hide selected** to suppress those visuals.
+**Restore original** removes the saved edit. Accept both editors, save, then rebuild.
+Prop visibility rules and actor/component placement do not transfer to these spawns;
+the animation keeps its own attachment, lifetime and native timing. Check grip in-game.
+
+Builds clone the edited animations and their required animation wiring into the suit's
+private namespace; they never replace shared donor packages. Source fingerprints and
+export indices prevent ambiguous edits. Missing/stale bindings or deleted referenced
+props block the build. **Scan report** identifies unreadable dependencies; code-spawned,
+skeletal and other specialized visuals are not claimed as editable.
+
+These settings are inherited by new character suits and by the **Abilities** section
+of an explicit character rebase. They are not a runtime retract/extend toggle.
+
 ## Equipment and upgrades
+
+Open **Equipment → Manage equipped gadgets** to remove a gadget from the current character or
+suit. **Remove equipment** clears its usable runtime entry and its equipment-menu/upgrade entry
+on the next native build; it does not just hide the mesh. **Restore inherited** clears that slot's
+edit and brings its donor gadget back. Slot numbers refer to the original donor loadout, so removing
+one does not move another saved edit. Save the loadout, build and install the mod, then restart the
+game and test equipment switching. Held props and melee combat are separate and remain unchanged.
+Saved overrides for a removed gadget's animation sets stay in the recipe but are inactive while
+that gadget is absent, as do its native held-item visual edits. Restoring its equipment also makes
+those overrides available again.
 
 Equipment edits preserve unchanged runtime slots, replace only the selected slot in both the
 generated runtime data and menu metadata, and carry the selected equipment's matching upgrade data.

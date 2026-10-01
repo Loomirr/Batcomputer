@@ -267,6 +267,40 @@ public sealed class AbilityAssetMutationService
         }
     }
 
+    /// <summary>Removes donor-indexed equipment entries from a staged DPRD without null holes.</summary>
+    public MutationResult RemoveDprdEquipmentSlots(string stagedDprdUassetPath, IReadOnlyCollection<int> slots)
+    {
+        var writable = EnsureStagedWritableAsset(stagedDprdUassetPath);
+        if (writable is not null) return writable;
+        try
+        {
+            var asset = LoadAsset(stagedDprdUassetPath);
+            var export = asset.Exports.OfType<NormalExport>()
+                .FirstOrDefault(e => e.Data.Any(p => PropertyNamed(p, "Equipment")));
+            var array = export?.Data.OfType<ArrayPropertyData>().FirstOrDefault(p => PropertyNamed(p, "Equipment"));
+            if (array is null || slots.Distinct().Count() != slots.Count ||
+                slots.Any(slot => slot < 0 || slot >= array.Value.Length))
+                return MutationResult.Fail("invalid-slot", "Equipment removals require unique, existing donor slots.");
+            if (array.Value.Any(p => p is not ObjectPropertyData))
+                return MutationResult.Fail("invalid-equipment-entry", "Equipment contains a non-object entry.");
+            var oldImports = array.Value.Cast<ObjectPropertyData>().Select(p => p.Value).Where(p => !p.IsNull()).ToList();
+            var expected = InspectDprdEquipment(stagedDprdUassetPath);
+            if (!expected.Success) return MutationResult.Fail(expected.Status, expected.Error ?? "Could not inspect equipment.");
+            var removed = slots.ToHashSet();
+            array.Value = array.Value.Where((_, index) => !removed.Contains(index)).ToArray();
+            for (var index = 0; index < array.Value.Length; index++) array.Value[index].Name = MakeName(asset, index.ToString());
+            SyncPreloadDependencies(asset, export!, oldImports,
+                array.Value.Cast<ObjectPropertyData>().Select(p => p.Value).Where(p => !p.IsNull()).ToList());
+            asset.Write(stagedDprdUassetPath);
+            var verify = InspectDprdEquipment(stagedDprdUassetPath);
+            var expectedPaths = expected.Equipment.Where(p => !removed.Contains(p.Index)).Select(p => p.PackagePath);
+            if (!verify.Success || !verify.Equipment.Select(p => p.PackagePath).SequenceEqual(expectedPaths, StringComparer.OrdinalIgnoreCase))
+                return MutationResult.Fail("verification-failed", "Equipment removal did not reload with the exact retained ordered loadout.");
+            return MutationResult.Ok(slots.Order().Select(slot => $"equipment slot {slot + 1} removed").ToArray());
+        }
+        catch (Exception ex) { return MutationResult.Fail("error", ex.ToString()); }
+    }
+
     /// <summary>Atomically replaces the DPRD's complete ordered AbilitySets list.</summary>
     public MutationResult SetDprdAbilitySets(
         string stagedDprdUassetPath,

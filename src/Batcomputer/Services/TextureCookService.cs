@@ -226,7 +226,9 @@ public sealed class TextureCookService
                 string.Equals(Path.GetFileName(Path.GetDirectoryName(request.TemplateJsonPath)),
                     TextureCookTemplateService.EquipmentAlphaTemplateFolder, StringComparison.OrdinalIgnoreCase),
                 string.Equals(Path.GetFileName(Path.GetDirectoryName(request.TemplateJsonPath)),
-                    TextureCookTemplateService.EquipmentAccentTemplateFolder, StringComparison.OrdinalIgnoreCase));
+                    TextureCookTemplateService.EquipmentAccentTemplateFolder, StringComparison.OrdinalIgnoreCase),
+                string.Equals(Path.GetFileName(Path.GetDirectoryName(request.TemplateJsonPath)),
+                    TextureCookTemplateService.CharacterSymbolTemplateFolder, StringComparison.OrdinalIgnoreCase));
             var sourceIntegrityAfter = FileIntegrity(request.SourceImagePath);
             if (sourceIntegrityAfter != sourceIntegrityBefore)
             {
@@ -373,6 +375,9 @@ public sealed class TextureCookService
         if (string.Equals(Path.GetFileName(Path.GetDirectoryName(templateJsonPath)),
                 TextureCookTemplateService.EquipmentAccentTemplateFolder, StringComparison.OrdinalIgnoreCase))
             hash.AppendData(Encoding.UTF8.GetBytes("equipment-white-green-sdf:v2;whole-alpha-red;accent-green-dominance32;range8;canvas64;supersample4"));
+        if (string.Equals(Path.GetFileName(Path.GetDirectoryName(templateJsonPath)),
+                TextureCookTemplateService.CharacterSymbolTemplateFolder, StringComparison.OrdinalIgnoreCase))
+            hash.AppendData(Encoding.UTF8.GetBytes("character-emblem-sdf:v2;alpha;fit128x64;range8;saturated0-255;grayscale"));
         return Convert.ToHexString(hash.GetHashAndReset());
     }
 
@@ -420,6 +425,7 @@ public sealed class TextureCookService
     }
 
     private static bool IsSupportedPixelFormat(string pixelFormat) =>
+        pixelFormat.Equals("PF_G8", StringComparison.OrdinalIgnoreCase) ||
         pixelFormat.Equals("PF_DXT1", StringComparison.OrdinalIgnoreCase) ||
         pixelFormat.Equals("PF_DXT5", StringComparison.OrdinalIgnoreCase) ||
         pixelFormat.Equals("PF_BC5", StringComparison.OrdinalIgnoreCase) ||
@@ -505,7 +511,10 @@ public sealed class TextureCookService
         var nativeBca = template.Package == "/Game/UI/Icons/Gadgets/T_UI_IconBatarang_BCA" &&
             template.PixelFormat == "PF_B8G8R8A8" && template.Mips.Count == 1 &&
             last.SizeX == 256 && last.SizeY == 256 && last.IsInline && last.OffsetInFile == 122;
-        if (!nativeBca && (last.SizeX != 1 || last.SizeY != 1))
+        var nativeEmblem = template.Package == "/Game/UI/Icons/Characters/Emblems/T_UI_EmblemBatman_SDF" &&
+            template.PixelFormat == "PF_G8" && template.Mips.Count == 1 && last.SizeX == 128 && last.SizeY == 64 &&
+            last.IsInline && last.OffsetInFile == 119 && last.SizeOnDisk == 8192;
+        if (!nativeBca && !nativeEmblem && (last.SizeX != 1 || last.SizeY != 1))
         {
             throw new InvalidOperationException(
                 $"Texture2D recipe stops at {last.SizeX}x{last.SizeY}. A complete mip chain through 1x1 is required so every texture-quality setting resolves authored pixels.");
@@ -535,6 +544,7 @@ public sealed class TextureCookService
 
     private static int ExpectedMipBytes(string pixelFormat, int width, int height)
     {
+        if (pixelFormat.Equals("PF_G8", StringComparison.OrdinalIgnoreCase)) return checked(width * height);
         if (pixelFormat.Equals("PF_B8G8R8A8", StringComparison.OrdinalIgnoreCase))
         {
             return checked(width * height * 4);
@@ -723,7 +733,8 @@ public sealed class TextureCookService
         string bc7InputLayout,
         string bc7Quality,
         bool alphaToEquipmentSdf = false,
-        bool greenToEquipmentSdf = false)
+        bool greenToEquipmentSdf = false,
+        bool alphaToCharacterSymbolSdf = false)
     {
         using var source = new Bitmap(sourceImagePath);
         if (greenToEquipmentSdf && (source.Width > 4096 || source.Height > 4096))
@@ -736,7 +747,12 @@ public sealed class TextureCookService
         // plastic-vs-print detail selector), so every channel must be sampled
         // independently as straight RGBA.
         var sourcePixels = ReadRgba(source);
-        if (greenToEquipmentSdf)
+        if (alphaToCharacterSymbolSdf)
+        {
+            var field = CharacterSymbolSdfService.Generate(sourceImagePath);
+            sourcePixels = field.Select(v => new Rgba(v, v, v, 255)).ToArray();
+        }
+        else if (greenToEquipmentSdf)
         {
             var rgba = new byte[checked(sourcePixels.Length * 4)];
             for (var i = 0; i < sourcePixels.Length; i++)
@@ -753,8 +769,8 @@ public sealed class TextureCookService
             var silhouette = ResizeRgba(sourcePixels, source.Width, source.Height, 64, 64, false);
             sourcePixels = EquipmentSdfFromAlpha(silhouette);
         }
-        var sourceWidth = alphaToEquipmentSdf || greenToEquipmentSdf ? 64 : source.Width;
-        var sourceHeight = alphaToEquipmentSdf || greenToEquipmentSdf ? 64 : source.Height;
+        var sourceWidth = alphaToCharacterSymbolSdf ? 128 : alphaToEquipmentSdf || greenToEquipmentSdf ? 64 : source.Width;
+        var sourceHeight = alphaToCharacterSymbolSdf || alphaToEquipmentSdf || greenToEquipmentSdf ? 64 : source.Height;
         var output = new Dictionary<MipTemplate, byte[]>();
         Rgba[]? previousMip = null;
         var previousWidth = 0;
@@ -799,6 +815,7 @@ public sealed class TextureCookService
                 "PF_BC5" => Bc5Encode(pixels, mip.SizeX, mip.SizeY),
                 "PF_BC7" => Bc7Encode(pixels, mip.SizeX, mip.SizeY, bc7InputLayout, bc7Quality),
                 "PF_B8G8R8A8" => Bgra8Encode(pixels, mip.SizeX, mip.SizeY),
+                "PF_G8" => pixels.Select(p => p.R).ToArray(),
                 _ => throw new InvalidOperationException($"Unsupported Texture2D pixel format: {pixelFormat}")
             };
             if (encoded.Length != mip.SizeOnDisk || encoded.Length != mip.ElementCount)

@@ -1798,6 +1798,7 @@ public sealed partial class MainForm
 
             tagRows.Add(new PawnTagConfigService.TagRow(suit.PawnTag.Trim(), $"{mod.ModId}: {suit.DisplayName}"));
             tagRows.AddRange(HeldItemService.TagRows(suit));
+            tagRows.AddRange(HeldItemToggleService.TagRows(suit));
             tagRows.AddRange(CustomEquipmentService.TagRows(suit));
             if (suit.CustomCharacter is { } character)
             {
@@ -1896,6 +1897,7 @@ public sealed partial class MainForm
 
             var mergedSuits = 0;
             var preparedSuits = new List<NativeSuitProject>();
+            var voiceBuilds = new List<CharacterVoiceBuildService.Result>();
             // No-rebase means suits keep their own /Game roots in one pak - two suits
             // sharing a DCMD package path would silently overwrite on merge. Catch it.
             var seenDcmd = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1934,6 +1936,8 @@ public sealed partial class MainForm
                 {
                     AppendLog($"  prepared '{suit.DisplayName}': playable + cutscene + DCMD + UIMD");
                     MergeContentRoot(prepared.Stage.ContentRoot, stageContent);
+                    if (prepared.VoiceBuild is { } voice)
+                        voiceBuilds.Add(CharacterVoiceBuildService.PreserveForAggregate(voice, Path.Combine(outRoot, "VoiceBuild", prepared.Project.SlotId)));
                     RepatchStagedSuitText(stageContent, prepared.Project, entry.SuitId, stObjectPath, mappings);
                     preparedSuits.Add(prepared.Project);
                     mergedSuits++;
@@ -2144,6 +2148,8 @@ public sealed partial class MainForm
                 return false;
             }
 
+            await CharacterVoiceBuildService.PackageMediaAsync(CharacterVoiceBuildService.Combine(voiceBuilds), trioBase + ".pak", CancellationToken.None);
+
             await PublishModBuildAttemptAsync(outRoot, publishedOutputRoot, attemptBoundary);
             timing.Mark("pack and publish");
             retocAttemptOutputs = null;
@@ -2199,6 +2205,7 @@ public sealed partial class MainForm
     {
         public required NativeSuitProject Project { get; init; }
         public required PackagePreparationStage Stage { get; init; }
+        public CharacterVoiceBuildService.Result? VoiceBuild { get; init; }
     }
 
     private async Task<(PreparedSuitForRelease? Prepared, string Error)> PrepareSuitForReleaseAsync(
@@ -2251,6 +2258,9 @@ public sealed partial class MainForm
             {
                 throw new InvalidOperationException(textureStageError);
             }
+            // Declared animation sources outrank stale generated-asset exports.
+            // StageGeneratedMaterials preserves complete packages already in this stage.
+            StageLibraryAnimsIntoContentRoot(suit, contentRoot);
             StageGeneratedMaterialsIntoContentRoot(suit, contentRoot);
             timing.Mark("stage and materials");
             StageGeneratedDcmdIntoContentRoot(
@@ -2258,7 +2268,7 @@ public sealed partial class MainForm
                 contentRoot,
                 persistAutoAssignedIcons: false,
                 requireSuccess: true);
-            StageLibraryAnimsIntoContentRoot(suit, contentRoot);
+            GameplayAnimationGraphService.Stage(suit, projectService.ProjectRoot, contentRoot, AppendLog);
 
             if (AnimArchetypeGraftService.RequiresCustomArchetype(suit))
             {
@@ -2286,6 +2296,15 @@ public sealed partial class MainForm
                     stageContentRootOverride: contentRoot),
                 "Saved material replay");
 
+            GameplayAnimationGraphService.Apply(suit, contentRoot, AppendLog);
+            var voiceBuild = await Task.Run(() => CharacterVoiceBuildService.StageAsync(suit, projectService.ProjectRoot,
+                contentRoot, line => AppendLog("    voice: " + line), CancellationToken.None));
+            var toggleAudio = HeldItemToggleService.Stage(suit, contentRoot);
+            voiceBuild = CharacterVoiceBuildService.Combine(new[] { voiceBuild, toggleAudio }.OfType<CharacterVoiceBuildService.Result>().ToArray());
+            await Task.Run(() => FaceAnimationService.ApplyToPackagedRoot(suit, contentRoot));
+            await Task.Run(() => AnimationSpawnedItemService.ApplyToPackagedRoot(suit, contentRoot, line => AppendLog("    " + line)));
+            timing.Mark("character voice and animation items");
+
             var requiredPackages = new[]
             {
                 (Role: "playable", Package: suit.TargetPackages?.Playable),
@@ -2308,6 +2327,7 @@ public sealed partial class MainForm
             {
                 Project = suit,
                 Stage = preparationStage,
+                VoiceBuild = voiceBuild,
             }, "");
         }
         catch (Exception ex)

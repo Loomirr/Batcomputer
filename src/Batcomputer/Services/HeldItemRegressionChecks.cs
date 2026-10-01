@@ -33,6 +33,15 @@ internal static class HeldItemRegressionChecks
         Check(legacy.HeldItems!.Count == 1 && item.Id == "legacy_sword" && item.Visibility == HeldWeaponVisibility.Always && item.MaterialPackage == "/Game/Test/MI_Custom" && item.CustomModel!.SourceName == "sword.obj" && fingerprint == AbilityLoadoutService.ConfigurationFingerprint(legacy), "legacy sword item migration is complete and idempotent");
         var copy = AbilityExplorerForm.CloneProfile(legacy); copy.HeldItems![0].CustomModel!.Scale = 2;
         Check(legacy.HeldItems[0].CustomModel!.Scale == 1 && fingerprint != AbilityLoadoutService.ConfigurationFingerprint(copy), "held-item models deep-clone and invalidate generated assets");
+        var glideCopy = item.Clone(); glideCopy.HideWhileGliding = true;
+        Check(!item.HideWhileGliding && HeldItemService.BlockTags(glideCopy).SequenceEqual(["Status.BlockItemGA", "Status.Gliding"]) &&
+            HeldItemService.BlockTags(item).SequenceEqual(["Status.BlockItemGA"]), "glide-only prop hiding is opt-in and preserves native block behavior for older recipes");
+        glideCopy.Visibility = HeldWeaponVisibility.OutsideCombat;
+        Check(HeldItemService.BlockTags(glideCopy).SequenceEqual(["Status.BlockItemGA", "Status.InCombat", "Abilities.Combat.MeleeAttack", "Status.Gliding"]) &&
+            System.Text.Json.JsonSerializer.Deserialize<HeldItemSettings>(System.Text.Json.JsonSerializer.Serialize(glideCopy))!.HideWhileGliding,
+            "gliding hides compose with saved visibility rules and persist without changing hand priority");
+        var glideProfile = AbilityExplorerForm.CloneProfile(legacy); glideProfile.HeldItems![0].HideWhileGliding=true;
+        Check(fingerprint!=AbilityLoadoutService.ConfigurationFingerprint(glideProfile),"changing glide visibility invalidates generated held-item assets");
         foreach (var change in new Action<HeldItemSettings>[] { i => i.Name += " edited", i => i.Id = "other", i => i.Hand = HeldItemHand.Left,
             i => i.Visibility = HeldWeaponVisibility.OutsideCombat, i => i.TemplateId = "baseball-bat", i => i.MeshPackage = "/Game/Test/SM_Other", i => i.MaterialPackage = "/Game/Test/MI_Other" }) {
             var changed = AbilityExplorerForm.CloneProfile(legacy); change(changed.HeldItems![0]);

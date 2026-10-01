@@ -196,6 +196,13 @@ internal static class AnimationDraftCookService
         if (Program.RepathNameMap(importedUasset, temporarySkeleton, NativeSkeleton) != 0 ||
             Program.RepathNameMap(importedUasset, Path.GetFileName(temporarySkeleton), "SKEL_LEGOfig") != 0)
             throw new InvalidDataException("The cooked animation could not be bound to the native skeleton.");
+        var voiceCues = AnimationVoiceCueService.Read(draft.RootElement, draft.RootElement.GetProperty("durationFrames").GetInt32());
+        if (voiceCues.Length > 0)
+        {
+            log($"Adding {voiceCues.Length} native dialogue voice cue(s)…");
+            var template = await AnimationVoiceCueService.ResolveTemplateAsync(reportDirectory, cancellation);
+            AnimationVoiceCueService.Apply(importedUasset, template, voiceCues, draft.RootElement.GetProperty("durationFrames").GetInt32());
+        }
         // Re-read the final serialized pair before exposing it in the library. A correct
         // skeleton path alone does not prove that tracks address the intended joints.
         var validationContent = Path.Combine(reportDirectory, "NativeValidation", "LEGOBatmanLotDK", "Content");
@@ -271,6 +278,7 @@ internal static class AnimationDraftCookService
             }
         }
         ValidateCombatTiming(draft, duration.GetInt32());
+        AnimationVoiceCueService.Read(draft, duration.GetInt32());
         return name;
     }
 
@@ -279,7 +287,7 @@ internal static class AnimationDraftCookService
         // A draft-only cache key can reuse a cook authored against a different FBX or an
         // obsolete skeleton-binding algorithm. Keep those earlier assets distinct.
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        hash.AppendData(Encoding.UTF8.GetBytes(AnimationSkeletonRemapService.Revision + "\0" + rigSignature + "\0"));
+        hash.AppendData(Encoding.UTF8.GetBytes(AnimationSkeletonRemapService.Revision + "\0" + AnimationVoiceCueService.Revision + "\0" + rigSignature + "\0"));
         hash.AppendData(referenceHash);
         hash.AppendData(draftBytes);
         return Convert.ToHexString(hash.GetHashAndReset())[..12];

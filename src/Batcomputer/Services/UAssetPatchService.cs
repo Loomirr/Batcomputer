@@ -145,6 +145,7 @@ public sealed class UAssetPatchService
             UnrealPathUtil.NormalizePackagePath(project.BaseProfile?.GameplayDonorPackage ?? project.PlayableTemplate?.PackagePath ?? ""),
             AnimArchetypeGraftService.RequiresCustomArchetype(project) ? "custom-archetype" : "native-archetype",
             AbilityLoadoutService.ConfigurationFingerprint(project.AbilityLoadout),
+            project.FaceAnimationBlueprintPackage,
         });
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
     }

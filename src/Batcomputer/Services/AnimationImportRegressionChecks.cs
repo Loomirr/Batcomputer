@@ -30,6 +30,11 @@ internal static class AnimationImportRegressionChecks
                 secondPrimary,
                 "/Game/Mods/AnimRegression/Rig/Test_SKEL",
                 secondSupport);
+            var references = new AnimLibrary { Entries = [second] };
+            second.SupportPackages[0].CachedFiles.Add(firstPrimary);
+            Check(AnimLibraryService.CacheIsReferenced(references, "first") && !AnimLibraryService.CacheIsReferenced(references, "first-other"),
+                "reimport retains older cache bytes still referenced by another montage's support closure", failures, output);
+            second.SupportPackages[0].CachedFiles.Remove(firstPrimary);
 
             Check(
                 service.ValidateStagingSet([first, second]).Count == 1,

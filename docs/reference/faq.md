@@ -28,9 +28,15 @@ See [Import/Export](../guides/import-export.md) for the differences and conflict
 ### Can a custom character have its own symbol?
 
 Yes. Load the character's default definition and open **Characters → Character symbol**.
-Import a square PNG (64–2048 pixels, at most 4 MB) with a transparent background and clear
-margins. Batcomputer uses its silhouette, not its painted colors, and cooks a 64px distance-field
-icon with the native UI emblem material. No painted outline is needed.
+Choose **Native character emblem** and import a transparent PNG (64–2048 pixels per side,
+at most 4 MB). Recommended artwork is **512×256**, with 10–15% clear margins and bold details.
+Square images also work: they are fitted without stretching. Batcomputer converts the alpha
+silhouette to the native **128×64 grayscale distance field**, with linear sampling, clamp
+addressing and one inline mip. Adjust **Outline thickness** in the same editor; the preview
+approximates the shape and outline, while game colors come from the native UI material.
+Do not paint an outline into the image. Test this profile in-game after rebuilding.
+
+Previously saved symbols keep their **Legacy 64×64** profile until you explicitly change it.
 
 The symbol is shared by that character's suits; it does not replace suit portraits or equipment
 icons. The source PNG is embedded in the saved recipe. **Save symbol**, then rebuild the mod.

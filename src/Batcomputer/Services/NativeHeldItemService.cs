@@ -26,6 +26,16 @@ internal static class NativeHeldItemService
     internal static string RedirectAbility(AbilityLoadoutProfile? profile, string mod, string package) =>
         profile?.NativeHeldItems.Any(e => e.AbilityPackage.Equals(package, StringComparison.OrdinalIgnoreCase)) == true ? Ability(mod, package) : package;
 
+    // Preserve dormant saved visual edits when equipment removal intentionally removes their GA.
+    // This service consumes only NativeHeldItems; the owning project's other sections stay intact.
+    internal static AbilityLoadoutProfile ForEquipmentClosure(AbilityLoadoutProfile profile, IEnumerable<string> removedAbilities)
+    {
+        var removed = removedAbilities.Select(UnrealPathUtil.NormalizePackagePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return new() { NativeHeldItems = profile.NativeHeldItems
+            .Where(edit => !removed.Contains(UnrealPathUtil.NormalizePackagePath(edit.AbilityPackage)))
+            .Select(edit => edit.Clone()).ToList() };
+    }
+
     internal static IReadOnlyList<string> ActiveAbilities(AbilityLoadoutProfile profile, AbilityEditorCatalog catalog)
     {
         var lookup = catalog.InheritedAbilitySets.Concat(catalog.AvailableAbilitySets)

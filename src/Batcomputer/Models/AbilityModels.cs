@@ -25,13 +25,66 @@ public sealed class AbilityLoadoutProfile
     // Do not initialize this property: old JSON must remain distinguishable from an intentional removal.
     public List<HeldItemSettings>? HeldItems { get; set; }
     public List<NativeHeldItemEdit> NativeHeldItems { get; set; } = [];
+    public List<AnimationSpawnedItemEdit> AnimationSpawnedItems { get; set; } = [];
+    // Optional user-owned cooked behavior. No imported content is bundled with the application.
+    public HeldItemToggleProfile? HeldItemToggle { get; set; }
     public bool AllowUnsafeCoreEdits { get; set; }
     public List<AbilitySetSelection> AbilitySets { get; set; } = new();
+}
+
+public sealed class HeldItemToggleProfile
+{
+    public bool Enabled { get; set; } = true;
+    public int Version { get; set; } = 1;
+    public string ItemId { get; set; } = "";
+    public string SourceOwner { get; set; } = "";
+    public string SourceRequestTag { get; set; } = "";
+    public string SourceBusyTag { get; set; } = "";
+    public string SourceContextTag { get; set; } = "";
+    public string ReplacedAbility { get; set; } = "";
+    public string RemovedFailureAbility { get; set; } = "";
+    public string ManagerPackage { get; set; } = "";
+    public string TogglePackage { get; set; } = "";
+    public string IdlePackage { get; set; } = "";
+    public string WalkPackage { get; set; } = "";
+    public string RunPackage { get; set; } = "";
+    public string SprintPackage { get; set; } = "";
+    public List<HeldItemToggleAsset> Assets { get; set; } = [];
+    public List<HeldItemToggleMedia> Media { get; set; } = [];
+}
+public sealed class HeldItemToggleAsset
+{
+    public string Package { get; set; } = "";
+    public string UassetBase64 { get; set; } = "";
+    public string UexpBase64 { get; set; } = "";
+    public string UassetSha256 { get; set; } = "";
+    public string UexpSha256 { get; set; } = "";
+}
+public sealed class HeldItemToggleMedia
+{
+    public string Name { get; set; } = "";
+    public string WemBase64 { get; set; } = "";
+    public string Sha256 { get; set; } = "";
+    public List<string> Mounts { get; set; } = [];
 }
 
 public enum HeldWeaponVisibility { WhileAttacking, InCombat, Always, OutsideCombat }
 // Keep saved Right=0 / Left=1 identities stable; Both uses both native managed hand slots.
 public enum HeldItemHand { Right = 0, Left = 1, Both = 2 }
+
+/// <summary>One exact animation notify mesh binding; never a global mesh replacement.</summary>
+public sealed class AnimationSpawnedItemEdit
+{
+    public string AnimationPackage { get; set; } = "";
+    public int ExportIndex { get; set; }
+    public string OriginalMeshPackage { get; set; } = "";
+    public string SourceFingerprint { get; set; } = "";
+    public bool Hide { get; set; }
+    public string HeldItemId { get; set; } = "";
+    public string ReplacementMeshPackage { get; set; } = "";
+    public string Key => AnimationPackage + "|" + ExportIndex;
+    public AnimationSpawnedItemEdit Clone() => (AnimationSpawnedItemEdit)MemberwiseClone();
+}
 
 /// <summary>Exact native managed-item visual binding. Does not remove attack grants or replace global assets.</summary>
 public sealed class NativeHeldItemEdit
@@ -85,12 +138,13 @@ public sealed class HeldItemSettings
     // Explicit opt-in: animation empty-hand requests use High; ordinary props retain Medium.
     // This does not bypass Status.BlockItemGA, alter native controllers or add combat hitboxes.
     public bool PreferOverAnimationEmptyHands { get; set; }
+    public bool HideWhileGliding { get; set; }
     public string MeshPackage { get; set; } = "/Game/Models/Props/SM_Katana";
     public string MaterialPackage { get; set; } = "";
     public WeaponModelRecipe? CustomModel { get; set; }
     public List<HeldItemEffectSettings> Effects { get; set; } = [];
     public HeldItemSettings Clone() => new() { Id = Id, Name = Name, TemplateId = TemplateId, Hand = Hand,
-        Visibility = Visibility, PreferOverAnimationEmptyHands = PreferOverAnimationEmptyHands,
+        Visibility = Visibility, PreferOverAnimationEmptyHands = PreferOverAnimationEmptyHands, HideWhileGliding = HideWhileGliding,
         MeshPackage = MeshPackage, MaterialPackage = MaterialPackage, CustomModel = CustomModel?.Clone(), Effects = (Effects ?? []).Select(e => e.Clone()).ToList() };
 }
 

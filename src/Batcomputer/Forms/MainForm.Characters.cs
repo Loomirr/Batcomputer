@@ -5,6 +5,62 @@ namespace Batcomputer;
 public sealed partial class MainForm
 {
     private bool _creatingCharacterRecipe;
+    private bool _rebasingCharacterSuit;
+
+    private async Task RebaseFromCharacterAsync()
+    {
+        if (_rebasingCharacterSuit || !await AwaitLoadedProjectStageRestoresBeforeEditAsync("rebase from character")) return;
+        if (_currentProject?.CustomCharacter is not { IsDefinition: false } identity)
+        { Dialog.Info(this, "Rebase from character", "Open a suit belonging to one of your custom characters first."); return; }
+        _rebasingCharacterSuit = true;
+        ProgressDialog? progress = null;
+        try
+        {
+            ReadFieldsIntoProject(_currentProject);
+            var original = _currentProject;
+            var root = _projectRootText.Text.Trim();
+            var context = CaptureCurrentProjectEditContext(original, root);
+            var originalJson = JsonSerializer.Serialize(original);
+            var suit = CloneProjectForPackagePreparation(original);
+            var service = new SuitProjectService(root);
+            var suitFile = service.CaptureProjectFileRollback(suit.SlotId);
+            var parentFile = service.CaptureProjectFileRollback(identity.DefinitionSlotId);
+            var owner = service.LoadProject(service.ProjectPathForSlot(identity.DefinitionSlotId))
+                ?? throw new InvalidDataException("The saved character definition is missing. Restore it before rebasing this suit.");
+            using var picker = new CharacterRebaseForm(owner.DisplayName, CharacterRebaseService.Preview(owner, suit));
+            if (picker.ShowDialog(this) != DialogResult.OK) return;
+            var selected = picker.SelectedSections;
+            progress = new ProgressDialog(this, "Rebasing from character");
+            var updates = new Progress<string>(message => { if (progress is { IsDisposed: false }) progress.Report(message); });
+            var candidate = await Task.Run(() => CharacterRebaseService.Prepare(owner, suit, selected, service,
+                message => ((IProgress<string>)updates).Report(message)));
+            bool StillCurrent() => CurrentProjectEditContextMatches(context) && JsonSerializer.Serialize(original) == originalJson;
+            if (!StillCurrent()) throw new InvalidOperationException("The suit changed while preparing the rebase. Nothing was saved; review and retry.");
+            // Fail closed before publishing the new recipe; normal loaded-project replay certifies
+            // the new stage. The old sources and a recipe backup remain available for recovery.
+            await MarkDeclarativeStageIncompleteAsync(candidate, root);
+            string? backup = null;
+            var saved = false;
+            var parentUnchanged = service.RunIfProjectFileSnapshotStillCurrent(parentFile, () =>
+            {
+                saved = service.RunIfProjectFileSnapshotStillCurrent(suitFile, () =>
+                {
+                    backup = Path.Combine(service.ProjectOutputDirectory(suit), "CharacterRebases", "recipe-before-" + Guid.NewGuid().ToString("N") + ".json");
+                    Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
+                    File.WriteAllText(backup, originalJson);
+                    service.SaveProject(candidate);
+                }, StillCurrent);
+            }, StillCurrent);
+            if (!parentUnchanged || !saved) throw new InvalidOperationException("The suit or character was saved while preparing the rebase. Nothing was overwritten; review and retry.");
+            progress.Dispose(); progress = null;
+            _projectService = service;
+            LoadProjectIntoUi(candidate);
+            AppendLog("Rebased saved character sections: " + string.Join(", ", selected) + ". Previous recipe: " + backup);
+            Dialog.Info(this, "Character settings inherited", "The selected sections are saved. The generated stage is being refreshed; rebuild the mod after it finishes.\n\nUnselected sections remain suit-specific. No installed mod was changed.\n\nPrevious recipe: " + backup);
+        }
+        catch (Exception ex) { progress?.Dispose(); progress = null; Dialog.Error(this, "Character rebase needs attention", ex.Message); }
+        finally { progress?.Dispose(); _rebasingCharacterSuit = false; }
+    }
     private void RefreshCharacterWorkspaceTiles()
     {
         var current = CustomCharacterProjectService.IsCharacter(_currentProject) ? _currentProject : null;
@@ -82,7 +138,7 @@ public sealed partial class MainForm
         if (owner.CustomCharacter is not { IsDefinition: true } identity || !BaseEligibilityService.Evaluate(owner).IsReady)
         { Dialog.Warn(this, "Choose a character base first", "Set and save this character's native base before creating its additional suits."); return; }
         using var dialog = new CharacterIdentityDialog("New suit for " + owner.DisplayName, "Suit ID (permanent; e.g. Unmasked)",
-            note: "This copies the current design into a separate suit. Edit its appearance and abilities independently.", ownerId: identity.CharacterId, modeAvailability: identity.ModeAvailability,
+            note: "This copies the current design into a separate suit. Customize it independently, then use Rebase from character to inherit later saved changes while choosing which suit-specific sections to keep.", ownerId: identity.CharacterId, modeAvailability: identity.ModeAvailability,
             pawnOwner: CustomCharacterProjectService.PawnOwner(identity));
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
         await SaveNewCharacterRecipeAsync(owner, dialog.DisplayNameValue, identity.CharacterId, dialog.TechnicalId, owner.SlotId, dialog.DescriptionValue);
@@ -136,6 +192,11 @@ public sealed partial class MainForm
                 progress?.Report("Preparing the character's playable and companion assets…");
                 await RebuildGraftStageFromDeclarativeAsync(candidate, service.ProjectRoot, persistProject: true);
             }
+            if (source?.CustomCharacter is { IsDefinition: true } && candidate.CustomCharacter is { IsDefinition: false })
+            {
+                CharacterRebaseService.CaptureInitial(source, candidate);
+                service.SaveProject(candidate);
+            }
         }
         catch (Exception ex)
         {
@@ -166,13 +227,15 @@ public sealed partial class MainForm
         if (BlockSynchronousEditWhileLoadedProjectRestores("editing character symbol") || _currentProject?.CustomCharacter is not { IsDefinition: true } identity) return;
         try
         {
-            using var dialog = new CharacterSymbolDialog(_currentProject.DisplayName, identity.SymbolPngBase64);
+            using var dialog = new CharacterSymbolDialog(_currentProject.DisplayName, identity.SymbolPngBase64, identity.SymbolCookProfile, identity.SymbolBorderThickness);
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
             var previous = identity.SymbolPngBase64; var previousPackage = identity.SymbolPackage;
+            var previousProfile = identity.SymbolCookProfile; var previousBorder = identity.SymbolBorderThickness;
             identity.SymbolPngBase64 = dialog.SymbolPngBase64;
+            identity.SymbolCookProfile = dialog.CookProfile; identity.SymbolBorderThickness = dialog.BorderThickness;
             if (dialog.ResetRequested) identity.SymbolPackage = "";
             try { (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject); }
-            catch { identity.SymbolPngBase64 = previous; identity.SymbolPackage = previousPackage; throw; }
+            catch { identity.SymbolPngBase64 = previous; identity.SymbolPackage = previousPackage; identity.SymbolCookProfile = previousProfile; identity.SymbolBorderThickness = previousBorder; throw; }
             RefreshToyboxTiles();
             AppendLog("Character symbol saved. Build the mod to apply it to all suits of this character.");
         }

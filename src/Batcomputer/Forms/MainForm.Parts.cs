@@ -78,8 +78,8 @@ public sealed partial class MainForm
             {
                 Title = "Equipment",
                 Detail = _currentProject?.EquipmentSlots is { Count: > 0 } es
-                    ? string.Join(", ", es.OrderBy(s => s.Slot).Select(s => s.Gadget))
-                    : "none · click to add"
+                    ? string.Join(", ", es.OrderBy(s => s.Slot).Select(s => s.Remove ? $"slot {s.Slot + 1} removed" : s.Gadget))
+                    : "inherited · click to manage"
             };
         }
 
@@ -166,8 +166,8 @@ public sealed partial class MainForm
                 onMaterialDrop: materialPath => _ = ApplyGliderMaterialAsync(materialPath)));
 
             var gadgets = _currentProject?.EquipmentSlots is { Count: > 0 } es
-                ? string.Join(", ", es.OrderBy(s => s.Slot).Select(s => s.Gadget))
-                : "none · click to add";
+                ? string.Join(", ", es.OrderBy(s => s.Slot).Select(s => s.Remove ? $"slot {s.Slot + 1} removed" : s.Gadget))
+                : "inherited · click to manage";
             _yourCharacter.SlotFlow.Controls.Add(BuildActionRow(
                 "Equipment", gadgets, Theme.Equipment,
                 onClick: () => SelectComboValue(_toyboxCategoryCombo, "Equipment"),
@@ -3655,7 +3655,8 @@ public sealed partial class MainForm
             var slotIndex = i;
             var occupant = i < current.Count ? current[i] : "(empty)";
             var staged = _currentProject?.EquipmentSlots.FirstOrDefault(s => s.Slot == slotIndex);
-            var label = staged is not null ? $"{occupant} → {staged.Gadget} (staged)" : occupant;
+            var label = staged?.Remove == true ? $"{occupant} → removed (staged)"
+                : staged is not null ? $"{occupant} → {staged.Gadget} (staged)" : occupant;
             var btn = new Button { Text = $"Slot {slotIndex + 1}:  {label}", Width = 370, Height = 40, Margin = new Padding(0, 0, 0, 6) };
             Theme.StyleSmallDarkButton(btn);
             btn.Click += (_, _) => { chosen = slotIndex; dlg.DialogResult = DialogResult.OK; };

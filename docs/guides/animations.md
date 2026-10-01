@@ -177,6 +177,19 @@ This browser describes readable animation sets and locomotion references, not th
 gameplay ability state machine. Ability-owned combat graphs and their hitbox/notify contracts
 are not yet editable here. A converted combat sequence alone is not a ready-to-use attack montage.
 
+### Animation voice cues
+
+In the animation editor, add a voice cue and choose its category and frame. For attack
+efforts, **Play on empty swings** prevents the animation request from filtering that cue.
+The character's voice routing, chance and cooldown still apply; this is not a damage event.
+Save the draft, cook/import the animation, then assign it to the character and build the mod.
+Existing drafts keep their previous filtering unless this option is enabled.
+
+Voice Studio's **Volume · dB** adjusts assigned recordings for previews and future builds.
+Boosts use peak limiting; imported WAV files stay unchanged. **Use for builds** selects
+the saved voice profile. **Build mod** encodes its recordings and packages the private
+voice routing with the suit; selecting a profile alone does not cook or install it.
+
 ### In-game checks
 
 1. Start with one sequence or montage on a duplicate test suit.

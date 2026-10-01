@@ -131,8 +131,38 @@ public static class CustomCharacterProjectService
             var node = JsonSerializer.SerializeToNode(project)!;
             RewriteOwnedStrings(node, oldRoot, OwnedRoot(project));
             project = node.Deserialize<NativeSuitProject>()!;
+            PreserveAnimationReferences(source, project);
         }
         return project;
+    }
+
+    // Cooked animations are workspace-library records with their own immutable package identity
+    // and support closure. Renaming just the recipe path loses the library's staging lookup.
+    internal static void PreserveAnimationReferences(NativeSuitProject source, NativeSuitProject target)
+    {
+        var copy = JsonSerializer.Deserialize<NativeSuitProject>(JsonSerializer.Serialize(source))!;
+        target.AnimationOverrides = copy.AnimationOverrides;
+        target.AnimationSlotOverrides = copy.AnimationSlotOverrides;
+        target.LocomotionOverrides = copy.LocomotionOverrides;
+        // Cache package identities are immutable; only the receiving suit's DPRD changes.
+        for (int i = 0; i < target.GameplayAnimationGraphs.Count; i++)
+        {
+            target.GameplayAnimationGraphs[i].Id = copy.GameplayAnimationGraphs[i].Id;
+            target.GameplayAnimationGraphs[i].Abilities = copy.GameplayAnimationGraphs[i].Abilities;
+            var mod = target.TargetPackages.Playable.Split('/').ElementAtOrDefault(3) ?? "";
+            target.GameplayAnimationGraphs[i].OwnerDprdPackage = $"/Game/Mods/{mod}/Characters/DA_DPRD_{mod}";
+        }
+        target.GliderAnimLas = copy.GliderAnimLas;
+        target.GliderAnimMas = copy.GliderAnimMas;
+        // Notify source identities are immutable, even when their replacement models are copied.
+        if (target.AbilityLoadout is { } loadout && copy.AbilityLoadout is { } sourceLoadout)
+        {
+            // Embedded cooked sources retain immutable identities. Runtime packages/tags are
+            // regenerated for each receiving suit; do not rewrite the source manifest itself.
+            loadout.HeldItemToggle = sourceLoadout.HeldItemToggle;
+            for (int i = 0; i < loadout.AnimationSpawnedItems.Count; i++)
+                loadout.AnimationSpawnedItems[i].AnimationPackage = sourceLoadout.AnimationSpawnedItems[i].AnimationPackage;
+        }
     }
 
     private static string OwnedRoot(NativeSuitProject project) =>
@@ -160,11 +190,13 @@ public static class CustomCharacterProjectService
 
     /// <summary>Native donor templates and tool-library assets remain references. Copy project-owned
     /// model sources so editing/reimporting a new character never writes into the source suit folder.</summary>
-    public static void CopyAuthoringSources(NativeSuitProject source, NativeSuitProject target, SuitProjectService service)
+    public static void CopyAuthoringSources(NativeSuitProject source, NativeSuitProject target, SuitProjectService service,
+        string sourcePrefix = "", string? assetRoot = null)
     {
         var from = Path.GetFullPath(service.ProjectOutputDirectory(source));
         var to = Path.GetFullPath(service.ProjectOutputDirectory(target));
         if (from.Equals(to, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Source and new project must differ.");
+        var copyRoot = string.IsNullOrEmpty(sourcePrefix) ? to : Below(to, sourcePrefix);
 
         var copies = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         void AddCopy(string input, string output)
@@ -183,7 +215,7 @@ public static class CustomCharacterProjectService
             var input = Below(from, relative);
             if (!File.Exists(input)) throw new FileNotFoundException(
                 "A saved model source is missing. Repair it in the source project before copying.", input);
-            AddCopy(input, Below(to, relative));
+            AddCopy(input, Below(copyRoot, relative));
         }
         void RequireCache(string relative)
         {
@@ -191,7 +223,7 @@ public static class CustomCharacterProjectService
             var input = Below(from, relative);
             if (!Directory.Exists(input)) throw new DirectoryNotFoundException(
                 "A saved model cache is missing. Repair it in the source project before copying: " + input);
-            var output = Below(to, relative);
+            var output = Below(copyRoot, relative);
             foreach (var file in Directory.EnumerateFiles(input, "*", SearchOption.AllDirectories))
                 AddCopy(file, Below(output, Path.GetRelativePath(input, file)));
         }
@@ -208,23 +240,35 @@ public static class CustomCharacterProjectService
         {
             if (!File.Exists(source.CoverImagePath)) throw new FileNotFoundException(
                 "The saved suit cover image is missing. Repair it in the source project before copying.", source.CoverImagePath);
-            cover = Path.Combine(to, "cover" + Path.GetExtension(source.CoverImagePath));
+            cover = Path.Combine(copyRoot, "cover" + Path.GetExtension(source.CoverImagePath));
             AddCopy(Path.GetFullPath(source.CoverImagePath), cover);
         }
         foreach (var (output, input) in copies) CopyFile(input, output);
         if (cover is not null) target.CoverImagePath = cover;
+        if (!string.IsNullOrEmpty(sourcePrefix))
+        {
+            foreach (var mesh in target.CustomStaticMeshes)
+                if (!string.IsNullOrWhiteSpace(mesh.SourceObjRelativePath)) mesh.SourceObjRelativePath = sourcePrefix + "/" + mesh.SourceObjRelativePath;
+            foreach (var mesh in target.SkinnedMeshes.Concat(EquipmentSkinnedModelService.Models(target)))
+            {
+                if (!string.IsNullOrWhiteSpace(mesh.SourceRelativePath)) mesh.SourceRelativePath = sourcePrefix + "/" + mesh.SourceRelativePath;
+                if (!string.IsNullOrWhiteSpace(mesh.CacheRelativePath)) mesh.CacheRelativePath = sourcePrefix + "/" + mesh.CacheRelativePath;
+            }
+        }
         // Custom OBJ geometry is regenerated from each project's alignment settings. Give it its
         // own output package while leaving shared material/texture library references untouched.
         foreach (var mesh in target.CustomStaticMeshes)
-            mesh.MeshPackagePath = $"/Game/Mods/CC_{target.CustomCharacter!.CharacterId}_{target.CustomCharacter.VariantId}/Meshes/SM_Custom_{mesh.Id}";
+            mesh.MeshPackagePath = (assetRoot ?? $"/Game/Mods/CC_{target.CustomCharacter!.CharacterId}_{target.CustomCharacter.VariantId}") + $"/Meshes/SM_Custom_{mesh.Id}";
     }
 
-    public static void CopyVisualAssets(NativeSuitProject source, NativeSuitProject target, SuitProjectService service, Action<string> log)
+    public static void CopyVisualAssets(NativeSuitProject source, NativeSuitProject target, SuitProjectService service, Action<string> log,
+        string? assetRoot = null, string sourcePrefix = "")
     {
-        var oldRoot = OwnedRoot(source); var newRoot = OwnedRoot(target);
+        var oldRoot = OwnedRoot(source); var newRoot = assetRoot ?? OwnedRoot(target);
         if (string.IsNullOrWhiteSpace(oldRoot) || oldRoot == newRoot)
             throw new InvalidDataException("The source needs a distinct mod-owned asset root.");
-        var directory = service.ProjectOutputDirectory(target);
+        var projectDirectory = service.ProjectOutputDirectory(target);
+        var directory = string.IsNullOrEmpty(sourcePrefix) ? projectDirectory : Below(projectDirectory, sourcePrefix);
         var library = new ToolMaterialLibraryService(service.ProjectRoot);
         var scratch = Path.Combine(directory, "CopiedMaterialSources", "Content");
         var regenerated = new Dictionary<string, (GeneratedTextureEntry Texture, string PackageBase)>(StringComparer.OrdinalIgnoreCase);
@@ -234,7 +278,7 @@ public static class CustomCharacterProjectService
             if (!File.Exists(texture.SourcePng)) throw new FileNotFoundException("Reimport this texture's source image in the original suit before copying it: " + texture.DisplayName, texture.SourcePng);
             var png = Below(directory, $"CopiedTextureSources/{i:D3}{Path.GetExtension(texture.SourcePng)}");
             CopyFile(texture.SourcePng, png); texture.SourcePng = png;
-            texture.OutputRoot = Below(Path.Combine(AppSettings.GeneratedRootFor(service.ProjectRoot), "TextureImports"), $"{target.SlotId}/{i:D3}");
+            texture.OutputRoot = Below(Path.Combine(AppSettings.GeneratedRootFor(service.ProjectRoot), "TextureImports"), $"{target.SlotId}/{sourcePrefix}/{i:D3}");
             texture.IoStoreRoot = "";
             var cook = new TextureCookService(service.ProjectRoot).Cook(new()
             {
@@ -275,7 +319,7 @@ public static class CustomCharacterProjectService
         }
         foreach (var mesh in target.SkinnedMeshes.Concat(EquipmentSkinnedModelService.Models(target)))
         {
-            var cache = Below(directory, mesh.CacheRelativePath);
+            var cache = Below(projectDirectory, mesh.CacheRelativePath);
             var manifestFile = Path.Combine(cache, "validated.json");
             var manifest = JsonSerializer.Deserialize<SkinnedMeshCookService.CookManifest>(File.ReadAllText(manifestFile))
                 ?? throw new InvalidDataException("Missing validated skinned cache.");
@@ -284,7 +328,7 @@ public static class CustomCharacterProjectService
             manifest = manifest with { Package = mesh.MeshPackage, Files = hashes,
                 TemporarySkeleton = manifest.TemporarySkeleton.Replace(oldRoot + "/", newRoot + "/", StringComparison.Ordinal) };
             File.WriteAllText(manifestFile, JsonSerializer.Serialize(manifest));
-            SkinnedMeshStageService.ReadManifest(directory, mesh);
+            SkinnedMeshStageService.ReadManifest(projectDirectory, mesh);
         }
         library.Register(target.GeneratedMaterials);
     }
@@ -304,6 +348,7 @@ public static class CustomCharacterProjectService
             .Concat((source.AbilityLoadout?.NativeHeldItems ?? []).SelectMany(item =>
                 (item.CustomModel?.Materials ?? []).Select(material => material.MaterialPath)
                 .Concat(item.Materials.Select(material => material.Package)).Append(item.ReplacementMeshPackage)))
+            .Concat((source.AbilityLoadout?.AnimationSpawnedItems ?? []).Select(item => item.ReplacementMeshPackage))
             .Concat(equipmentParts.SelectMany(part => (part.Model?.Materials ?? []).Select(material => material.MaterialPath).Append(part.ReplacementPackage)))
             .Concat(source.EquipmentSlots.Select(slot => slot.Custom?.HudIcon?.SdfPackage ?? ""))
             .Append(source.GliderMaterial)

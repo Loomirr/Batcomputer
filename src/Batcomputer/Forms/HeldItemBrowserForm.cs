@@ -1,14 +1,20 @@
 namespace Batcomputer;
 
 /// <summary>Private-copy browser of active native items and optional extra props.</summary>
-public sealed class HeldItemsForm : AdaptiveForm
+public sealed partial class HeldItemsForm : AdaptiveForm
 {
     public List<HeldItemSettings> Result { get; private set; }
     public List<NativeHeldItemEdit> NativeResult { get; private set; } = [];
+    public List<AnimationSpawnedItemEdit> AnimationResult { get; private set; } = [];
+    internal bool ToggleEnabled { get; private set; }
     public HeldItemsForm(IEnumerable<HeldItemSettings> items) : this(items, [], new([], [])) { }
-    internal HeldItemsForm(IEnumerable<HeldItemSettings> items, IEnumerable<NativeHeldItemEdit> edits, NativeHeldItemService.Inspection native)
+    internal HeldItemsForm(IEnumerable<HeldItemSettings> items, IEnumerable<NativeHeldItemEdit> edits, NativeHeldItemService.Inspection native,
+        IEnumerable<AnimationSpawnedItemEdit>? animationEdits = null, AnimationSpawnedItemService.Inspection? animationInspection = null,
+        Func<AnimationSpawnedItemService.Inspection>? animationLoader = null, HeldItemToggleProfile? toggle = null)
     {
         Result = items.Select(i => i.Clone()).ToList(); NativeResult = edits.Select(i => i.Clone()).ToList();
+        AnimationResult = (animationEdits ?? []).Select(i => i.Clone()).ToList();
+        ToggleEnabled = toggle?.Enabled == true;
         Text = "Batcomputer — Held items"; StartPosition = FormStartPosition.CenterParent; ClientSize = new(1120, 760); MinimumSize = new(940, 630);
         BackColor = Theme.WindowBg; ForeColor = Theme.OnDark; Font = Theme.Body; Icon = EmbeddedAssets.LoadIcon(Theme.CurrentVisualTheme.IconAsset) ?? Icon;
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new(18), ColumnCount = 1, RowCount = 3 };
@@ -16,9 +22,20 @@ public sealed class HeldItemsForm : AdaptiveForm
         root.Controls.Add(ItemWorkshopUi.Header("Held items", "Existing ability items: replace or hide their visuals. Extra props: add a separate model to one or both hands."));
         var pages = new ItemInspectorPages(); root.Controls.Add(pages, 0, 1);
         pages.Add($"Native items · {native.Items.Count}", NativePage(native)); pages.Add("Extra props", ExtraPage());
+        if (toggle is not null)
+        {
+            var page = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, Padding = new(18), AutoScroll = true };
+            var enabled = new CheckBox { Text = "Use saved held-item toggle instead of Focus", AutoSize = true, Checked = ToggleEnabled, Name = "held-item-toggle-enabled" };
+            enabled.CheckedChanged += (_, _) => ToggleEnabled = enabled.Checked;
+            page.Controls.Add(enabled);
+            page.Controls.Add(new Label { AutoSize = true, MaximumSize = new(720,0), Text = "Uses the native Focus binding, including controller/keyboard remapping. Starts extended; attacks auto-extend. Unarmed idle and forward movement, gestures and private sounds are rebuilt from this project's saved bundle.\n\nTurning this off restores normal Focus on the next build. The mesh still snaps visible/hidden; this bundle does not animate the blades.\n\nEdit the prop's model, materials, hand placement and glide hiding under Extra props. Save this screen, apply Abilities, then rebuild." });
+            pages.Add("Item toggle",page);
+        }
+        if (animationInspection is not null) pages.Add($"Animation items · {animationInspection.Items.Count}", AnimationPage(animationInspection));
+        else if (animationLoader is not null) pages.Add("Animation items", LazyAnimationPage(animationLoader));
         var use = ItemWorkshopUi.Button("Use held items", true); var cancel = ItemWorkshopUi.Button("Cancel"); cancel.DialogResult = DialogResult.Cancel;
         root.Controls.Add(ItemWorkshopUi.Footer(new Label { Text = "Private changes · save the Ability editor and rebuild after applying.", ForeColor = Theme.OnDarkMuted }, cancel, use), 0, 2); AcceptButton = use; CancelButton = cancel;
-        use.Click += (_, _) => { var errors = HeldItemService.Validate(Result).Concat(NativeHeldItemService.Validate(NativeResult)).ToList(); if (errors.Count > 0) { Dialog.Warn(this, "Check held items", string.Join("\n", errors)); return; } DialogResult = DialogResult.OK; Close(); };
+        use.Click += (_, _) => { var errors = HeldItemService.Validate(Result).Concat(NativeHeldItemService.Validate(NativeResult)).Concat(AnimationSpawnedItemService.Validate(new() { HeldItems = Result, AnimationSpawnedItems = AnimationResult })).ToList(); if (errors.Count > 0) { Dialog.Warn(this, "Check held items", string.Join("\n", errors)); return; } DialogResult = DialogResult.OK; Close(); };
         Shown += (_, _) => Theme.UseDarkTitleBar(this);
     }
     private Control NativePage(NativeHeldItemService.Inspection inspection)

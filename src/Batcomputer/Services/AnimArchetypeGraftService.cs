@@ -828,6 +828,7 @@ public sealed class AnimArchetypeGraftService
             out var donorEquipmentSlots);
         foreach (var change in project.EquipmentSlots)
         {
+            if (change.Remove) continue;
             var eq = gd.FindEquipment(change.Gadget);
             if (eq is null)
             {
@@ -972,9 +973,15 @@ public sealed class AnimArchetypeGraftService
             }
         }
 
-        var exactSlotOverrides = project.AnimationSlotOverrides ?? [];
+        var removedAnimationOwners = dependencyPlan.MontageAnimSetsToRemove.Concat(dependencyPlan.LayerAnimSetsToRemove)
+            .Select(UnrealPathUtil.NormalizePackagePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var exactSlotOverrides = (project.AnimationSlotOverrides ?? [])
+            .Where(change => !removedAnimationOwners.Contains(UnrealPathUtil.NormalizePackagePath(change.OwnerSetPackage))).ToList();
+        foreach (var dormant in (project.AnimationSlotOverrides ?? []).Except(exactSlotOverrides))
+            result.Log.Add($"saved animation override inactive while its equipment is absent: {dormant.OwnerSetPackage} [{dormant.ActionTag}]");
         var hasAbilityCustomization = AbilityLoadoutService.HasCustomizations(project);
-        if (foreignMas.Count == 0 && foreignLas.Count == 0 && foreignEd.Count == 0 &&
+        var equipmentRemovals = project.EquipmentSlots.Where(change => change.Remove).Select(change => change.Slot).ToArray();
+        if (equipmentRemovals.Length == 0 && foreignMas.Count == 0 && foreignLas.Count == 0 && foreignEd.Count == 0 &&
             foreignAbilitySets.Count == 0 &&
             foreignEffects.Count == 0 &&
             dependencyPlan.GameplayAbilitiesToRemove.Count == 0 &&
@@ -1010,8 +1017,11 @@ public sealed class AnimArchetypeGraftService
 
             // Animation-set overrides (whole building-block swaps, e.g. locomotion
             // LAS_Default_Batman → LAS_Default_Catwoman).
-            var montageOverrides = project.AnimationOverrides.Where(o => o.Kind.Equals("Montage", StringComparison.OrdinalIgnoreCase)).ToList();
-            var layerOverrides = project.AnimationOverrides.Where(o => o.Kind.Equals("Layer", StringComparison.OrdinalIgnoreCase)).ToList();
+            var removedAnimationStems = removedAnimationOwners.Select(UnrealPathUtil.AssetName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var montageOverrides = project.AnimationOverrides.Where(o => o.Kind.Equals("Montage", StringComparison.OrdinalIgnoreCase) &&
+                !removedAnimationStems.Contains(DonorSetForCategory(o.Category, donor.Family))).ToList();
+            var layerOverrides = project.AnimationOverrides.Where(o => o.Kind.Equals("Layer", StringComparison.OrdinalIgnoreCase) &&
+                !removedAnimationStems.Contains(DonorSetForCategory(o.Category, donor.Family))).ToList();
             var montageSlotOverrides = exactSlotOverrides
                 .Where(o => o.Kind.Equals("Montage", StringComparison.OrdinalIgnoreCase))
                 .ToList();
@@ -1378,7 +1388,7 @@ public sealed class AnimArchetypeGraftService
 
             // --- Loadout: clone DPRD, swap the gadget's ED into Equipment, repoint archetype. ---
             if (RequiresGeneratedDprdFromResolvedDependencies(
-                    foreignEd.Count > 0,
+                    foreignEd.Count > 0 || equipmentRemovals.Length > 0,
                     foreignAbilitySets.Count > 0 || foreignEffects.Count > 0 || hasAbilityCustomization))
             {
                 var customDprdPkg = $"/Game/Mods/{mod}/Characters/DA_DPRD_{mod}";
@@ -1422,6 +1432,13 @@ public sealed class AnimArchetypeGraftService
                         return result;
                     }
                     expectedEquipment[slot] = UnrealPathUtil.NormalizePackagePath(edPkg);
+                }
+                if (equipmentRemovals.Length > 0)
+                {
+                    var removal = equipmentMutation.RemoveDprdEquipmentSlots(customDprdUasset, equipmentRemovals);
+                    if (!removal.Success) throw new InvalidDataException(removal.Error ?? "Runtime equipment removal failed.");
+                    foreach (var index in equipmentRemovals.OrderDescending()) expectedEquipment.RemoveAt(index);
+                    result.Log.Add("DPRD equipment removed at donor slots: " + string.Join(", ", equipmentRemovals.Select(i => i + 1)));
                 }
                 var equipmentAfter = equipmentMutation.InspectDprdEquipment(customDprdUasset);
                 var actualEquipment = equipmentAfter.Equipment
@@ -1694,7 +1711,14 @@ public sealed class AnimArchetypeGraftService
                     HeldItemService.Generate(project.AbilityLoadout!, extractedRoot, patchedContentRoot, mod, customDprdUasset, mappings!, result.Log);
 
                 if (project.AbilityLoadout is { NativeHeldItems.Count: > 0 } nativeProfile)
-                    NativeHeldItemService.Generate(nativeProfile, extractedRoot, patchedContentRoot, mod, customDprdUasset, mappings!, result.Log);
+                {
+                    var activeVisuals = NativeHeldItemService.ForEquipmentClosure(nativeProfile, dependencyPlan.GameplayAbilitiesToRemove);
+                    if (activeVisuals.NativeHeldItems.Count != nativeProfile.NativeHeldItems.Count)
+                        result.Log.Add("saved native held-item edits inactive while their equipment controllers are absent");
+                    NativeHeldItemService.Generate(activeVisuals, extractedRoot, patchedContentRoot, mod, customDprdUasset, mappings!, result.Log);
+                }
+
+                HeldItemToggleService.Generate(project, extractedRoot, patchedContentRoot, mod, customDprdUasset, mappings!, result.Log);
 
                 if (!VerifyStagedDependencyCertificate(
                         project,
@@ -1822,6 +1846,7 @@ public sealed class AnimArchetypeGraftService
         var actualDprd = mutation.InspectDprdAbilitySets(stagedDprdUasset);
         if (project.AbilityLoadout is { NativeHeldItems.Count: > 0 } nativeProfile)
         {
+            nativeProfile = NativeHeldItemService.ForEquipmentClosure(nativeProfile, plan.GameplayAbilitiesToRemove);
             try {
                 NativeHeldItemService.Verify(nativeProfile, extractedRoot, stagedRoot, mod, expectedSets, LoadMappings()!);
                 var rewritten = NativeHeldItemService.RewriteSetPackages(nativeProfile, expectedSets, extractedRoot, stagedRoot, mod, LoadMappings()!);
@@ -1832,7 +1857,24 @@ public sealed class AnimArchetypeGraftService
                 expectedSets = rewritten.ToList();
             } catch (Exception ex) { error = ex.Message; return false; }
         }
+        if (project.AbilityLoadout?.HeldItemToggle is not null)
+        {
+            try
+            {
+                var rewritten = HeldItemToggleService.VerifySets(project, extractedRoot, stagedRoot, mod, expectedSets, LoadMappings()!);
+                var bridgeIndex = expectedSets.FindIndex(p => p.Equals(bridgePackage, StringComparison.OrdinalIgnoreCase));
+                if (bridgeIndex >= 0) bridgePackage = rewritten[bridgeIndex];
+                expectedSets = rewritten;
+            }
+            catch (Exception ex) { error = ex.Message; return false; }
+        }
         var actualSets = actualDprd.AbilitySets.Select(reference => reference.PackagePath).ToList();
+        if (project.GameplayAnimationGraphs.Count > 0 && actualDprd.Success &&
+            !actualSets.SequenceEqual(expectedSets, StringComparer.OrdinalIgnoreCase))
+        {
+            if (!GameplayAnimationGraphService.CertifySets(project, stagedRoot, expectedSets, actualSets, out error)) return false;
+            expectedSets = actualSets.ToList();
+        }
         if (!actualDprd.Success ||
             !actualSets.SequenceEqual(expectedSets, StringComparer.OrdinalIgnoreCase))
         {
@@ -2084,6 +2126,7 @@ public sealed class AnimArchetypeGraftService
             out var donorSlots);
         foreach (var change in project.EquipmentSlots)
         {
+            if (change.Remove) return true;
             var equipment = gameData.FindEquipment(change.Gadget);
             if (equipment is null)
             {
@@ -2114,7 +2157,8 @@ public sealed class AnimArchetypeGraftService
 
     public static bool RequiresCustomArchetype(NativeSuitProject project) =>
         project.UseCustomArchetype ||
-        project.EquipmentSlots.Any(slot => slot.Custom is not null) ||
+        project.GameplayAnimationGraphs.Count > 0 ||
+        project.EquipmentSlots.Any(slot => slot.Remove || slot.Custom is not null) ||
         AbilityLoadoutService.HasCustomizations(project) ||
         HasExactEquipmentGraftDependency(project);
 

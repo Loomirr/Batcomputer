@@ -129,6 +129,8 @@ public sealed partial class MainForm
 
         menu.Items.Add("Preview package…", null, (_, _) => ShowPackageContentsPreview());
         menu.Items.Add("Rebase current project to current dump…", null, (_, _) => RebaseCurrentSuitToActiveDump());
+        if (_currentProject?.CustomCharacter is { IsDefinition: false })
+            menu.Items.Add("Rebase suit from character…", null, (_, _) => _ = RebaseFromCharacterAsync());
         menu.Items.Add("Clean generated output…", null, (_, _) => CleanGeneratedOutputForCurrentSuit());
         menu.Items.Add(new ToolStripSeparator());
 
@@ -611,6 +613,10 @@ public sealed partial class MainForm
             AppendLog("IoStore package aborted: " + textureStageError);
             return PackageBuildResult.Failed(textureStageError);
         }
+        // The declared animation library owns these packages. Stage it before the broad
+        // generated-asset cache so stale cached animations cannot override their source.
+        // Library-to-library conflicts still fail closed inside the staging check.
+        StageLibraryAnimsIntoContentRoot(packageProject, contentRootToPackage);
         StageGeneratedMaterialsIntoContentRoot(packageProject, contentRootToPackage);
 
         // Every suit needs its own DCMD (points to the menu icon + equipment + the
@@ -625,7 +631,7 @@ public sealed partial class MainForm
         // Stage library-owned cooked animations (preserve-path/proven-clone/
         // imported) that this suit's overrides reference. external/base-game anims are NOT shipped
         // (they live in the modder's own pak or the base game).
-        StageLibraryAnimsIntoContentRoot(packageProject, contentRootToPackage);
+        GameplayAnimationGraphService.Stage(packageProject, projectRoot, contentRootToPackage, AppendLog);
 
         // Apply the custom-archetype pipeline (clone archetype + reparent playable/
         // cutscene + anim/equipment/visual graft) to the ACTUAL packaged root - the
@@ -670,6 +676,14 @@ public sealed partial class MainForm
             return PackageBuildResult.Failed(message);
         }
 
+        GameplayAnimationGraphService.Apply(packageProject, contentRootToPackage, AppendLog);
+        _packageProgress?.Report("Preparing selected character voice profile…");
+        var voiceBuild = await Task.Run(() => CharacterVoiceBuildService.StageAsync(packageProject, projectRoot,
+            contentRootToPackage, line => AppendLog(line), CancellationToken.None));
+        var toggleAudio = HeldItemToggleService.Stage(packageProject, contentRootToPackage);
+        voiceBuild = CharacterVoiceBuildService.Combine(new[] { voiceBuild, toggleAudio }.OfType<CharacterVoiceBuildService.Result>().ToArray());
+        await Task.Run(() => FaceAnimationService.ApplyToPackagedRoot(packageProject, contentRootToPackage));
+        await Task.Run(() => AnimationSpawnedItemService.ApplyToPackagedRoot(packageProject, contentRootToPackage, line => AppendLog(line)));
         var runtimeJsonPath = StageRuntimeV2SuitJson(packageProject, buildId);
         AppendLog($"Runtime V2 suit JSON: {runtimeJsonPath}");
         _packageProgress?.Report("Checking the package…");
@@ -763,6 +777,8 @@ public sealed partial class MainForm
             {
                 return PackageBuildResult.Failed($"IoStore packaging exited with code {process.ExitCode}.");
             }
+
+            await CharacterVoiceBuildService.PackageMediaAsync(voiceBuild, Path.Combine(outputRoot, packageBaseName + ".pak"), CancellationToken.None);
 
             var missingOrEmpty = BuildManifestService.FindMissingOrEmptyFiles(expectedTrioPaths)
                 .Select(Path.GetFileName)
@@ -1629,8 +1645,27 @@ public sealed partial class MainForm
         var gd = GameDataService.Instance;
         var refs = new List<DcmdGenService.EquipmentSlotRef>();
         var unresolved = new List<string>();
+        if (project.EquipmentSlots.Any(change => change.Remove))
+        {
+            if (!AbilityDependencyService.TryReadDonorRuntimeEquipmentSlots(project, gd.Db.Equipment, out var donorSlots))
+                throw new InvalidDataException("Equipment removal requires an exactly inspected donor runtime loadout.");
+            var menuSlots = new DcmdGenService(_projectRootText.Text.Trim()).ReadEquipmentSlots(dcmdUasset);
+            foreach (var removal in project.EquipmentSlots.Where(change => change.Remove))
+            {
+                var original = gd.FindEquipment(donorSlots.GetValueOrDefault(removal.Slot, ""));
+                if (original is null || removal.Slot < 0 || removal.Slot >= menuSlots.Count ||
+                    !menuSlots[removal.Slot].Equals(UnrealPathUtil.AssetName(original.EtaPackage), StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException($"Equipment slot {removal.Slot + 1} has different runtime/menu equipment. Removal stopped to avoid clearing an unrelated menu entry.");
+            }
+        }
         foreach (var change in project.EquipmentSlots.OrderBy(s => s.Slot))
         {
+            if (change.Remove)
+            {
+                if (change.Custom is not null) throw new InvalidDataException("Removed equipment cannot also contain a custom recipe.");
+                refs.Add(new(change.Slot, change.Gadget, "", Remove: true));
+                continue;
+            }
             var eq = gd.FindEquipment(change.Gadget);
             var resolutionError = EquipmentDependencyService.SavedChangeResolutionError(change, eq);
             if (resolutionError is not null)
@@ -1892,6 +1927,8 @@ public sealed partial class MainForm
 
         foreach (var change in project.EquipmentSlots.OrderBy(s => s.Slot))
         {
+            if (change.Remove)
+                throw new InvalidDataException("Equipment removal requires the native cooked build flow, not the legacy runtime-JSON flow.");
             var newEq = gd.FindEquipment(change.Gadget);
             if (newEq is null || string.IsNullOrWhiteSpace(newEq.EtaPackage))
             {

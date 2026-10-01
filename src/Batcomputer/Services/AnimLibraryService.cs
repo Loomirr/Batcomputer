@@ -224,7 +224,7 @@ public sealed class AnimLibraryService
 
         if (replacementCommitted && existing is not null &&
             !existing.Id.Equals(entry.Id, StringComparison.OrdinalIgnoreCase) &&
-            !library.Entries.Any(active => active.Id.Equals(existing.Id, StringComparison.OrdinalIgnoreCase)))
+            !CacheIsReferenced(library, existing.Id))
         {
             DeleteCacheBestEffort(existing.Id);
         }
@@ -686,7 +686,7 @@ public sealed class AnimLibraryService
         // If saving failed above, the old index and all old cache directories remain untouched.
         foreach (var cacheId in retiredCacheIds)
         {
-            if (!library.Entries.Any(entry => entry.Id.Equals(cacheId, StringComparison.OrdinalIgnoreCase)))
+            if (!CacheIsReferenced(library, cacheId))
             {
                 DeleteCacheBestEffort(cacheId);
             }
@@ -880,6 +880,14 @@ public sealed class AnimLibraryService
             UnrealPathUtil.NormalizePackagePath(entry.PackagePath)
                 .Equals(UnrealPathUtil.NormalizePackagePath(replacement.PackagePath), StringComparison.OrdinalIgnoreCase));
         library.Entries.Add(replacement);
+    }
+
+    internal static bool CacheIsReferenced(AnimLibrary library, string entryId)
+    {
+        var prefix = "Cache/" + entryId + "/";
+        return library.Entries.Any(entry => entry.Id.Equals(entryId, StringComparison.OrdinalIgnoreCase) ||
+            entry.CachedFiles.Concat(entry.SupportPackages.SelectMany(s => s.CachedFiles))
+                .Any(file => file.Replace('\\', '/').StartsWith(prefix, StringComparison.OrdinalIgnoreCase)));
     }
 
     private void DeleteCacheBestEffort(string entryId)

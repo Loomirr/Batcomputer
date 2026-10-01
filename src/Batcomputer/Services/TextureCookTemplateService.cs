@@ -30,6 +30,7 @@ internal static class TextureCookTemplateService
     public const string EquipmentSdfTemplateFolder = "TextureStandaloneTemplate_GadgetIconSDF_BGRA8";
     public const string EquipmentAlphaTemplateFolder = "TextureStandaloneTemplate_GadgetIconAlphaToSDF_BGRA8";
     public const string EquipmentAccentTemplateFolder = "TextureStandaloneTemplate_GadgetIconGreenToSDF_BGRA8";
+    public const string CharacterSymbolTemplateFolder = "TextureStandaloneTemplate_CharacterEmblem128x64_G8";
     public const string EquipmentColorTemplateFolder = "TextureStandaloneTemplate_GadgetIconBCA_BGRA8";
     private const string NativeSuitIconAssetName = "T_SuitIcon_NULL_BCA";
     private const string NativeCharacterIconAssetName = "T_UI_IconChar_Batman_TheBatman2025_Menu_BCA";
@@ -105,6 +106,10 @@ internal static class TextureCookTemplateService
 
     private static readonly Definition[] Definitions =
     {
+        new(CharacterSymbolTemplateFolder, "T_UI_EmblemBatman_SDF.json", "UI/Icons/Characters/Emblems/T_UI_EmblemBatman_SDF",
+            "/Game/UI/Icons/Characters/Emblems/T_UI_EmblemBatman_SDF", 128, 64, "PF_G8", 1, 1, 0, 119, 0,
+            804, 8339, 0, "3863756474BD4F4CFF3EF45789577034DBC7E53E7ED3B4694754369F69899268",
+            "70406A2C35950CCAB94C1F5C4CEBE2466274DD913B66343E4FABA8D7FC1CB95E", ""),
         new(VehicleIconTemplateFolder, "T_UI_IconVeh_Batmobile1995_BatmanForever_BCA.json",
             "UI/Icons/Vehicles/T_UI_IconVeh_Batmobile1995_BatmanForever_BCA",
             "/Game/UI/Icons/Vehicles/T_UI_IconVeh_Batmobile1995_BatmanForever_BCA",
@@ -726,6 +731,7 @@ internal static class TextureCookTemplateService
     // import the original world textures; a Full refresh adds the new donor
     // packages and makes each matching profile available automatically.
     private static bool IsOptionalProfileDefinition(Definition definition) =>
+        definition.Folder == CharacterSymbolTemplateFolder ||
         definition.Folder == VehicleIconTemplateFolder ||
         definition.Folder == EquipmentSdfTemplateFolder ||
         definition.Folder == EquipmentAlphaTemplateFolder || definition.Folder == EquipmentColorTemplateFolder ||

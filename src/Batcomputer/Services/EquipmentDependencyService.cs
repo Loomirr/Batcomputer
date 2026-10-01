@@ -86,6 +86,8 @@ public static class EquipmentDependencyService
         EquipmentSlotChange change,
         GameDataEquipment? equipment)
     {
+        if (change.Remove)
+            return change.Custom is null ? null : "Removed equipment cannot also contain a custom equipment recipe.";
         var gadget = string.IsNullOrWhiteSpace(change.Gadget) ? "(empty gadget name)" : change.Gadget;
         var prefix = $"Equipment slot {change.Slot + 1} '{gadget}'";
         if (equipment is null)

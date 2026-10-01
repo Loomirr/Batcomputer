@@ -35,6 +35,26 @@ public sealed partial class MainForm
         {
             new()
             {
+                Section = "CHARACTER",
+                Title = "Character voices",
+                Subtitle = "browse + assign + private voice builds",
+                Accent = Theme.Abilities,
+                OnClick = () =>
+                {
+                    if (_currentProject is null) return;
+                    var previousVoice = _currentProject.VoiceProfileId;
+                    using var voices = new CharacterVoiceWorkshopForm(_currentProject, AppSettings.Current.EffectiveProjectRoot());
+                    voices.ShowDialog(this);
+                    if (_currentProject.VoiceProfileId != previousVoice)
+                    {
+                        try { new SuitProjectService(AppSettings.Current.EffectiveProjectRoot()).SaveProject(_currentProject); }
+                        catch (Exception ex) { _currentProject.VoiceProfileId = previousVoice; Dialog.Error(this, "Voice selection not saved", ex.Message); }
+                    }
+                },
+                ToolTip = "Inspect native voice lines, import recordings, assign or silence lines and explicitly select a profile for private suit-local builds.",
+            },
+            new()
+            {
                 Section = "LOADOUT",
                 Title = "Edit suit abilities",
                 Subtitle = "ability sets + gameplay grants",

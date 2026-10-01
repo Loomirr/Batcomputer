@@ -88,6 +88,7 @@ internal static class AbilityAssetRegressionChecks
                 failures,
                 output);
             RunBruceWayneEquipmentAuthorityCheck(extractedRoot, fixtureRoot, failures, output);
+            RunEquipmentRemovalChecks(extractedRoot, fixtureRoot, service, failures, output);
 
             var baseWriteBlocked = service.SetDprdAbilitySets(
                 dprdSource,
@@ -183,6 +184,60 @@ internal static class AbilityAssetRegressionChecks
         {
             try { Directory.Delete(fixtureRoot, recursive: true); }
             catch { /* best-effort test cleanup */ }
+        }
+    }
+
+    private static void RunEquipmentRemovalChecks(string extractedRoot, string fixtureRoot,
+        AbilityAssetMutationService mutation, List<string> failures, TextWriter output)
+    {
+        const string dprdPackage = "/Game/Characters/Minifig/Catwoman/DA_DPRD_CatwomanCharacterData";
+        const string menuPackage = "/Game/Characters/Minifig/Catwoman/DA_DCMD_CatWoman_Default_Mask_Playable";
+        var runtimeSource = ExtractedPackagePathService.ResolvePackageUasset(extractedRoot, dprdPackage) ?? "";
+        var menuSource = ExtractedPackagePathService.ResolvePackageUasset(extractedRoot, menuPackage) ?? "";
+        if (!File.Exists(runtimeSource) || !File.Exists(menuSource)) {
+            output.WriteLine("PASS: equipment removal real-asset fixture skipped (native donor unavailable)"); return;
+        }
+        var runtime = CopyCookedAsset(runtimeSource, Path.Combine(fixtureRoot, "RemoveEquipment", "Runtime"));
+        var menu = CopyCookedAsset(menuSource, Path.Combine(fixtureRoot, "RemoveEquipment", "Menu"));
+        var original = mutation.InspectDprdEquipment(runtime);
+        var originalSets = mutation.InspectDprdAbilitySets(runtime);
+        if (original.Equipment.Count < 2) throw new InvalidDataException("Equipment removal fixture needs two native slots.");
+        var blocked = mutation.RemoveDprdEquipmentSlots(runtimeSource, [0]);
+        var duplicate = mutation.RemoveDprdEquipmentSlots(runtime, [0, 0]);
+        var outside = mutation.RemoveDprdEquipmentSlots(runtime, [original.Equipment.Count]);
+        Check(!blocked.Success && blocked.Status == "base-asset-read-only" && !duplicate.Success && !outside.Success,
+            "runtime equipment removal protects native assets and rejects duplicate/out-of-range donor slots", failures, output);
+        var removed = mutation.RemoveDprdEquipmentSlots(runtime, [0]);
+        var retained = mutation.InspectDprdEquipment(runtime);
+        Check(removed.Success && retained.Equipment.Select(e => e.PackagePath).SequenceEqual(original.Equipment.Skip(1).Select(e => e.PackagePath)) &&
+            mutation.InspectDprdAbilitySets(runtime).AbilitySets.Select(e => e.PackagePath).SequenceEqual(originalSets.AbilitySets.Select(e => e.PackagePath)),
+            "removing one runtime gadget compacts the loadout while preserving the other gadget and ability sets", failures, output);
+        var removedAll = mutation.RemoveDprdEquipmentSlots(runtime, Enumerable.Range(0, retained.Equipment.Count).ToArray());
+        Check(removedAll.Success && mutation.InspectDprdEquipment(runtime).Equipment.Count == 0,
+            "removing all runtime equipment reloads as an empty array rather than null gadget holes", failures, output);
+        var menuService = new DcmdGenService("");
+        var menuOriginal = menuService.ReadEquipmentSlots(menu);
+        var menuRemoved = menuService.ReplaceEquipment(menu, [new(0, "Whip", "", Remove: true)]);
+        Check(menuRemoved.Status == "ok" && menuService.ReadEquipmentSlots(menu).SequenceEqual(menuOriginal.Skip(1)),
+            "menu gadget removal reloads the retained equipment with parallel upgrade entries", failures, output);
+        var menuAll = CopyCookedAsset(menuSource, Path.Combine(fixtureRoot, "RemoveEquipment", "EmptyMenu"));
+        var menuAllResult = menuService.ReplaceEquipment(menuAll, Enumerable.Range(0, menuOriginal.Count)
+            .Reverse().Select(i => new DcmdGenService.EquipmentSlotRef(i, "", "", Remove: true)).ToArray());
+        Check(menuAllResult.Status == "ok" && menuService.ReadEquipmentSlots(menuAll).Count == 0,
+            "multiple menu removals resolve against original indexes regardless of request order", failures, output);
+        var mixedMenu = CopyCookedAsset(menuSource, Path.Combine(fixtureRoot, "RemoveEquipment", "MixedMenu"));
+        var mixedRuntime = CopyCookedAsset(runtimeSource, Path.Combine(fixtureRoot, "RemoveEquipment", "MixedRuntime"));
+        var first = GameDataService.Instance.Db.Equipment.FirstOrDefault(e =>
+            UnrealPathUtil.AssetName(e.EtaPackage).Equals(menuOriginal[0], StringComparison.OrdinalIgnoreCase));
+        if (first is not null)
+        {
+            var mixed = menuService.ReplaceEquipment(mixedMenu, [new(0, "", "", Remove: true),
+                new(1, first.Name, first.EtaPackage, first.UpgradePackage)]);
+            var replaced = new AnimGraftService().SetEquipmentSlot(mixedRuntime, 1, original.Equipment[0].PackagePath);
+            var removedFirst = mutation.RemoveDprdEquipmentSlots(mixedRuntime, [0]);
+            Check(mixed.Status == "ok" && menuService.ReadEquipmentSlots(mixedMenu).SequenceEqual([menuOriginal[0]]) &&
+                replaced.Status == "ok" && removedFirst.Success && mutation.InspectDprdEquipment(mixedRuntime).Equipment.Single().PackagePath == original.Equipment[0].PackagePath,
+                "mixed replacement/removal targets original donor indexes in both runtime and menu arrays", failures, output);
         }
     }
 

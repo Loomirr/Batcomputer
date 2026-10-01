@@ -223,6 +223,8 @@ public sealed class AbilityExplorerForm : AdaptiveForm
             heldItems.Enabled = false; heldItems.Text = "Reading native items…";
             try {
                 var snapshot = CloneProfile(_working);
+                var projectSnapshot = System.Text.Json.JsonSerializer.Deserialize<NativeSuitProject>(System.Text.Json.JsonSerializer.Serialize(_project))!;
+                projectSnapshot.AbilityLoadout = snapshot;
                 var fingerprint = AbilityLoadoutService.ConfigurationFingerprint(snapshot);
                 var inspection = await Task.Run(() => NativeHeldItemService.Inspect(snapshot, _catalog));
                 if (IsDisposed) return;
@@ -230,10 +232,13 @@ public sealed class AbilityExplorerForm : AdaptiveForm
                     Dialog.Info(this, "Loadout changed", "Your ability loadout changed while its native items were being read. Open Held items again to inspect the current loadout.");
                     return;
                 }
-                using var editor = new HeldItemsForm(HeldItemService.Resolve(_working), _working.NativeHeldItems, inspection);
+                using var editor = new HeldItemsForm(HeldItemService.Resolve(_working), _working.NativeHeldItems, inspection, _working.AnimationSpawnedItems,
+                    animationLoader: () => AnimationSpawnedItemService.Inspect(projectSnapshot), toggle: _working.HeldItemToggle);
                 if (editor.ShowDialog(this) != DialogResult.OK) return;
                 _working.HeldItems = editor.Result.Select(i => i.Clone()).ToList();
                 _working.NativeHeldItems = editor.NativeResult.Select(i => i.Clone()).ToList(); _resetToDonor = false;
+                _working.AnimationSpawnedItems = editor.AnimationResult.Select(i => i.Clone()).ToList();
+                if (_working.HeldItemToggle is { } toggle) toggle.Enabled = editor.ToggleEnabled;
                 _search.Clear(); _view.SelectedIndex = 0; RebuildTree();
             } catch (Exception ex) { if (!IsDisposed) Dialog.Warn(this, "Native held items", ex.Message); }
             finally { if (!IsDisposed) { heldItems.Enabled = true; heldItems.Text = "Held items…"; } }
@@ -976,6 +981,8 @@ public sealed class AbilityExplorerForm : AdaptiveForm
         _working.SwordCombat = null;
         _working.HeldItems = [];
         _working.NativeHeldItems = [];
+        _working.AnimationSpawnedItems = [];
+        _working.HeldItemToggle = null;
         _working.DonorDprdPackage = Normalize(_catalog.DonorDprdPackage);
         _working.DonorAbilitySetFingerprint = _catalog.DonorAbilitySetFingerprint;
         _working.DonorAbilitySetPackages = _catalog.InheritedAbilitySets
@@ -1063,6 +1070,7 @@ public sealed class AbilityExplorerForm : AdaptiveForm
         if (!string.IsNullOrWhiteSpace(_working.FightingStyleId)) return true;
         if (HeldItemService.Resolve(_working).Count > 0) return true;
         if (_working.NativeHeldItems.Count > 0) return true;
+        if (_working.AnimationSpawnedItems.Count > 0) return true;
         if (!enabled.SequenceEqual(inherited, StringComparer.OrdinalIgnoreCase)) return true;
         return _working.AbilitySets.Any(set =>
             set.AddedGameplayAbilities.Count > 0 || set.RemovedGameplayAbilities.Count > 0 || !set.Enabled);
@@ -1176,6 +1184,8 @@ public sealed class AbilityExplorerForm : AdaptiveForm
         SwordCombat = source.SwordCombat?.Clone(),
         HeldItems = source.HeldItems?.Select(i => i.Clone()).ToList(),
         NativeHeldItems = source.NativeHeldItems.Select(i => i.Clone()).ToList(),
+        AnimationSpawnedItems = source.AnimationSpawnedItems.Select(i => i.Clone()).ToList(),
+        HeldItemToggle = source.HeldItemToggle is null ? null : System.Text.Json.JsonSerializer.Deserialize<HeldItemToggleProfile>(System.Text.Json.JsonSerializer.Serialize(source.HeldItemToggle)),
         AllowUnsafeCoreEdits = source.AllowUnsafeCoreEdits,
         AbilitySets = (source.AbilitySets ?? new List<AbilitySetSelection>()).Select(set => new AbilitySetSelection
         {

@@ -47,6 +47,10 @@ internal static class AbilityLoadoutPresentation
         }).Concat(profile.NativeHeldItems.Select(item => new Entry(
             UnrealPathUtil.AssetName(item.ActorPackage) + $" [{item.ManagedItemIndex}] · native visual edit",
             NativeHeldItemService.Ability(path[3], item.AbilityPackage),
-            item.Hide ? "Native visuals removed; attacks and slot behavior retained." : "Suit-local model/material/placement override; native timing and hand slots retained."))).ToList();
+            item.Hide ? "Native visuals removed; attacks and slot behavior retained." : "Suit-local model/material/placement override; native timing and hand slots retained.")))
+            .Concat(profile.AnimationSpawnedItems.Select(item => new Entry(
+                UnrealPathUtil.AssetName(item.AnimationPackage) + $" [spawn {item.ExportIndex}] · animation item",
+                AnimationSpawnedItemService.Alias(path[3], item.AnimationPackage),
+                item.Hide ? "Temporary visual hidden; notify timing and attacks retained." : "Temporary visual replaced; model and materials follow the selected extra prop or cooked mesh."))).ToList();
     }
 }

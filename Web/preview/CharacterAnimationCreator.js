@@ -20,6 +20,8 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
   const markersByFrame = new Map(), selectedKeysByFrame = new Map();
   const playheads = [];
   let combatWindows = [], selectedWindow = '', sourceAnimationPackage = '';
+  let voiceCues = [], selectedVoice = '';
+  const voiceTags = { VOX_Combat:'Attack · normal effort', VOX_CombatSml:'Attack · small effort', VOX_CombatLrg:'Attack · heavy effort', VOX_Jump:'Jump effort' };
   let libraryDraftId = '', libraryEntries = window.PREVIEW_USER_ANIMATIONS || [];
   let revision = 0, draftGeneration = 0, pendingLibrarySave = null;
   const undoStack = [], redoStack = [];
@@ -78,6 +80,15 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
     '<div class="cw-creator-buttons"><button type="button" class="clear-track">Clear bone track</button><button type="button" class="undo">Undo</button><button type="button" class="redo">Redo</button></div>' +
     '<small>Keys for selected bone</small><div class="keys"></div>' +
     '<small>Shortcuts: W move · R rotate · E scale · K key · Space play · ←/→ one frame · Shift+←/→ five frames · Ctrl+Z/Y undo/redo · Ctrl+S save.</small>' +
+    '<div class="cw-creator-section">VOICE CUES · COOKED WITH ANIMATION</div>' +
+    '<small>Request the playing character’s voice at a frame. Recordings come from Character voices, not from this draft. No audio playback here; test in-game. Add the cue to the clip OR its montage, not both.</small>' +
+    '<label>Cue<select class="voice-picker" aria-label="Voice cue"></select></label>' +
+    '<div class="cw-creator-buttons"><button type="button" class="voice-add">Add voice here</button><button type="button" class="voice-remove">Remove voice</button></div>' +
+    '<label>Category<select class="voice-tag" aria-label="Voice cue category">' + Object.entries(voiceTags).map(([tag,label])=>`<option value="${tag}">${label}</option>`).join('') + '</select></label>' +
+    '<label>Frame<input type="number" class="voice-frame" aria-label="Voice cue frame" min="0" step="1"><button type="button" class="voice-playhead">Use playhead</button></label>' +
+    '<label><input type="checkbox" class="voice-empty" aria-label="Play voice on empty swings"> Play on empty swings</label>' +
+    '<small>Allows attack effort cues through animation request filtering, including swings without a target. Dialogue cooldowns and interruptions still apply.</small>' +
+    '<small>Use one effort cue near each swing. Save the draft, cook it, assign the cooked clip, then build your mod. Hit windows below remain separate preview markers.</small>' +
     '<div class="cw-creator-section">COMBAT TIMING · PREVIEW DRAFT</div>' +
     '<small>Plan active hit windows against the pose. These markers are not game damage events; native notify integration is still required before cooking combat timing.</small>' +
     '<label>Hit window<select class="combat-window" aria-label="Combat hit window"></select></label>' +
@@ -191,12 +202,13 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
     else if (event.key === 'Home') { event.preventDefault(); applyDockHeight(160, true); }
     else if (event.key === 'End') { event.preventDefault(); applyDockHeight(dock.parentElement?.clientHeight || current, true); }
   });
-  function snapshot() { return { durationFrames, clipName, clipDescription, sourceAnimationPackage, combatWindows:combatWindows.map(value=>({...value})), selectedWindow,
+  function snapshot() { return { durationFrames, clipName, clipDescription, sourceAnimationPackage, voiceCues:voiceCues.map(value=>({...value})), selectedVoice, combatWindows:combatWindows.map(value=>({...value})), selectedWindow,
     tracks:[...tracks].map(([name, values]) => [name, values.map(key => ({ frame:key.frame, p:[...key.p], q:[...key.q], s:[...(key.s || [1,1,1])], interpolation:key.interpolation || 'linear' }))]) }; }
   function pushUndo() { undoStack.push(snapshot()); if (undoStack.length > 50) undoStack.shift(); redoStack.length = 0; refreshHistory(); }
   function restoreSnapshot(value) {
     durationFrames = value.durationFrames; clipName = value.clipName; clipDescription = value.clipDescription;
     sourceAnimationPackage = value.sourceAnimationPackage || ''; combatWindows = (value.combatWindows || []).map(item=>({...item})); selectedWindow = value.selectedWindow || '';
+    voiceCues = (value.voiceCues || []).map(item=>({...item})); selectedVoice = value.selectedVoice || '';
     tracks.clear(); for (const [name, values] of value.tracks) tracks.set(name, values);
     panel.querySelector('.clip-name').value = clipName; panel.querySelector('.clip-description').value = clipDescription;
     length.value = String(durationFrames / fps); frame = clamp(frame, 0, durationFrames); playing = false;
@@ -385,6 +397,7 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
   }
   function refresh() {
     refreshCombat();
+    refreshVoice();
     timeline.max = String(durationFrames); timeline.value = String(Math.round(frame));
     dockTimeline.max = String(durationFrames); dockTimeline.value = String(Math.round(frame));
     // Updating an inherited CSS variable on the reel invalidates the computed
@@ -440,6 +453,16 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
     for (let second = 0; second <= durationFrames / fps; second++) {
       const tick = document.createElement('span'); tick.textContent = `${second}s`;
       tick.style.left = `${125 + second * fps / durationFrames * railWidth}px`; ruler.appendChild(tick);
+    }
+    for (const cue of voiceCues) {
+      const row=document.createElement('div');row.className='cw-creator-lane';row.style.width=`${railWidth+125}px`;
+      const label=document.createElement('button');label.type='button';label.textContent='Voice · '+voiceTags[cue.tag];label.title=voiceTags[cue.tag];label.onclick=()=>{selectedVoice=cue.id;seek(cue.frame);};row.appendChild(label);
+      const rail=document.createElement('div');rail.className='cw-creator-lane-rail';row.appendChild(rail);
+      const marker=document.createElement('button');marker.type='button';marker.className='cw-combat-marker hit';marker.style.left=`${cue.frame/durationFrames*100}%`;
+      marker.textContent='♪';marker.title=`${voiceTags[cue.tag]} · frame ${cue.frame}`;marker.setAttribute('aria-label',marker.title);
+      marker.onclick=()=>{selectedVoice=cue.id;seek(cue.frame);};rail.appendChild(marker);
+      rail.onclick=event=>{if(event.target===rail)seek(Math.round((event.clientX-rail.getBoundingClientRect().left)/rail.clientWidth*durationFrames));};
+      addPlayhead(rail);reel.appendChild(row);
     }
     for (const window of combatWindows) {
       const row = document.createElement('div'); row.className = 'cw-creator-lane cw-combat-lane'; row.style.width = `${railWidth + 125}px`; row.dataset.windowId=window.id;
@@ -516,6 +539,46 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
     playhead.style.left = `${clamp(frame / durationFrames * 100, 0, 100)}%`; rail.appendChild(playhead); playheads.push(playhead);
   }
   function seek(value) { playing = false; frame = clamp(value, 0, durationFrames); pose(); }
+  function validateVoice(value,duration) {
+    if(value===undefined)return [];
+    if(value?.schema!=='batcomputer.voice-cues.v1'||!Array.isArray(value.cues)||value.cues.length>16)throw new Error('Invalid voice cue metadata.');
+    const ids=new Set(),frames=new Set();return value.cues.map(cue=>{
+      if(typeof cue.id!=='string'||!/^[a-zA-Z0-9_-]{1,64}$/.test(cue.id)||ids.has(cue.id)||!Object.hasOwn(voiceTags,cue.tag)||!Number.isInteger(cue.frame)||cue.frame<0||cue.frame>=duration||frames.has(cue.frame)||
+        (cue.playOnEmptySwing!==undefined&&typeof cue.playOnEmptySwing!=='boolean')||(cue.playOnEmptySwing===true&&cue.tag==='VOX_Jump'))
+        throw new Error('Voice cues need unique IDs and frames, a supported category and a frame before the end.');
+      ids.add(cue.id);frames.add(cue.frame);return {id:cue.id,tag:cue.tag,frame:cue.frame,playOnEmptySwing:cue.playOnEmptySwing===true};
+    });
+  }
+  function refreshVoice() {
+    const picker=panel.querySelector('.voice-picker'),item=voiceCues.find(cue=>cue.id===selectedVoice);
+    const labels=voiceCues.map(cue=>`${voiceTags[cue.tag]} · frame ${cue.frame}`);
+    if(picker.options.length!==voiceCues.length||[...picker.options].some((option,index)=>option.value!==voiceCues[index].id||option.textContent!==labels[index])) {
+      picker.replaceChildren();voiceCues.forEach((cue,index)=>{const option=document.createElement('option');option.value=cue.id;option.textContent=labels[index];picker.appendChild(option);});
+    }
+    picker.value=selectedVoice;picker.disabled=!voiceCues.length;
+    for(const field of ['tag','frame']){const input=panel.querySelector('.voice-'+field);input.disabled=!item;if(document.activeElement!==input)input.value=item?item[field]:'';}
+    panel.querySelector('.voice-frame').max=String(durationFrames-1);
+    panel.querySelector('.voice-empty').disabled=!item||item.tag==='VOX_Jump';panel.querySelector('.voice-empty').checked=item?.playOnEmptySwing===true;
+    panel.querySelector('.voice-remove').disabled=!item;panel.querySelector('.voice-playhead').disabled=!item||Math.round(frame)>=durationFrames;
+    panel.querySelector('.voice-add').disabled=voiceCues.length>=16||Math.round(frame)>=durationFrames||voiceCues.some(cue=>cue.frame===Math.round(frame));
+  }
+  function changeVoice(field,value) {
+    const item=voiceCues.find(cue=>cue.id===selectedVoice);if(!item)return;
+    const candidate={...item,[field]:value};if(candidate.tag==='VOX_Jump')candidate.playOnEmptySwing=false;
+    try{validateVoice({schema:'batcomputer.voice-cues.v1',cues:voiceCues.map(cue=>cue===item?candidate:cue)},durationFrames);}
+    catch(error){status.textContent=error.message;if(field!=='playOnEmptySwing')panel.querySelector('.voice-'+field).value=item[field];refreshVoice();return;}
+    pushUndo();Object.assign(item,candidate);markDirty();reelDirty=true;playing=false;pose();
+  }
+  panel.querySelector('.voice-picker').onchange=event=>{selectedVoice=event.target.value;refresh();};
+  panel.querySelector('.voice-add').onclick=()=>{
+    if(panel.querySelector('.voice-add').disabled)return;
+    pushUndo();const id='voice_'+Date.now().toString(36)+'_'+voiceCues.length;voiceCues.push({id,tag:'VOX_Combat',frame:Math.round(frame)});selectedVoice=id;markDirty();reelDirty=true;pose();
+  };
+  panel.querySelector('.voice-remove').onclick=()=>{if(!selectedVoice)return;pushUndo();voiceCues=voiceCues.filter(cue=>cue.id!==selectedVoice);selectedVoice=voiceCues[0]?.id||'';markDirty();reelDirty=true;pose();};
+  panel.querySelector('.voice-tag').onchange=event=>changeVoice('tag',event.target.value);
+  panel.querySelector('.voice-frame').onchange=event=>changeVoice('frame',Number(event.target.value));
+  panel.querySelector('.voice-playhead').onclick=()=>changeVoice('frame',Math.round(frame));
+  panel.querySelector('.voice-empty').onchange=event=>changeVoice('playOnEmptySwing',event.target.checked);
   function validateCombat(value, duration) {
     if(value===undefined)return [];
     if(value?.schema!=='batcomputer.combat-timing.v1'||value.previewOnly!==true||!Array.isArray(value.windows)||value.windows.length>16)
@@ -600,7 +663,7 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
   dock.querySelector('.loop').onchange = event => { loop = event.target.checked; };
   length.onchange = () => {
     const requested = Math.round(Number(length.value) * fps);
-    const lastKey = Math.max(0, ...combatWindows.map(item=>item.end), ...[...tracks.values()].flatMap(track => track.map(key => key.frame)));
+    const lastKey = Math.max(0, ...voiceCues.map(item=>item.frame+1), ...combatWindows.map(item=>item.end), ...[...tracks.values()].flatMap(track => track.map(key => key.frame)));
     if (!Number.isInteger(requested) || requested < 3 || requested > 900 || requested < lastKey) {
       length.value = String(durationFrames / fps);
       status.textContent = 'Length must be 0.1–30 seconds and include every existing keyframe.'; return;
@@ -663,6 +726,7 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
     if (dirty && !window.confirm('Discard the unsaved animation draft and start a new one?')) return;
     tracks.clear(); draftGeneration++; libraryDraftId = ''; undoStack.length = 0; redoStack.length = 0; copiedKey = null; refreshHistory();
     combatWindows=[];selectedWindow='';sourceAnimationPackage='';
+    voiceCues=[];selectedVoice='';
     clipName = 'New animation'; clipDescription = ''; durationFrames = 60; frame = 0; playing = false; loop = true;
     dock.querySelector('.loop').checked = true;
     selectedBone = bones.has('Chest') ? 'Chest' : [...bones.keys()][0];
@@ -677,6 +741,7 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
     return { schema:'batcomputer.animation-draft.v1', name:clipName, description:clipDescription, fps, durationFrames, loop, rigSignature,
       ...(libraryDraftId ? {libraryDraftId} : {}),
       sourceAnimationPackage, combatTiming:{schema:'batcomputer.combat-timing.v1',previewOnly:true,windows:combatWindows.map(item=>({...item}))},
+      voiceCues:{schema:'batcomputer.voice-cues.v1',cues:voiceCues.map(item=>({...item}))},
       tracks:[...tracks].filter(([, keys]) => keys.length).map(([bone, keys]) => ({ bone, keys })) };
   }
   panel.querySelector('.save').onclick = () => {
@@ -697,6 +762,7 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
   panel.querySelector('.load').onclick = () => file.click();
   async function openDraft(draft, fallbackName='Imported animation') {
       const importedCombat=validateCombat(draft.combatTiming,draft.durationFrames);
+      const importedVoice=validateVoice(draft.voiceCues,draft.durationFrames);
       if(draft.loop!==undefined&&typeof draft.loop!=='boolean')throw new Error('Invalid loop setting.');
       if (draft.schema !== 'batcomputer.animation-draft.v1' || draft.rigSignature !== rigSignature || draft.fps !== fps ||
           !Number.isInteger(draft.durationFrames) || draft.durationFrames < 3 || draft.durationFrames > 900 ||
@@ -726,6 +792,7 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
       if (dirty && !window.confirm('Replace the unsaved animation draft with this file?')) return false;
       tracks.clear(); imported.forEach((keys, bone) => tracks.set(bone, keys));
       combatWindows=importedCombat;selectedWindow=combatWindows[0]?.id||'';sourceAnimationPackage=typeof draft.sourceAnimationPackage==='string'?draft.sourceAnimationPackage:'';
+      voiceCues=importedVoice;selectedVoice=voiceCues[0]?.id||'';
       durationFrames = draft.durationFrames; length.value = String(durationFrames / fps); frame = 0; playing = false;
       loop = draft.loop === true; dock.querySelector('.loop').checked = loop;
       clipName = typeof draft.name === 'string' ? draft.name.slice(0,64) : fallbackName;

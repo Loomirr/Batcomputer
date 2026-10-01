@@ -2495,6 +2495,9 @@ public sealed partial class MainForm
         if (!CustomCharacterProjectService.IsCharacter(_currentProject))
             tiles.Add(new() { Section = SectionBase, Title = "Your custom characters", Subtitle = "create a new suit with its character's owner", Accent = Theme.Materials,
                 OnClick = () => _ = ChooseCustomCharacterBaseAsync() });
+        if (_currentProject?.CustomCharacter is { IsDefinition: false })
+            tiles.Add(new() { Section = SectionBase, Title = "Rebase from character", Subtitle = "inherit saved changes · keep selected suit overrides", Accent = Theme.Materials,
+                OnClick = () => _ = RebaseFromCharacterAsync() });
         if (hasBase)
         {
             tiles.Add(new() { Section = SectionIdentity, Title = _currentProject?.CustomCharacter is null ? "Native identity" : "Character identity", Subtitle = NativeIdentityTileSubtitle(), Accent = Theme.Gold, OnClick = EditNativeIdentity });
@@ -3066,6 +3069,12 @@ public sealed partial class MainForm
         var tiles = new List<VirtualTilePanel.Tile>();
         tiles.Add(new VirtualTilePanel.Tile
         {
+            Title = "Manage equipped gadgets", Subtitle = "remove · restore inherited", Accent = Theme.Equipment,
+            OnClick = () => _ = OpenEquipmentLoadoutAsync(),
+            ToolTip = "Remove inherited or replaced gadgets from this character/suit's runtime loadout and menu."
+        });
+        tiles.Add(new VirtualTilePanel.Tile
+        {
             Title = "+ Custom equipment", Subtitle = "models · projectiles · HUD assets", Accent = Theme.Equipment,
             OnClick = () => OpenEquipmentWorkshop(),
             ToolTip = "Inspect extracted equipment and create a suit-local derivative. Static models use the held-item alignment workshop."
@@ -3358,6 +3367,43 @@ public sealed partial class MainForm
         var note = profile.SupportLabel.ToLowerInvariant();
         RecordChange("Equipment", $"slot {slot + 1}", $"{eq.Name} ({note})", status: "staged");
         AppendLog($"Staged '{eq.Name}' into equipment slot {slot + 1} and saved. See Review.");
+    }
+
+    private async Task OpenEquipmentLoadoutAsync()
+    {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("edit equipped gadgets")) return;
+        EnsureProject();
+        if (_currentProject is null) { Dialog.Info(this, "Select a suit", "Open a character or suit first."); return; }
+        var project = _currentProject;
+        var context = CaptureCurrentProjectEditContext(project);
+        var donor = CurrentEquipmentSlotNames();
+        if (donor.Count == 0) { Dialog.Info(this, "No editable equipment", "The exact donor loadout has no equipment, or could not be read. Refresh game assets if you expected gadgets here."); return; }
+        using var editor = new EquipmentLoadoutForm(project.DisplayName, donor, project.EquipmentSlots);
+        if (editor.ShowDialog(this) != DialogResult.OK || !CurrentProjectEditContextMatches(context)) return;
+        var rollback = CloneProjectForPackagePreparation(project);
+        project.EquipmentSlots = editor.Result;
+        project.Changes.RemoveAll(c => c.Category == "Equipment");
+        project.Changes.Add(new() { Category = "Equipment", Target = "loadout", Detail =
+            project.EquipmentSlots.Count == 0 ? "donor equipment restored" : string.Join(", ", project.EquipmentSlots.OrderBy(c => c.Slot)
+                .Select(c => $"slot {c.Slot + 1}: {(c.Remove ? "removed" : c.Custom?.Name ?? c.Gadget)}")), Status = "staged" });
+        var capture = CaptureCurrentProjectSave(context, "save equipment loadout");
+        try
+        {
+            var saved = await CommitCurrentProjectSaveCaptureAsync(capture);
+            RequireCurrentProjectSaveCommitted(saved, "save equipment loadout");
+        }
+        catch (CurrentProjectSaveSupersededException) { return; }
+        catch (Exception ex)
+        {
+            if (CurrentProjectEditContextMatches(context)) {
+                _currentProject = rollback; ApplyProjectToFields(rollback); UpdateSelectedLabels();
+                Dialog.Error(this, "Equipment was not saved", ex.Message);
+            }
+            return;
+        }
+        if (!CurrentProjectEditContextMatches(context)) return;
+        AppendLog("Saved suit-local equipment loadout. Build mod to apply removals/restores; held items and melee are unchanged.");
+        _session.RaiseChanged(); RefreshToyboxTiles(); PopulateToyboxSlots(); RefreshInspector();
     }
 
     private async void OpenEquipmentWorkshop(EquipmentSlotChange? existing = null)

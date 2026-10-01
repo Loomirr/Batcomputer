@@ -42,6 +42,34 @@ internal static class AnimationDraftRegressionChecks
             "combat preview windows roundtrip with valid hand/contact frames and reject invalid or misrepresented timings", failures, output);
         bool TimedCookRejected() { try { using var doc=JsonDocument.Parse(timed); AnimationDraftCookService.ValidateCombatTiming(doc.RootElement,60,true); return false; } catch(InvalidDataException) { return true; } }
         Check(TimedCookRejected(), "motion-only cook refuses to silently discard authored combat windows or present preview markers as native hit events", failures, output);
+        const string voice = """
+            ,"voiceCues":{"schema":"batcomputer.voice-cues.v1","cues":[{"id":"effort","tag":"VOX_Combat","frame":8}]}
+            """;
+        var voiced = valid[..valid.LastIndexOf('}')] + voice + "}";
+        var emptySwing=voiced.Replace("\"frame\":8", "\"frame\":8,\"playOnEmptySwing\":true");
+        Check(Accepted(emptySwing,signature,bones) && !Accepted(emptySwing.Replace("VOX_Combat","VOX_Jump"),signature,bones) &&
+              !Accepted(emptySwing.Replace("\"playOnEmptySwing\":true","\"playOnEmptySwing\":1"),signature,bones),
+            "attack cues can bypass request filtering while jump cues and malformed switches are rejected",failures,output);
+        Check(Accepted(voiced, signature, bones) &&
+              Accepted(voiced.Replace("VOX_Combat", "VOX_CombatLrg"), signature, bones) &&
+              Accepted(voiced.Replace("VOX_Combat", "VOX_Jump"), signature, bones),
+            "voice cues accept native categories independently of combat hit windows", failures, output);
+        Check(!Accepted(voiced.Replace("\"frame\":8", "\"frame\":60"), signature, bones) &&
+              !Accepted(voiced.Replace("\"frame\":8", "\"frame\":-1"), signature, bones) &&
+              !Accepted(voiced.Replace("\"frame\":8", "\"frame\":1.5"), signature, bones) &&
+              !Accepted(voiced.Replace("VOX_Combat", "/Game/ArbitraryEvent"), signature, bones) &&
+              !Accepted(voiced.Replace("\"frame\":8", "\"frame\":null"), signature, bones) &&
+              !Accepted(voiced.Replace("\"effort\"", "\"../bad\""), signature, bones),
+            "voice cues reject invalid frames, arbitrary event paths and unsafe IDs", failures, output);
+        var repeated = voiced.Replace("\"frame\":8}", "\"frame\":8},{\"id\":\"another\",\"tag\":\"VOX_Jump\",\"frame\":8}");
+        Check(!Accepted(repeated, signature, bones) && !Accepted(repeated.Replace("\"another\"", "\"effort\"").Replace("\"frame\":8}]", "\"frame\":9}]"), signature, bones),
+            "voice cues reject duplicate frames and duplicate IDs", failures, output);
+        using (var doc = JsonDocument.Parse(voiced))
+        {
+            AnimationDraftCookService.ValidateCombatTiming(doc.RootElement, 60, true);
+            Check(AnimationVoiceCueService.Read(doc.RootElement, 60).Single() == new AnimationVoiceCueService.Cue("effort", "VOX_Combat", 8),
+                "voice-only draft is cookable and retains category/frame", failures, output);
+        }
         Check(!Accepted(timed.Replace("\"hit\":9,", ""), signature, bones) &&
               !Accepted(timed.Replace("\"hit\":9", "\"hit\":9.5"), signature, bones) &&
               !Accepted(timed.Replace("\"hand\":\"right\"", "\"hand\":null"), signature, bones),

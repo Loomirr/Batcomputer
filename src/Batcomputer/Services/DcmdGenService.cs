@@ -257,7 +257,7 @@ public sealed class DcmdGenService
     }
 
     /// <summary>A gadget to place into a specific 0-based equipment slot.</summary>
-    public sealed record EquipmentSlotRef(int Slot, string Name, string EtaPackage, string? UpgradePackage = null);
+    public sealed record EquipmentSlotRef(int Slot, string Name, string EtaPackage, string? UpgradePackage = null, bool Remove = false);
 
     public sealed class AddEquipmentResult
     {
@@ -280,6 +280,9 @@ public sealed class DcmdGenService
         var result = new AddEquipmentResult();
         try
         {
+            if (gadgets.Any(g => g.Remove) && ExtractedPackagePathService.EnumerateMounts(AppSettings.Current.EffectiveExtractedContentRoot())
+                .Any(mount => AbilityAssetMutationService.IsUnderRootForTest(dcmdUassetPath, mount.ContentRoot)))
+                throw new InvalidDataException("Native equipment assets are read-only. Remove equipment only from a staged mod clone.");
             var mappings = LoadMappings();
             if (mappings is null)
             {
@@ -309,8 +312,12 @@ public sealed class DcmdGenService
 
             var equip = equipmentList.Value.ToList();
             var upgrades = upgradeList?.Value.ToList() ?? new List<PropertyData>();
+            var originalCount = equip.Count;
+            if (gadgets.GroupBy(g => g.Slot).Any(g => g.Count() > 1) ||
+                gadgets.Any(g => g.Remove && (g.Slot < 0 || g.Slot >= originalCount)))
+                throw new InvalidDataException("Equipment removals require unique, existing donor slots.");
 
-            foreach (var gadget in gadgets)
+            foreach (var gadget in gadgets.Where(g => !g.Remove))
             {
                 var etaPkg = UnrealPathUtil.NormalizePackagePath(gadget.EtaPackage);
                 var etaName = UnrealPathUtil.AssetName(etaPkg);
@@ -372,6 +379,16 @@ public sealed class DcmdGenService
                 }
 
                 result.Applied.Add($"slot {gadget.Slot + 1} = {gadget.Name}");
+            }
+
+            // Resolve every edit against donor indexes first; compact both parallel arrays last.
+            while (upgradeList is not null && upgrades.Count < equip.Count)
+                upgrades.Add(MakeNullSoft(asset, upgradeList.Name));
+            foreach (var removal in gadgets.Where(g => g.Remove).OrderByDescending(g => g.Slot))
+            {
+                equip.RemoveAt(removal.Slot);
+                if (upgradeList is not null) upgrades.RemoveAt(removal.Slot);
+                result.Applied.Add($"slot {removal.Slot + 1} removed");
             }
 
             equipmentList.Value = equip.ToArray();

@@ -177,6 +177,8 @@ public sealed class NativeSuitProject
     // Local artwork copied into the suit project for its Home tile.
     public string CoverImagePath { get; set; } = "";
     public string PackageBaseName { get; set; } = "CUSTOM_SUIT_P";
+    // Explicit workspace voice profile. Empty leaves all native voice assets untouched.
+    public string VoiceProfileId { get; set; } = "";
     public TargetPackages TargetPackages { get; set; } = new();
     public TemplateRecord? PlayableTemplate { get; set; }
     public TemplateRecord? CutsceneTemplate { get; set; }
@@ -264,6 +266,8 @@ public sealed class NativeSuitProject
     // composition (e.g. locomotion LAS_Default_Batman → LAS_Default_Catwoman) so
     // the suit uses another family's (or a custom) animations for a category.
     public List<AnimSetOverride> AnimationOverrides { get; set; } = new();
+    // Face-only controller override. Empty retains the donor; does not replace facial artwork or body animation.
+    public string FaceAnimationBlueprintPackage { get; set; } = "";
 
     // Per-animation locomotion pose overrides (idle/walk/run), applied by cloning
     // the suit's OWN ABP_Core and repointing the individual AnimSequences - the
@@ -275,6 +279,10 @@ public sealed class NativeSuitProject
     // later game-data refresh can validate the target instead of silently patching another row.
     public List<AnimationSlotOverride> AnimationSlotOverrides { get; set; } = new();
 
+    // Cooked combat/reaction graphs are not TTAnimSet slots. Keep their immutable
+    // workspace-cache identities and exact ability connections in the recipe too.
+    public List<GameplayAnimationGraphSelection> GameplayAnimationGraphs { get; set; } = new();
+
     // Cooked Texture2D imports staged into the suit's IoStore trio.
     public List<GeneratedTextureEntry> GeneratedTextures { get; set; } = new();
 
@@ -283,6 +291,20 @@ public sealed class NativeSuitProject
     // material and face-mesh compatibility so the Faces browser can reject a
     // cross-rig assignment before it reaches the game.
     public List<GeneratedMaterialEntry> GeneratedMaterials { get; set; } = new();
+}
+
+public sealed class GameplayAnimationGraphSelection
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string OwnerDprdPackage { get; set; } = "";
+    public List<GameplayAnimationAbilityBinding> Abilities { get; set; } = new();
+}
+
+public sealed class GameplayAnimationAbilityBinding
+{
+    public string OriginalPackage { get; set; } = "";
+    public string ReplacementPackage { get; set; } = "";
 }
 
 /// <summary>Visual source and runtime donor chosen for a suit base.</summary>
@@ -724,6 +746,8 @@ public sealed class EquipmentSlotChange
 {
     public int Slot { get; set; }
     public string Gadget { get; set; } = "";
+    // Slot indexes always address the original donor loadout, even after other slots are removed.
+    public bool Remove { get; set; }
     public CustomEquipmentRecipe? Custom { get; set; }
 }
 
