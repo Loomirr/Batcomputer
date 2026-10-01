@@ -2390,7 +2390,8 @@ public sealed class StageValidationService
                     findings.Add(new("ERROR",
                         "This suit combines a regular cape with a glide visual, but its playable base does not natively own separate cosmetic-cape and glider components. " +
                         "That synthetic component layout is not runtime-proven and may crash or leave the regular cape visible while gliding. " +
-                        "Use the dynamic adapter with a complete matching native cape pair, or choose a playable donor with the native two-cape visibility setup." +
+                        "Remove the conflicting regular-cape selection, then use Gliders > Glider presets to apply a proven native Glide cape with its matching playable/cutscene pair. " +
+                        "Batcomputer can add the matching regular cape automatically on a verified glide-only base. Otherwise choose a playable donor with the native two-cape setup." +
                         reason));
                 }
             }

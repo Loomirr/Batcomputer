@@ -1187,7 +1187,8 @@ public sealed class AnimArchetypeGraftService
                 }
                 if (usesPairedCapeAdapter)
                 {
-                    var donorSet = $"MAS_Glide_{donor.Family}";
+                    var donorSet = RequiredCategoryParent(
+                        graft.InspectParentSets(StageUasset(patchedContentRoot, customMasPkg)), "MAS_Glide_", $"MAS_Glide_{donor.Family}");
                     var r = graft.ReplaceParentSet(
                         StageUasset(patchedContentRoot, customMasPkg),
                         "TTAnimSet",
@@ -1246,7 +1247,8 @@ public sealed class AnimArchetypeGraftService
                 }
                 if (usesPairedCapeAdapter)
                 {
-                    var donorSet = $"LAS_Traversal_{donor.Family}";
+                    var donorSet = RequiredCategoryParent(
+                        graft.InspectParentSets(StageUasset(patchedContentRoot, customLasPkg)), "LAS_Traversal_", $"LAS_Traversal_{donor.Family}");
                     var r = graft.ReplaceParentSet(
                         StageUasset(patchedContentRoot, customLasPkg),
                         "TTLayerSet",
@@ -2621,6 +2623,22 @@ public sealed class AnimArchetypeGraftService
     }
 
     private static string StageUasset(string contentRoot, string packagePath) => PackageToStageBase(contentRoot, packagePath) + ".uasset";
+
+    internal static string RequiredCategoryParent(AnimGraftService.ParentSetInspection inspection, string prefix, string? preferredSetName = null)
+    {
+        if (!inspection.Success)
+            throw new InvalidDataException("Could not inspect the paired-cape donor's authored category: " + inspection.Error);
+        // A character can reuse another native family's set (for example a Villain
+        // Mode LAS). Read the exact serialized parent, never derive it from its name.
+        var parents = inspection.PackagePaths.Where(package => UnrealPathUtil.AssetName(package).StartsWith(prefix, StringComparison.Ordinal)).ToArray();
+        // Preserve the existing exact family-specific rule when the composite
+        // explicitly includes it alongside a shared fallback category.
+        var exact = parents.Where(package => UnrealPathUtil.AssetName(package).Equals(preferredSetName, StringComparison.Ordinal)).ToArray();
+        if (exact.Length == 1) return UnrealPathUtil.AssetName(exact[0]);
+        if (parents.Length != 1)
+            throw new InvalidDataException($"The paired-cape donor must have exactly one authored {prefix}* parent (found {parents.Length}); no replacement was written.");
+        return UnrealPathUtil.AssetName(parents[0]);
+    }
 
     private static string ErrSuffix(string? error) => string.IsNullOrWhiteSpace(error) ? "" : " ERROR=" + error.Split('\n')[0];
 

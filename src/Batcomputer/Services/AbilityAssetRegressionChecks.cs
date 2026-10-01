@@ -15,6 +15,18 @@ internal static class AbilityAssetRegressionChecks
 {
     public static void Run(List<string> failures, TextWriter output)
     {
+        var sharedTraversal = new AnimGraftService.ParentSetInspection { Success=true, PackagePaths=[
+            "/Game/Animation/LayerAnimSets/Locomotion/LAS_Default_MrFreeze", "/Game/Animation/LayerAnimSets/Traversal/LAS_Traversal_MrFreeze"] };
+        Check(AnimArchetypeGraftService.RequiredCategoryParent(sharedTraversal, "LAS_Traversal_") == "LAS_Traversal_MrFreeze",
+            "paired-cape category replacement follows an exact borrowed native traversal parent", failures, output);
+        static bool RejectCategory(AnimGraftService.ParentSetInspection value) { try { AnimArchetypeGraftService.RequiredCategoryParent(value, "LAS_Traversal_"); return false; } catch (InvalidDataException) { return true; } }
+        Check(RejectCategory(new() { Success=true, PackagePaths=[] }) &&
+              RejectCategory(new() { Success=true, PackagePaths=["/Game/Animation/LAS_Traversal_Batman", "/Game/Animation/LAS_Traversal_MrFreeze"] }) &&
+              RejectCategory(new() { Success=false, Error="unreadable" }),
+            "paired-cape category replacement rejects missing, ambiguous and unreadable native parents", failures, output);
+        Check(AnimArchetypeGraftService.RequiredCategoryParent(new() { Success=true,
+                PackagePaths=["/Game/Animation/MAS_Glide_Gordon", "/Game/AdditionalContent/MAS_Glide_Joker"] }, "MAS_Glide_", "MAS_Glide_Joker") == "MAS_Glide_Joker",
+            "paired-cape category replacement preserves an exact native family parent alongside shared fallbacks", failures, output);
         var boundaryRoot = Path.Combine(Path.GetTempPath(), "Batcomputer-ability-root");
         Check(
             AbilityAssetMutationService.IsUnderRootForTest(

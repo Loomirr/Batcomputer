@@ -45,6 +45,15 @@ For an independent roster entry, create a **custom character**, not only a renam
 display name and give it a [unique pawn-tag family](character-identity.md). Then set
 [Normal, Mayhem or Both](character-modes.md) independently of the visual's name.
 
+## Native metadata with no authored UI reference
+
+Some real playable variants, including Frozen Batman, have a DCMD but omit its default UI
+metadata reference. Batcomputer keeps that variant's DCMD, actor pair, equipment and identity,
+creates the missing UI data from the standard scaffold, and links the generated copy to it.
+Customize the suit's icons normally. This is not a fallback to another character's gameplay.
+If a DCMD does reference a UI asset that is missing from the active extraction, the build still
+stops and asks for a refresh; missing extracted dependencies are not treated as omitted defaults.
+
 ## Body size is not rig import scale
 
 Supported Minifig/Smallfig profiles use the shared native LEGOfig skeleton but have different body

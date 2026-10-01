@@ -68,6 +68,7 @@
     <EmbeddedResource Include="Web\updater\*.html;Web\updater\*.css;Web\updater\*.js;Web\updater\*.glb;Web\updater\*.png" />
     <EmbeddedResource Include="Tools\SkinnedMesh\import_mesh.py" />
     <EmbeddedResource Include="Tools\Animations\author_animation_drafts.py" />
+    <EmbeddedResource Include="Tools\Animations\import_blender_animation.py" />
     <EmbeddedResource Include="Tools\SkinnedMesh\prepare_blender_rig.py" />
     <!-- Shipped game-data catalogs and runtime socket calibration profiles. -->
     <None Update="gamedata\**\*.json"

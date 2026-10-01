@@ -33,6 +33,14 @@ internal static class NativeAssetTextPatchRegressionChecks
             !NativeAssetTextPatch.SetStringTableText(Fixture("TtEquipmentTaggedAsset"), "Description", table, "No"),
             "missing text insertion remains restricted to known pawn UI description fields");
         var malformed = Fixture("TtPawnUIMetaData");
+        var metadata = Fixture("DinnerCharacterMetaData");
+        const string uiPath = "/Game/Mods/Test/DA_UIMD_Test";
+        yield return (NativeAssetTextPatch.SetDcmdUiMetadata(metadata, uiPath, "/Script/Test", "TtPawnUIMetaData") &&
+            NativeAssetTextPatch.SetDcmdUiMetadata(metadata, uiPath, "/Script/Test", "TtPawnUIMetaData") &&
+            ((NormalExport)metadata.Exports[0]).Data.Count == 1 &&
+            NativeAssetTextPatch.GetObjectReference(metadata, "UIMetaData")?.PackageName == uiPath &&
+            !NativeAssetTextPatch.SetDcmdUiMetadata(ui, uiPath, "/Script/Test", "TtPawnUIMetaData"),
+            "default-omitted character UI links accept a native hard reference without replacing metadata or duplicating properties");
         ((NormalExport)malformed.Exports[0]).Data.Add(new NamePropertyData(FName.FromString(malformed, "Description"))
             { Value = FName.FromString(malformed, "WrongType") });
         yield return (!NativeAssetTextPatch.SetStringTableText(malformed, "Description", table, "No"),

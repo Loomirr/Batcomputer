@@ -24,7 +24,11 @@ public static class NativeMetadataDonorService
         string UimdUassetPath,
         string PawnTag,
         string ProgressTag,
-        Icons IconPaths);
+        Icons IconPaths)
+    {
+        // An omitted default is different from a referenced asset missing from the dump.
+        public bool NeedsUiScaffold => string.IsNullOrWhiteSpace(UimdPackagePath);
+    }
 
     public static Donor? TryRead(
         TemplateRecord? dcmdTemplate,
@@ -55,22 +59,32 @@ public static class NativeMetadataDonorService
         try
         {
             var dcmd = Load(dcmdUasset);
-            var uimdPackage = FindPackage(dcmd, "DA_UIMD_");
-            if (string.IsNullOrWhiteSpace(uimdPackage))
+            var serializedPlayable = ReadActorPackage(dcmd, "Pawn");
+            var serializedCutscene = ReadActorPackage(dcmd, "CinematicsActor");
+            var pawnTag = ReadGameplayTag(dcmd, "PawnTag");
+            if (!IsNativeCharacterMetadata(dcmd) || string.IsNullOrWhiteSpace(serializedPlayable) || string.IsNullOrWhiteSpace(pawnTag))
             {
-                error = $"Cannot resolve the UI metadata referenced by {dcmdTemplate.PackagePath} in the active extraction.";
+                error = $"{dcmdTemplate.PackagePath} is not readable native character metadata with a Pawn and PawnTag.";
                 return null;
             }
-
-            var uimdUasset = PackageToUasset(uimdPackage);
+            var reference = NativeAssetTextPatch.GetObjectReference(dcmd, "UIMetaData");
+            var uimdPackage = reference is { } ui ? UnrealPathUtil.NormalizePackagePath(ui.PackageName) : "";
+            var uimdUasset = string.IsNullOrWhiteSpace(uimdPackage) ? "" : PackageToUasset(uimdPackage);
+            if (!string.IsNullOrWhiteSpace(uimdPackage) && !File.Exists(uimdUasset))
+            {
+                error = $"Missing referenced UI metadata {uimdPackage} in the active extraction. Refresh game assets; no fallback will replace an authored reference.";
+                return null;
+            }
+            if (reference is null && dcmd.Exports.OfType<NormalExport>().SelectMany(export => export.Data)
+                .Any(property => property.Name.ToString() == "UIMetaData" &&
+                    (property is not ObjectPropertyData objectProperty || objectProperty.Value.Index != 0)))
+                throw new InvalidDataException("The authored UIMetaData reference is malformed; it cannot use a UI scaffold.");
             var icons = File.Exists(uimdUasset) ? ReadIcons(Load(uimdUasset)) : Icons.Empty;
             // The DCMD is authoritative for its actor pair. Several shipped families do not use
             // predictable sibling names (for example RobinDickGrayson playables point at
             // BP_Robin_* or BP_DickGrayson_* cinematic actors). Using the picker-derived template
             // path here meant the generated DCMD could retain the donor CinematicsActor and the
             // game would silently fall back to the native/default suit in a cold cutscene.
-            var serializedPlayable = ReadActorPackage(dcmd, "Pawn");
-            var serializedCutscene = ReadActorPackage(dcmd, "CinematicsActor");
             return new Donor(
                 UnrealPathUtil.NormalizePackagePath(dcmdTemplate.PackagePath),
                 dcmdUasset,
@@ -78,7 +92,7 @@ public static class NativeMetadataDonorService
                 PreferSerializedActorPackage(serializedCutscene, cutsceneTemplate?.PackagePath),
                 uimdPackage,
                 uimdUasset,
-                ReadGameplayTag(dcmd, "PawnTag"),
+                pawnTag,
                 CanonicalProgressTag(ReadGameplayTag(dcmd, "ProgressTag")),
                 icons);
         }
@@ -88,6 +102,9 @@ public static class NativeMetadataDonorService
             return null;
         }
     }
+
+    internal static bool IsNativeCharacterMetadata(UAsset asset) => asset.Exports.OfType<NormalExport>()
+        .Any(export => export.GetExportClassType()?.ToString() == "DinnerCharacterMetaData");
 
     internal static string CanonicalProgressTag(string? tag)
     {
@@ -160,18 +177,6 @@ public static class NativeMetadataDonorService
             : null;
         return new UAsset(path, EngineVersion.VER_UE5_6, mappings,
             CustomSerializationFlags.SkipPreloadDependencyLoading);
-    }
-
-    private static string FindPackage(UAsset asset, string assetPrefix)
-    {
-        var contentRoot = AppSettings.Current.EffectiveExtractedContentRoot();
-        return asset.GetNameMapIndexList()
-            .Select(name => UnrealPathUtil.NormalizePackagePath(name.ToString()))
-            .FirstOrDefault(package =>
-                UnrealPathUtil.AssetName(package).StartsWith(assetPrefix, StringComparison.OrdinalIgnoreCase) &&
-                ExtractedPackagePathService.ResolvePackageUasset(contentRoot, package) is { } path &&
-                File.Exists(path))
-            ?? "";
     }
 
     private static Icons ReadIcons(UAsset asset)

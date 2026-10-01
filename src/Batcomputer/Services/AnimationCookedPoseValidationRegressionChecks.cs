@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Buffers.Binary;
 using System.Text.Json;
 
 namespace Batcomputer;
@@ -27,6 +28,19 @@ internal static class AnimationCookedPoseValidationRegressionChecks
         var after = Sample(linear, 20);
         Check(legacy.P.X == 1 && legacy.S == Vector3.One && Math.Abs(legacy.Q.W) == 1 && after.P == new Vector3(2, 4, 6),
             "cooked pose validator matches implicit neutral start, legacy unit scale, antipodal rotation and final-key hold", failures, output);
+        var acl = new byte[32];
+        BinaryPrimitives.WriteUInt32LittleEndian(acl.AsSpan(8), 0xAC11AC11);
+        BinaryPrimitives.WriteUInt16LittleEndian(acl.AsSpan(12), 10);
+        BinaryPrimitives.WriteInt32LittleEndian(acl.AsSpan(20), 30);
+        Check(AnimationCookedPoseValidationService.AuthoredAclFrameCount(acl, 30) == 30,
+            "authored ACL retains an exact non-optimized sample count", failures, output);
+        static bool Rejects(byte[] stream, int samples) { try { AnimationCookedPoseValidationService.AuthoredAclFrameCount(stream, samples); return false; } catch (InvalidDataException) { return true; } }
+        Check(Rejects(acl, 31), "authored ACL rejects an unexplained missing endpoint", failures, output);
+        BinaryPrimitives.WriteUInt32LittleEndian(acl.AsSpan(28), 1u << 30);
+        Check(AnimationCookedPoseValidationService.AuthoredAclFrameCount(acl, 31) == 31 && Rejects(acl, 32),
+            "authored ACL accepts only its explicitly wrap-optimized duplicate endpoint", failures, output);
+        BinaryPrimitives.WriteUInt16LittleEndian(acl.AsSpan(12), 9);
+        Check(Rejects(acl, 31), "authored ACL does not guess wrap flags on an unverified header version", failures, output);
     }
 
     private static void Check(bool passed, string description, List<string> failures, TextWriter output)

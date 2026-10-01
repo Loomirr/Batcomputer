@@ -136,7 +136,7 @@ internal static class AnimationCookedPoseValidationService
         if (BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(offset + 8)) != 0xAC11AC11 ||
             BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset + 16)) != map.Length)
             throw new InvalidDataException("Authored ACL header does not match the cooked track table.");
-        var samples = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset + 20)); offset += length;
+        offset += length;
         for (var i = 0; i < 2; i++)
         {
             var characters = ReadInt();
@@ -146,12 +146,27 @@ internal static class AnimationCookedPoseValidationService
         var curveBytes = ReadInt();
         if (curveBytes != 0) throw new InvalidDataException("Unexpected curves in an authored motion-only sequence.");
         var serializedSamples = ReadInt();
-        if (samples != serializedSamples || samples is < 2 or > 901)
-            throw new InvalidDataException("Authored ACL sample count disagrees with serialized metadata.");
+        var frames = AuthoredAclFrameCount(bytes.AsSpan(dataOffset, length), serializedSamples);
         var data = (FACLCompressedAnimData)new UAnimBoneCompressionCodec_ACL().AllocateAnimData();
         data.Bind(bytes.AsSpan(dataOffset, length).ToArray());
         typeof(FACLCompressedAnimData).GetProperty(nameof(FACLCompressedAnimData.CompressedNumberOfFrames), BindingFlags.Public | BindingFlags.Instance)!
-            .SetValue(data, samples);
-        sequence.CompressedDataStructure = data; sequence.NumFrames = samples;
+            .SetValue(data, frames);
+        sequence.CompressedDataStructure = data; sequence.NumFrames = frames;
+    }
+
+    internal static int AuthoredAclFrameCount(ReadOnlySpan<byte> stream, int serializedSamples)
+    {
+        if (stream.Length < 32 || BinaryPrimitives.ReadUInt32LittleEndian(stream[8..]) != 0xAC11AC11)
+            throw new InvalidDataException("Invalid authored ACL stream header.");
+        var samples = BinaryPrimitives.ReadInt32LittleEndian(stream[20..]);
+        // UE 5.6's ACL 2.1 header explicitly records wrap optimization in bit 30.
+        // It can remove the duplicate closing sample while preserving the original
+        // serialized timeline. The native decoder reconstructs that sample by wrapping.
+        var wrapOptimized = BinaryPrimitives.ReadUInt16LittleEndian(stream[12..]) == 10 &&
+                            (BinaryPrimitives.ReadUInt32LittleEndian(stream[28..]) & (1u << 30)) != 0;
+        if (samples is < 2 or > 901 || serializedSamples is < 2 or > 901 ||
+            (samples != serializedSamples && !(wrapOptimized && serializedSamples == samples + 1)))
+            throw new InvalidDataException("Authored ACL sample count disagrees with serialized metadata.");
+        return serializedSamples;
     }
 }

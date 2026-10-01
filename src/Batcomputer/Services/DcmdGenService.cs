@@ -171,6 +171,23 @@ public sealed class DcmdGenService
             RepointActor("MenuActor", playablePackagePath);
             RepointActor("CinematicsActor", cutscenePackagePath);
 
+            if (donor?.NeedsUiScaffold == true && !string.IsNullOrWhiteSpace(uimdPackagePath))
+            {
+                // This is a real native DataAsset field omitted at its null default, not a new
+                // Blueprint component. Keep the donor DCMD and add only its missing UI link.
+                var scaffoldPath = ExtractedPackagePathService.ResolvePackageUasset(
+                    AppSettings.Current.EffectiveExtractedContentRoot(), SrcUimdPkg);
+                if (string.IsNullOrWhiteSpace(scaffoldPath) || !File.Exists(scaffoldPath))
+                    throw new InvalidDataException("The standard UI scaffold is missing. Refresh game assets.");
+                var scaffold = new UAsset(scaffoldPath, EngineVersion.VER_UE5_6, mappings, CustomSerializationFlags.SkipPreloadDependencyLoading);
+                var uiExport = scaffold.Exports.OfType<NormalExport>().First(export => export.GetExportClassType()?.ToString() == "TtPawnUIMetaData");
+                var classImport = scaffold.Imports[-uiExport.ClassIndex.Index - 1];
+                var scriptPackage = scaffold.Imports[-classImport.OuterIndex.Index - 1].ObjectName.ToString();
+                if (!NativeAssetTextPatch.SetDcmdUiMetadata(asset, uimdPackagePath, scriptPackage, classImport.ObjectName.ToString()))
+                    throw new InvalidDataException("The donor metadata could not accept its native UI field.");
+                result.Repointed.Add($"UIMetaData (default omitted) -> {uimdPackagePath}");
+            }
+
             if (!string.IsNullOrWhiteSpace(targetPawnTag))
             {
                 if (!NativeAssetTextPatch.SetGameplayTag(asset, "PawnTag", targetPawnTag.Trim()))

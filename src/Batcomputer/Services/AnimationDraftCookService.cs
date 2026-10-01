@@ -279,6 +279,7 @@ internal static class AnimationDraftCookService
         }
         ValidateCombatTiming(draft, duration.GetInt32());
         AnimationVoiceCueService.Read(draft, duration.GetInt32());
+        AnimationBoneGroupService.Validate(draft, boneNames);
         return name;
     }
 

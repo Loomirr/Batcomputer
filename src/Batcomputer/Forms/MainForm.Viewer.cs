@@ -172,6 +172,7 @@ public sealed partial class MainForm
         _viewer.PlacementSaveRequested += (_, args) => SaveViewerPlacement(args);
         _viewer.SuitIconTestRequested += (_, args) => _ = TestViewerSuitIconAsync(args);
         _viewer.SuitIconApplyRequested += (_, args) => _ = ApplyViewerSuitIconAsync(args);
+        _viewer.AnimationPackageImportRequested += ImportCustomAnimationsFromPakAsync;
         right.Controls.Add(_viewer, 0, 0);
 
         _viewerStatus = new Label

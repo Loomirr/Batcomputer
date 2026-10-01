@@ -46,6 +46,26 @@ internal static class CharacterAnimationPreviewService
         return LoadFrom(provider, source, package);
     }
 
+    internal static Asset[] AddWorkspaceAnimations(string folder, string workspace)
+    {
+        var key = Path.GetFullPath(folder);
+        if (!Sources.TryGetValue(key, out var source)) throw new InvalidDataException("Reload the character preview before importing animations.");
+        var service = new AnimLibraryService(workspace, source.UsmapPath);
+        var entries = service.Load().Entries.Where(entry => entry.IsAvailable && entry.CachedFiles.Count > 0 &&
+            entry.Skeleton.Equals("/Game/Characters/LEGOfig/SKEL_LEGOfig", StringComparison.OrdinalIgnoreCase) &&
+            entry.AssetClass is "AnimSequence" or "AnimMontage").Take(512).ToArray();
+        var content = Path.Combine(folder, "animation-sources", "Content");
+        Directory.CreateDirectory(content);
+        var catalog = new List<Asset>();
+        foreach (var entry in entries)
+            if (service.StageInto(entry, content) > 0)
+                catalog.Add(new Asset(entry.Name, "Your cooked animations", entry.PackagePath, entry.AssetClass == "AnimSequence" ? "Sequence" : "Montage"));
+        var merged = source.Catalog.Concat(catalog).DistinctBy(asset => asset.Package, StringComparer.OrdinalIgnoreCase).ToArray();
+        Sources[key] = source with { LooseContentRoots = source.LooseContentRoots.Append(content).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+            Packages = merged.Select(asset => asset.Package).ToHashSet(StringComparer.OrdinalIgnoreCase), Catalog = merged };
+        return catalog.ToArray();
+    }
+
     internal static Bundle LoadBundle(string folder, string package)
     {
         if (!Sources.TryGetValue(Path.GetFullPath(folder), out var source) || !source.Packages.Contains(package))

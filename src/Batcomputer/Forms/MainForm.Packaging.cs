@@ -1564,7 +1564,9 @@ public sealed partial class MainForm
             pawnTag: pawnTag,
             donor: metadataDonor,
             iconTargets: iconTargets);
-        var uimdSource = metadataDonor is null
+        var uimdSource = metadataDonor?.NeedsUiScaffold == true
+            ? "from the standard UI scaffold; original character DCMD retained"
+            : metadataDonor is null
             ? "from base Batman metadata"
             : $"from {UnrealPathUtil.AssetName(metadataDonor.UimdPackagePath)}";
         AppendLog($"UIMD generate: {uimdResult.Status}{(selectedIconCount > 0 ? $" ({selectedIconCount} selected icon(s) verified)" : $" ({uimdSource})")}");

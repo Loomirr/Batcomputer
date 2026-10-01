@@ -84,11 +84,49 @@ Space starts or pauses, Left/Right steps one frame (Shift steps five), and Ctrl+
 
 ### Edit motion from an existing clip
 
+For workspace imports, open a saved suit in Batcomputer's embedded **3D viewer**, then choose
+**Create**. Read-only base-character previews can copy native motion, but cannot import into a
+suit workspace.
+
+In **Create → Start from existing motion**, search a source clip and choose **Copy to editable
+draft**. **Refresh your cooked clips** includes compatible sequences and montages from this
+workspace's library without rebuilding the viewer. **Import cooked package…** runs the same
+verified container import used on the Animations page, then refreshes this list. Select an imported
+body clip and copy its poses into a new draft; the original package and assigned animation remain
+unchanged. A montage contributes its readable body sequence, not its complete montage logic.
+
+**Import Blender action…** reads a saved `.blend`, asks for an action, and samples a copy at 30 fps.
+Choose your installed `blender.exe` when first asked; Blender is not bundled. Embedded scripts are
+disabled and the source is never saved by the importer. Start with this viewer's exported native
+body GLB, retaining every bone name, parent and rest transform. This first version requires an
+already-retargeted LOTDK body rig and its bound mesh. It does not retarget arbitrary rigs, import
+face/cape tracks, or copy gameplay notifies. Bake object-level travel onto native bones first.
+The FBX preparation helper is for the separate **cook-reference FBX**, not this Blender import rig.
+
 In **Motion**, select and load a body animation, then open **Create** and choose
 **Edit selected Motion clip**. Batcomputer samples the displayed CharacterMesh0 motion at 30 fps
 into editable native-rig keys. Adjust the joints, retime keys and save a new draft. The original
 animation remains untouched. Body clips must be 0.1–30 seconds; face, cape and montage-only clips
 are not imported into this body editor. Gameplay notifies are not copied with the pose samples.
+
+### Select several bones and organize divisions
+
+Ctrl-click bones in the hierarchy or 3D joint markers to add/remove them from the selection;
+Shift-click in the hierarchy selects a range. **Select all** and **Only primary bone** are available
+beside the joint controls. Search hides nonmatching rows without changing the selection.
+
+Numeric fields show the primary bone. Editing a field applies that change to all selected bones,
+preserving their existing differences. The 3D gizmo moves selected roots together; selecting a
+parent and its child does not apply the parent's motion twice. Set/delete keys, rest-pose keys,
+track clearing and interpolation changes affect the selection as one undoable edit. Copying several
+keys pastes them back to their original bones; copying one key can paste onto another selection.
+
+Under **Bone groups**, name a division such as Breathing or Arms and use **Create from selection**.
+**Assign selection** moves selected bones into the chosen group, **Select group** selects its
+members, and **Rename** changes its label. Collapse group headings in the timeline to focus on a
+different division. Up to 32 groups are saved with the draft; deleting a group never deletes keys.
+These are organizational groups, not additive layers: each bone still has one motion track and
+cooking uses the same native-rig poses.
 
 Drafts are limited to 2 MB for both reopening and cooking. Saved values retain eight decimal
 places; compact JSON avoids storing viewer floating-point noise. An oversized draft stays unsaved

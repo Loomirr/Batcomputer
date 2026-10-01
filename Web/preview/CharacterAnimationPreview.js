@@ -3,7 +3,7 @@
 window.BatcomputerCharacterAnimationPreview = function ({ THREE, loaded, root, data }) {
   const panel = document.createElement('section'); panel.id = 'cw-animations';
   const initialClips = (data?.clips || []).filter(c => c.frameCount > 1 && c.framesPerSecond > 0 && c.tracks);
-  const catalog = data?.catalog?.length ? data.catalog : initialClips.map(c => ({ name:c.label, group:'Movement', package:c.package }));
+  let catalog = data?.catalog?.length ? data.catalog : initialClips.map(c => ({ name:c.label, group:'Movement', package:c.package }));
   const cache = new Map(initialClips.map(c => [c.package, c]));
   const bundleCache = new Map();
   const initialPackages = new Set(cache.keys());
@@ -223,6 +223,10 @@ window.BatcomputerCharacterAnimationPreview = function ({ THREE, loaded, root, d
         if (oldest) { cache.delete(oldest); bundleCache.delete(oldest); } }
     } else { if (!clip && !error) error = 'This animation has no matching visible rig in the viewer.'; }
     sync();
+    if (draftRequest?.package === packageName) {
+      const request=draftRequest;draftRequest=null;clearTimeout(request.timeout);
+      if(error)request.reject(new Error(error));else request.resolve();
+    }
   }
   const clipResult = (packageName, result, failure) => bundleResult(packageName,
     result ? { primary:result, companions:[], warnings:[] } : null, failure);
@@ -277,5 +281,20 @@ window.BatcomputerCharacterAnimationPreview = function ({ THREE, loaded, root, d
         tracks:tracks.filter(track => track.keys.some(key => key.p.some(v=>Math.abs(v)>1e-7) || Math.abs(key.q[3])<.99999999 || key.s.some(v=>Math.abs(v-1)>1e-7)))};
     } finally { reset(); root.updateMatrixWorld(true); time = savedTime; pose(savedTime); playing = wasPlaying; last = performance.now(); sync(); }
   }
-  return { panel, update, rest: restButton.onclick, followBodyPose, withRestPose, bundleResult, clipResult, editableBodyDraft };
+  let draftRequest=null;
+  return { panel, update, rest: restButton.onclick, followBodyPose, withRestPose, bundleResult, clipResult, editableBodyDraft,
+    catalog:()=>catalog,
+    addCatalog(values) { catalog=[...catalog,...values].filter((value,index,all)=>all.findIndex(item=>item.package===value.package)===index);fillPicker(); },
+    async sourceDraft(packageName, signature, reference) {
+      if(draftRequest)throw new Error('An animation is already loading.');
+      if(!catalog.some(asset=>asset.package===packageName))throw new Error('Choose an animation from the current catalog.');
+      select(packageName);
+      if(pending===packageName)await new Promise((resolve,reject)=>{
+        const timeout=setTimeout(()=>{draftRequest=null;reject(new Error('Animation loading timed out.'));},60000);
+        draftRequest={package:packageName,resolve,reject,timeout};
+      });
+      if(!clip||selectedPackage!==packageName)throw new Error('The requested animation could not load.');
+      return editableBodyDraft(signature,reference);
+    }
+  };
 };

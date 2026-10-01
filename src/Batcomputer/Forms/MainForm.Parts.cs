@@ -4570,7 +4570,7 @@ public sealed partial class MainForm
             var detail = baseContract == AnimArchetypeGraftService.CapeGlideContractStatus.Unknown
                 ? "Batcomputer could not verify that this playable base owns the native two-component cape visibility setup. Refresh the character assets and run the build check before pairing a regular cape with a glider."
                 : baseContract == AnimArchetypeGraftService.CapeGlideContractStatus.GlideOnly
-                    ? "This gameplay donor owns only a native glide visual. To preserve its play style, first apply a proven ABP_Cape_Glide preset, then add the matching native regular cape from that same playable/cutscene donor pair. Batcomputer will construct and verify a dynamic paired-cape adapter."
+                    ? "This base has a glide visual but no separate everyday cape. Keep its gameplay and open Gliders > Glider presets, select a native Batman-style Glide cape, and choose Use preset. Batcomputer adds that donor's matching regular cape automatically and verifies both character roles.\n\nDo not add an unrelated regular Cape first. Remove that conflicting cape selection and retry the complete preset. The donor must use the proven ABP_Cape_Glide driver; an arbitrary wingsuit or custom static cape cannot replace it."
                     : "This playable base does not natively own separate regular-cape and glide-visual components. Adding both is not a proven runtime layout and may crash or leave the regular cape visible during gliding.";
             Dialog.Error(this,
                 "Cape and glider are not compatible with this base",

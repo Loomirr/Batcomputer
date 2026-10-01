@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Adds multi-bone selection, bulk key/transform edits, and saved named bone groups to Animation Studio.
+- Adds in-studio cooked-package and native-rig Blender-action imports, plus searchable source clips for creating editable variations.
+- Supports native playable metadata with default-omitted UI data without changing the selected gameplay donor; missing authored UI dependencies still stop the build.
+- Clarifies the complete native cape/glider preset workflow for glide-only character donors.
+- Validates ACL loop-compressed animation endpoints without treating their intentionally omitted duplicate sample as a damaged cook.
+- Cape/glide adapters follow the donor's actual native traversal parents, including shared Villain Mode animation sets.
+
 ## 1.1.0-beta.1 — 2026-09-27
 
 - Adds character animation previews and an animation creator with bone gizmos, keyframes, a resizable timeline, synchronized playback and a draft-to-cooked-animation workflow.

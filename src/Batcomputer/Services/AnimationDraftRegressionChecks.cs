@@ -35,6 +35,15 @@ internal static class AnimationDraftRegressionChecks
         const string timing = """
             ,"combatTiming":{"schema":"batcomputer.combat-timing.v1","previewOnly":true,"windows":[{"id":"strike_1","name":"Right claw","hand":"right","start":5,"hit":9,"end":15}]}
             """;
+        const string grouping = """
+            ,"boneGroups":{"schema":"batcomputer.bone-groups.v1","groups":[{"id":"upper","name":"Upper body","bones":["Head"]}]}
+            """;
+        var grouped = valid[..valid.LastIndexOf('}')] + grouping + "}";
+        Check(Accepted(grouped, signature, bones) &&
+            !Accepted(grouped.Replace("\"bones\":[\"Head\"]", "\"bones\":[\"Head\",\"Head\"]"), signature, bones) &&
+            !Accepted(grouped.Replace("\"bones\":[\"Head\"]", "\"bones\":[\"Unknown\"]"), signature, bones) &&
+            !Accepted(grouped.Replace("\"upper\"", "\"../unsafe\""), signature, bones),
+            "named bone groups retain native tracks and reject unknown, repeated or unsafe members", failures, output);
         var timed = valid[..valid.LastIndexOf('}')] + timing + "}";
         Check(Accepted(timed, signature, bones) && !Accepted(timed.Replace("\"hit\":9", "\"hit\":25"), signature, bones) &&
               !Accepted(timed.Replace("\"end\":15", "\"end\":90"), signature, bones) &&

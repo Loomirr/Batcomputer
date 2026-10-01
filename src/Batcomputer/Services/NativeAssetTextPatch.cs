@@ -172,6 +172,21 @@ public static class NativeAssetTextPatch
     }
 
     /// <summary>Reads a top-level hard object import such as a DCMD's UIMetaData.</summary>
+    internal static bool SetDcmdUiMetadata(UAsset asset, string package, string classPackage, string className)
+    {
+        var export = asset.Exports.OfType<NormalExport>().SingleOrDefault(candidate =>
+            candidate.GetExportClassType()?.ToString() == "DinnerCharacterMetaData");
+        if (export is null || className != "TtPawnUIMetaData" || !classPackage.StartsWith("/Script/", StringComparison.Ordinal)) return false;
+        var existing = export.Data.FirstOrDefault(property => property.Name.ToString() == "UIMetaData");
+        if (existing is not null && existing is not ObjectPropertyData) return false;
+        var property = existing as ObjectPropertyData ?? new ObjectPropertyData(FName.FromString(asset, "UIMetaData"));
+        property.Value = SwordCombatService.Obj(asset, package, UnrealPathUtil.AssetName(package), classPackage, className);
+        if (existing is null) export.Data.Add(property);
+        if (!export.CreateBeforeSerializationDependencies.Any(value => value.Index == property.Value.Index))
+            export.CreateBeforeSerializationDependencies.Add(property.Value);
+        return true;
+    }
+
     public static (string PackageName, string AssetName)? GetObjectReference(UAsset asset, string propName)
     {
         var export = FindExportWithProp(asset, propName);

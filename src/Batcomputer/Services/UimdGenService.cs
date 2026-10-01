@@ -92,13 +92,13 @@ public sealed class UimdGenService
         try
         {
             var sourceUasset = donor?.UimdUassetPath;
-            if (donor is not null && (string.IsNullOrWhiteSpace(sourceUasset) || !File.Exists(sourceUasset)))
+            if (donor is not null && !donor.NeedsUiScaffold && (string.IsNullOrWhiteSpace(sourceUasset) || !File.Exists(sourceUasset)))
             {
                 result.Status = "missing-donor";
                 result.Error = $"Selected donor UIMD is not extracted: {sourceUasset}";
                 return result;
             }
-            if (donor is null)
+            if (donor is null || donor.NeedsUiScaffold)
             {
                 sourceUasset = ResolveBaseUimdPath();
             }
@@ -138,7 +138,7 @@ public sealed class UimdGenService
             // callers that have not supplied role targets.
             if (iconOverrides is not null && iconTargets is null)
             {
-                var sourceIcons = donor is null
+                var sourceIcons = donor is null || donor.NeedsUiScaffold
                     ? new[] { SrcMenuIcon, SrcLeftIcon, SrcRightIcon, SrcSuitIcon }
                     : new[] { donor.IconPaths.Menu, donor.IconPaths.Suit, donor.IconPaths.Left, donor.IconPaths.Right };
                 foreach (var src in sourceIcons.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase))

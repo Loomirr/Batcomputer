@@ -99,9 +99,10 @@ suit should use a normal cape and a matching glide cape:
 2. Open **Gliders**, choose **Glider presets**, and filter to one native **Glide cape** donor.
 3. Open that preset and choose **Use preset**. Batcomputer records the donor's complete glide
    setup, including the authored component, materials, visibility behavior, and body pose.
-4. Open **Parts** and apply the regular cosmetic `Cape` from the exact same character variant as the
-   glide preset. Right-click the part and choose **Apply to character**. Do not use a custom OBJ cape
-   or a cape from another donor pair.
+4. On a glide-only base with no regular cape, a proven paired glide-cape preset automatically adds
+   its exact matching cosmetic `Cape` for both playable and cutscene roles. Check both parts in the
+   inspector. Do not add a custom OBJ cape or an unrelated donor cape first. If an older attempt
+   already has a conflicting regular cape, remove that selection and apply the complete preset.
 5. Batcomputer keeps the gameplay donor's appearance and normal movement, combat, and equipment,
    then uses the cape donor's matching animation while gliding.
 6. Run **Check mod**, build, and cold-launch the game. Test standing cape visibility, glide opening,

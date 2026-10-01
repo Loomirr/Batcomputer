@@ -32,6 +32,8 @@ public sealed class AppSettings
     // Optional, user-supplied decoder for local Wwise sound previews; never bundled.
     public string? VgmstreamExePath { get; set; }
     public string? VoiceEncoderExePath { get; set; }
+    // Optional read-only animation import bridge. Blender itself is not bundled.
+    public string? BlenderExePath { get; set; }
 
     // .usmap mappings file for UAssetAPI (read/write cooked assets).
     public string? UsmapPath { get; set; }

@@ -48,6 +48,84 @@ public sealed class ModelPreviewControl : UserControl
     private int _rendererVersion;
     private string? _animationWorkspace;
     private NativeSuitProject? _animationCharacter;
+    internal event Func<Task>? AnimationPackageImportRequested;
+    private bool _animationSourceImporting;
+    private async Task ImportAnimationSourceAsync(string kind, string layoutKey, string rigSignature)
+    {
+        var folder = _pendingFolder; var web = _web; var character = _animationCharacter; var workspace = _animationWorkspace;
+        if (_animationSourceImporting || character is null || string.IsNullOrWhiteSpace(workspace) || string.IsNullOrWhiteSpace(folder) ||
+            layoutKey != ViewerLayoutService.SuitKey(character) || rigSignature.Length is < 1 or > 20_000) return;
+        _animationSourceImporting = true;
+        string? error = null; object? result = null;
+        try
+        {
+            if (kind is "pak" or "library")
+            {
+                if (kind == "pak" && AnimationPackageImportRequested is { } handler) await handler();
+                if (folder != _pendingFolder || !ReferenceEquals(web, _web)) return;
+                var catalog = await Task.Run(() => CharacterAnimationPreviewService.AddWorkspaceAnimations(folder, workspace));
+                result = new { catalog };
+            }
+            else if (kind == "blender")
+            {
+                using var sourceDialog = new OpenFileDialog { Title = "Import animation from a LOTDK-rig Blender file",
+                    Filter = "Blender project (*.blend)|*.blend", CheckFileExists = true };
+                if (sourceDialog.ShowDialog(this) != DialogResult.OK) { result = new { cancelled = true }; }
+                else
+                {
+                    var executable = AppSettings.Current.BlenderExePath;
+                    if (!File.Exists(executable))
+                    {
+                        using var executableDialog = new OpenFileDialog { Title = "Select your installed blender.exe (used read-only)",
+                            Filter = "Blender executable (blender.exe)|blender.exe", CheckFileExists = true };
+                        if (executableDialog.ShowDialog(this) != DialogResult.OK) { result = new { cancelled = true }; }
+                        else { executable = executableDialog.FileName; AppSettings.Current.BlenderExePath = executable; AppSettings.Current.Save(); }
+                    }
+                    if (result is null && executable is not null)
+                    {
+                        var work = Path.Combine(folder, "blender-imports", Guid.NewGuid().ToString("N"));
+                        var manifest = Path.Combine(work, "choices.json");
+                        await BlenderAnimationImportService.RunAsync(executable, sourceDialog.FileName, work, new { mode = "list", rigSignature, output = manifest });
+                        if (!File.Exists(manifest) || new FileInfo(manifest).Length > 500_000) throw new InvalidDataException("Blender returned an invalid action list.");
+                        var choices = JsonSerializer.Deserialize<BlenderAnimationImportService.Choice[]>(File.ReadAllText(manifest),
+                            new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
+                        if (choices.Length is < 1 or > 512) throw new InvalidDataException("No supported animation actions were found.");
+                        if (folder != _pendingFolder || !ReferenceEquals(web, _web)) return;
+                        var choice = ChooseBlenderAction(choices);
+                        if (choice is null) result = new { cancelled = true };
+                        else
+                        {
+                            var output = Path.Combine(work, "motion.glb");
+                            await BlenderAnimationImportService.RunAsync(executable, sourceDialog.FileName, work,
+                                new { mode = "export", rigSignature, output, rig = choice.Rig, action = choice.Action, slot = choice.Slot });
+                            if (!File.Exists(output) || new FileInfo(output).Length is 0 or > 80_000_000)
+                                throw new InvalidDataException("The animation export is missing or exceeds 80 MB.");
+                            result = new { file = "blender-imports/" + Path.GetFileName(work) + "/motion.glb", name = choice.Action };
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex) { error = ex.Message; }
+        finally { _animationSourceImporting = false; }
+        if (IsDisposed || folder != _pendingFolder || !ReferenceEquals(web, _web) || web?.CoreWebView2 is not { } core) return;
+        try { await core.ExecuteScriptAsync("window.characterAnimationCreator?.sourceImported(" +
+            JsonSerializer.Serialize(result, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }) + "," + JsonSerializer.Serialize(error) + ")"); }
+        catch (Exception ex) { Debug.WriteLine("Animation source import response: " + ex.Message); }
+    }
+    private BlenderAnimationImportService.Choice? ChooseBlenderAction(BlenderAnimationImportService.Choice[] choices)
+    {
+        using var dialog = new Form { Text = "Choose an animation to edit", Size = new Size(640, 480), MinimumSize = new Size(460, 360),
+            StartPosition = FormStartPosition.CenterParent, BackColor = Theme.WindowBg, ForeColor = Theme.OnDark, Font = Theme.Body };
+        var list = new ListBox { Dock = DockStyle.Fill, DataSource = choices, DisplayMember = "Label", BackColor = Theme.WindowBg, ForeColor = Theme.OnDark };
+        var help = new Label { Dock = DockStyle.Top, Height = 60, Text = "Choose one action on the LOTDK body rig. A copy becomes editable keys.\nYour Blender file and existing animations are not modified.", Padding = new Padding(12) };
+        var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 50, FlowDirection = FlowDirection.RightToLeft };
+        var import = new Button { Text = "Import action", Width = 120, Height = 36, DialogResult = DialogResult.OK };
+        var cancel = new Button { Text = "Cancel", Width = 100, Height = 36, DialogResult = DialogResult.Cancel };
+        buttons.Controls.AddRange([import, cancel]); dialog.Controls.Add(list); dialog.Controls.Add(help); dialog.Controls.Add(buttons);
+        dialog.AcceptButton = import; dialog.CancelButton = cancel;
+        return dialog.ShowDialog(this) == DialogResult.OK ? list.SelectedItem as BlenderAnimationImportService.Choice : null;
+    }
     internal void ConfigureAnimationLibrary(string workspace, NativeSuitProject? character)
     {
         _animationWorkspace = workspace;
@@ -381,6 +459,15 @@ public sealed class ModelPreviewControl : UserControl
                         if (value.TryGetProperty("draft", out var draft) && draft.ValueKind == JsonValueKind.Object &&
                             value.TryGetProperty("layoutKey", out var layout) && layout.ValueKind == JsonValueKind.String)
                             _ = SaveAnimationDraftAsync(draft.GetRawText(), value.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String ? id.GetString() : null, layout.GetString() ?? "");
+                        return;
+                    }
+                    if (type.GetString() == "import-animation-source" && json.Length < 24_000)
+                    {
+                        var value = document.RootElement;
+                        if (value.TryGetProperty("kind", out var kind) && kind.ValueKind == JsonValueKind.String && kind.GetString() is "pak" or "blender" or "library" &&
+                            value.TryGetProperty("layoutKey", out var layout) && layout.ValueKind == JsonValueKind.String &&
+                            value.TryGetProperty("rigSignature", out var rig) && rig.ValueKind == JsonValueKind.String)
+                            _ = ImportAnimationSourceAsync(kind.GetString()!, layout.GetString() ?? "", rig.GetString() ?? "");
                         return;
                     }
                     if (type.GetString() == "item-workshop-transform")

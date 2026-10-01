@@ -15,6 +15,8 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
   const tracks = new Map();
   const fps = 30;
   let durationFrames = 60, frame = 0, selectedBone = bones.has('Chest') ? 'Chest' : [...bones.keys()][0], active = false, playing = false, last = 0, loop = true, dragging = false;
+  let selectedBones = new Set([selectedBone]), boneGroups = [], selectedGroup = '';
+  const collapsedGroups = new Set();
   let clipName = 'New animation', clipDescription = '', playbackRate = 1, zoom = 1, dirty = false, reelDirty = true;
   let copiedKey = null, lastReelFrame = -1, lastUiFrame = -1, keysDirty = true, keyCount = 0;
   const markersByFrame = new Map(), selectedKeysByFrame = new Map();
@@ -52,16 +54,31 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
     '<small>30 frames per second · 0.1–30 seconds. The timeline below the character controls playback.</small>' +
     '<div class="cw-creator-buttons"><button type="button" class="from-motion">Edit selected Motion clip</button></div>' +
     '<small>Select a loaded body animation in Motion first. This copies its poses into editable keys; it does not copy gameplay notifies.</small>' +
-    '<div class="cw-creator-section">RIG · SELECT A JOINT</div>' +
+    '<div class="cw-creator-section">START FROM EXISTING MOTION</div>' +
+    '<input type="search" class="source-search" aria-label="Search source animations" placeholder="Find a native or your cooked animation…">' +
+    '<label>Source clip<select class="source-picker" aria-label="Source animation"></select></label>' +
+    '<div class="cw-creator-buttons"><button type="button" class="source-edit">Copy to editable draft</button><button type="button" class="source-refresh">Refresh your cooked clips</button></div>' +
+    '<div class="cw-creator-buttons"><button type="button" class="source-pak">Import cooked package…</button><button type="button" class="source-blender">Import Blender action…</button></div>' +
+    '<small>Import a package into your private library, or choose a saved Blender action already on this exact LOTDK body rig. Source files are unchanged. Gameplay notifies are not copied; save as a new draft to make a variation.</small>' +
+    '<div class="cw-creator-section">RIG · SELECT JOINTS</div>' +
+    '<small>Click a bone; Ctrl-click adds/removes it, Shift-click selects a range. Transforms and key actions affect all selected bones.</small>' +
+    '<small class="selection-info" role="status"></small>' +
     '<label>Find bone<input type="search" aria-label="Find animation bone" placeholder="Search bones…"></label>' +
     '<label>Bone<select aria-label="Animation bone"></select></label>' +
     '<div class="cw-creator-bone-list" aria-label="Skeleton bone hierarchy"></div>' +
     '<div class="cw-creator-buttons"><button type="button" class="focus-joint">Focus joint</button><button type="button" class="toggle-joints" aria-pressed="false">Show joints</button></div>' +
+    '<div class="cw-creator-buttons"><button type="button" class="select-all-bones">Select all</button><button type="button" class="select-one-bone">Only primary bone</button></div>' +
+    '<div class="cw-creator-section">BONE GROUPS</div>' +
+    '<small>Organize tracks into named divisions, such as Breathing or Arms. Groups are not motion layers; each bone has one track.</small>' +
+    '<label>Group<select class="bone-group" aria-label="Bone group"></select></label>' +
+    '<label>Name<input class="group-name" aria-label="Bone group name" maxlength="48" placeholder="e.g. Breathing"></label>' +
+    '<div class="cw-creator-buttons"><button type="button" class="group-create">Create from selection</button><button type="button" class="group-assign">Assign selection</button></div>' +
+    '<div class="cw-creator-buttons"><button type="button" class="group-select">Select group</button><button type="button" class="group-rename">Rename</button><button type="button" class="group-delete">Delete group</button></div>' +
     '<div class="cw-creator-section">TRANSFORM · SELECTED BONE</div>' +
     '<div class="cw-creator-buttons cw-creator-tools"><button type="button" class="move active">Move · W</button><button type="button" class="rotate">Rotate · R</button><button type="button" class="scale">Scale · E</button></div>' +
     '<label>Axes <select class="axes" aria-label="Transform axes"><option value="local">Local to bone</option><option value="world">World</option></select></label>' +
     '<label>Snap <span class="cw-creator-inline"><input type="checkbox" class="snap" aria-label="Snap transforms"><input type="number" class="snap-degrees" aria-label="Rotation snap degrees" min="1" max="90" value="15">°</span></label>' +
-    '<small>Move, rotate, or scale the 3D handles at this bone’s joint. Changes create a key on the current frame. Position is an offset in viewer units; scale is a multiplier of the rest pose.</small>' +
+    '<small>Numeric edits apply the primary bone’s change to the selection, preserving pose differences. 3D handles transform selected roots together (parents are not applied twice). Position is in viewer units; scale is a rest-pose multiplier.</small>' +
     '<div class="cw-creator-grid"><span>Rotation offset · degrees</span><label>X<input type="number" data-kind="rotation" data-axis="0" step="1"></label>' +
     '<label>Y<input type="number" data-kind="rotation" data-axis="1" step="1"></label>' +
     '<label>Z<input type="number" data-kind="rotation" data-axis="2" step="1"></label></div>' +
@@ -156,6 +173,100 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
     window.chrome.webview.postMessage({type:'save-animation-draft',layoutKey:window.PREVIEW_LAYOUT_KEY,id:libraryDraftId,draft});
   };
   const identity = new THREE.Quaternion();
+  let pendingSource=null;
+  const sourceButtons=[...panel.querySelectorAll('.source-edit,.source-refresh,.source-pak,.source-blender')];
+  const sourceHost=!!(window.BATCOMPUTER_ANIMATION_LIBRARY_HOST&&window.chrome?.webview&&window.PREVIEW_CAN_SAVE_PLACEMENTS&&window.PREVIEW_LAYOUT_KEY?.startsWith('suit:'));
+  function fillSources() {
+    const picker=panel.querySelector('.source-picker'),old=picker.value,query=panel.querySelector('.source-search').value.toLowerCase().trim();
+    picker.replaceChildren();
+    for(const asset of preview.catalog?.()||[]) {
+      if(/_(LEGOface|HAT|Cape)(_|$)/i.test(asset.name)||query&&!`${asset.name} ${asset.group} ${asset.package}`.toLowerCase().includes(query))continue;
+      const option=document.createElement('option');option.value=asset.package;option.textContent=`${asset.name} · ${asset.group||'Native'}`;picker.appendChild(option);
+    }
+    if([...picker.options].some(option=>option.value===old))picker.value=old;
+    panel.querySelector('.source-edit').disabled=!!pendingSource||!picker.value;
+    for(const name of ['refresh','pak','blender'])panel.querySelector('.source-'+name).disabled=!!pendingSource||!sourceHost;
+    if(!sourceHost)for(const name of ['refresh','pak','blender'])panel.querySelector('.source-'+name).title='Open a saved suit in the embedded viewer to import into its workspace.';
+  }
+  panel.querySelector('.source-search').oninput=fillSources;
+  function requestSource(kind) {
+    if(pendingSource||!sourceHost)return;
+    playing=false;pendingSource={generation:draftGeneration,revision,kind};fillSources();
+    status.textContent=kind==='blender'?'Choose a native-rig Blender file, then an action. Reading without saving the source…':'Reading your cooked animation library…';
+    window.chrome.webview.postMessage({type:'import-animation-source',kind,layoutKey:window.PREVIEW_LAYOUT_KEY,rigSignature});
+  }
+  for(const kind of ['pak','blender'])panel.querySelector('.source-'+kind).onclick=()=>requestSource(kind);
+  panel.querySelector('.source-refresh').onclick=()=>requestSource('library');
+  panel.querySelector('.source-edit').onclick=async()=>{
+    if(pendingSource)return;
+    const context={generation:draftGeneration,revision};pendingSource=context;fillSources();playing=false;
+    status.textContent='Sampling a copy of the source animation into editable keys…';
+    try {
+      const draft=await preview.sourceDraft(panel.querySelector('.source-picker').value,rigSignature,rest);
+      if(context.generation!==draftGeneration||context.revision!==revision)throw new Error('Your draft changed while loading. Import again when ready.');
+      if(await openDraft(draft))libraryDraftId='';
+    } catch(error){status.textContent='Could not import motion: '+error.message;}
+    finally{pendingSource=null;pose();fillSources();}
+  };
+  async function blenderDraft(file,name) {
+    const source=await new Promise((resolve,reject)=>new THREE.GLTFLoader().load(file,resolve,undefined,reject));
+    let mixer;
+    try {
+      const imported=new Map();
+      source.scene.traverse(node=>{if(node.isBone){if(imported.has(node.name))throw new Error('The export has duplicate bones.');imported.set(node.name,node);}});
+      const importedSignature=[...imported].map(([bone,node])=>`${bone}:${node.parent?.isBone?node.parent.name:''}`).sort().join('|');
+      if(importedSignature!==rigSignature.split('|').sort().join('|'))throw new Error('The Blender export does not retain the complete native bone hierarchy.');
+      for(const [bone,node] of imported) {
+        const reference=rest.get(bone);
+        if(node.position.distanceTo(reference.p)>.0002||node.quaternion.angleTo(reference.q)>.001||node.scale.distanceTo(reference.s)>.001)
+          throw new Error(`Rest-space mismatch at ${bone}. Use this viewer's unmodified native GLB rig; do not apply the FBX preparation helper to an animation import.`);
+      }
+      if(source.animations.length!==1)throw new Error('Expected one exported Blender action. Remove other active object animations and retry.');
+      const clip=source.animations[0];
+      // Blender often starts actions at frame 1 (or a later scene frame). Preserve
+      // clip length, not the leading scene-time gap, in the draft's zero-based timeline.
+      const start=Math.min(...clip.tracks.map(track=>track.times[0]));
+      if(!Number.isFinite(start)||start<0)throw new Error('The exported action has invalid sample times.');
+      // glTF channels can share a time accessor. Copy it before shifting each
+      // track, otherwise the common array is shifted repeatedly.
+      for(const track of clip.tracks){track.times=Float32Array.from(track.times);track.shift(-start);}
+      clip.resetDuration();const duration=Math.round(clip.duration*fps);
+      if(duration<3||duration>900)throw new Error('The action must be 0.1–30 seconds.');
+      // Object-level travel is not a body bone track. Reject instead of quietly dropping it.
+      for(const track of clip.tracks)if(![...imported.keys()].some(bone=>track.name.startsWith(bone+'.')))throw new Error('Animation includes object-level motion. Bake motion onto native bones before importing.');
+      mixer=new THREE.AnimationMixer(source.scene);const action=mixer.clipAction(clip);action.setLoop(THREE.LoopOnce,1);action.clampWhenFinished=true;action.play();
+      const tracks=[...bones.keys()].map(bone=>({bone,keys:[]}));
+      const compact=values=>values.map(value=>Math.round(value*1e8)/1e8);
+      for(let at=0;at<=duration;at++) {
+        mixer.setTime(Math.min(clip.duration,at/fps));
+        for(const track of tracks) {
+          const node=imported.get(track.bone),reference=rest.get(track.bone),q=reference.q.clone().invert().multiply(node.quaternion).normalize();
+          if(track.keys.length&&q.dot(new THREE.Quaternion(...track.keys.at(-1).q))<0)q.set(-q.x,-q.y,-q.z,-q.w);
+          track.keys.push({frame:at,p:compact(node.position.clone().sub(reference.p).toArray()),q:compact(q.toArray()),s:compact(node.scale.clone().divide(reference.s).toArray()),interpolation:'linear'});
+        }
+      }
+      return {schema:'batcomputer.animation-draft.v1',name:name.slice(0,64),description:'Editable copy of a native-rig Blender action; gameplay notifies are not imported.',fps,durationFrames:duration,loop:true,rigSignature,
+        tracks:tracks.filter(track=>track.keys.some(key=>key.p.some(v=>Math.abs(v)>1e-5)||key.q.slice(0,3).some(v=>Math.abs(v)>1e-5)||key.s.some(v=>Math.abs(v-1)>1e-5)))};
+    } finally {
+      mixer?.stopAllAction();mixer?.uncacheRoot(source.scene);
+      source.scene.traverse(node=>{node.geometry?.dispose();for(const material of Array.isArray(node.material)?node.material:node.material?[node.material]:[])material.dispose();});
+    }
+  }
+  async function sourceImported(result,error) {
+    const context=pendingSource;if(!context)return;
+    try {
+      if(error)throw new Error(error);
+      if(result?.catalog){preview.addCatalog?.(result.catalog);status.textContent=`${result.catalog.length} of your cooked body clips are available above. Choose one, then copy to an editable draft.`;}
+      else if(result?.cancelled)status.textContent='Import cancelled. Your current draft is unchanged.';
+      else if(result?.file) {
+        const draft=await blenderDraft(result.file,result.name||'Blender motion');
+        if(context.generation!==draftGeneration||context.revision!==revision)throw new Error('Your draft changed while importing. Import again when ready.');
+        if(new Blob([JSON.stringify(draft)]).size>2000000)throw new Error('The sampled draft exceeds 2 MB. Shorten the action.');
+        if(await openDraft(draft))libraryDraftId='';
+      }
+    }catch(failure){status.textContent='Could not import source: '+failure.message;}
+    finally{pendingSource=null;pose();fillSources();}
+  }
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
   const rounded = value => Math.abs(value) < .0000005 ? 0 : Number(value.toFixed(4));
   const dockHeightStorageKey = 'batcomputer.animationTimelineHeight';
@@ -202,13 +313,17 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
     else if (event.key === 'Home') { event.preventDefault(); applyDockHeight(160, true); }
     else if (event.key === 'End') { event.preventDefault(); applyDockHeight(dock.parentElement?.clientHeight || current, true); }
   });
-  function snapshot() { return { durationFrames, clipName, clipDescription, sourceAnimationPackage, voiceCues:voiceCues.map(value=>({...value})), selectedVoice, combatWindows:combatWindows.map(value=>({...value})), selectedWindow,
+  function snapshot() { return { durationFrames, clipName, clipDescription, loop, sourceAnimationPackage, voiceCues:voiceCues.map(value=>({...value})), selectedVoice, combatWindows:combatWindows.map(value=>({...value})), selectedWindow,
+    boneGroups:boneGroups.map(group=>({...group,bones:[...group.bones]})), selectedGroup, selectedBone, selectedBones:[...selectedBones],
     tracks:[...tracks].map(([name, values]) => [name, values.map(key => ({ frame:key.frame, p:[...key.p], q:[...key.q], s:[...(key.s || [1,1,1])], interpolation:key.interpolation || 'linear' }))]) }; }
   function pushUndo() { undoStack.push(snapshot()); if (undoStack.length > 50) undoStack.shift(); redoStack.length = 0; refreshHistory(); }
   function restoreSnapshot(value) {
     durationFrames = value.durationFrames; clipName = value.clipName; clipDescription = value.clipDescription;
+    loop=value.loop;dock.querySelector('.loop').checked=loop;
     sourceAnimationPackage = value.sourceAnimationPackage || ''; combatWindows = (value.combatWindows || []).map(item=>({...item})); selectedWindow = value.selectedWindow || '';
     voiceCues = (value.voiceCues || []).map(item=>({...item})); selectedVoice = value.selectedVoice || '';
+    boneGroups = value.boneGroups.map(group=>({...group,bones:[...group.bones]})); selectedGroup = value.selectedGroup;
+    selectedBone = value.selectedBone; selectedBones = new Set(value.selectedBones); refreshGroups(); fillBones(); attachBone();
     tracks.clear(); for (const [name, values] of value.tracks) tracks.set(name, values);
     panel.querySelector('.clip-name').value = clipName; panel.querySelector('.clip-description').value = clipDescription;
     length.value = String(durationFrames / fps); frame = clamp(frame, 0, durationFrames); playing = false;
@@ -240,7 +355,7 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
     if (!showJoints || !active) return;
     for (const [name, marker] of joints) {
       marker.position.copy(bones.get(name).getWorldPosition(new THREE.Vector3()));
-      marker.material = name === selectedBone ? jointSelected : jointNormal;
+      marker.material = selectedBones.has(name) ? jointSelected : jointNormal;
     }
   }
   const pickJoint = event => {
@@ -251,7 +366,7 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
     const hit = raycaster.intersectObjects([...joints.values()], false)[0];
     if (!hit) return;
     event.stopPropagation(); event.preventDefault();
-    selectBone(hit.object.userData.boneName);
+    selectBone(hit.object.userData.boneName, event);
   };
   renderer.domElement.addEventListener('pointerdown', pickJoint, true);
   function tool(mode) {
@@ -275,26 +390,44 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
   panel.querySelector('.snap-degrees').onchange = updateSnap;
   function attachBone() {
     gizmo.detach();
-    if (active && bones.has(selectedBone)) { gizmo.attach(bones.get(selectedBone)); gizmo.visible = true; }
+    let anchor = bones.get(selectedBone);
+    for (let parent = anchor?.parent; parent?.isBone; parent = parent.parent)
+      if (selectedBones.has(parent.name)) anchor = parent;
+    if (active && anchor) { gizmo.attach(anchor); gizmo.visible = true; }
     else gizmo.visible = false;
     updateJoints();
   }
+  let dragAnchor = null, dragRoots = [];
   gizmo.addEventListener('dragging-changed', event => {
     dragging = event.value; controls.enabled = !event.value;
-    if (event.value) { playing = false; pushUndo(); }
-    else if (active) pose();
+    if (event.value) {
+      playing = false; pushUndo(); root.updateMatrixWorld(true);
+      dragAnchor = gizmo.object?.matrixWorld.clone();
+      dragRoots = [...selectedBones].map(name=>bones.get(name)).filter(bone=>{
+        for(let parent=bone.parent;parent?.isBone;parent=parent.parent)if(selectedBones.has(parent.name))return false;
+        return true;
+      }).map(bone=>({bone,world:bone.matrixWorld.clone()}));
+    } else { dragAnchor = null; dragRoots = []; if (active) pose(); }
   });
   gizmo.addEventListener('objectChange', () => {
     if (!active || !dragging) return;
-    const bone = bones.get(selectedBone), saved = rest.get(selectedBone);
-    if (!bone || !saved) return;
-    const p = bone.position.clone().sub(saved.p), q = saved.q.clone().invert().multiply(bone.quaternion).normalize();
-    const s = bone.scale.clone().divide(saved.s);
-    if (p.length() > 5) { bone.position.copy(saved.p).add(sample(selectedBone, frame).p); return; }
-    if (![s.x, s.y, s.z].every(value => Number.isFinite(value) && value >= .05 && value <= 5)) {
-      bone.scale.copy(saved.s).multiply(sample(selectedBone, frame).s); return;
+    if (!dragAnchor || !gizmo.object) return;
+    root.updateMatrixWorld(true);
+    const delta = gizmo.object.matrixWorld.clone().multiply(dragAnchor.clone().invert());
+    for (const {bone,world} of dragRoots) if (bone !== gizmo.object) {
+      bone.parent.updateWorldMatrix(true,false);
+      const local = bone.parent.matrixWorld.clone().invert().multiply(delta).multiply(world);
+      local.decompose(bone.position,bone.quaternion,bone.scale);
     }
-    setKey(p.toArray(), q, s.toArray(), false);
+    const values = [...selectedBones].map(name=>{
+      const bone=bones.get(name),saved=rest.get(name);
+      return {name,p:bone.position.clone().sub(saved.p).toArray(),q:saved.q.clone().invert().multiply(bone.quaternion).normalize(),s:bone.scale.clone().divide(saved.s).toArray()};
+    });
+    if(values.some(value=>!value.p.every(v=>Number.isFinite(v)&&Math.abs(v)<=5)||!value.s.every(v=>Number.isFinite(v)&&v>=.05&&v<=5))) {
+      pose(); status.textContent='Transform exceeds the supported position or scale limits.'; return;
+    }
+    for(const value of values)writeKey(value.name,value.p,value.q,value.s);
+    markDirty(); root.updateMatrixWorld(true); preview.followBodyPose?.(false); updateJoints(); refresh();
   });
   window.addEventListener('pagehide', () => {
     timelineResize.disconnect();
@@ -304,10 +437,43 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
     jointGeometry.dispose(); jointNormal.dispose(); jointSelected.dispose();
   }, { once:true });
 
-  function selectBone(name) {
+  function selectBone(name, event = {}) {
     if (!bones.has(name)) return;
-    selectedBone = name; keysDirty = true; find.value = ''; fillBones(); attachBone(); reelDirty = true; refresh();
+    if(event.shiftKey) {
+      const names=[...bones.keys()].filter(item=>!find.value.trim()||item.toLowerCase().includes(find.value.trim().toLowerCase()));
+      const a=names.indexOf(selectedBone),b=names.indexOf(name);
+      if(a>=0&&b>=0) for(const item of names.slice(Math.min(a,b),Math.max(a,b)+1))selectedBones.add(item);
+      else selectedBones.add(name);
+    } else if(event.ctrlKey||event.metaKey) {
+      if(selectedBones.has(name)&&selectedBones.size>1)selectedBones.delete(name);else selectedBones.add(name);
+    } else selectedBones=new Set([name]);
+    selectedBone=selectedBones.has(name)?name:[...selectedBones][0];
+    selectionChanged();
   }
+  function selectionChanged() { keysDirty=true; reelDirty=true; fillBones(); attachBone(); refresh(); }
+  panel.querySelector('.select-all-bones').onclick=()=>{selectedBones=new Set(bones.keys());selectionChanged();};
+  panel.querySelector('.select-one-bone').onclick=()=>selectBone(selectedBone);
+  function refreshGroups() {
+    const picker=panel.querySelector('.bone-group');picker.replaceChildren();
+    const empty=document.createElement('option');empty.value='';empty.textContent='Choose a group';picker.appendChild(empty);
+    for(const group of boneGroups){const option=document.createElement('option');option.value=group.id;option.textContent=`${group.name} · ${group.bones.length} bones`;picker.appendChild(option);}
+    if(!boneGroups.some(group=>group.id===selectedGroup))selectedGroup='';picker.value=selectedGroup;
+    panel.querySelector('.group-name').value=boneGroups.find(group=>group.id===selectedGroup)?.name||'';
+    for(const action of ['assign','select','rename','delete'])panel.querySelector('.group-'+action).disabled=!selectedGroup;
+    panel.querySelector('.group-create').disabled=boneGroups.length>=32;
+  }
+  panel.querySelector('.bone-group').onchange=event=>{selectedGroup=event.target.value;refreshGroups();};
+  function groupName(){return panel.querySelector('.group-name').value.trim();}
+  function assignGroup(group){for(const item of boneGroups)item.bones=item.bones.filter(name=>!selectedBones.has(name));group.bones=[...selectedBones];}
+  panel.querySelector('.group-create').onclick=()=>{
+    const name=groupName();if(!name||boneGroups.length>=32){status.textContent='Enter a group name (up to 32 groups).';return;}
+    pushUndo();const group={id:'group_'+crypto.randomUUID().replace(/-/g,''),name,bones:[]};boneGroups.push(group);assignGroup(group);selectedGroup=group.id;
+    markDirty();reelDirty=true;refreshGroups();refresh();
+  };
+  panel.querySelector('.group-assign').onclick=()=>{const group=boneGroups.find(item=>item.id===selectedGroup);if(!group)return;pushUndo();assignGroup(group);markDirty();reelDirty=true;refreshGroups();refresh();};
+  panel.querySelector('.group-select').onclick=()=>{const group=boneGroups.find(item=>item.id===selectedGroup);if(!group?.bones.length)return;selectedBones=new Set(group.bones);selectedBone=group.bones[0];selectionChanged();};
+  panel.querySelector('.group-rename').onclick=()=>{const group=boneGroups.find(item=>item.id===selectedGroup),name=groupName();if(!group||!name)return;pushUndo();group.name=name;markDirty();reelDirty=true;refreshGroups();refresh();};
+  panel.querySelector('.group-delete').onclick=()=>{if(!selectedGroup)return;pushUndo();boneGroups=boneGroups.filter(item=>item.id!==selectedGroup);selectedGroup='';markDirty();reelDirty=true;refreshGroups();refresh();status.textContent='Group removed. Its bone tracks are unchanged.';};
   panel.querySelector('.focus-joint').onclick = () => {
     const target = bones.get(selectedBone)?.getWorldPosition(new THREE.Vector3());
     if (!target) return;
@@ -322,13 +488,11 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
 
   function fillBones() {
     const query = find.value.trim().toLowerCase();
-    const previousSelection = selectedBone;
     picker.replaceChildren();
     for (const name of bones.keys()) if (!query || name.toLowerCase().includes(query)) {
       const option = document.createElement('option'); option.value = name; option.textContent = name; picker.appendChild(option);
     }
     if (picker.options.length) {
-      if (![...picker.options].some(option => option.value === selectedBone)) selectedBone = picker.options[0].value;
       picker.value = selectedBone;
     } else {
       const option = document.createElement('option'); option.textContent = 'No matching bones'; option.disabled = true;
@@ -342,12 +506,13 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
       while (parent?.isBone && depth < 8) { depth++; parent = parent.parent; }
       const button = document.createElement('button'); button.type = 'button';
       button.textContent = name; button.style.paddingLeft = `${8 + depth * 9}px`;
-      button.className = name === selectedBone ? 'selected' : '';
+      button.className = selectedBones.has(name) ? 'selected' : '';
+      button.setAttribute('aria-pressed',String(selectedBones.has(name)));
       button.title = `${name}${bone.parent?.isBone ? ' · parent: ' + bone.parent.name : ''}`;
-      button.onclick = () => selectBone(name);
+      button.onclick = event => selectBone(name,event);
       boneList.appendChild(button);
     }
-    if (previousSelection !== selectedBone) { keysDirty = true; reelDirty = true; attachBone(); }
+    panel.querySelector('.selection-info').textContent=`${selectedBones.size} selected · primary: ${selectedBone}`;
     refresh();
   }
   const sampled = new Map([...bones.keys()].map(name => [name, {
@@ -416,10 +581,11 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
     for (const input of inputs) if (document.activeElement !== input) input.value = String(rounded(values[input.dataset.kind][Number(input.dataset.axis)]));
     const track = tracks.get(selectedBone) || [];
     const currentKey = track.find(key => key.frame === Math.round(frame));
-    remove.disabled = panel.querySelector('.copy-key').disabled = !currentKey;
+    const selectionHasKey = [...selectedBones].some(name=>(tracks.get(name)||[]).some(key=>key.frame===Math.round(frame)));
+    remove.disabled = panel.querySelector('.copy-key').disabled = !selectionHasKey;
     panel.querySelector('.paste-key').disabled = !copiedKey;
-    panel.querySelector('.clear-track').disabled = !track.length;
-    panel.querySelector('.interpolation').disabled = !currentKey;
+    panel.querySelector('.clear-track').disabled = ![...selectedBones].some(name=>tracks.get(name)?.length);
+    panel.querySelector('.interpolation').disabled = !selectionHasKey;
     panel.querySelector('.interpolation').value = currentKey?.interpolation || 'linear';
     if (keysDirty || reelDirty) {
     keysDirty = false; keys.replaceChildren(); selectedKeysByFrame.clear();
@@ -445,7 +611,7 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
   function refreshReel() {
     reelDirty = false; lastReelFrame = Math.round(frame);
     const visible = [...tracks].filter(([, values]) => values.length).map(([name]) => name);
-    if (!visible.includes(selectedBone)) visible.unshift(selectedBone);
+    for(const name of selectedBones)if(!visible.includes(name))visible.unshift(name);
     reel.replaceChildren(); markersByFrame.clear(); playheads.length = 0;
     const ruler = dock.querySelector('.cw-creator-ruler'); ruler.replaceChildren();
     const railWidth = Math.max(220, reelScroll.clientWidth - 126, durationFrames * 3 * zoom);
@@ -487,11 +653,23 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
         };rail.appendChild(marker);
       }row.append(label,rail);reel.appendChild(row);
     }
-    for (const name of visible) {
-      const row = document.createElement('div'); row.className = 'cw-creator-lane' + (name === selectedBone ? ' selected' : '');
+    const grouped = new Set(boneGroups.flatMap(group=>group.bones));
+    const sections = [...boneGroups.map(group=>({...group,visible:visible.filter(name=>group.bones.includes(name))})),
+      {id:'',name:'Ungrouped',visible:visible.filter(name=>!grouped.has(name))}];
+    for(const section of sections) {
+      if(boneGroups.length && (section.id || section.visible.length)) {
+        const header=document.createElement('div');header.className='cw-creator-group-header';
+        const collapse=document.createElement('button');collapse.type='button';collapse.textContent=`${collapsedGroups.has(section.id)?'▸':'▾'} ${section.name}`;
+        collapse.setAttribute('aria-expanded',String(!collapsedGroups.has(section.id)));
+        collapse.onclick=()=>{if(collapsedGroups.has(section.id))collapsedGroups.delete(section.id);else collapsedGroups.add(section.id);reelDirty=true;refresh();};
+        header.appendChild(collapse);reel.appendChild(header);
+      }
+      if(collapsedGroups.has(section.id))continue;
+    for (const name of section.visible) {
+      const row = document.createElement('div'); row.className = 'cw-creator-lane' + (selectedBones.has(name) ? ' selected' : '');
       row.style.width = `${railWidth + 125}px`;
       const label = document.createElement('button'); label.type = 'button'; label.textContent = name; label.title = `Select ${name}`;
-      label.onclick = () => selectBone(name);
+      label.onclick = event => selectBone(name,event);
       const rail = document.createElement('div'); rail.className = 'cw-creator-lane-rail';
       addPlayhead(rail);
       rail.onclick = event => { if (event.target !== rail) return; seek(Math.round((event.clientX - rail.getBoundingClientRect().left) / rail.clientWidth * durationFrames)); };
@@ -525,13 +703,14 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
               pushUndo(); key.frame = destination; values.sort((a, b) => a.frame - b.frame);
               markDirty(); status.textContent = `Moved ${name} key to frame ${destination}.`;
             }
-            selectedBone = name; find.value = ''; fillBones(); attachBone(); frame = destination; reelDirty = true; pose();
+            selectBone(name); frame = destination; reelDirty = true; pose();
           };
           window.addEventListener('pointermove', move); window.addEventListener('pointerup', up, { once:true });
         };
         rail.appendChild(marker);
       }
       row.append(label, rail); reel.appendChild(row);
+    }
     }
   }
   function addPlayhead(rail) {
@@ -625,27 +804,36 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
   }
   panel.querySelector('.combat-label').onchange=event=>changeWindow('label',event.target.value.trim());
   panel.querySelector('.combat-hand').onchange=event=>changeWindow('hand',event.target.value);
-  function setKey(p, q, s = [1,1,1], record = true) {
-    if (record) pushUndo();
-    const at = Math.round(frame), track = tracks.get(selectedBone) || [];
+  function writeKey(name, p, q, s = [1,1,1], interpolation) {
+    const at = Math.round(frame), track = tracks.get(name) || [];
     const existing = track.findIndex(item => item.frame === at);
-    const key = { frame:at, p:p.map(rounded), q:q.toArray(), s:s.map(rounded), interpolation:existing >= 0 ? track[existing].interpolation || 'linear' : 'linear' };
+    const key = { frame:at, p:p.map(rounded), q:q.toArray(), s:s.map(rounded), interpolation:interpolation || (existing >= 0 ? track[existing].interpolation || 'linear' : 'linear') };
     if (existing >= 0) track[existing] = key; else track.push(key);
-    track.sort((a, b) => a.frame - b.frame); tracks.set(selectedBone, track);
-    markDirty(); if (existing < 0) reelDirty = true;
-    pose();
-    status.textContent = `Keyed ${selectedBone} at ${(at / fps).toFixed(2)} s.`;
+    track.sort((a, b) => a.frame - b.frame); tracks.set(name, track);
+    if (existing < 0) reelDirty = true;
+  }
+  function editSelection(edit, message='Updated selected bones.') {
+    pushUndo(); playing=false;
+    for(const name of selectedBones)edit(name);
+    markDirty(); reelDirty=true;pose();status.textContent=message;
   }
   inputs.forEach(input => input.onchange = () => {
     if (!Number.isFinite(Number(input.value))) { refresh(); return; }
     playing = false;
-    const values = currentValues();
-    const kind = input.dataset.kind;
-    values[kind][Number(input.dataset.axis)] = kind === 'scale'
+    const values = currentValues(),kind=input.dataset.kind,axis=Number(input.dataset.axis);
+    const next = kind === 'scale'
       ? clamp(Number(input.value), .05, 5)
       : clamp(Number(input.value), kind === 'rotation' ? -180 : -5, kind === 'rotation' ? 180 : 5);
-    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(...values.rotation.map(v => v * Math.PI / 180), 'XYZ'));
-    setKey(values.position, q, values.scale);
+    const change=next-values[kind][axis];
+    const edits=[...selectedBones].map(name=>{
+      const value=sample(name,frame),euler=new THREE.Euler().setFromQuaternion(value.q,'XYZ');
+      const channels={position:value.p.toArray(),rotation:[euler.x,euler.y,euler.z].map(v=>v*180/Math.PI),scale:value.s.toArray()};
+      channels[kind][axis]+=change;
+      return {name,...channels,q:new THREE.Quaternion().setFromEuler(new THREE.Euler(...channels.rotation.map(v=>v*Math.PI/180),'XYZ'))};
+    });
+    if(edits.some(value=>!value.position.every(v=>Math.abs(v)<=5)||!value.scale.every(v=>v>=.05&&v<=5))){refresh();status.textContent='One selected bone would exceed the position or scale limits.';return;}
+    pushUndo();for(const value of edits)writeKey(value.name,value.position,value.q,value.scale);
+    markDirty();pose();status.textContent=`Keyed ${selectedBones.size} selected bone(s).`;
   });
   find.oninput = fillBones;
   picker.onchange = () => selectBone(picker.value);
@@ -683,36 +871,29 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
   };
   play.onclick = () => { if (frame >= durationFrames) frame = 0;
     playing = !playing; last = performance.now(); if (active) pose(); else refresh(); };
-  panel.querySelector('.key').onclick = () => { const value = sample(selectedBone, frame); setKey(value.p.toArray(), value.q, value.s.toArray()); };
-  remove.onclick = () => { const track = tracks.get(selectedBone) || [];
-    if (!track.some(key => key.frame === Math.round(frame))) return;
-    pushUndo(); tracks.set(selectedBone, track.filter(key => key.frame !== Math.round(frame)));
-    markDirty(); reelDirty = true; pose(); status.textContent = 'Keyframe removed.'; };
+  panel.querySelector('.key').onclick = () => editSelection(name=>{const value=sample(name,frame);writeKey(name,value.p.toArray(),value.q,value.s.toArray());},`Keyed ${selectedBones.size} selected bone(s).`);
+  remove.onclick = () => editSelection(name=>{tracks.set(name,(tracks.get(name)||[]).filter(key=>key.frame!==Math.round(frame)));},'Selected keys removed.');
   panel.querySelector('.interpolation').onchange = event => {
-    const key = (tracks.get(selectedBone) || []).find(item => item.frame === Math.round(frame));
-    if (!key || key.interpolation === event.target.value) return;
-    pushUndo(); key.interpolation = event.target.value; markDirty(); reelDirty = true; pose();
+    const interpolation=event.target.value;
+    editSelection(name=>{const key=(tracks.get(name)||[]).find(item=>item.frame===Math.round(frame));if(key)key.interpolation=interpolation;});
   };
   panel.querySelector('.copy-key').onclick = () => {
-    const key = (tracks.get(selectedBone) || []).find(item => item.frame === Math.round(frame));
-    if (!key) return;
-    copiedKey = { p:[...key.p], q:[...key.q], s:[...(key.s || [1,1,1])], interpolation:key.interpolation || 'linear' };
-    refresh(); status.textContent = `Copied ${selectedBone} key at frame ${key.frame}. Select a bone/frame and paste.`;
+    copiedKey=[...selectedBones].flatMap(name=>{const key=(tracks.get(name)||[]).find(item=>item.frame===Math.round(frame));return key?[{bone:name,p:[...key.p],q:[...key.q],s:[...(key.s||[1,1,1])],interpolation:key.interpolation||'linear'}]:[];});
+    if(!copiedKey.length)copiedKey=null;
+    refresh(); status.textContent='Copied selected keys. Multiple keys paste back onto the same bones; a single key can paste onto another selection.';
   };
   panel.querySelector('.paste-key').onclick = () => {
     if (!copiedKey) return;
-    setKey([...copiedKey.p], new THREE.Quaternion(...copiedKey.q), [...copiedKey.s]);
-    const key = (tracks.get(selectedBone) || []).find(item => item.frame === Math.round(frame));
-    key.interpolation = copiedKey.interpolation;
-    reelDirty = true; refresh(); status.textContent = `Pasted key on ${selectedBone} at frame ${Math.round(frame)}.`;
+    pushUndo();
+    const values=copiedKey.length===1?[...selectedBones].map(bone=>({...copiedKey[0],bone})):copiedKey;
+    for(const key of values)writeKey(key.bone,key.p,new THREE.Quaternion(...key.q),key.s,key.interpolation);
+    markDirty();reelDirty=true;pose();status.textContent=`Pasted ${values.length} key(s).`;
   };
   panel.querySelector('.reset-bone').onclick = () => {
-    setKey([0,0,0], identity.clone(), [1,1,1]); status.textContent = `Keyed ${selectedBone} at its rest pose.`;
+    editSelection(name=>writeKey(name,[0,0,0],identity.clone(),[1,1,1]),'Keyed selected bones at their rest pose.');
   };
   panel.querySelector('.clear-track').onclick = () => {
-    if (!(tracks.get(selectedBone) || []).length) return;
-    pushUndo(); tracks.delete(selectedBone); markDirty(); reelDirty = true; pose();
-    status.textContent = `Cleared the ${selectedBone} track. Undo restores it.`;
+    editSelection(name=>tracks.delete(name),'Cleared selected tracks. Undo restores them.');
   };
   panel.querySelector('.undo').onclick = () => {
     if (!undoStack.length) return;
@@ -730,6 +911,7 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
     clipName = 'New animation'; clipDescription = ''; durationFrames = 60; frame = 0; playing = false; loop = true;
     dock.querySelector('.loop').checked = true;
     selectedBone = bones.has('Chest') ? 'Chest' : [...bones.keys()][0];
+    selectedBones=new Set([selectedBone]);boneGroups=[];selectedGroup='';collapsedGroups.clear();refreshGroups();
     panel.querySelector('.clip-name').value = clipName; panel.querySelector('.clip-description').value = '';
     length.value = '2'; find.value = ''; fillBones(); attachBone(); tool('translate');
     dirty = false; panel.querySelector('.draft-indicator').textContent = 'New draft';
@@ -742,6 +924,7 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
       ...(libraryDraftId ? {libraryDraftId} : {}),
       sourceAnimationPackage, combatTiming:{schema:'batcomputer.combat-timing.v1',previewOnly:true,windows:combatWindows.map(item=>({...item}))},
       voiceCues:{schema:'batcomputer.voice-cues.v1',cues:voiceCues.map(item=>({...item}))},
+      boneGroups:{schema:'batcomputer.bone-groups.v1',groups:boneGroups.map(group=>({...group,bones:[...group.bones]}))},
       tracks:[...tracks].filter(([, keys]) => keys.length).map(([bone, keys]) => ({ bone, keys })) };
   }
   panel.querySelector('.save').onclick = () => {
@@ -761,6 +944,7 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
   };
   panel.querySelector('.load').onclick = () => file.click();
   async function openDraft(draft, fallbackName='Imported animation') {
+      const importedGroups=validateGroups(draft.boneGroups);
       const importedCombat=validateCombat(draft.combatTiming,draft.durationFrames);
       const importedVoice=validateVoice(draft.voiceCues,draft.durationFrames);
       if(draft.loop!==undefined&&typeof draft.loop!=='boolean')throw new Error('Invalid loop setting.');
@@ -791,6 +975,7 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
       }
       if (dirty && !window.confirm('Replace the unsaved animation draft with this file?')) return false;
       tracks.clear(); imported.forEach((keys, bone) => tracks.set(bone, keys));
+      boneGroups=importedGroups;selectedGroup='';collapsedGroups.clear();refreshGroups();
       combatWindows=importedCombat;selectedWindow=combatWindows[0]?.id||'';sourceAnimationPackage=typeof draft.sourceAnimationPackage==='string'?draft.sourceAnimationPackage:'';
       voiceCues=importedVoice;selectedVoice=voiceCues[0]?.id||'';
       durationFrames = draft.durationFrames; length.value = String(durationFrames / fps); frame = 0; playing = false;
@@ -803,10 +988,22 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
       draftGeneration++;
       libraryDraftId = typeof draft.libraryDraftId === 'string' ? draft.libraryDraftId : '';
       undoStack.length = 0; redoStack.length = 0; refreshHistory(); reelDirty = true;
-      selectedBone = draft.tracks[0]?.bone || selectedBone; find.value = ''; fillBones();
+      selectedBone = draft.tracks[0]?.bone || selectedBone;selectedBones=new Set([selectedBone]); find.value = ''; fillBones();
       if (active) { pose(); attachBone(); } else refresh();
       status.textContent = `Loaded ${imported.size} bone track(s). Draft only; no game assets changed.`;
       return true;
+  }
+  function validateGroups(value) {
+    if(value===undefined)return [];
+    if(value?.schema!=='batcomputer.bone-groups.v1'||!Array.isArray(value.groups)||value.groups.length>32)throw new Error('Invalid bone groups.');
+    const ids=new Set(),members=new Set();
+    return value.groups.map(group=>{
+      if(typeof group.id!=='string'||!/^[a-zA-Z0-9_-]{1,64}$/.test(group.id)||ids.has(group.id)||typeof group.name!=='string'||!group.name.trim()||group.name.length>48||!Array.isArray(group.bones)||group.bones.length>bones.size)
+        throw new Error('Groups need unique IDs, a name, and native bone names.');
+      ids.add(group.id);
+      for(const name of group.bones){if(!bones.has(name)||members.has(name))throw new Error('A bone can belong to only one group.');members.add(name);}
+      return {id:group.id,name:group.name.trim(),bones:[...group.bones]};
+    });
   }
   file.onchange = async () => {
     try { if(!file.files?.length)return;if(file.files[0].size>2000000)throw new Error('Draft must be smaller than 2 MB.');
@@ -825,6 +1022,7 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
       if (key === 'z') { event.preventDefault(); panel.querySelector(event.shiftKey ? '.redo' : '.undo').click(); }
       else if (key === 'y') { event.preventDefault(); panel.querySelector('.redo').click(); }
       else if (key === 's') { event.preventDefault(); panel.querySelector(panel.querySelector('.library-save').disabled ? '.save' : '.library-save').click(); }
+      else if (key === 'a') { event.preventDefault(); panel.querySelector('.select-all-bones').click(); }
       return;
     }
     if (key === ' ') { event.preventDefault(); play.click(); }
@@ -842,8 +1040,9 @@ window.BatcomputerCharacterAnimationCreator = function ({ THREE, scene, camera, 
   };
   window.addEventListener('keydown', keydown);
   window.addEventListener('pagehide', () => window.removeEventListener('keydown', keydown), { once:true });
-  fillBones(); refreshHistory(); refreshLibrary();
+  refreshGroups();fillBones(); refreshHistory(); refreshLibrary();fillSources();
   return { panel, dock, gizmo,
+    sourceImported,
     async openLibraryDraft(id) { const entry = libraryEntries.find(item => item.id === id); if (!entry) return;
       libraryPicker.value = id; await panel.querySelector('.library-open').onclick(); },
     librarySaved(id, entries, error) {

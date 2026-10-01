@@ -121,6 +121,8 @@
 #character-workshop .cw-creator-lane>button{background:none;border:0;border-radius:0;padding:4px 5px;color:var(--cw-muted);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cw-creator-lane>button{position:sticky;left:0;z-index:1;background:#202a36!important}
 .cw-creator-lane.selected{background:#ffda430d}.cw-creator-lane.selected>button{color:var(--cw-gold)!important}
+.cw-creator-group-header{position:sticky;left:0;background:#273342;border-bottom:1px solid #536173;padding:3px 6px}
+#character-workshop .cw-creator-group-header button{background:none;border:0;color:var(--cw-gold);font-size:11px;text-align:left}
 .cw-creator-lane-rail{height:24px;position:relative;cursor:crosshair;background:repeating-linear-gradient(90deg,#ffffff10 0 1px,transparent 1px 10%)}
 .cw-creator-playhead{position:absolute;z-index:1;top:0;bottom:0;width:1px;background:#fff7c4b0;pointer-events:none}
 #character-workshop .cw-key-marker{position:absolute;top:6px;width:12px;height:12px;min-width:0;padding:0;border:1px solid #fff2a0;border-radius:2px;background:var(--cw-gold);transform:translateX(-50%) rotate(45deg);box-shadow:0 0 6px #0008}
