@@ -7,6 +7,30 @@ internal static class CharacterVoiceRegressionChecks
 {
     internal static IEnumerable<(bool Passed, string Description)> Run()
     {
+        var definition = CustomCharacterProjectService.CreateRecipe(null, "Example hero", "ExampleHero", "ExampleHero");
+        var suit = CustomCharacterProjectService.CreateRecipe(definition, "Example suit", "ExampleHero", "Blue", definition.SlotId);
+        var baseVoice = new CharacterVoiceLibraryService.Profile { CharacterId = definition.SlotId };
+        var suitVoice = new CharacterVoiceLibraryService.Profile { CharacterId = suit.SlotId };
+        yield return (CharacterVoiceBuildService.BuildIdentity(definition, baseVoice, null) == CharacterVoiceBuildService.BuildIdentity(suit, baseVoice, definition) &&
+            CharacterVoiceBuildService.BuildIdentity(suit, suitVoice, null) != CharacterVoiceBuildService.BuildIdentity(definition, baseVoice, null) &&
+            Reject(() => CharacterVoiceBuildService.BuildIdentity(suit, baseVoice, null)),
+            "inherited voice profiles reuse their character's private actor, media and routing identity; explicit suit voice profiles remain isolated and missing definitions fail closed");
+        var wem=new byte[102];"RIFF"u8.CopyTo(wem);BitConverter.GetBytes(94).CopyTo(wem,4);"WAVEfmt "u8.CopyTo(wem.AsSpan(8));
+        BitConverter.GetBytes(66).CopyTo(wem,16);BitConverter.GetBytes((ushort)65535).CopyTo(wem,20);BitConverter.GetBytes((ushort)1).CopyTo(wem,22);
+        BitConverter.GetBytes(48000).CopyTo(wem,24);BitConverter.GetBytes(6).CopyTo(wem,64);BitConverter.GetBytes(0x20cef588).CopyTo(wem,80);wem[84]=8;wem[85]=11;
+        "data"u8.CopyTo(wem.AsSpan(86));BitConverter.GetBytes(8).CopyTo(wem,90);BitConverter.GetBytes((ushort)4).CopyTo(wem,94);wem[96]=1;wem[100]=42;
+        var normalized=PrivateWemSetupService.Normalize(wem);var alternate=wem.ToArray();alternate[96]=2;var other=PrivateWemSetupService.Normalize(alternate);
+        var differentAudio=wem.ToArray();differentAudio[100]=43;
+        yield return (!normalized.AsSpan(80,4).SequenceEqual(other.AsSpan(80,4)) &&
+            normalized.AsSpan(80,4).SequenceEqual(PrivateWemSetupService.Normalize(differentAudio).AsSpan(80,4)),
+            "private Vorbis media separates different decoder setups while identical setups share a stable identity");
+        yield return (normalized.SequenceEqual(PrivateWemSetupService.Normalize(normalized)) &&
+            Enumerable.Range(0,wem.Length).Where(i=>i<80||i>=84).All(i=>wem[i]==normalized[i]) && wem[80]==0x88,
+            "private WEM normalization is idempotent and changes only four setup-identity bytes; input and audio packets stay untouched");
+        var malformed=wem.ToArray();BitConverter.GetBytes(200).CopyTo(malformed,64);
+        var pcm=wem.ToArray();BitConverter.GetBytes((ushort)1).CopyTo(pcm,20);
+        yield return (Reject(()=>PrivateWemSetupService.Normalize(malformed))&&Reject(()=>PrivateWemSetupService.Normalize(wem[..^1]))&&
+            PrivateWemSetupService.Normalize(pcm).SequenceEqual(pcm),"private audio rejects invalid setup offsets and truncated RIFFs, without rewriting other codecs");
         var data=JArray.Parse("""[{"Sequence":{"InnerSequence":[{"Character":"ExampleHero","WemName":"Greeting_A"},{"Character":"Default","WemName":"Effort_A"},{"Character":"Partner","WemName":"Reply_A"}]}}]""");
         var lines=CharacterVoiceCatalogService.ParseLines(data,"/Game/Wub/DialogueEvents/Test","DX_CHR_EnterGame","ExampleHero");
         yield return (lines.Length==3&&lines[0].OwnSpeaker&&lines[1].OwnSpeaker&&!lines[2].OwnSpeaker&&lines.Select(l=>l.Id).Distinct().Count()==3,

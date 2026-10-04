@@ -478,7 +478,7 @@ public static class AbilityLoadoutService
         ProtectedCoreNames.Contains(UnrealPathUtil.AssetName(UnrealPathUtil.NormalizePackagePath(packagePath)));
 
     public static bool HasCustomizations(NativeSuitProject? project) =>
-        project?.AbilityLoadout is { } profile && (profile.HeldItemToggle is not null || profile.AbilitySets.Count > 0 || HeldItemService.Resolve(profile).Count > 0 || profile.NativeHeldItems.Count > 0 || profile.AnimationSpawnedItems.Count > 0 || !string.IsNullOrWhiteSpace(profile.FightingStyleId));
+        project?.AbilityLoadout is { } profile && (CharacterUtilityService.Enabled(profile.Utilities) || profile.HeldItemToggle is not null || profile.AbilitySets.Count > 0 || HeldItemService.Resolve(profile).Count > 0 || profile.NativeHeldItems.Count > 0 || profile.AnimationSpawnedItems.Count > 0 || !string.IsNullOrWhiteSpace(profile.FightingStyleId));
 
     public static string Fingerprint(IEnumerable<string> orderedPackages)
     {
@@ -506,6 +506,7 @@ public static class AbilityLoadoutService
             profile.NativeHeldItems.Count > 0 ? "native-held-visuals-v1|" + System.Text.Json.JsonSerializer.Serialize(profile.NativeHeldItems) : "",
             profile.AnimationSpawnedItems.Count > 0 ? "animation-item-visuals-v1|" + System.Text.Json.JsonSerializer.Serialize(profile.AnimationSpawnedItems) : "",
             profile.HeldItemToggle is not null ? "held-item-toggle-v1|" + System.Text.Json.JsonSerializer.Serialize(profile.HeldItemToggle) : "",
+            CharacterUtilityService.Enabled(profile.Utilities) ? "character-utilities-v1|" + System.Text.Json.JsonSerializer.Serialize(profile.Utilities) : "",
             SwordCombatService.Enabled(profile) && MeleeStatusEffectService.Enabled(profile.SwordCombat?.HitStatus) ? "hit-status-v1" : "",
         };
         lines.AddRange((profile.DonorAbilitySetPackages ?? new List<string>())

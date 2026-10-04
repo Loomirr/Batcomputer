@@ -98,7 +98,14 @@ internal static class CharacterRebaseService
         if (takeCharacter.Count == 0) return Compose(owner, suit, suit, takeCharacter);
         // Native base and library-animation references carry no editable visual sources. A
         // movement-only refresh must not recook textures or require an unrelated missing OBJ.
-        if (takeCharacter.All(id => id is "base" or "animations")) return Compose(owner, suit, owner, takeCharacter);
+        if (takeCharacter.All(id => id is "base" or "animations"))
+        {
+            var identity = suit.CustomCharacter!;
+            var animationCopy = CustomCharacterProjectService.CreateRecipe(owner, suit.DisplayName, identity.CharacterId, identity.VariantId, owner.SlotId);
+            animationCopy.TargetPackages = JsonSerializer.Deserialize<TargetPackages>(JsonSerializer.Serialize(suit.TargetPackages))!;
+            CustomCharacterProjectService.PreserveAnimationReferences(owner, animationCopy);
+            return Compose(owner, suit, animationCopy, takeCharacter);
+        }
         var child = suit.CustomCharacter!;
         var copied = CustomCharacterProjectService.CreateRecipe(owner, suit.DisplayName, child.CharacterId, child.VariantId, owner.SlotId);
         // Repeated rebases must never overwrite a suit's editable meshes/materials. Every refresh

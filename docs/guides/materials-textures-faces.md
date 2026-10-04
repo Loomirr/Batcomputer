@@ -37,6 +37,19 @@ stops instead of trying to invent the lost values.
 A blank override inherits the donor value. **Set None** writes an intentional null/disabled value
 where the template supports it; it is different from leaving the override blank.
 
+In Material Forge, **Surface / UV…** reads supported inherited global scalar controls from the actual
+native parent. This can expose fabric/detail strength and tiling controls not authored on the
+selected child instance. **Reduce cape fuzz** sets exposed `Fuzz Strength`, `Fluffball Strength`
+and `Hair Card Intensity` overrides to zero without changing opacity, textures or UV scale.
+Generate, assign, save and rebuild to use these changes; check the result in-game. The cloth
+preview remains an approximation of the native shader, not a guarantee of identical fibers.
+
+A UV-channel selector appears only when the base shader exposes a real scalar selector. Otherwise
+UV routing is fixed in its compiled shader (the native EoM cape uses UV0). Texture tiling is not a
+UV-channel selector. **Part UV set · preview only** in the 3D viewer is diagnostic and does not
+change in-game material routing. For a fixed-UV shader, author the mesh's required UV set or use
+a compatible shader; editing texture-streaming metadata alone does not change its coordinates.
+
 While copying or editing a material, right-click one of its texture parameter rows and choose
 **Extract texture…** to save the referenced cooked texture as a PNG. Right-clicking the override
 column extracts the override first and also keeps the inherited donor texture available as a
@@ -291,7 +304,7 @@ The four UIMD icon fields do not all use the same size:
 
 To make a starting image from the assembled character, open its **3D viewer → Icon studio**.
 Choose **Suit tile** for the torso image or one of the three portrait layouts, adjust framing,
-and **Save PNG**. The studio enlarges the tile to fill its preview; use **Actual pixels** to check
+and **Create selected PNG…**. The studio enlarges the tile to fill its preview; use **Actual pixels** to check
 the native 256px sharpness. Enlarging it in another image viewer will also make those pixels look soft. The export
 renders above the target size and downsamples for cleaner edges, but the native suit-selector
 texture is still 256px. Import the saved PNG in **Textures** with the matching icon type and
@@ -303,11 +316,28 @@ For a saved suit, **Test suit icon cook** in Icon studio sends the current **Sui
 through the verified native 256px BC7 cooker and writes the PNG and cooked texture to a separate
 `Runtime/IconTests` folder. The result appears in the studio and log. This is a dry run: it does
 not add a texture to the suit, change any of its four icon paths, package a mod, or touch the game.
-When you are ready to keep it, choose **Use as suit icon** and confirm the project name and
-existing icon. Batcomputer cooks a new generated texture and assigns only the suit-selector icon
-in the saved project. The previous icon and its recipe remain available. You still need to build
-and install the mod to see the change in-game. **Save PNG** remains available for manual editing
-and import. Try the assignment on a duplicate suit first if you are comparing designs.
+When you are ready to keep a render, choose **Create and assign selected icon**. This works for
+any selected layout. **Create and assign all character icons** renders Menu, Left slot,
+Right slot and Suit using their native sizes. Each slot keeps its own camera framing;
+zoom, pan, height, angle and lens controls affect only the selected slot. The left/right slot
+names identify the game's destinations, not the direction the portrait faces. Assignment uses
+the correct opposing camera views without mirroring the character's textures.
+One confirmation applies the complete set: all requested cooks must succeed before assignments
+are saved. Previous icons and their recipes remain available. Rebuild and install the mod to see
+the change in-game. **Create selected PNG…** remains available for manual editing and import.
+All four renders use the same captured pose. **Refresh captured pose** takes a new snapshot from
+the viewer. **Blue rim**, **Warm rim** and **White / key strength** control shared lighting independently. Camera reset
+affects only the selected slot; lighting has its own reset. Defaults use all four keyed template
+cameras, including the suit camera's torso height, distance and lens. The template's light
+positions, colours, world brightness, exposure, gamma and PBR Neutral response are used in
+the studio. Emitter powers are balanced on a consistent WebGL scale so the warm light does not
+overwhelm blue and white lighting. Materials and shadows can still differ from Blender's render.
+
+Open **Share a studio template** to name and **Export settings JSON…**. Share that
+`.icon-studio.json` file, then use **Import settings JSON…** in another studio. It contains
+the four cameras' adjustments and shared lighting only—not character assets, PNGs or project
+paths. Import changes the preview, not assigned icons. Unsupported or invalid files leave
+the current settings unchanged. Create and assign the icons when the imported preview is ready.
 
 Batcomputer keeps both choices available, but the icon assignment window only offers a generated
 texture to a field with the matching role. Old experimental BC7/DXT5 outputs may look plausible in

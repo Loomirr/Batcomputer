@@ -28,19 +28,32 @@ public sealed class AbilityLoadoutProfile
     public List<AnimationSpawnedItemEdit> AnimationSpawnedItems { get; set; } = [];
     // Optional user-owned cooked behavior. No imported content is bundled with the application.
     public HeldItemToggleProfile? HeldItemToggle { get; set; }
+    public CharacterUtilitySettings? Utilities { get; set; }
     public bool AllowUnsafeCoreEdits { get; set; }
     public List<AbilitySetSelection> AbilitySets { get; set; } = new();
+}
+
+/// <summary>Replayable character-local native utility abilities; no shared game assets are edited.</summary>
+public sealed class CharacterUtilitySettings
+{
+    public bool Tracking { get; set; }
+    public bool Healing { get; set; }
+    public float HealingPercentPerSecond { get; set; } = 2;
 }
 
 public sealed class HeldItemToggleProfile
 {
     public bool Enabled { get; set; } = true;
     public int Version { get; set; } = 1;
+    // Priority bundles defer their toggle and yield to the native takedown ability.
+    public bool PreserveNativeTakedown { get; set; }
     public string ItemId { get; set; } = "";
     public string SourceOwner { get; set; } = "";
     public string SourceRequestTag { get; set; } = "";
     public string SourceBusyTag { get; set; } = "";
     public string SourceContextTag { get; set; } = "";
+    /// <summary>Version 3: actor-local event dispatched by the persistent native input responder.</summary>
+    public string SourceInputEventTag { get; set; } = "";
     public string ReplacedAbility { get; set; } = "";
     public string RemovedFailureAbility { get; set; } = "";
     public string ManagerPackage { get; set; } = "";
@@ -49,6 +62,9 @@ public sealed class HeldItemToggleProfile
     public string WalkPackage { get; set; } = "";
     public string RunPackage { get; set; } = "";
     public string SprintPackage { get; set; } = "";
+    // Exact armed -> sheathed pairs. Private replacements travel in Assets;
+    // native replacements are read-only references, never global edits.
+    public Dictionary<string, string> SheathedAnimationReplacements { get; set; } = new(StringComparer.Ordinal);
     public List<HeldItemToggleAsset> Assets { get; set; } = [];
     public List<HeldItemToggleMedia> Media { get; set; } = [];
 }

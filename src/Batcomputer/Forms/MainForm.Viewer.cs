@@ -172,6 +172,7 @@ public sealed partial class MainForm
         _viewer.PlacementSaveRequested += (_, args) => SaveViewerPlacement(args);
         _viewer.SuitIconTestRequested += (_, args) => _ = TestViewerSuitIconAsync(args);
         _viewer.SuitIconApplyRequested += (_, args) => _ = ApplyViewerSuitIconAsync(args);
+        _viewer.CharacterIconsApplyRequested += (_, args) => _ = ApplyViewerCharacterIconsAsync(args);
         _viewer.AnimationPackageImportRequested += ImportCustomAnimationsFromPakAsync;
         right.Controls.Add(_viewer, 0, 0);
 
@@ -273,10 +274,9 @@ public sealed partial class MainForm
             var templateJson = TextureCookTemplateService.TemplateJsonPath(
                 projectRoot, TextureCookTemplateService.NativeSuitIconTemplateFolder);
             var requestedName = $"SuitIconStudio_{Guid.NewGuid():N}";
+            if (ReferenceEquals(project, _currentProject)) ReadFieldsIntoProject(project);
             var slotIndex = NextTextureSlotIndex(project);
-            var modFolder = project.IconSuit.Split('/', StringSplitOptions.RemoveEmptyEntries) is var iconSegments &&
-                            iconSegments.Length >= 3 && iconSegments[0] == "Game" && iconSegments[1] == "Mods"
-                ? iconSegments[2] : project.SlotId;
+            var modFolder = CharacterIconAssignmentService.TextureModFolder(project);
             var packagePath = TexturePackagePathFromUserName(templateJson, requestedName, slotIndex,
                 modFolder, project.SlotId, "Suit selector icon");
             if (project.GeneratedTextures.Any(entry =>
@@ -304,16 +304,9 @@ public sealed partial class MainForm
                     texture.PackagePath.Equals(entry.PackagePath, StringComparison.OrdinalIgnoreCase)))
                 throw new InvalidOperationException("The cooked icon path conflicts with an existing texture. Nothing was assigned.");
 
-            var oldIcon = project.IconSuit;
-            project.GeneratedTextures.Add(entry);
-            project.IconSuit = entry.PackagePath;
-            try { new SuitProjectService(projectRoot).SaveProject(project); }
-            catch
-            {
-                project.IconSuit = oldIcon;
-                project.GeneratedTextures.Remove(entry);
-                throw;
-            }
+            CharacterIconAssignmentService.AssignAndSave(project,
+                new Dictionary<string, GeneratedTextureEntry> { ["suit"] = entry },
+                () => new SuitProjectService(projectRoot).SaveProject(project));
 
             AppendLog($"Suit icon assigned: {project.DisplayName} — {entry.PackagePath} ({cooked.Cook.Width}x{cooked.Cook.Height} {cooked.Cook.PixelFormat}, {cooked.Cook.MipCount} mips).");
             AppendLog("Previous icon retained: " + priorIcon);

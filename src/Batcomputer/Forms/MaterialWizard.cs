@@ -237,7 +237,14 @@ public sealed partial class MaterialWizard : AdaptiveForm
             Left = padding, Top = 314, Width = innerWidth, Height = 210,
             BackColor = Theme.CardBg, BorderColor = Theme.LineSoft, CornerRadius = Theme.RadiusSm
         };
-        _parametersCard.Controls.Add(MakeFieldLabel("MATERIAL PARAMETERS", 14, 13, innerWidth - 28));
+        _parametersCard.Controls.Add(MakeFieldLabel("MATERIAL PARAMETERS", 14, 13, innerWidth - 300));
+        var surfaceControls = new Button { Text = "Surface / UV…", Left = innerWidth - 274, Top = 6, Width = 132, Height = 28, Anchor = AnchorStyles.Top | AnchorStyles.Right };
+        Theme.StyleDarkButton(surfaceControls);
+        surfaceControls.Click += async (_, _) => await ReadSurfaceControlsAsync();
+        _toolTips.SetToolTip(surfaceControls, "Expose inherited native fabric/detail controls and UV selectors only where the base shader supports them.");
+        var reduceFuzz = new Button { Text = "Reduce cape fuzz", Left = innerWidth - 138, Top = 6, Width = 124, Height = 28, Anchor = AnchorStyles.Top | AnchorStyles.Right };
+        Theme.StyleDarkButton(reduceFuzz); reduceFuzz.Click += (_, _) => ReduceCapeFuzz();
+        _parametersCard.Controls.Add(surfaceControls); _parametersCard.Controls.Add(reduceFuzz);
         _grid.SetBounds(14, 37, innerWidth - 28, 148);
         StyleParameterGrid();
         _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Kind", HeaderText = "Type", ReadOnly = true, Width = 70 });

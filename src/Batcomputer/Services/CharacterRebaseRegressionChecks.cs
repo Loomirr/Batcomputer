@@ -71,6 +71,13 @@ internal static class CharacterRebaseRegressionChecks
         var animationOnly = CharacterRebaseService.Prepare(owner, suit, new HashSet<string> { "animations" }, service, _ => { });
         yield return (animationOnly.AnimationSlotOverrides[0].ReplacementPackage == owner.AnimationSlotOverrides[0].ReplacementPackage,
             "animation-only rebases do not recook visual assets or require unrelated missing model sources");
+        owner.GameplayAnimationGraphs = [new() { Id = new string('a',32), Name = "Example movement", OwnerDprdPackage = "/Game/Mods/CC_Example_Example/Characters/DA_DPRD_CC_Example_Example",
+            Abilities = [new() { OriginalPackage = "/Game/Characters/GA_Jump", ReplacementPackage = "/Game/Mods/ExampleMovement/GA_ChargedJump" }] }];
+        var refreshed = CharacterRebaseService.Prepare(owner, suit, new HashSet<string> { "animations" }, service, _ => { });
+        yield return (refreshed.GameplayAnimationGraphs[0].Id == owner.GameplayAnimationGraphs[0].Id &&
+            refreshed.GameplayAnimationGraphs[0].Abilities[0].ReplacementPackage == owner.GameplayAnimationGraphs[0].Abilities[0].ReplacementPackage &&
+            refreshed.GameplayAnimationGraphs[0].OwnerDprdPackage == "/Game/Mods/CC_Example_Alternate/Characters/DA_DPRD_CC_Example_Alternate",
+            "animation-only rebase shares immutable cached assets while wiring the receiving suit's own DPRD");
     }
     private static bool Reject(Action action) { try { action(); return false; } catch (InvalidDataException) { return true; } }
 }

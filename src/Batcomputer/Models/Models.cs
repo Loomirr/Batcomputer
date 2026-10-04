@@ -154,6 +154,8 @@ public sealed class RecommendedDonorPlan
 
 public sealed class NativeSuitProject
 {
+    // Disposable combined-build context, never persisted in an authoring recipe.
+    internal IReadOnlyDictionary<string, string> ReleaseAssetAliases { get; set; } = new Dictionary<string, string>();
     // Null is a normal suit for a native character. A definition is the new character's
     // default suit; a child keeps an explicit reference to that saved definition.
     public CustomCharacterIdentity? CustomCharacter { get; set; }
@@ -299,6 +301,9 @@ public sealed class GameplayAnimationGraphSelection
     public string Name { get; set; } = "";
     public string OwnerDprdPackage { get; set; } = "";
     public List<GameplayAnimationAbilityBinding> Abilities { get; set; } = new();
+    // Explicit helper grants already present in AbilityLoadout. Their cooked cache identities
+    // must remain immutable when a receiving suit's own asset namespace is rebased.
+    public List<string> SupportAbilityPackages { get; set; } = new();
 }
 
 public sealed class GameplayAnimationAbilityBinding

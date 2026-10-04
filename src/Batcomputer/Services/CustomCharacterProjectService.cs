@@ -149,6 +149,7 @@ public static class CustomCharacterProjectService
         {
             target.GameplayAnimationGraphs[i].Id = copy.GameplayAnimationGraphs[i].Id;
             target.GameplayAnimationGraphs[i].Abilities = copy.GameplayAnimationGraphs[i].Abilities;
+            target.GameplayAnimationGraphs[i].SupportAbilityPackages = copy.GameplayAnimationGraphs[i].SupportAbilityPackages;
             var mod = target.TargetPackages.Playable.Split('/').ElementAtOrDefault(3) ?? "";
             target.GameplayAnimationGraphs[i].OwnerDprdPackage = $"/Game/Mods/{mod}/Characters/DA_DPRD_{mod}";
         }
@@ -160,6 +161,20 @@ public static class CustomCharacterProjectService
             // Embedded cooked sources retain immutable identities. Runtime packages/tags are
             // regenerated for each receiving suit; do not rewrite the source manifest itself.
             loadout.HeldItemToggle = sourceLoadout.HeldItemToggle;
+            var support = copy.GameplayAnimationGraphs.SelectMany(g => g.SupportAbilityPackages).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            // Both callers pass a full recipe copy. Rebase also rewrites its authoring sources
+            // beneath a revision folder, so matching only the receiving mod root is insufficient.
+            // Restore by the unchanged grant positions, never by a possibly ambiguous leaf name.
+            if (support.Count > 0)
+            {
+                if (loadout.AbilitySets.Count != sourceLoadout.AbilitySets.Count ||
+                    loadout.AbilitySets.Where((s, i) => s.AddedGameplayAbilities.Count != sourceLoadout.AbilitySets[i].AddedGameplayAbilities.Count).Any())
+                    throw new InvalidDataException("Cannot preserve cached helper identities in a structurally different ability loadout.");
+                for (int i = 0; i < sourceLoadout.AbilitySets.Count; i++)
+                for (int j = 0; j < sourceLoadout.AbilitySets[i].AddedGameplayAbilities.Count; j++)
+                    if (support.Contains(sourceLoadout.AbilitySets[i].AddedGameplayAbilities[j].PackagePath))
+                        loadout.AbilitySets[i].AddedGameplayAbilities[j].PackagePath = sourceLoadout.AbilitySets[i].AddedGameplayAbilities[j].PackagePath;
+            }
             for (int i = 0; i < loadout.AnimationSpawnedItems.Count; i++)
                 loadout.AnimationSpawnedItems[i].AnimationPackage = sourceLoadout.AnimationSpawnedItems[i].AnimationPackage;
         }

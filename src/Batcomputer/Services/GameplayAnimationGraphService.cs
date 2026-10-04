@@ -20,6 +20,9 @@ internal static class GameplayAnimationGraphService
     internal static string CacheRoot(string workspace) => Path.Combine(AppSettings.GeneratedRootFor(workspace), "GameplayAnimationGraphs");
     internal static bool ValidPrivatePackage(string package) => HeldItemService.ValidPackage(package) &&
         package.StartsWith("/Game/Mods/", StringComparison.Ordinal) && package.Split('/').Length >= 6;
+    internal static bool SupportedPayloadClass(string className) => className is
+        "AnimSequence" or "AnimMontage" or "GameplayTagStateMachineDataAsset" or
+        "BlueprintGeneratedClass" or "WidgetBlueprintGeneratedClass";
     private static string FileFor(string root, string package)
     {
         if (!ValidPrivatePackage(package)) throw new InvalidDataException("Animation graph outputs must be private /Game/Mods packages.");
@@ -30,9 +33,11 @@ internal static class GameplayAnimationGraphService
     internal static void ValidateSelection(GameplayAnimationGraphSelection selection)
     {
         if (!Regex.IsMatch(selection.Id, "^[a-f0-9]{32}$") || !ValidPrivatePackage(selection.OwnerDprdPackage) ||
-            selection.Abilities.Count == 0 || selection.Abilities.Select(b => b.OriginalPackage).Distinct(StringComparer.OrdinalIgnoreCase).Count() != selection.Abilities.Count ||
+            (selection.Abilities.Count == 0 && selection.SupportAbilityPackages.Count == 0) || selection.Abilities.Select(b => b.OriginalPackage).Distinct(StringComparer.OrdinalIgnoreCase).Count() != selection.Abilities.Count ||
             selection.Abilities.Select(b => b.ReplacementPackage).Distinct(StringComparer.OrdinalIgnoreCase).Count() != selection.Abilities.Count ||
-            selection.Abilities.Any(b => !HeldItemService.ValidPackage(b.OriginalPackage) || !ValidPrivatePackage(b.ReplacementPackage) || b.OriginalPackage == b.ReplacementPackage))
+            selection.Abilities.Any(b => !HeldItemService.ValidPackage(b.OriginalPackage) || !ValidPrivatePackage(b.ReplacementPackage) || b.OriginalPackage == b.ReplacementPackage) ||
+            selection.SupportAbilityPackages.Count > 32 || selection.SupportAbilityPackages.Any(p => !ValidPrivatePackage(p)) ||
+            selection.SupportAbilityPackages.Distinct(StringComparer.OrdinalIgnoreCase).Count() != selection.SupportAbilityPackages.Count)
             throw new InvalidDataException("Invalid or conflicting gameplay animation graph bindings.");
     }
     internal static Manifest Import(string workspace, string name, string sourceContent, IEnumerable<string> packagePaths)
@@ -59,7 +64,7 @@ internal static class GameplayAnimationGraphService
             }
             var asset = new UAsset(cached, EngineVersion.VER_UE5_6, maps, CustomSerializationFlags.SkipPreloadDependencyLoading);
             var classes = asset.Exports.Select(e => e.GetExportClassType()?.ToString() ?? "").ToArray();
-            if (!classes.Any(c => c is "AnimSequence" or "AnimMontage" or "GameplayTagStateMachineDataAsset" or "BlueprintGeneratedClass"))
+            if (!classes.Any(SupportedPayloadClass))
                 throw new InvalidDataException("Unsupported animation graph payload: " + package);
             if (asset.Imports.Any(i => i.ObjectName.ToString() is "UnknownPackage" or "UnknownExport")) throw new InvalidDataException("Unresolved cooked graph import: " + package);
             var dependencies = asset.Imports.Where(i => i.OuterIndex.IsNull()).Select(i => i.ObjectName.ToString()).Where(p => p.StartsWith('/')).Distinct().ToArray();
@@ -82,6 +87,8 @@ internal static class GameplayAnimationGraphService
             throw new InvalidDataException("Invalid cached animation graph manifest.");
         foreach (var binding in selection.Abilities)
             if (!manifest.Packages.Any(p => p.Package == binding.ReplacementPackage)) throw new InvalidDataException("Replacement ability is absent from its saved animation graph.");
+        foreach (var support in selection.SupportAbilityPackages)
+            if (!manifest.Packages.Any(p => p.Package == support)) throw new InvalidDataException("Support ability is absent from its saved animation graph.");
         foreach (var dependency in manifest.Packages.SelectMany(p => p.Dependencies).Where(p => p.StartsWith("/Game/Mods/", StringComparison.Ordinal)))
             if (!manifest.Packages.Any(p => p.Package.Equals(dependency, StringComparison.OrdinalIgnoreCase))) throw new InvalidDataException("Cached animation graph is missing a private dependency: " + dependency);
         foreach (var package in manifest.Packages)
@@ -211,17 +218,26 @@ internal static class GameplayAnimationGraphService
                     throw new InvalidDataException("Staged gameplay animation graph differs from its saved cache.");
             var sets=mutation.InspectDprdAbilitySets(FileFor(contentRoot,selection.OwnerDprdPackage));
             if(!sets.Success)throw new InvalidDataException(sets.Error);
+            var allGrants = new List<string>();
             foreach(var set in sets.AbilitySets)
             {
                 var grants = ReadGrants(context.Read(set.PackagePath));
+                allGrants.AddRange(grants);
                 if(grants.Any(g=>selection.Abilities.Any(b=>b.OriginalPackage==g)))
                     throw new InvalidDataException("A saved gameplay animation graph was staged but its original ability is still active.");
             }
+            foreach (var support in selection.SupportAbilityPackages)
+                if (allGrants.Count(g => g.Equals(support, StringComparison.OrdinalIgnoreCase)) != 1)
+                    throw new InvalidDataException("A saved gameplay graph support ability must be granted exactly once in its staged owner DPRD.");
         }
     }
     internal static void ValidateSelections(NativeSuitProject project)
     {
         foreach (var selection in project.GameplayAnimationGraphs) ValidateSelection(selection);
+        var added = project.AbilityLoadout?.AbilitySets.Where(s => s.Enabled).SelectMany(s => s.AddedGameplayAbilities).Select(g => g.PackagePath).ToArray() ?? [];
+        foreach (var support in project.GameplayAnimationGraphs.SelectMany(g => g.SupportAbilityPackages).Distinct(StringComparer.OrdinalIgnoreCase))
+            if (added.Count(p => p.Equals(support, StringComparison.OrdinalIgnoreCase)) != 1)
+                throw new InvalidDataException("The saved gameplay graph requires exactly one enabled support ability grant: " + support);
         var bindings = project.GameplayAnimationGraphs.SelectMany(g => g.Abilities.Select(b => (g.OwnerDprdPackage, Binding: b))).ToArray();
         if (bindings.GroupBy(b => b.OwnerDprdPackage + "|" + b.Binding.OriginalPackage, StringComparer.OrdinalIgnoreCase).Any(g => g.Count() > 1) ||
             bindings.Any(b => bindings.Any(other => b.OwnerDprdPackage.Equals(other.OwnerDprdPackage, StringComparison.OrdinalIgnoreCase) &&

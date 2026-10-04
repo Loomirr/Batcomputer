@@ -36,6 +36,7 @@ public sealed class AbilityExplorerForm : AdaptiveForm
 
     private SetNodeTag? _selectedSet;
     private GrantNodeTag? _selectedGrant;
+    private UtilityNodeTag? _selectedUtility;
     private bool _resetToDonor;
     private bool _initializingUnsafe;
 
@@ -243,8 +244,8 @@ public sealed class AbilityExplorerForm : AdaptiveForm
             } catch (Exception ex) { if (!IsDisposed) Dialog.Warn(this, "Native held items", ex.Message); }
             finally { if (!IsDisposed) { heldItems.Enabled = true; heldItems.Text = "Held items…"; } }
         };
-        var extraTools = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
-        extraTools.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50)); extraTools.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        var extraTools = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Margin = Padding.Empty };
+        for (var i = 0; i < 3; i++) extraTools.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / 3));
         extraTools.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         extraTools.Controls.Add(heldItems, 0, 0);
         var takedowns = new Button { Text = "Takedowns…", Name = "takedown-presets", Dock = DockStyle.Fill, Margin = new Padding(0, 5, 8, 0) };
@@ -258,6 +259,10 @@ public sealed class AbilityExplorerForm : AdaptiveForm
         takedowns.Click += (_, _) => menu.Show(takedowns, new Point(0, takedowns.Height));
         FormClosed += (_, _) => menu.Dispose();
         extraTools.Controls.Add(takedowns, 1, 0);
+        var utilities = new Button { Text = "Add ability…", Name = "character-abilities", Dock = DockStyle.Fill, Margin = new Padding(0, 5, 8, 0) };
+        Theme.StyleDarkButton(utilities);
+        utilities.Click += (_, _) => AddGrant();
+        extraTools.Controls.Add(utilities, 2, 0);
         layout.Controls.Add(extraTools, 0, 4);
         layout.Controls.Add(swordSettings, 1, 4);
         return card;
@@ -540,6 +545,10 @@ public sealed class AbilityExplorerForm : AdaptiveForm
 
     private void BuildCurrentTree(string query)
     {
+        foreach (var kind in Enum.GetValues<CharacterUtilityKind>())
+            if (UtilityEnabled(kind) && Matches(query, kind == CharacterUtilityKind.Tracking ? "Tracking spectral vision clue trail" : "Passive healing regeneration health"))
+                _tree.Nodes.Add(new TreeNode(kind == CharacterUtilityKind.Tracking ? "Clue / trail tracking" : $"Passive healing · {_working.Utilities!.HealingPercentPerSecond:0.#}% max health/second")
+                { ForeColor = Theme.Abilities, Tag = new UtilityNodeTag(kind) });
         var heldEntries = AbilityLoadoutPresentation.HeldEntries(_working, _project.TargetPackages.Playable);
         if (heldEntries.Count > 0 && Matches(query, "Held items", string.Join(' ', heldEntries.Select(e => e.Label + " " + e.Package + " " + e.Detail)))) {
             var node = new TreeNode("Held items  [independent · staged]") { ForeColor = Theme.Abilities,
@@ -678,8 +687,17 @@ public sealed class AbilityExplorerForm : AdaptiveForm
             _ => null,
         };
         _selectedGrant = tag as GrantNodeTag;
+        _selectedUtility = tag as UtilityNodeTag;
 
-        if (tag is BundleNodeTag bundle)
+        if (_selectedUtility is { } utility)
+        {
+            _detailTitle.Text = utility.Kind == CharacterUtilityKind.Tracking ? "Clue / trail tracking" : "Passive healing";
+            _detailSubtitle.Text = "Independent character ability · generated at build";
+            _details.Text = utility.Kind == CharacterUtilityKind.Tracking
+                ? "Interact at a native Spectral Vision clue spot. Includes the required tracking animations and effects, without granting unrelated gadgets or healing. Does not create arbitrary enemy scent trails.\n\nUse Edit ability or Remove ability below."
+                : $"Restores {_working.Utilities!.HealingPercentPerSecond:0.#}% of maximum health per second outside combat. Native death-state and difficulty restrictions apply. Does not grant tracking.\n\nUse Edit ability to change the rate, or Remove ability to disable it.";
+        }
+        else if (tag is BundleNodeTag bundle)
         {
             _detailTitle.Text = bundle.Title;
             _detailSubtitle.Text = bundle.Subtitle;
@@ -746,12 +764,12 @@ public sealed class AbilityExplorerForm : AdaptiveForm
         var enabledOrder = OrderedEnabledSelections();
         _moveUp.Enabled = currentSet && set?.Selection.Enabled == true && enabledOrder.FindIndex(item => ReferenceEquals(item, set.Selection)) > 0;
         _moveDown.Enabled = currentSet && set?.Selection.Enabled == true && enabledOrder.FindIndex(item => ReferenceEquals(item, set.Selection)) is var index && index >= 0 && index < enabledOrder.Count - 1;
-        _addGrant.Visible = currentSet;
-        _addGrant.Enabled = currentSet && set?.Selection.Enabled == true && set.Catalog?.IsAvailable != false && (!IsCore(set) || _working.AllowUnsafeCoreEdits);
-        _editGrant.Visible = grant?.IsAdded == true && !grant.IsLibraryNode;
+        _addGrant.Visible = true;
+        _addGrant.Enabled = true;
+        _editGrant.Visible = _selectedUtility is not null || grant?.IsAdded == true && !grant.IsLibraryNode;
         _editGrant.Enabled = _editGrant.Visible;
-        _removeGrant.Visible = grant is not null && !grant.IsLibraryNode;
-        _removeGrant.Enabled = _removeGrant.Visible && (set is null || !IsCore(set) || _working.AllowUnsafeCoreEdits || grant!.IsRemoved);
+        _removeGrant.Visible = _selectedUtility is not null || grant is not null && !grant.IsLibraryNode;
+        _removeGrant.Enabled = _selectedUtility is not null || _removeGrant.Visible && (set is null || !IsCore(set) || _working.AllowUnsafeCoreEdits || grant!.IsRemoved);
         _removeGrant.Text = grant?.IsRemoved == true ? "Restore ability" : "Remove ability";
     }
 
@@ -867,14 +885,32 @@ public sealed class AbilityExplorerForm : AdaptiveForm
         RebuildTree(selected.Selection.PackagePath);
     }
 
+    private sealed record UtilityNodeTag(CharacterUtilityKind Kind);
+    private bool UtilityEnabled(CharacterUtilityKind kind) => kind == CharacterUtilityKind.Tracking ? _working.Utilities?.Tracking == true : _working.Utilities?.Healing == true;
+    private void EditUtility(CharacterUtilityKind kind, bool enable = false)
+    {
+        var settings = _working.Utilities is { } saved
+            ? new CharacterUtilitySettings { Tracking = saved.Tracking, Healing = saved.Healing, HealingPercentPerSecond = saved.HealingPercentPerSecond }
+            : new CharacterUtilitySettings();
+        if (enable) { if (kind == CharacterUtilityKind.Tracking) settings.Tracking = true; else settings.Healing = true; }
+        using var editor = new CharacterUtilitiesForm(settings, kind);
+        if (editor.ShowDialog(this) != DialogResult.OK) return;
+        _working.Utilities = editor.Result; _resetToDonor = false; _search.Clear(); _view.SelectedIndex = 0; RebuildTree();
+        foreach (TreeNode node in _tree.Nodes)
+            if (node.Tag is UtilityNodeTag tag && tag.Kind == kind) { _tree.SelectedNode = node; break; }
+    }
+
     private void AddGrant()
     {
-        if (_selectedSet is not { IsLibraryNode: false } selected || !selected.Selection.Enabled) return;
-        if (IsCore(selected) && !_working.AllowUnsafeCoreEdits) return;
-        if (IsCore(selected) && !ConfirmUnsafeCoreEdit("add an ability to", selected.Selection.PackagePath)) return;
-
         using var dialog = new GameplayAbilityGrantDialog(_catalog.GameplayAbilities);
-        if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Result is null) return;
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        if (dialog.Utility is { } kind) { EditUtility(kind, enable: true); return; }
+        if (dialog.Result is null) return;
+        if (_selectedSet is not { IsLibraryNode: false } selected || !selected.Selection.Enabled)
+        { Dialog.Info(this, "Select a destination set", "Tracking and healing can be added directly. For a raw gameplay ability, select an enabled loadout set and choose Add ability again."); return; }
+        if (IsCore(selected) && !_working.AllowUnsafeCoreEdits)
+        { Dialog.Warn(this, "Core set is protected", "Select a non-core destination set or explicitly unlock advanced core edits."); return; }
+        if (IsCore(selected) && !ConfirmUnsafeCoreEdit("add an ability to", selected.Selection.PackagePath)) return;
         if (AbilityDependencyService.AddedGrantCompatibilityError(WorkingProject(), dialog.Result.PackagePath) is { } dependencyError)
         {
             Dialog.Warn(this, "Ability dependency is missing", dependencyError);
@@ -888,6 +924,7 @@ public sealed class AbilityExplorerForm : AdaptiveForm
 
     private void EditGrant()
     {
+        if (_selectedUtility is { } utility) { EditUtility(utility.Kind); return; }
         if (_selectedGrant is not { IsAdded: true, IsLibraryNode: false } selected) return;
         var current = selected.Selection.AddedGameplayAbilities.FirstOrDefault(grant =>
             Normalize(grant.PackagePath).Equals(Normalize(selected.PackagePath), StringComparison.OrdinalIgnoreCase));
@@ -908,6 +945,12 @@ public sealed class AbilityExplorerForm : AdaptiveForm
 
     private void ToggleSelectedGrant()
     {
+        if (_selectedUtility is { } utility)
+        {
+            if (utility.Kind == CharacterUtilityKind.Tracking) _working.Utilities!.Tracking = false;
+            else _working.Utilities!.Healing = false;
+            _resetToDonor = false; RebuildTree(); return;
+        }
         if (_selectedGrant is not { IsLibraryNode: false } selected) return;
         if (!selected.IsRemoved &&
             AbilityDependencyService.RequiredGrantRemovalReason(WorkingProject(), selected.PackagePath) is { } dependencyReason)
@@ -1068,6 +1111,7 @@ public sealed class AbilityExplorerForm : AdaptiveForm
         var enabled = OrderedEnabledSelections().Select(set => Normalize(set.PackagePath)).ToList();
         var inherited = _catalog.InheritedAbilitySets.Select(set => Normalize(set.PackagePath)).ToList();
         if (!string.IsNullOrWhiteSpace(_working.FightingStyleId)) return true;
+        if (CharacterUtilityService.Enabled(_working.Utilities)) return true;
         if (HeldItemService.Resolve(_working).Count > 0) return true;
         if (_working.NativeHeldItems.Count > 0) return true;
         if (_working.AnimationSpawnedItems.Count > 0) return true;
@@ -1186,6 +1230,8 @@ public sealed class AbilityExplorerForm : AdaptiveForm
         NativeHeldItems = source.NativeHeldItems.Select(i => i.Clone()).ToList(),
         AnimationSpawnedItems = source.AnimationSpawnedItems.Select(i => i.Clone()).ToList(),
         HeldItemToggle = source.HeldItemToggle is null ? null : System.Text.Json.JsonSerializer.Deserialize<HeldItemToggleProfile>(System.Text.Json.JsonSerializer.Serialize(source.HeldItemToggle)),
+        Utilities = source.Utilities is { } utilities ? new CharacterUtilitySettings
+        { Tracking = utilities.Tracking, Healing = utilities.Healing, HealingPercentPerSecond = utilities.HealingPercentPerSecond } : null,
         AllowUnsafeCoreEdits = source.AllowUnsafeCoreEdits,
         AbilitySets = (source.AbilitySets ?? new List<AbilitySetSelection>()).Select(set => new AbilitySetSelection
         {
@@ -1287,6 +1333,7 @@ public sealed class AbilityExplorerForm : AdaptiveForm
     {
         _selectedSet = null;
         _selectedGrant = null;
+        _selectedUtility = null;
         _detailTitle.Text = entry.Profile?.DisplayName ?? "Enemy / other combat source";
         _detailSubtitle.Text = entry.Profile is null ? "Inspection only — player adapter required" : "Coordinated fighting-style bundle";
         _details.Text = FightingStyleLibraryService.Describe(entry);
@@ -1338,6 +1385,7 @@ public sealed class AbilityExplorerForm : AdaptiveForm
 
     private NativeSuitProject WorkingProject() => new()
     {
+        TargetPackages = _project.TargetPackages,
         BaseProfile = _project.BaseProfile,
         PlayableTemplate = _project.PlayableTemplate,
         DcmdTemplate = _project.DcmdTemplate,
@@ -1421,12 +1469,15 @@ public sealed class AbilityExplorerForm : AdaptiveForm
         private readonly TextBox _inputTag = new();
 
         public CustomGameplayAbilityGrant? Result { get; private set; }
+        public CharacterUtilityKind? Utility { get; private set; }
+        private readonly bool _allowUtilities;
 
         public GameplayAbilityGrantDialog(
             IReadOnlyList<GameplayAbilityCatalogEntry> catalog,
             CustomGameplayAbilityGrant? current = null)
         {
             _catalog = catalog ?? Array.Empty<GameplayAbilityCatalogEntry>();
+            _allowUtilities = current is null;
             Text = current is null ? "Batcomputer — Add ability" : "Batcomputer — Edit ability";
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(820, 680);
@@ -1482,7 +1533,10 @@ public sealed class AbilityExplorerForm : AdaptiveForm
             _list.HorizontalScrollbar = true;
             _list.SelectedIndexChanged += (_, _) =>
             {
+                var utility = _list.SelectedItem as UtilityChoice;
+                _package.Enabled = _level.Enabled = _inputTag.Enabled = utility is null;
                 if (_list.SelectedItem is AbilityChoice choice) _package.Text = choice.PackagePath;
+                else if (utility is not null) _package.Text = "Built-in character ability — configure after adding";
             };
             _list.DoubleClick += (_, _) => Accept();
             root.Controls.Add(_list, 0, 1);
@@ -1554,6 +1608,12 @@ public sealed class AbilityExplorerForm : AdaptiveForm
             try
             {
                 _list.Items.Clear();
+                if (_allowUtilities)
+                    foreach (var kind in Enum.GetValues<CharacterUtilityKind>())
+                    {
+                        var choice = new UtilityChoice(kind);
+                        if (Matches(query, choice.ToString(), kind == CharacterUtilityKind.Tracking ? "spectral vision clue trail" : "regeneration health")) _list.Items.Add(choice);
+                    }
                 foreach (var ability in _catalog
                              .Where(entry => Matches(query, entry.PackagePath, entry.InputTag, entry.SourceAbilitySetPackage))
                              .DistinctBy(entry => Normalize(entry.PackagePath), StringComparer.OrdinalIgnoreCase)
@@ -1581,6 +1641,8 @@ public sealed class AbilityExplorerForm : AdaptiveForm
 
         private void Accept()
         {
+            if (_list.SelectedItem is UtilityChoice choice)
+            { Utility = choice.Kind; DialogResult = DialogResult.OK; Close(); return; }
             var package = Normalize(_package.Text);
             if (!ExtractedPackagePathService.IsContentPackagePath(package) ||
                 package.Split('/', StringSplitOptions.RemoveEmptyEntries).Length < 2 ||
@@ -1600,6 +1662,10 @@ public sealed class AbilityExplorerForm : AdaptiveForm
             Close();
         }
 
+        private sealed record UtilityChoice(CharacterUtilityKind Kind)
+        {
+            public override string ToString() => Kind == CharacterUtilityKind.Tracking ? "Clue / trail tracking  ·  built-in character ability" : "Passive healing  ·  configurable regeneration";
+        }
         private sealed record AbilityChoice(string PackagePath, string InputTag)
         {
             public override string ToString() => UnrealPathUtil.AssetName(PackagePath) +

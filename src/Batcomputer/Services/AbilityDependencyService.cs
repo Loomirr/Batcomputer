@@ -208,6 +208,22 @@ public static class AbilityDependencyService
         var layerSlices = new List<FightingStyleLayerSlice>();
         var issues = new List<AbilityDependencyIssue>();
         var profile = project.AbilityLoadout;
+        if (CharacterUtilityService.Enabled(profile?.Utilities))
+        {
+            if (CharacterUtilityService.ValidationError(profile!.Utilities!) is { } utilityError)
+                issues.Add(new(AbilityDependencySeverity.Error, utilityError));
+            else
+            {
+                if (CharacterUtilityService.NeedsSet(project)) sets.Add(CharacterUtilityService.SetPackage(project));
+                if (profile.Utilities!.Tracking)
+                {
+                    montage.Add(CharacterUtilityService.TrackingMas);
+                    layer.Add(CharacterUtilityService.TrackingLas);
+                }
+                issues.Add(new(AbilityDependencySeverity.Information,
+                    "Character utilities are built locally. Tracking uses native authored clue spots and vision effects; healing and tracking require an in-game check on this donor."));
+            }
+        }
         var enabledSelections = profile?.AbilitySets.Where(selection => selection.Enabled).ToList()
                                ?? new List<AbilitySetSelection>();
         var exactDonorAbilitySets = (profile?.DonorAbilitySetPackages ?? new List<string>())

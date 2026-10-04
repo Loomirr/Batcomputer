@@ -1000,6 +1000,8 @@ public sealed class AnimArchetypeGraftService
             var mappings = LoadMappings();
             var extractedRoot = AppSettings.Current.EffectiveExtractedContentRoot();
             var archetypeUasset = StageUasset(patchedContentRoot, customArchetypePkg);
+            if (CharacterUtilityService.NeedsSet(project))
+                CharacterUtilityService.Generate(project, patchedContentRoot, mappings ?? throw new InvalidDataException("Mappings are required for character utilities."), result.Log.Add);
             var graft = new AnimGraftService();
 
             var donor = DetectDonorForProject(project, patchedContentRoot, mappings);
@@ -1837,20 +1839,20 @@ public sealed class AnimArchetypeGraftService
             var sourceIndex = expectedSets.FindIndex(p => p.Equals(sourceMelee, StringComparison.OrdinalIgnoreCase));
             if (sourceIndex < 0) { error = "The sword preset requires one player martial melee set."; return false; }
             expectedSets[sourceIndex] = SwordCombatService.MeleePackage(mod);
-            if (!SwordCombatService.Verify(project.AbilityLoadout!, extractedRoot, stagedRoot, mod, LoadMappings()!, out error)) return false;
+            if (!SwordCombatService.Verify(project.AbilityLoadout!, extractedRoot, stagedRoot, mod, LoadMappings()!, out error, project.ReleaseAssetAliases)) return false;
         }
 
         if (HeldItemService.Independent(project.AbilityLoadout))
         {
             expectedSets.AddRange(project.AbilityLoadout!.HeldItems!.Select(i => HeldItemService.SetPackage(mod, i)));
-            if (!HeldItemService.Verify(project.AbilityLoadout, extractedRoot, stagedRoot, mod, LoadMappings()!, out error)) return false;
+            if (!HeldItemService.Verify(project.AbilityLoadout, extractedRoot, stagedRoot, mod, LoadMappings()!, out error, project.ReleaseAssetAliases)) return false;
         }
         var actualDprd = mutation.InspectDprdAbilitySets(stagedDprdUasset);
         if (project.AbilityLoadout is { NativeHeldItems.Count: > 0 } nativeProfile)
         {
             nativeProfile = NativeHeldItemService.ForEquipmentClosure(nativeProfile, plan.GameplayAbilitiesToRemove);
             try {
-                NativeHeldItemService.Verify(nativeProfile, extractedRoot, stagedRoot, mod, expectedSets, LoadMappings()!);
+                NativeHeldItemService.Verify(nativeProfile, extractedRoot, stagedRoot, mod, expectedSets, LoadMappings()!, project.ReleaseAssetAliases);
                 var rewritten = NativeHeldItemService.RewriteSetPackages(nativeProfile, expectedSets, extractedRoot, stagedRoot, mod, LoadMappings()!);
                 if (!string.IsNullOrEmpty(bridgePackage)) {
                     var bridgeIndex = expectedSets.FindIndex(p => p.Equals(bridgePackage, StringComparison.OrdinalIgnoreCase));

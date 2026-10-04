@@ -9,6 +9,25 @@ internal static class PreviewMaterialRegressionChecks
     internal static IReadOnlyList<(bool Passed, string Description)> Run()
     {
         var results = new List<(bool, string)>();
+        results.Add((MaterialSurfaceControlService.IsUvChannel("UV Channel") && MaterialSurfaceControlService.IsUvChannel("TexCoord Index") &&
+            !MaterialSurfaceControlService.IsUvChannel("UV Tiling") && !MaterialSurfaceControlService.IsUvChannel("Fuzz and hair tiling"),
+            "material UV controls distinguish native channel selectors from scalar texture tiling"));
+        results.Add((MaterialSurfaceControlService.IsFuzzStrength("Hair Card Intensity") && MaterialSurfaceControlService.IsFuzzStrength("Fuzz Strength") &&
+            !MaterialSurfaceControlService.IsFuzzStrength("Opacity") && !MaterialSurfaceControlService.IsFuzzStrength("Fuzz and hair tiling"),
+            "cape fuzz preset only changes named native fuzz strengths, never opacity or UV scale"));
+        var nativeSurfaceDefaults = Newtonsoft.Json.Linq.JObject.Parse("""
+            {"RuntimeEntries":{"ParameterInfoSet":[
+                {"Name":"Fuzz Strength","Association":"EMaterialParameterAssociation::GlobalParameter","Index":-1},
+                {"Name":"UV Channel","Association":"EMaterialParameterAssociation::LayerParameter","Index":0},
+                {"Name":"UV Tiling","Association":"EMaterialParameterAssociation::GlobalParameter","Index":-1}]},
+             "ScalarValues":[7,1,6.5]}
+            """);
+        var surfaceDefaults = MaterialSurfaceControlService.ReadGlobalDefaults(nativeSurfaceDefaults);
+        results.Add((surfaceDefaults.Count == 2 && surfaceDefaults["Fuzz Strength"] == 7 && surfaceDefaults["UV Tiling"] == 6.5f &&
+            !surfaceDefaults.ContainsKey("UV Channel"), "surface controls use exact native scalar indices and refuse unsupported layer selectors"));
+        nativeSurfaceDefaults["ScalarValues"] = new Newtonsoft.Json.Linq.JArray(7);
+        results.Add((MaterialSurfaceControlService.ReadGlobalDefaults(nativeSurfaceDefaults).Count == 0,
+            "surface controls fail closed on inconsistent native scalar metadata"));
         var mounts = PreviewMountPathService.GameFeatureMounts([
             "LEGOBatmanLotDK/Plugins/GameFeatures/DLC_ArkhamPack/Content/Characters/BP_Catwoman.uasset",
             "legobatmanlotdk/plugins/gamefeatures/dlc_arkhampack/content/Textures/T_Body.uasset",

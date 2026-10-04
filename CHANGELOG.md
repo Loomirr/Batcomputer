@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Adds independently assignable clue/trail tracking and configurable passive healing to the ability picker, with individual edit/remove controls and saved build replay.
+- Preserves utility settings and the actual target namespace through ability-workshop editing and saving.
+- Reuses compatible character-family assets across ordinary suits while keeping distinct authored variants separate.
+- Excludes independent helper-project source files from application compilation.
+- Adds single-icon and atomic four-icon creation/assignment in Icon Studio, independent per-slot camera controls, a shared captured pose, revised template lighting and separate blue/warm rims.
+- Corrects left/right portrait destination angles without mirroring textures, and keeps Icon Studio controls and footer accessible at smaller window sizes.
+- Uses all four keyed icon-template camera positions and closer template color/lighting response, with shareable JSON camera and lighting presets.
+- Balances warm and blue icon emitters on one preview power scale, adds a separate white/key-light control, and imports earlier JSON templates with a neutral key-light default.
+- Keeps generated studio icons under the playable target's actual mod folder, including projects whose slot ID differs from that folder.
+- Supports verified held-item toggle bundles with actor-local native input listeners that survive normal rebuilds, retain the native Focus takedown and yield when it starts.
+- Corrects sheathed forward-movement selection in angle-based blend spaces and supports portable, context-specific animation pairs without disconnecting existing action variants.
+- Blocks missing animation replacements, incompatible skeletons and normal/additive pose mismatches before packaging, including held-item animation state pairs.
+- Preserves explicitly cached helper-ability identities when creating or rebasing suits, and blocks incomplete or duplicate helper grants before replaying a saved gameplay graph.
+- Assigns distinct setup identities to differently encoded private Vorbis media while preserving their audio packets and all native sound assets.
+- Exposes inherited native surface/detail controls in Material Forge, adds a cape-fuzz reduction preset, and distinguishes supported shader UV selectors from preview-only UV changes.
 - Adds multi-bone selection, bulk key/transform edits, and saved named bone groups to Animation Studio.
 - Adds in-studio cooked-package and native-rig Blender-action imports, plus searchable source clips for creating editable variations.
 - Supports native playable metadata with default-omitted UI data without changing the selected gameplay donor; missing authored UI dependencies still stop the build.

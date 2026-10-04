@@ -1898,6 +1898,7 @@ public sealed partial class MainForm
             var mergedSuits = 0;
             var preparedSuits = new List<NativeSuitProject>();
             var voiceBuilds = new List<CharacterVoiceBuildService.Result>();
+            var sharedVoiceMedia = new Dictionary<string, byte[]>(StringComparer.Ordinal);
             // No-rebase means suits keep their own /Game roots in one pak - two suits
             // sharing a DCMD package path would silently overwrite on merge. Catch it.
             var seenDcmd = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1922,7 +1923,7 @@ public sealed partial class MainForm
                 }
 
                 ModReleaseStep($"Preparing {suit.DisplayName} for the shared release…");
-                var preparation = await PrepareSuitForReleaseAsync(suit, svc);
+                var preparation = await PrepareSuitForReleaseAsync(suit, svc, sharedVoiceMedia);
                 if (preparation.Prepared is null)
                 {
                     preflight.Result.AddError(CustomCharacterProjectService.IsCharacter(suit) ? "character preparation" : "suit preparation", preparation.Error, suit.SlotId);
@@ -2033,6 +2034,16 @@ public sealed partial class MainForm
                 AppendLog("Build mod ABORTED: combined stage validation failed.");
                 foreach (var error in validationErrors) AppendLog("  " + error);
                 return false;
+            }
+
+            ModReleaseStep("Sharing unchanged character-family assets…");
+            var reuse = await Task.Run(() => CharacterAssetReuseService.Apply(stageContent, preparedSuits,
+                mappings ?? throw new InvalidDataException("Asset sharing requires mappings."), Path.Combine(outRoot, "AssetReuse"), projectRoot, AppendLog));
+            if (reuse.Packages > 0)
+            {
+                var structural = new StageValidationService(stageContent, AppSettings.Current.EffectiveUsmapPath(), projectRoot);
+                var errors = preparedSuits.SelectMany(suit => structural.Validate(suit)).Where(f => f.Severity == "ERROR").ToArray();
+                if (errors.Length > 0) throw new InvalidDataException("Shared-asset stage validation failed: " + string.Join("; ", errors.Select(e => e.Message)));
             }
 
             // Do this before retoc so a bad primary-asset row never produces a
@@ -2193,6 +2204,12 @@ public sealed partial class MainForm
             var rel = Path.GetRelativePath(srcContent, file);
             var dest = Path.Combine(dstContent, rel);
             Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+            if (File.Exists(dest) && Path.GetExtension(dest) is ".uasset" or ".uexp" or ".ubulk" or ".uptnl" or ".wem")
+            {
+                if (!File.ReadAllBytes(file).AsSpan().SequenceEqual(File.ReadAllBytes(dest)))
+                    throw new InvalidDataException("Conflicting shared asset in combined build: " + rel);
+                continue;
+            }
             File.Copy(file, dest, overwrite: true);
         }
     }
@@ -2210,7 +2227,8 @@ public sealed partial class MainForm
 
     private async Task<(PreparedSuitForRelease? Prepared, string Error)> PrepareSuitForReleaseAsync(
         NativeSuitProject authoringSuit,
-        SuitProjectService projectService)
+        SuitProjectService projectService,
+        Dictionary<string, byte[]>? sharedVoiceMedia = null)
     {
         using var timing = new OperationTiming("Prepare " + authoringSuit.DisplayName, AppendLog);
         PackagePreparationStage? preparationStage = null;
@@ -2298,7 +2316,7 @@ public sealed partial class MainForm
 
             GameplayAnimationGraphService.Apply(suit, contentRoot, AppendLog);
             var voiceBuild = await Task.Run(() => CharacterVoiceBuildService.StageAsync(suit, projectService.ProjectRoot,
-                contentRoot, line => AppendLog("    voice: " + line), CancellationToken.None));
+                contentRoot, line => AppendLog("    voice: " + line), CancellationToken.None, sharedVoiceMedia));
             var toggleAudio = HeldItemToggleService.Stage(suit, contentRoot);
             voiceBuild = CharacterVoiceBuildService.Combine(new[] { voiceBuild, toggleAudio }.OfType<CharacterVoiceBuildService.Result>().ToArray());
             await Task.Run(() => FaceAnimationService.ApplyToPackagedRoot(suit, contentRoot));

@@ -273,7 +273,8 @@ internal static class NativeHeldItemService
         e.Data.Add(Struct("RelativeScale3D", "Vector", new VectorPropertyData(new FName(a, "RelativeScale3D")) { Value = new FVector(t.ScaleX,t.ScaleY,t.ScaleZ) }));
     }
 
-    internal static void Verify(AbilityLoadoutProfile profile, string extracted, string staged, string mod, IReadOnlyList<string> originalSets, Usmap mappings)
+    internal static void Verify(AbilityLoadoutProfile profile, string extracted, string staged, string mod, IReadOnlyList<string> originalSets, Usmap mappings,
+        IReadOnlyDictionary<string, string>? aliases = null)
     {
         using var c = new SwordCombatService.Context(extracted, staged, mod, mappings, Root(mod));
         var expectedSets = RewriteSetPackages(profile, originalSets, extracted, staged, mod, mappings);
@@ -321,6 +322,7 @@ internal static class NativeHeldItemService
                     var component = actor.Exports.OfType<NormalExport>().Single(e => e.ObjectName.ToString() == edit.ExportName);
                     var property = component.Data.OfType<ObjectPropertyData>().Single(p => p.Name.ToString() == edit.MeshProperty);
                     var expected = edit.CustomModel is not null ? Root(mod) + "/SM_NativeHeld_" + Hash(edit.Key) : edit.ReplacementMeshPackage.Length > 0 ? edit.ReplacementMeshPackage : edit.OriginalMeshPackage;
+                    expected = CharacterAssetReuseService.Resolve(expected, aliases);
                     if (edit.Hide ? property.Value.Index != 0 : SwordCombatService.Package(actor, property.Value) != expected) throw new InvalidDataException("Native held-item visual failed cooked roundtrip.");
                     if (!edit.Hide && edit.Transform is { } transform && ReadTransform(component) != transform) throw new InvalidDataException("Native held-item placement failed cooked roundtrip.");
                     if (!edit.Hide) {

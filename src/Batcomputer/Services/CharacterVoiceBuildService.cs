@@ -98,6 +98,22 @@ internal static class CharacterVoiceBuildService
     private static string Digest(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
     internal static bool OwnsProfile(NativeSuitProject project, CharacterVoiceLibraryService.Profile profile) =>
         profile.CharacterId == project.SlotId || (project.CustomCharacter is { IsDefinition: false } child && profile.CharacterId == child.DefinitionSlotId);
+    internal static (string Owner, string Root) BuildIdentity(NativeSuitProject project, CharacterVoiceLibraryService.Profile profile, NativeSuitProject? definition)
+    {
+        if (!OwnsProfile(project, profile)) throw new InvalidDataException("Voice profile belongs to another character.");
+        var owner = project;
+        if (profile.CharacterId != project.SlotId)
+        {
+            if (definition?.CustomCharacter is not { IsDefinition: true } identity || definition.SlotId != profile.CharacterId ||
+                identity.CharacterId != project.CustomCharacter?.CharacterId)
+                throw new InvalidDataException("The inherited voice profile needs its saved character definition.");
+            owner = definition;
+        }
+        var playable = owner.TargetPackages.Playable;
+        if (!playable.StartsWith("/Game/Mods/", StringComparison.Ordinal) || playable.Split('/').Length < 6 || playable.Contains(".."))
+            throw new InvalidDataException("Invalid private voice owner.");
+        return (owner.SlotId, string.Join('/', playable.Split('/').Take(4)));
+    }
     internal static CharacterVoiceLibraryService.Profile Selected(NativeSuitProject project, string workspace)
     {
         if (!Regex.IsMatch(project.VoiceProfileId, "^[a-f0-9]{32}$")) throw new InvalidDataException("Invalid selected voice profile.");
@@ -110,7 +126,8 @@ internal static class CharacterVoiceBuildService
         return profile;
     }
 
-    internal static async Task<Result?> StageAsync(NativeSuitProject project, string workspace, string contentRoot, Action<string> log, CancellationToken cancellation)
+    internal static async Task<Result?> StageAsync(NativeSuitProject project, string workspace, string contentRoot, Action<string> log, CancellationToken cancellation,
+        Dictionary<string, byte[]>? sharedMedia = null)
     {
         if (string.IsNullOrEmpty(project.VoiceProfileId)) return null;
         var profile = Selected(project, workspace);
@@ -135,8 +152,11 @@ internal static class CharacterVoiceBuildService
         var playable = project.TargetPackages.Playable;
         if (!playable.StartsWith("/Game/Mods/", StringComparison.Ordinal) || playable.Split('/').Length < 6 || playable.Contains(".."))
             throw new InvalidDataException("Voices can only be built for a private /Game/Mods character package.");
-        var prefix = string.Join('/', playable.Split('/').Take(4)) + "/Voice/" + profile.Id;
-        var actor = "BCVoice_" + Digest(project.SlotId + "|" + profile.Id)[..24];
+        var definition = profile.CharacterId == project.SlotId ? null : new SuitProjectService(workspace).LoadProject(
+            new SuitProjectService(workspace).ProjectPathForSlot(profile.CharacterId));
+        var identity = BuildIdentity(project, profile, definition);
+        var prefix = identity.Root + "/Voice/" + profile.Id;
+        var actor = "BCVoice_" + Digest(identity.Owner + "|" + profile.Id)[..24];
         var work = Path.Combine(Path.GetDirectoryName(contentRoot)!, "VoiceBuild");Directory.CreateDirectory(work);
         var native = Path.Combine(work, "Native");
         var maps = MappingsCache.Load(AppSettings.Current.EffectiveUsmapPath()!);
@@ -203,6 +223,15 @@ internal static class CharacterVoiceBuildService
         {
             var key = assignment.Silent ? "silence" : assignment.ClipId;
             if (encoded.TryGetValue(key, out var existing)) { RegisterMedia(assignment, existing);return existing; }
+            var levelIdentity = profile.GainDb == 0 ? "" : "|gain-v3:" + profile.GainDb.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+            var name = "BCV_" + Digest(identity.Owner + "|" + profile.Id + "|" + key + levelIdentity);
+            if (stock.Files.Keys.Any(f => f.EndsWith('/' + name + ".wem", StringComparison.OrdinalIgnoreCase))) throw new InvalidDataException("Native media collision.");
+            var output = Path.Combine(contentRoot, "Wub/Platforms/Windows/Media", name + ".wem");Directory.CreateDirectory(Path.GetDirectoryName(output)!);
+            if (sharedMedia?.TryGetValue(name, out var reused) == true)
+            {
+                using var target = File.Open(output, FileMode.CreateNew, FileAccess.Write); target.Write(reused);
+                target.Dispose(); encoded[key] = name; RegisterMedia(assignment, name); return name;
+            }
             using var codec = new CodecWorkspace(AppSettings.RuntimeRoot, Path.GetTempPath());
             var input = codec.Input;
             if (assignment.Silent)
@@ -217,10 +246,6 @@ internal static class CharacterVoiceBuildService
                 if (!Convert.ToHexString(SHA256.HashData(bytes)).Equals(key, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Voice recording hash changed: " + key);
                 File.WriteAllBytes(input, CharacterVoiceLevelService.Apply(bytes, profile.GainDb));
             }
-            var levelIdentity = profile.GainDb == 0 ? "" : "|gain-v3:" + profile.GainDb.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
-            var name = "BCV_" + Digest(project.SlotId + "|" + profile.Id + "|" + key + levelIdentity);
-            if (stock.Files.Keys.Any(f => f.EndsWith('/' + name + ".wem", StringComparison.OrdinalIgnoreCase))) throw new InvalidDataException("Native media collision.");
-            var output = Path.Combine(contentRoot, "Wub/Platforms/Windows/Media", name + ".wem");Directory.CreateDirectory(Path.GetDirectoryName(output)!);
             await Run(encoder!, ["-resample", "48000", "-q", "4", "-o", codec.Encoded, input], codec.Folder, cancellation, work);
             var decoded = codec.Decoded;await Run(decoder!, ["-o", decoded, codec.Encoded], codec.Folder, cancellation, work);
             // Lossy reconstruction may overshoot a sample-limited WAV. Check the actual
@@ -240,7 +265,10 @@ internal static class CharacterVoiceBuildService
             var before = CharacterVoiceLibraryService.InspectWav(File.ReadAllBytes(input));var after = CharacterVoiceLibraryService.InspectWav(File.ReadAllBytes(decoded));
             if (Math.Abs(before.Seconds - after.Seconds) > .03 || new FileInfo(codec.Encoded).Length < 44) throw new InvalidDataException("Encoded voice duration/format verification failed.");
             cancellation.ThrowIfCancellationRequested();
-            File.Copy(codec.Encoded, output, overwrite: false);
+            // Normalize only freshly encoded private output, never donor media.
+            using(var target=File.Open(output,FileMode.CreateNew,FileAccess.Write))
+                target.Write(PrivateWemSetupService.Normalize(File.ReadAllBytes(codec.Encoded)));
+            if (sharedMedia is not null) sharedMedia[name] = File.ReadAllBytes(output);
             encoded[key] = name;RegisterMedia(assignment, name);return name;
         }
         var expected = new Dictionary<string, JArray>();

@@ -208,7 +208,8 @@ internal static class HeldItemService
     private static void SetTags(UAsset asset, NormalExport cdo, string property, string[] values) =>
         cdo.Data.OfType<StructPropertyData>().Single(p => p.Name.ToString() == property).Value.OfType<GameplayTagContainerPropertyData>().Single().Value = values.Select(t => new FName(asset, t)).ToArray();
 
-    internal static bool Verify(AbilityLoadoutProfile profile, string extracted, string staged, string mod, Usmap mappings, out string error)
+    internal static bool Verify(AbilityLoadoutProfile profile, string extracted, string staged, string mod, Usmap mappings, out string error,
+        IReadOnlyDictionary<string, string>? aliases = null)
     {
         try {
             var items = profile.HeldItems ?? [];
@@ -241,12 +242,13 @@ internal static class HeldItemService
                 var template = Templates.Single(t => t.Id == item.TemplateId);
                 var actor = c.ReadStaged(ActorPackage(mod, item)); var mesh = actor.Exports.OfType<NormalExport>().Single(e => e.ObjectName.ToString() == template.MeshComponent);
                 HeldItemEffectService.Verify(actor, item);
-                if (SwordCombatService.Package(actor, mesh.Data.OfType<ObjectPropertyData>().Single(p => p.Name.ToString() == "StaticMesh").Value) != root + "/SM_HeldItem") throw new InvalidDataException("Wrong held mesh.");
+                var expectedMesh = CharacterAssetReuseService.Resolve(root + "/SM_HeldItem", aliases);
+                if (SwordCombatService.Package(actor, mesh.Data.OfType<ObjectPropertyData>().Single(p => p.Name.ToString() == "StaticMesh").Value) != expectedMesh) throw new InvalidDataException("Wrong held mesh.");
                 if (!template.Melee) VerifyPassiveActor(actor, mesh);
                 if (item.CustomModel is { } customModel) VerifyCustomModelMaterials(actor, mesh, customModel);
                 if (template.PrimitiveData is { } expected && !(mesh.Data.OfType<StructPropertyData>().Single(p => p.Name.ToString() == "CustomPrimitiveData").Value
                     .OfType<ArrayPropertyData>().Single().Value.OfType<FloatPropertyData>().Select(p => p.Value).SequenceEqual(expected))) throw new InvalidDataException("Held prop lost native material primitive data.");
-                c.ReadStaged(root + "/SM_HeldItem");
+                c.ReadStagedShared(expectedMesh);
                 var grants = new AbilityAssetMutationService().InspectAbilitySet(c.PathFor(SetPackage(mod, item)));
                 if (!grants.Success || grants.GameplayAbilities.Count != 1 || grants.GameplayAbilities[0].PackagePath != root + "/GA_HeldItem") throw new InvalidDataException("Held item must grant only its own OnSpawn ability.");
             }

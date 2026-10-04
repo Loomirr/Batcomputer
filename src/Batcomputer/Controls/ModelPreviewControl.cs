@@ -160,6 +160,7 @@ public sealed class ModelPreviewControl : UserControl
     public event EventHandler<PreviewPlacementSaveRequestedEventArgs>? PlacementSaveRequested;
     internal event EventHandler<PreviewSuitIconTestRequestedEventArgs>? SuitIconTestRequested;
     internal event EventHandler<PreviewSuitIconTestRequestedEventArgs>? SuitIconApplyRequested;
+    internal event EventHandler<PreviewCharacterIconsRequestedEventArgs>? CharacterIconsApplyRequested;
     private async Task SendCharacterAnimationAsync(string package)
     {
         var folder = _pendingFolder;
@@ -360,6 +361,10 @@ public sealed class ModelPreviewControl : UserControl
         uri.StartsWith($"blob:https://{host}/", StringComparison.OrdinalIgnoreCase) &&
         Path.GetFileName(path).EndsWith(".animation-draft.json", StringComparison.OrdinalIgnoreCase);
 
+    internal static bool IsCharacterIconTemplateDownload(string uri, string host, string path) =>
+        uri.StartsWith($"blob:https://{host}/", StringComparison.OrdinalIgnoreCase) &&
+        Path.GetFileName(path).EndsWith(".icon-studio.json", StringComparison.OrdinalIgnoreCase);
+
     internal static void ConfigureCharacterExportDownloads(WebView2 web, Control owner, Func<string> currentHost, Func<bool> isCurrent)
     {
         web.CoreWebView2.DownloadStarting += (_, download) =>
@@ -368,8 +373,9 @@ public sealed class ModelPreviewControl : UserControl
             download.Handled = true;
             var icon = IsCharacterIconDownload(download.DownloadOperation.Uri, currentHost(), download.ResultFilePath);
             var draft = IsAnimationDraftDownload(download.DownloadOperation.Uri, currentHost(), download.ResultFilePath);
-            if (!icon && !draft && !IsCharacterExportDownload(download.DownloadOperation.Uri, currentHost(), download.ResultFilePath)) return;
-            var suggestedName = icon || draft ? Path.GetFileName(download.ResultFilePath) : "Character-assembled.glb";
+            var template = IsCharacterIconTemplateDownload(download.DownloadOperation.Uri, currentHost(), download.ResultFilePath);
+            if (!icon && !draft && !template && !IsCharacterExportDownload(download.DownloadOperation.Uri, currentHost(), download.ResultFilePath)) return;
+            var suggestedName = icon || draft || template ? Path.GetFileName(download.ResultFilePath) : "Character-assembled.glb";
             var host = currentHost();
             var deferral = download.GetDeferral();
             try
@@ -381,13 +387,13 @@ public sealed class ModelPreviewControl : UserControl
                         if (owner.IsDisposed || host != currentHost() || !isCurrent()) return;
                         using var dialog = new SaveFileDialog
                         {
-                            Title = icon ? "Save suit icon" : draft ? "Save animation draft" : "Export assembled character",
-                            Filter = icon ? "PNG image (*.png)|*.png" : draft ? "Animation draft (*.json)|*.json" : "glTF binary (*.glb)|*.glb",
-                            DefaultExt = icon ? "png" : draft ? "json" : "glb", AddExtension = true, OverwritePrompt = true,
+                            Title = icon ? "Save suit icon" : template ? "Export icon studio settings" : draft ? "Save animation draft" : "Export assembled character",
+                            Filter = icon ? "PNG image (*.png)|*.png" : template ? "Icon studio template (*.icon-studio.json)|*.icon-studio.json" : draft ? "Animation draft (*.json)|*.json" : "glTF binary (*.glb)|*.glb",
+                            DefaultExt = icon ? "png" : draft || template ? "json" : "glb", AddExtension = true, OverwritePrompt = true,
                             FileName = suggestedName,
                         };
                         if (dialog.ShowDialog(owner) != DialogResult.OK) return;
-                        if (!Path.GetExtension(dialog.FileName).Equals(icon ? ".png" : draft ? ".json" : ".glb", StringComparison.OrdinalIgnoreCase)) return;
+                        if (!Path.GetExtension(dialog.FileName).Equals(icon ? ".png" : draft || template ? ".json" : ".glb", StringComparison.OrdinalIgnoreCase)) return;
                         download.ResultFilePath = dialog.FileName;
                         download.Cancel = false;
                     }
@@ -475,6 +481,18 @@ public sealed class ModelPreviewControl : UserControl
                         var folder = _pendingFolder;
                         if (ItemWorkshopTransform.TryParse(json, out var change))
                             BeginInvoke(() => { if (!IsDisposed && folder == _pendingFolder) ItemWorkshopTransformChanged?.Invoke(change); });
+                        return;
+                    }
+                    if (type.GetString() == "apply-character-icons")
+                    {
+                        try
+                        {
+                            var request = PreviewCharacterIconsRequestedEventArgs.Parse(json);
+                            var folder = _pendingFolder;
+                            BeginInvoke(() => { if (!IsDisposed && folder == _pendingFolder) CharacterIconsApplyRequested?.Invoke(this, request); });
+                        }
+                        catch (Exception ex) when (ex is InvalidDataException or KeyNotFoundException or InvalidOperationException or FormatException or JsonException)
+                        { _ = NotifySuitIconApplyAsync(false, "Icon assignment rejected: " + ex.Message); }
                         return;
                     }
                     if (type.GetString() is "test-suit-icon" or "apply-suit-icon")
@@ -640,6 +658,27 @@ internal sealed class PreviewSuitIconTestRequestedEventArgs(string layoutKey, by
 {
     internal string LayoutKey { get; } = layoutKey;
     internal byte[] PngBytes { get; } = pngBytes;
+}
+
+internal sealed class PreviewCharacterIconsRequestedEventArgs(string layoutKey, IReadOnlyDictionary<string, byte[]> icons) : EventArgs
+{
+    internal string LayoutKey { get; } = layoutKey;
+    internal IReadOnlyDictionary<string, byte[]> Icons { get; } = icons;
+    internal static PreviewCharacterIconsRequestedEventArgs Parse(string json)
+    {
+        if (json.Length > 6_100_000) throw new InvalidDataException("The icon request is too large.");
+        using var doc = JsonDocument.Parse(json);
+        var layout = doc.RootElement.GetProperty("layout").GetString() ?? "";
+        if (layout.Length is < 1 or > 160) throw new InvalidDataException("The icons must identify a saved suit.");
+        var images = doc.RootElement.GetProperty("icons");
+        if (images.ValueKind != JsonValueKind.Object) throw new InvalidDataException("Invalid icon set.");
+        var result = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        foreach (var image in images.EnumerateObject())
+            if (!result.TryAdd(image.Name, SuitIconDryRunService.DecodePngDataUrl(image.Value.GetString() ?? "", CharacterIconAssignmentService.Size(image.Name))))
+                throw new InvalidDataException("Duplicate icon role.");
+        CharacterIconAssignmentService.Validate(result);
+        return new(layout, result);
+    }
 }
 
 public sealed record PreviewCustomMeshTransform(

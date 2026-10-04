@@ -7,11 +7,25 @@ internal static class GameplayAnimationGraphRegressionChecks
 {
     internal static IEnumerable<(bool Passed, string Description)> Run()
     {
+        yield return (GameplayAnimationGraphService.SupportedPayloadClass("WidgetBlueprintGeneratedClass") &&
+            GameplayAnimationGraphService.SupportedPayloadClass("BlueprintGeneratedClass") &&
+            !GameplayAnimationGraphService.SupportedPayloadClass("Texture2D") &&
+            !GameplayAnimationGraphService.SupportedPayloadClass("UnknownExport"),
+            "private gameplay graph closures accept cooked ability HUD widgets without permitting arbitrary payload classes");
         var original = "/Game/Abilities/GA_Original";
         var replacement = "/Game/Mods/Example/Combat/GA_Custom";
         var selection = new GameplayAnimationGraphSelection { Id = new string('a',32), Name = "Example combat",
             OwnerDprdPackage = "/Game/Mods/Example/Characters/DA_DPRD_Example", Abilities = [new() { OriginalPackage = original, ReplacementPackage = replacement }] };
         GameplayAnimationGraphService.ValidateSelection(selection);
+        var supportOnly = new GameplayAnimationGraphSelection { Id = new string('b',32), Name = "Additional traversal",
+            OwnerDprdPackage = selection.OwnerDprdPackage, SupportAbilityPackages = [replacement] };
+        GameplayAnimationGraphService.ValidateSelection(supportOnly);
+        var supportProject = new NativeSuitProject { GameplayAnimationGraphs = [supportOnly], AbilityLoadout = new() {
+            AbilitySets = [new() { PackagePath = "/Game/Abilities/AS_Core", AddedGameplayAbilities = [new() { PackagePath = replacement }] }] } };
+        GameplayAnimationGraphService.ValidateSelections(supportProject);
+        yield return (Reject(() => GameplayAnimationGraphService.ValidateSelection(new() { Id = supportOnly.Id, OwnerDprdPackage = supportOnly.OwnerDprdPackage })) &&
+            Reject(() => GameplayAnimationGraphService.ValidateSelections(new() { GameplayAnimationGraphs = [supportOnly] })),
+            "additional cooked gameplay graphs need no native replacement, but must declare and grant verified support abilities; empty graphs remain invalid");
         var project = new NativeSuitProject { TargetPackages = new() { Playable = "/Game/Mods/Example/Characters/BP_Example" }, GameplayAnimationGraphs = [selection] };
         var restored = JsonSerializer.Deserialize<NativeSuitProject>(JsonSerializer.Serialize(project))!;
         yield return (restored.GameplayAnimationGraphs[0].Id == selection.Id && restored.GameplayAnimationGraphs[0].Abilities[0].ReplacementPackage == replacement &&
@@ -37,6 +51,10 @@ internal static class GameplayAnimationGraphRegressionChecks
         var manifest = new GameplayAnimationGraphService.Manifest(1,selection.Id,"Example",[new(replacement,[],members.ToArray())]);
         var manifestPath = Path.Combine(cache,"manifest.json");
         File.WriteAllText(manifestPath,JsonSerializer.Serialize(manifest));
+        selection.SupportAbilityPackages = ["/Game/Mods/Example/Combat/GA_MissingHelper"];
+        yield return (Reject(() => GameplayAnimationGraphService.Load(folder,selection)),
+            "a declared support ability must exist inside the verified immutable graph closure");
+        selection.SupportAbilityPackages = [];
         var stage = Path.Combine(folder,"Stage");
         GameplayAnimationGraphService.Stage(project,folder,stage,_=>{});
         var target = Path.Combine(stage,replacement[6..]+".uasset");
@@ -66,6 +84,29 @@ internal static class GameplayAnimationGraphRegressionChecks
             !ReferenceEquals(child.GameplayAnimationGraphs[0].Abilities,owner.GameplayAnimationGraphs[0].Abilities) &&
             CharacterRebaseService.Sections().Single(s=>s.Id=="animations").Fields.Contains("GameplayAnimationGraphs"),
             "new suits and animation rebases retain cooked graph cache identities while directing grant wiring to the receiving suit's own DPRD");
+        var helper = "/Game/Mods/CC_Example_Example/Movement/GA_NativeExecutor";
+        owner.GameplayAnimationGraphs[0].SupportAbilityPackages = [helper];
+        owner.AbilityLoadout = new() { AbilitySets = [new() { PackagePath = "/Game/Abilities/AS_Core", AddedGameplayAbilities = [new() { PackagePath = helper }] }] };
+        var assisted = CustomCharacterProjectService.CreateRecipe(owner,"Alternate","Example","Alternate",owner.SlotId);
+        GameplayAnimationGraphService.ValidateSelections(assisted);
+        yield return (assisted.AbilityLoadout!.AbilitySets[0].AddedGameplayAbilities[0].PackagePath == helper &&
+            assisted.GameplayAnimationGraphs[0].SupportAbilityPackages.SequenceEqual([helper]) &&
+            !ReferenceEquals(assisted.GameplayAnimationGraphs[0].SupportAbilityPackages,owner.GameplayAnimationGraphs[0].SupportAbilityPackages),
+            "helper grants retain immutable cooked package identities in a new suit while its runtime grant wiring remains suit-local");
+        assisted.AbilityLoadout!.AbilitySets[0].AddedGameplayAbilities[0].PackagePath = "/Game/Mods/CC_Example_Alternate/CharacterRebases/revision/Movement/GA_NativeExecutor";
+        CustomCharacterProjectService.PreserveAnimationReferences(owner, assisted);
+        yield return (assisted.AbilityLoadout.AbilitySets[0].AddedGameplayAbilities[0].PackagePath == helper,
+            "ability rebases restore helper cache identities after revision-folder authoring source rewrites");
+        assisted.AbilityLoadout.AbilitySets[0].Enabled = false;
+        yield return (Reject(() => GameplayAnimationGraphService.ValidateSelections(assisted)),
+            "a disabled helper grant blocks gameplay graph replay instead of creating a silently nonfunctional ability");
+        assisted.AbilityLoadout.AbilitySets[0].Enabled = true;
+        assisted.AbilityLoadout.AbilitySets[0].AddedGameplayAbilities.Add(new() { PackagePath = helper });
+        yield return (Reject(() => GameplayAnimationGraphService.ValidateSelections(assisted)),
+            "duplicate graph helper grants are rejected to prevent stacked input responders or movement effects");
+        selection.SupportAbilityPackages = ["/Game/Native/GA_Helper"];
+        yield return (Reject(() => GameplayAnimationGraphService.ValidateSelection(selection)),
+            "declared cache helpers must use safe private cooked package identities");
     }
     private static bool Reject(Action action) { try { action();return false; } catch(InvalidDataException) { return true; } }
 }

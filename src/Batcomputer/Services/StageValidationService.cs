@@ -73,6 +73,15 @@ public sealed class StageValidationService
         CheckGliderAnimInjection(project, findings);
         CheckAbilityDependencyDeclarations(project, findings);
         CheckRequiredAbilitySets(project, findings);
+        if (CharacterUtilityService.Enabled(project.AbilityLoadout?.Utilities))
+        {
+            try
+            {
+                if (_mappings is null) throw new InvalidDataException("Mappings are required to verify character utilities.");
+                CharacterUtilityService.Verify(project, _contentRoot, _mappings);
+            }
+            catch (Exception ex) { findings.Add(new("ERROR", "Character utilities did not rebuild correctly: " + ex.Message)); }
+        }
         if (project.GameplayAnimationGraphs.Count > 0)
         {
             try { GameplayAnimationGraphService.VerifyStaged(project, _projectRoot, _contentRoot); }
@@ -80,6 +89,12 @@ public sealed class StageValidationService
         }
         CheckEquipmentDependencies(project, findings);
         CheckGliderDependencies(project, characterAssets, findings);
+        try
+        {
+            foreach (var issue in AnimationReplacementCompatibilityService.Validate(project, _contentRoot))
+                findings.Add(new("ERROR", issue));
+        }
+        catch (Exception ex) { findings.Add(new("ERROR", "Animation compatibility could not be verified: " + ex.Message)); }
         return findings;
     }
 

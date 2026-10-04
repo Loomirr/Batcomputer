@@ -43,8 +43,8 @@
   </PropertyGroup>
   <Import Project="Tools\Updater\OrganizedPublish.targets" />
   <ItemGroup>
-    <!-- Unreal build rules are not part of Batcomputer. -->
-    <Compile Remove="Tools\BatcomputerRegistryWriter\**\*.cs" />
+    <!-- Independent helper projects and Unreal build rules are not app sources. -->
+    <Compile Remove="Tools\**\*.cs" />
     <Compile Remove="artifacts\**\*.cs" />
     <!-- Release/acceptance snapshots can contain copied WinForms .resx files. Keep every
          disposable artifact out of MSBuild's embedded-resource glob as well as compilation. -->

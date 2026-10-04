@@ -5,6 +5,7 @@ internal static class AbilityLoadoutRegressionChecks
 {
     public static void Run(List<string> failures, TextWriter output)
     {
+        CharacterUtilityRegressionChecks.Run(failures, output);
         HeldItemRegressionChecks.Run(failures, output);
         NativeHeldItemRegressionChecks.Run(failures, output);
         PlayerMeleeAdapterRegressionChecks.Run(failures, output);

@@ -372,6 +372,33 @@ public sealed class MaterialGenService
             {
                 result.Warnings.Add("The base MI has no scalar parameters to override.");
             }
+            // Inherited controls are not necessarily authored on the child MI. Validate them
+            // against the real parent before adding an override; never invent shader inputs.
+            var missingScalars = request.ParamToScalar.Keys.Where(name =>
+                !(scalarArray?.Value.OfType<StructPropertyData>().Any(entry => ReadParamName(entry).Equals(name, StringComparison.OrdinalIgnoreCase)) ?? false)).ToArray();
+            if (missingScalars.Length > 0)
+            {
+                var nativeControls = MaterialSurfaceControlService.Read(ReadTemplate(request.BaseUassetPath))
+                    .ToDictionary(control => control.Name, StringComparer.OrdinalIgnoreCase);
+                var prototype = scalarArray?.Value.OfType<StructPropertyData>().FirstOrDefault(entry =>
+                    FindScalarValue(entry) is not null && IsGlobalScalarEntry(entry));
+                foreach (var name in missingScalars)
+                {
+                    if (!nativeControls.TryGetValue(name, out var control) || prototype is null || scalarArray is null)
+                        throw new InvalidDataException($"Cannot add unproven inherited scalar '{name}', or this MI has no global scalar-entry template.");
+                    var number = request.ParamToScalar[name];
+                    if (!float.IsFinite(number) || (control.UvChannel && (number < 0 || number > 7 || number != MathF.Truncate(number))))
+                        throw new InvalidDataException($"Invalid native UV/scalar override for '{name}'.");
+                    var added = (StructPropertyData)PartGraftService.DeepClonePropertiesRebased([prototype], asset).Single();
+                    added.Name = new FName(asset, scalarArray.Value.Length.ToString());
+                    var parameterInfo = FindProperty<StructPropertyData>(added.Value, "ParameterInfo")!;
+                    FindProperty<NamePropertyData>(parameterInfo.Value, "Name")!.Value = new FName(asset, name);
+                    added.Value.RemoveAll(p => p.Name.ToString() == "ExpressionGUID");
+                    added.Value.Add(new StructPropertyData(new FName(asset, "ExpressionGUID")) {
+                        StructType = new FName(asset, "Guid"), Value = [new GuidPropertyData(new FName(asset, "ExpressionGUID")) { Value = Guid.Empty }] });
+                    scalarArray.Value = [..scalarArray.Value, added];
+                }
+            }
             foreach (var entry in scalarArray?.Value?.OfType<StructPropertyData>() ?? Enumerable.Empty<StructPropertyData>())
             {
                 var name = ReadParamName(entry);
@@ -387,6 +414,9 @@ public sealed class MaterialGenService
                     continue;
                 }
 
+                if (!float.IsFinite(scalar) || (MaterialSurfaceControlService.IsUvChannel(name) &&
+                    (scalar < 0 || scalar > 7 || scalar != MathF.Truncate(scalar))))
+                    throw new InvalidDataException($"Invalid native UV/scalar override for '{name}'.");
                 value.Value = scalar;
                 result.Retargeted.Add($"{name} -> {scalar.ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture)}");
             }
@@ -434,6 +464,16 @@ public sealed class MaterialGenService
 
     private static FloatPropertyData? FindScalarValue(StructPropertyData entry) =>
         FindProperty<FloatPropertyData>(entry.Value, "ParameterValue");
+
+    private static bool IsGlobalScalarEntry(StructPropertyData entry)
+    {
+        var info = FindProperty<StructPropertyData>(entry.Value, "ParameterInfo");
+        if (info is null || FindProperty<IntPropertyData>(info.Value, "Index")?.Value != -1) return false;
+        var association = FindProperty<EnumPropertyData>(info.Value, "Association");
+        return association is not null
+            ? association.Value.ToString() is "GlobalParameter" or "EMaterialParameterAssociation::GlobalParameter"
+            : FindProperty<BytePropertyData>(info.Value, "Association")?.Value == 0;
+    }
 
     private static string ReadParamName(StructPropertyData entry)
     {

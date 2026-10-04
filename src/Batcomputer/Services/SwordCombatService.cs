@@ -177,7 +177,8 @@ internal static class SwordCombatService
             (HeldItemService.Independent(profile) ? "held items configured separately." : $"legacy weapon visibility={settings.Visibility}."));
     }
 
-    internal static bool Verify(AbilityLoadoutProfile profile, string extracted, string staged, string mod, Usmap mappings, out string error)
+    internal static bool Verify(AbilityLoadoutProfile profile, string extracted, string staged, string mod, Usmap mappings, out string error,
+        IReadOnlyDictionary<string, string>? aliases = null)
     {
         try
         {
@@ -205,9 +206,9 @@ internal static class SwordCombatService
             if (states.Count != 89) throw new InvalidDataException("Expected 89 sword states.");
             for (var n = 0; n < states.Count; n++)
             {
-                var montagePath = root + $"/AM_PlayerSword_{n}";
+                var montagePath = CharacterAssetReuseService.Resolve(root + $"/AM_PlayerSword_{n}", aliases);
                 if (Package(graph, states[n].Value) != montagePath) throw new InvalidDataException("Sword graph points to stale attack data.");
-                var montage = c.ReadStaged(montagePath);
+                var montage = c.ReadStagedShared(montagePath);
                 VerifyComboHandoff(montage);
                 PlayerMeleeAdapterService.Verify(montage, profile.FightingStyleId, n);
                 MeleeStatusEffectService.Verify(montage, c, mod, s.HitStatus);
@@ -230,7 +231,7 @@ internal static class SwordCombatService
             var mutation = new AbilityAssetMutationService();
             var grants = mutation.InspectAbilitySet(c.PathFor(MeleePackage(mod)));
             if (!grants.Success || grants.GameplayAbilities.Count(g => g.PackagePath == root + "/GA_PlayerSword") != 1 || grants.GameplayAbilities.Count(g => g.PackagePath == root + "/GA_PlayerHeldSword") != (HeldItemService.Independent(profile) ? 0 : 1) || grants.GameplayAbilities.Any(g => g.PackagePath == MartialGa)) throw new InvalidDataException("Sword melee/held-item grant mismatch.");
-            if (!HeldItemService.Independent(profile)) { c.ReadStaged(root + "/BP_PlayerSword_Weapon"); c.ReadStaged(root + "/SM_PlayerSword"); }
+            if (!HeldItemService.Independent(profile)) { c.ReadStaged(root + "/BP_PlayerSword_Weapon"); c.ReadStagedShared(CharacterAssetReuseService.Resolve(root + "/SM_PlayerSword", aliases)); }
             error = ""; return true;
         }
         catch (Exception ex) { error = "Sword adapter verification: " + ex.Message; return false; }
@@ -362,6 +363,14 @@ internal static class SwordCombatService
             var asset = Load(PathFor(package));
             if (asset.Imports.Any(i => i.ObjectName.ToString() is "UnknownExport" or "UnknownPackage")) throw new InvalidDataException("Unresolved cooked sword import: " + package);
             return asset;
+        }
+        public UAsset ReadStagedShared(string package)
+        {
+            if (!HeldItemService.ValidPackage(package) || !package.StartsWith("/Game/Mods/", StringComparison.Ordinal))
+                throw new InvalidDataException("Shared validation reads require a private staged package.");
+            var path = Path.GetFullPath(Path.Combine(_staged, package[6..].Replace('/', Path.DirectorySeparatorChar)) + ".uasset");
+            if (!FileSystemPathUtil.IsWithinDirectory(path, _staged)) throw new InvalidDataException("Shared validation read escaped staging.");
+            return Load(path);
         }
         public void Write(UAsset asset, string package) => asset.Write(PathFor(package));
         public UAsset Clone(string from, string to, Dictionary<string, string>? redirects = null)
