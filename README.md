@@ -5,7 +5,7 @@ Build suits, customize equipment, and create new playable characters using asset
 copy of the game. Pick a base, make your changes, and build a mod to try in-game.
 
 > **Stable:** Batcomputer 1.0 (`1.0.0`) — first official release
-> **Latest beta:** [1.1.0-beta.1](https://github.com/Loomirr/Batcomputer/releases/tag/v1.1.0-beta.1) — animation creator, viewer, Parts and vehicle improvements
+> **Latest beta:** [1.1.0-beta.2](https://github.com/Loomirr/Batcomputer/releases/tag/v1.1.0-beta.2) — animation and voice studios, icon tools, reusable suit assets and takedown fixes
 > **Documentation:** [loomirr.github.io/Batcomputer](https://loomirr.github.io/Batcomputer/)
 
 This repository contains Batcomputer only. It does not contain game files, extracted assets, Oodle,

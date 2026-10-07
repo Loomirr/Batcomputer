@@ -1790,6 +1790,11 @@ public sealed partial class MainForm
                     break;
                 case "Textures":
                     _toyboxTypeCombo.Items.Add("Your textures");
+                    if (_currentProject?.CustomCharacter is { IsDefinition: false })
+                    {
+                        _toyboxTypeCombo.Items.Add("Base character textures");
+                        _toyboxTypeCombo.Items.Add("Suit + base character textures");
+                    }
                     _toyboxTypeCombo.Items.Add("Texture cooker notes");
                     break;
                 case "Parts":

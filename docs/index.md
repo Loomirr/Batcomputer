@@ -8,8 +8,8 @@ Batcomputer handles the files and registration needed to package and install you
 
 !!! success "Batcomputer 1.0 is here"
     Get the [official 1.0 release](https://github.com/Loomirr/Batcomputer/releases/tag/v1.0.0),
-    or use the built-in updater if your version supports it. The [1.1 beta](releases/1.1.0-beta.1.md)
-    adds animation creation, viewer improvements, more Parts and vehicle tools. Enable beta
+    or use the built-in updater if your version supports it. The [latest 1.1 beta](releases/1.1.0-beta.2.md)
+    expands animation, voice and icon tools, suit inheritance and takedown compatibility. Enable beta
     releases to try it; experimental features are marked in these guides. Keep a backup before upgrading.
 
 ## Start here

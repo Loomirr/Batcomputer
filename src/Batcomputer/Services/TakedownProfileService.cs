@@ -22,6 +22,34 @@ internal static class TakedownProfileService
     private static string Normalize(string path) => UnrealPathUtil.NormalizePackagePath(path);
     private static bool IsTakedown(string path) => MainPackages.Contains(Normalize(path)) || EndPackages.Contains(Normalize(path));
 
+    internal static string? BodyMismatchWarning(NativeSuitProject project)
+    {
+        var bodies = project.SkinnedMeshes.Where(m => m.Component.Equals("CharacterMesh0", StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (bodies.Length > 1) return null;
+        var body = bodies.SingleOrDefault();
+        var family = body is null ? project.BodyProfile?.GeometryFamily : NativeBodyProfileService.MatchMesh(body.DonorMeshPackage)?.GeometryFamily;
+        if (string.IsNullOrWhiteSpace(family) || project.AbilityLoadout is not { } profile) return null;
+        var combat = profile.AbilitySets.Where(s => s.Enabled && AbilityDependencyService.IsCombatSet(s.PackagePath)).ToArray();
+        if (combat.Length != 1) return null; // The ordinary loadout checks explain ambiguous combat sets.
+        var set = combat[0];
+        if (project.GameplayAnimationGraphs.Any(g => g.Abilities.Any(a => IsTakedown(a.OriginalPackage)))) return null;
+        var addedMain = set.AddedGameplayAbilities.Where(g => MainPackages.Contains(Normalize(g.PackagePath))).ToArray();
+        if (addedMain.Length > 1) return null;
+        var main = addedMain.SingleOrDefault()?.PackagePath;
+        if (main is null)
+        {
+            if (set.RemovedGameplayAbilities.Any(p => MainPackages.Contains(Normalize(p)))) return null;
+            var name = UnrealPathUtil.AssetName(set.PackagePath);
+            main = name.Equals("AS_Melee_Robin_DickGrayson", StringComparison.OrdinalIgnoreCase) ? MainAbility(Preset.Smallfig) :
+                name is "AS_Melee_Batman" or "AS_Melee_CatWoman" or "AS_Melee_Batgirl" or "AS_Melee_Gordon" or "AS_Melee_NightWing" ? MainAbility(Preset.Minifig) : null;
+        }
+        if (main is null) return null;
+        var smallBody = family.StartsWith("Smallfig", StringComparison.OrdinalIgnoreCase);
+        var smallMove = Normalize(main).Equals(MainAbility(Preset.Smallfig), StringComparison.OrdinalIgnoreCase);
+        return smallBody == smallMove ? null :
+            $"The {family} body still uses {(smallMove ? "Smallfig" : "Minifig")} takedowns. Paired animations may refuse to start. In Ability workshop → Takedowns, select {(smallBody ? "Smallfig · Robin" : "Minifig · Batman")}, save, and rebuild. This does not change the rest of the fighting style.";
+    }
+
     internal static string Label(Preset preset) => preset switch
     {
         Preset.Native => "Restore current melee set's takedowns",

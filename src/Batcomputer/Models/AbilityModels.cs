@@ -52,7 +52,7 @@ public sealed class HeldItemToggleProfile
     public string SourceRequestTag { get; set; } = "";
     public string SourceBusyTag { get; set; } = "";
     public string SourceContextTag { get; set; } = "";
-    /// <summary>Version 3: actor-local event dispatched by the persistent native input responder.</summary>
+    /// <summary>Version 3 uses a native input responder; version 4 observes mapped keys without consuming the native action. Both dispatch an actor-local event.</summary>
     public string SourceInputEventTag { get; set; } = "";
     public string ReplacedAbility { get; set; } = "";
     public string RemovedFailureAbility { get; set; } = "";

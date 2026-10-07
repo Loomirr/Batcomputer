@@ -25,6 +25,8 @@ Open the character and choose **Add a suit**, or use **Suits → Use your charac
 
 The new project opens in **Suits**, with a copied design and `Pawns.Playable.Ragman.NoHood`. Change its parts or abilities independently. The default character project is automatically included when building a mod containing this child suit. A missing or explicitly disabled parent blocks the build with a dependency message. Characters with saved child suits cannot be deleted from the tool until those suits are removed.
 
+Unchanged textures remain references to the included base character: creating a child suit does not copy its PNGs or cook a second set of texture packages. Materials and editable model sources remain suit-specific. In **Textures**, choose **Base character textures** or **Suit + base character textures** to browse the saved character's textures, then copy a package path to reuse it in a material. The material forge also lists those textures. Shared entries are read-only here; import a new PNG into the suit for a suit-specific change, or edit the base character to update the shared texture. Existing suits with older copied textures retain their recipes; combined builds still deduplicate equivalent packages.
+
 ## Refresh a suit from its character
 
 Save the character's latest changes, then open its additional suit and choose **Base → Rebase from character** (also available in the overflow menu). Review the sections and choose **Rebase suit**:

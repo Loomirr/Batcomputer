@@ -127,7 +127,7 @@ public sealed partial class MainForm
             _currentProject.PlayableTemplate,
             _currentProject.CutsceneTemplate);
         var donorIcons = donor?.IconPaths ?? NativeMetadataDonorService.Icons.Empty;
-        var generatedUiTextures = _currentProject.GeneratedTextures
+        var generatedUiTextures = MaterialBrowserTextures()
             .Where(texture => IsUiTextureKind(texture.Kind) && !string.IsNullOrWhiteSpace(texture.PackagePath))
             .OrderBy(texture => texture.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -273,6 +273,11 @@ public sealed partial class MainForm
 
     private void RefreshTextureTiles(string? type)
     {
+        var showBase = type is "Base character textures" or "Suit + base character textures";
+        var baseTextures = showBase ? BaseCharacterTexturesForBrowser() : [];
+        var displayedTextures = (type == "Base character textures" ? Enumerable.Empty<GeneratedTextureEntry>() :
+            _currentProject?.GeneratedTextures ?? Enumerable.Empty<GeneratedTextureEntry>()).Concat(baseTextures)
+            .GroupBy(t => t.PackagePath, StringComparer.OrdinalIgnoreCase).Select(g => g.First()).ToList();
         var search = CurrentToyboxSearch();
         var header =
             "Textures are cooked Texture2D assets made from PNGs by copying a tested game template.\n" +
@@ -305,7 +310,7 @@ public sealed partial class MainForm
                     Subtitle = "normal suit pak",
                     Accent = Theme.Textures,
                     OnClick = () => AppendLog("Generated Texture2D assets are staged directly into the owning suit mod when you build it; Batcomputer does not create a separate texture test pak."),
-                    ToolTip = "Build mod includes only the generated texture assets referenced by that suit, under its own /Game/Mods/<mod>/Textures path."
+                    ToolTip = "Build mod includes referenced textures. A custom character's suits can share the included base character's texture packages; edited suit textures keep their own packages."
                 }
             }, header);
             return;
@@ -324,7 +329,7 @@ public sealed partial class MainForm
             }
         };
 
-        if (_currentProject?.GeneratedTextures.Count > 0)
+        if (type != "Base character textures" && _currentProject?.GeneratedTextures.Count > 0)
         {
             tiles.Add(new VirtualTilePanel.Tile
             {
@@ -336,16 +341,17 @@ public sealed partial class MainForm
             });
         }
 
-        if (_currentProject is null || _currentProject.GeneratedTextures.Count == 0)
+        if (_currentProject is null || displayedTextures.Count == 0)
         {
-            ShowVirtualTiles(tiles, header + "\n\nNo generated textures saved on this suit yet.");
+            ShowVirtualTiles(tiles, header + "\n\nNo textures in this filter. Base character textures are shared read-only; import a new PNG for suit-specific changes.");
             return;
         }
 
-        foreach (var texture in _currentProject.GeneratedTextures
+        foreach (var texture in displayedTextures
             .Where(t => MatchesToyboxSearch(search, t.DisplayName, t.Kind, t.PackagePath, t.ObjectPath, t.SourcePng, t.PackageBaseName))
             .OrderByDescending(t => t.CreatedUtc, StringComparer.OrdinalIgnoreCase))
         {
+            var shared = !_currentProject.GeneratedTextures.Contains(texture);
             var title = string.IsNullOrWhiteSpace(texture.DisplayName)
                 ? UnrealPathUtil.AssetName(texture.PackagePath)
                 : texture.DisplayName;
@@ -354,7 +360,7 @@ public sealed partial class MainForm
             tiles.Add(new VirtualTilePanel.Tile
             {
                 Title = TrimMiddle(title, 30),
-                Subtitle = $"{texture.Kind} · {TextureProfileSafetyLabel(safety)}\n{TextureCookDetail(texture)} · {TrimMiddle(texture.PackagePath, 38)}",
+                Subtitle = $"{(shared ? "Base character · shared" : texture.Kind)} · {TextureProfileSafetyLabel(safety)}\n{TextureCookDetail(texture)} · {TrimMiddle(texture.PackagePath, 38)}",
                 Accent = exists ? Theme.Textures : Theme.OnDarkMuted,
                 Image = LoadTextureThumbnail(texture.SourcePng),
                 OnClick = () => CopyText(texture.PackagePath, $"Copied texture package path: {texture.PackagePath}"),
@@ -366,11 +372,42 @@ public sealed partial class MainForm
                     $"Cook: {TextureCookDetail(texture)}\n" +
                     $"PNG: {texture.SourcePng}\n" +
                     $"IoStore: {texture.IoStoreRoot}",
-                MenuFactory = () => BuildTextureTileMenu(texture),
+                MenuFactory = () => shared ? BuildSharedTextureTileMenu(texture) : BuildTextureTileMenu(texture),
             });
         }
 
         ShowVirtualTiles(tiles, header, $"No generated textures matched '{search}'.");
+    }
+
+    private IReadOnlyList<GeneratedTextureEntry> BaseCharacterTexturesForBrowser()
+    {
+        try
+        {
+            return CharacterTextureReferenceService.BaseTextures(_currentProject,
+                _projectService ??= new SuitProjectService(_projectRootText.Text.Trim()));
+        }
+        catch (Exception ex)
+        {
+            AppendLog("Base character textures unavailable: " + ex.Message);
+            return [];
+        }
+    }
+
+    private IEnumerable<GeneratedTextureEntry> MaterialBrowserTextures() =>
+        (_currentProject?.GeneratedTextures ?? Enumerable.Empty<GeneratedTextureEntry>())
+            .Concat(BaseCharacterTexturesForBrowser()).GroupBy(t => t.PackagePath, StringComparer.OrdinalIgnoreCase).Select(g => g.First());
+
+    private ContextMenuStrip BuildSharedTextureTileMenu(GeneratedTextureEntry texture)
+    {
+        var menu = new ContextMenuStrip();
+        menu.Items.Add("Copy package path (reuse in material)", null, (_, _) => CopyText(texture.PackagePath, "Copied shared base-character texture path."));
+        menu.Items.Add("Copy object path", null, (_, _) => CopyText(TextureObjectPath(texture), "Copied shared texture object path."));
+        menu.Items.Add("Copy source PNG path", null, (_, _) => CopyText(texture.SourcePng, "Copied source PNG path. Import a new texture to change it for this suit only."));
+        menu.Items.Add("View recipe safety…", null, (_, _) => ShowTextureRecipeSafety(texture));
+        menu.Items.Add("Open output folder", null, (_, _) => OpenTextureOutputFolder(texture));
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Shared with base character · edit on the base", null, (_, _) => { }).Enabled = false;
+        return menu;
     }
 
     private ContextMenuStrip BuildTextureTileMenu(GeneratedTextureEntry texture)

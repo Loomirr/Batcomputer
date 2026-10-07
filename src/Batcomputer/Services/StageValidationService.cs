@@ -69,6 +69,8 @@ public sealed class StageValidationService
         CheckGameplayShellIntegrity(project, characterAssets, findings);
         CheckNativeBodyProfile(project, characterAssets, findings);
         CheckSkinnedMeshes(project, characterAssets, findings);
+        if (TakedownProfileService.BodyMismatchWarning(project) is { } takedownWarning)
+            findings.Add(new("WARN", takedownWarning));
         CheckPawnTag(project, findings);
         CheckGliderAnimInjection(project, findings);
         CheckAbilityDependencyDeclarations(project, findings);
@@ -277,6 +279,14 @@ public sealed class StageValidationService
                 SkinnedMeshStageService.ReadManifest(new SuitProjectService(_projectRoot).ProjectOutputDirectory(project), mesh);
                 var file = SkinnedMeshCookService.SafePath(_contentRoot, mesh.MeshPackage[6..] + ".uasset");
                 if (!File.Exists(file) || !File.Exists(Path.ChangeExtension(file, ".uexp"))) throw new InvalidDataException("Custom skeletal mesh pair is missing.");
+                if (mesh.Component.Equals("CharacterMesh0", StringComparison.OrdinalIgnoreCase) && _mappings is not null)
+                {
+                    var imported = new UAsset(file, EngineVersion.VER_UE5_6, _mappings);
+                    var donorFile = Path.Combine(AppSettings.Current.EffectiveExtractedContentRoot(), mesh.DonorMeshPackage[6..] + ".uasset");
+                    var donor = new UAsset(donorFile, EngineVersion.VER_UE5_6, _mappings);
+                    if (!SynchronisedMeshCompatibilityService.Tags(imported).SequenceEqual(SynchronisedMeshCompatibilityService.Tags(donor)))
+                        throw new InvalidDataException("Paired-animation rig metadata is missing or incompatible. Rebuild this suit with the updated body importer before packaging.");
+                }
                 foreach (var (role, asset) in assets)
                 {
                     var component = MaterialReplaceService.FindComponentExport(asset, mesh.Component);

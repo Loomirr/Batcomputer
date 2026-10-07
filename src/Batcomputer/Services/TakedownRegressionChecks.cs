@@ -24,6 +24,12 @@ internal static class TakedownRegressionChecks
         var untouchedSource = JsonSerializer.Serialize(catalog);
         TakedownProfileService.Apply(profile, catalog, TakedownProfileService.Preset.Minifig);
         var set = profile.AbilitySets.Single();
+        var bodyProject = new NativeSuitProject { AbilityLoadout = Fixture(), BodyProfile = NativeBodyProfileService.Find("minifig-standard") };
+        Check(TakedownProfileService.BodyMismatchWarning(bodyProject) is not null, "an adult body with untouched Robin takedowns gets actionable build guidance");
+        bodyProject.AbilityLoadout = profile;
+        Check(TakedownProfileService.BodyMismatchWarning(bodyProject) is null, "matched adult-body takedowns do not produce a false size warning");
+        bodyProject.BodyProfile = NativeBodyProfileService.Find("smallfig-standard");
+        Check(TakedownProfileService.BodyMismatchWarning(bodyProject) is not null, "a small body with explicit Batman takedowns gets actionable build guidance");
         Check(profile.FightingStyleId == "robin-dual-sticks" && set.RemovedGameplayAbilities.Contains(unrelated) &&
             set.AddedGameplayAbilities.Any(g => g.PackagePath == unrelated + "Added") && JsonSerializer.Serialize(catalog) == untouchedSource,
             "takedown presets preserve combat style, unrelated edits and the source catalog");

@@ -53,6 +53,16 @@ hiding an unrelated cape or face just to conceal a bad rig is not a fix.
 Run **Check mod**, build the complete mod and cold-launch the game. Check idle, walking/running,
 attacks, traversal and cutscenes. A mesh can look fine in its rest pose and still stretch under animation.
 
+Body builds retain the selected native rig's synchronized-animation compatibility metadata.
+For an existing validated import, rebuild the suit with the updated application to restore this
+metadata; reimporting the FBX is not required just for that repair. This does not retarget paired
+animations or make arbitrary body proportions compatible.
+
+If you switch between Minifig and Smallfig bodies, check **Ability workshop → Takedowns** too.
+Choose **Minifig · Batman** or **Smallfig · Robin** to match the body, save and rebuild. These
+experimental presets change only the supported takedown grants, not the rest of the fighting style.
+Test both normal Focus takedowns and stealth/final-enemy takedowns in-game before sharing.
+
 Use **Import / replace weighted FBX…** for a newly exported Blender file. **Reimport saved FBX**
 cooks the copy already stored by Batcomputer; it does not pick up a different file in Downloads.
 Keep your `.blend` and source art too.

@@ -135,6 +135,11 @@ internal static class SkinnedMeshStageService
         { replacements[parent + "/MI_Slot_" + material.Slot] = material.MaterialPath; replacements["MI_Slot_" + material.Slot] = UnrealPathUtil.AssetName(material.MaterialPath); }
         RedirectImports(asset, replacements);
         asset.Write(file);
+        if (mesh.Component.Equals("CharacterMesh0", StringComparison.OrdinalIgnoreCase))
+        {
+            var donor = Path.Combine(AppSettings.Current.EffectiveExtractedContentRoot(), mesh.DonorMeshPackage[6..] + ".uasset");
+            SynchronisedMeshCompatibilityService.Restore(file, donor, MappingsCache.Load(AppSettings.Current.EffectiveUsmapPath()!));
+        }
     }
     internal static void RedirectImports(UAsset asset, IReadOnlyDictionary<string, string> replacements)
     {

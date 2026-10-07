@@ -29,11 +29,11 @@ internal static class HeldItemToggleService
     internal static void Validate(AbilityLoadoutProfile loadout)
     {
         if (loadout.HeldItemToggle is not { Enabled: true } p) return;
-        if (p.Version is not (1 or 2 or 3) || (p.PreserveNativeTakedown && p.Version < 2) || (p.Version == 3 && !p.PreserveNativeTakedown) || !Regex.IsMatch(p.SourceOwner,"^[A-Za-z][A-Za-z0-9_]{0,100}$") ||
+        if (p.Version is not (1 or 2 or 3 or 4) || (p.PreserveNativeTakedown && p.Version < 2) || (p.Version >= 3 && !p.PreserveNativeTakedown) || !Regex.IsMatch(p.SourceOwner,"^[A-Za-z][A-Za-z0-9_]{0,100}$") ||
             !Regex.IsMatch(p.ItemId,"^[A-Za-z0-9_]{1,64}$") || p.Assets.Count is < 2 or > 40 || p.Media.Count > 32)
             throw new InvalidDataException("Unsupported held-item toggle bundle or identity.");
-        if (p.Version == 3 && p.SourceInputEventTag != InputEventTag(p.SourceOwner,p))
-            throw new InvalidDataException("The input responder requires its character-local toggle event.");
+        if (p.Version >= 3 && p.SourceInputEventTag != InputEventTag(p.SourceOwner,p))
+            throw new InvalidDataException("The input bundle requires its character-local toggle event.");
         var item=loadout.HeldItems?.SingleOrDefault(i=>i.Id==p.ItemId);
         if (item is null || item.Visibility != HeldWeaponVisibility.Always) throw new InvalidDataException("The toggle requires its saved Always-held prop. Restore that prop or remove its toggle profile.");
         if (p.SourceRequestTag != $"Status.Batcomputer.HeldItem.{p.SourceOwner}.{p.ItemId}" ||
@@ -85,16 +85,25 @@ internal static class HeldItemToggleService
                 (!asset.Imports.Any(i => i.ObjectName.ToString() == "Delay") ||
                  !asset.GetNameMapIndexList().Any(n => n.ToString() == "Abilities.Combat.TakeDownAttack")))
                 throw new InvalidDataException("This toggle is missing its cooked native-takedown priority gate. Import a verified priority bundle.");
-            if (p.Version >= 3 && a.Package == p.ManagerPackage &&
+            if (p.Version == 3 && a.Package == p.ManagerPackage &&
                 (!asset.Imports.Any(i => i.ObjectName.ToString() == "WaitTagActionResponse") ||
                  !asset.Imports.Any(i => i.ObjectName.ToString() == "SendGameplayEventToActor") ||
                  !asset.Imports.Any(i => i.ObjectName.ToString() == "Delay") ||
                  !asset.GetNameMapIndexList().Any(n => n.ToString() == "InputTag.Ability.TakeDown") ||
                  !asset.GetNameMapIndexList().Any(n => n.ToString() == p.SourceInputEventTag)))
                 throw new InvalidDataException("This toggle is missing its cooked actor-local Focus input responder.");
+            if (p.Version >= 4 && a.Package == p.ManagerPackage &&
+                (asset.Imports.Any(i => i.ObjectName.ToString() == "WaitTagActionResponse") ||
+                 !asset.GetNameMapIndexList().Any(n => n.ToString() == "QueryKeysMappedToAction") ||
+                 !asset.Imports.Any(i => i.ObjectName.ToString() == "IsInputKeyDown") ||
+                 !asset.Imports.Any(i => i.ObjectName.ToString() == "WaitDelay") ||
+                 !asset.Imports.Any(i => i.ObjectName.ToString() == "SendGameplayEventToActor") ||
+                 !asset.GetNameMapIndexList().Any(n => n.ToString() == p.SourceInputEventTag) ||
+                 !asset.GetNameMapIndexList().Any(n => n.ToString() == "Abilities.Combat.EndOfEncounterTakeDownAttack")))
+                throw new InvalidDataException("This toggle is missing its non-consuming mapped-input observer and native execution priority.");
             if (p.Version >= 3 && a.Package == p.TogglePackage &&
                 !asset.GetNameMapIndexList().Any(n => n.ToString() == p.SourceInputEventTag))
-                throw new InvalidDataException("The toggle and input responder must use the same actor-local event.");
+                throw new InvalidDataException("The toggle and input bundle must use the same actor-local event.");
             var names=asset.GetNameMapIndexList();
             for(var i=0;i<names.Count;i++) if(renames.TryGetValue(names[i].ToString(),out var replacement)) asset.SetNameReference(i,new FString(replacement));
             asset.FolderName=new FString(redirects[a.Package]);
@@ -204,7 +213,7 @@ internal static class HeldItemToggleService
             if(!setAsset.Exports.OfType<NormalExport>().Any(e=>e.GetExportClassType()?.ToString()=="TTAnimSet"))continue;
             if(AddContextVariants(setAsset,ContextTag(owner,p),statePairs,"AnimMontage")>0)setAsset.Write(file);
         }
-        log.Add("Held-item toggle rebuilt: private Focus binding" + (p.PreserveNativeTakedown ? " with native takedown priority" : "") + (p.Version >= 3 ? " and an actor-local input responder" : "") + ", native audio, auto-extension and separate unarmed idle/forward movement. Physical deployment remains visibility-only.");
+        log.Add("Held-item toggle rebuilt: private Focus binding" + (p.PreserveNativeTakedown ? " with native takedown priority" : "") + (p.Version >= 4 ? " and a non-consuming mapped-input observer" : p.Version >= 3 ? " and an actor-local input responder" : "") + ", native audio, auto-extension and separate unarmed idle/forward movement. Physical deployment remains visibility-only.");
     }
     internal static int ForwardSampleIndex(JArray samples)
     {
@@ -245,7 +254,7 @@ internal static class HeldItemToggleService
         foreach (var native in source.GameplayAbilities.Where(g => g.PackagePath == p.ReplacedAbility))
             result.Add(new() { Kind = p.PreserveNativeTakedown ? AbilityAssetMutationService.GameplayAbilityEditKind.Add : AbilityAssetMutationService.GameplayAbilityEditKind.Replace,
                 TargetPackagePath = p.PreserveNativeTakedown ? toggle : native.PackagePath, ReplacementPackagePath = p.PreserveNativeTakedown ? "" : toggle,
-                AbilityLevelOverride = native.AbilityLevel, InputTagOverride = native.InputTag,
+                AbilityLevelOverride = native.AbilityLevel, InputTagOverride = p.Version >= 4 ? "" : native.InputTag,
                 SourceAbilityPackagePath = native.PackagePath });
         return result.ToArray();
     }
@@ -276,7 +285,7 @@ internal static class HeldItemToggleService
             var expected=source.GameplayAbilities.Where(g=>g.PackagePath!=p.RemovedFailureAbility).ToList();
             if (p.PreserveNativeTakedown)
                 expected.AddRange(source.GameplayAbilities.Where(g => g.PackagePath == p.ReplacedAbility).Select(g => new AbilityAssetMutationService.AbilityGrantReference {
-                    PackagePath = redirects[p.TogglePackage], AbilityLevel = g.AbilityLevel, InputTag = g.InputTag }));
+                    PackagePath = redirects[p.TogglePackage], AbilityLevel = g.AbilityLevel, InputTag = p.Version >= 4 ? "" : g.InputTag }));
             var pkg=root+"/AS_Input_"+i; var actual=mutation.InspectAbilitySet(FileFor(content,pkg));
             if(!actual.Success || actual.GameplayAbilities.Count != expected.Count ||
                 expected.Where((g,j) => actual.GameplayAbilities[j].PackagePath != (g.PackagePath==p.ReplacedAbility && !p.PreserveNativeTakedown?redirects[p.TogglePackage]:g.PackagePath) ||

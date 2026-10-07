@@ -132,6 +132,7 @@ public static class CustomCharacterProjectService
             RewriteOwnedStrings(node, oldRoot, OwnedRoot(project));
             project = node.Deserialize<NativeSuitProject>()!;
             PreserveAnimationReferences(source, project);
+            project = CharacterTextureReferenceService.Preserve(source, project, oldRoot, OwnedRoot(project));
         }
         return project;
     }
@@ -287,6 +288,7 @@ public static class CustomCharacterProjectService
         var library = new ToolMaterialLibraryService(service.ProjectRoot);
         var scratch = Path.Combine(directory, "CopiedMaterialSources", "Content");
         var regenerated = new Dictionary<string, (GeneratedTextureEntry Texture, string PackageBase)>(StringComparer.OrdinalIgnoreCase);
+        var sharedTextures = CharacterTextureReferenceService.SharedPackages(source, target);
         for (int i = 0; i < target.GeneratedTextures.Count; i++)
         {
             var texture = target.GeneratedTextures[i];
@@ -319,7 +321,7 @@ public static class CustomCharacterProjectService
             }
             log("Copied and cooked texture: " + texture.DisplayName);
         }
-        library.CopyCharacterMaterialSources(VisualCopyRoots(source), scratch, regenerated);
+        library.CopyCharacterMaterialSources(VisualCopyRoots(source), scratch, regenerated, sharedTextures);
         if (Directory.Exists(scratch))
         foreach (var file in Directory.EnumerateFiles(scratch, "*.uasset", SearchOption.AllDirectories))
         {
@@ -330,7 +332,7 @@ public static class CustomCharacterProjectService
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
             foreach (var ext in new[] { ".uasset", ".uexp", ".ubulk" })
                 if (File.Exists(Path.ChangeExtension(file, ext))) File.Copy(Path.ChangeExtension(file, ext), Path.ChangeExtension(destination, ext), false);
-            RepointCopiedPackage(destination, oldRoot, newRoot);
+            RepointCopiedPackage(destination, oldRoot, newRoot, sharedTextures);
         }
         foreach (var mesh in target.SkinnedMeshes.Concat(EquipmentSkinnedModelService.Models(target)))
         {
@@ -338,7 +340,7 @@ public static class CustomCharacterProjectService
             var manifestFile = Path.Combine(cache, "validated.json");
             var manifest = JsonSerializer.Deserialize<SkinnedMeshCookService.CookManifest>(File.ReadAllText(manifestFile))
                 ?? throw new InvalidDataException("Missing validated skinned cache.");
-            RepointCopiedPackage(Path.Combine(cache, "mesh.uasset"), oldRoot, newRoot);
+            RepointCopiedPackage(Path.Combine(cache, "mesh.uasset"), oldRoot, newRoot, sharedTextures);
             var hashes = manifest.Files.Keys.ToDictionary(file => file, file => SkinnedMeshCookService.Hash(Path.Combine(cache, file)));
             manifest = manifest with { Package = mesh.MeshPackage, Files = hashes,
                 TemporarySkeleton = manifest.TemporarySkeleton.Replace(oldRoot + "/", newRoot + "/", StringComparison.Ordinal) };
@@ -371,7 +373,7 @@ public static class CustomCharacterProjectService
             .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
-    private static void RepointCopiedPackage(string file, string oldRoot, string newRoot)
+    private static void RepointCopiedPackage(string file, string oldRoot, string newRoot, IReadOnlySet<string>? sharedTextures = null)
     {
         var asset = new UAsset(file, EngineVersion.VER_UE5_6, null,
             CustomSerializationFlags.SkipParsingExports | CustomSerializationFlags.SkipPreloadDependencyLoading);
@@ -379,7 +381,8 @@ public static class CustomCharacterProjectService
         for (int i = 0; i < names.Count; i++)
         {
             var name = names[i].ToString();
-            if (name.StartsWith(oldRoot + "/", StringComparison.Ordinal))
+            if (name.StartsWith(oldRoot + "/", StringComparison.Ordinal) &&
+                !(sharedTextures?.Any(p => name == p || name.StartsWith(p + ".", StringComparison.Ordinal)) ?? false))
                 asset.SetNameReference(i, new FString(newRoot + name[oldRoot.Length..]));
         }
         if (asset.FolderName?.ToString() is { } folder && folder.StartsWith(oldRoot + "/", StringComparison.Ordinal))

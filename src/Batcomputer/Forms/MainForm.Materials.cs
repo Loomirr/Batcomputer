@@ -312,7 +312,7 @@ public sealed partial class MainForm
             _projectRootText.Text.Trim(),
             mod,
             suggested,
-            _currentProject?.GeneratedTextures,
+            MaterialBrowserTextures(),
             CurrentMaterialTemplateTarget());
         if (wiz.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(wiz.ResultMiPackagePath))
         {
@@ -366,7 +366,7 @@ public sealed partial class MainForm
             _projectRootText.Text.Trim(),
             mod,
             suggested,
-            _currentProject?.GeneratedTextures,
+            MaterialBrowserTextures(),
             CurrentMaterialTemplateTarget());
         wiz.PrefillBase(diskPath, suggested, editInPlace);
         if (wiz.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(wiz.ResultMiPackagePath))

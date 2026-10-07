@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 1.1.0-beta.2 — 2026-10-07
+
+These changes are relative to 1.1.0-beta.1. See the [release notes](docs/releases/1.1.0-beta.2.md) for workflows, update instructions and limits.
+
+- Restores native synchronized-animation compatibility metadata on imported character bodies and warns about mismatched body/takedown families. Short, tall and both native-rig custom-body test cases passed in-game; this does not retarget arbitrary rigs.
+- New character suits reference their included base character's unchanged textures instead of copying PNGs and cooking duplicate textures. Adds read-only base-character texture filters and material-picker reuse.
+- Adds explicit section-based character-to-suit rebasing, including abilities, equipment, voices and animations, while preserving suit identity and selected suit-specific sections. Character edits do not silently update saved suits.
+- Adds Character Voice Studio with searchable native slots, imported WAV libraries, waveform playback, multi-selection, batch assignment/silencing/restoring and recording gain. Builds encode selected profiles into character-local voice routing without replacing other characters.
+- Fixes localized voice-media staging, long encoder scratch paths, shared voice ownership across character suits and encoded Vorbis setup collisions. Adds animation voice cues, including an explicit empty-swing option; native triggers, chance and cooldown still apply.
+- Adds a searchable Animation Explorer tree with inline base-game/imported replacement choices, current assignments and reset controls; adds the workspace's editable/cooked animation library and improves dense-clip playback.
+- Adds combat hit-window timeline drafting with start/contact/end markers. These remain preview planning data, not automatic game damage events; drafts with unsupported combat timing cannot be cooked as ready-to-use attacks.
+- Validates authored animation bone order, native rig mapping and final decoded poses, improving detection of scale/pose errors before clips enter the library.
+- Modernizes held-item and OBJ workshops with in-place imports, material-slot controls, your-material filters, explicit reference visibility, frame targets, dimensions, unit helpers and shared transform gizmos. Alignment updates reuse preview geometry.
+- Adds character-local native held-item appearance edits, conditional extra-prop visibility and editable supported animation-spawned static items without changing shared native assets.
+- Adds equipment removal/restoration and independent face-animation Blueprint selection while retaining the character's face materials.
+- Corrects native character-emblem SDF encoding and documents alpha cutouts, source margins and the separate HUD backplate/border behavior.
+- Corrects custom mesh preview mount paths and material resolution, improves packed material/dummy texture handling, and adds Material Forge's native dummy choices.
+
 - Adds independently assignable clue/trail tracking and configurable passive healing to the ability picker, with individual edit/remove controls and saved build replay.
 - Preserves utility settings and the actual target namespace through ability-workshop editing and saving.
 - Reuses compatible character-family assets across ordinary suits while keeping distinct authored variants separate.

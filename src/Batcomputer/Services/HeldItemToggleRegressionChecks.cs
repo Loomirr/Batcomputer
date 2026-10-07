@@ -35,6 +35,11 @@ internal static class HeldItemToggleRegressionChecks
         results.Add((legacy.Any(edit => edit.Kind == AbilityAssetMutationService.GameplayAbilityEditKind.Replace && edit.TargetPackagePath == p.ReplacedAbility),
             "legacy item-toggle bundles retain their saved replacement behavior"));
         p.Version = 3; p.SourceInputEventTag = HeldItemToggleService.InputEventTag(p.SourceOwner,p); HeldItemToggleService.Validate(profile);
+        p.Version = 4; HeldItemToggleService.Validate(profile);
+        var observed = HeldItemToggleService.InputEdits(grants,p,prefix+"OutputToggle");
+        results.Add((observed.Single(e=>e.Kind==AbilityAssetMutationService.GameplayAbilityEditKind.Add) is { InputTagOverride:"", AbilityLevelOverride:7 } &&
+            !observed.Any(e=>e.TargetPackagePath==p.ReplacedAbility),
+            "non-consuming mapped-input toggle is event-only and leaves the native Focus grant untouched"));
         var clone=AbilityExplorerForm.CloneProfile(profile);
         clone.HeldItemToggle!.Enabled=false;
         results.Add((p.Enabled && !clone.HeldItemToggle.Enabled && !ReferenceEquals(p.Assets,clone.HeldItemToggle.Assets),"ability editor deep-copies the complete private item-toggle bundle"));

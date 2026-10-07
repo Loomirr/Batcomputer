@@ -534,7 +534,8 @@ public sealed class ToolMaterialLibraryService
     /// traversing the old material graph. Never repair/overwrite the original suit or fall back to
     /// stale texture archives. Normal packaging still requires every original cook to be valid.</summary>
     internal void CopyCharacterMaterialSources(IEnumerable<string> roots, string contentRoot,
-        IReadOnlyDictionary<string, (GeneratedTextureEntry Texture, string PackageBase)> regeneratedTextures)
+        IReadOnlyDictionary<string, (GeneratedTextureEntry Texture, string PackageBase)> regeneratedTextures,
+        IReadOnlySet<string>? sharedTextures = null)
     {
         var gate = RepairGate;
         gate.Wait();
@@ -544,11 +545,11 @@ public sealed class ToolMaterialLibraryService
                 if (!IsSafeModPackagePath(pair.Key) || !MainForm.ValidateGeneratedTextureCook(pair.Value.Texture, pair.Value.PackageBase, out _))
                     throw new InvalidDataException("The new character's texture copy is not certified: " + pair.Key);
             var closure = roots.SelectMany(root => WalkModLocalMaterialDependencyClosure(root,
-                package => regeneratedTextures.ContainsKey(package) ? [] : DirectModLocalPackageDependencies(package, false)))
+                package => regeneratedTextures.ContainsKey(package) || sharedTextures?.Contains(package) == true ? [] : DirectModLocalPackageDependencies(package, false)))
                 .Distinct(StringComparer.OrdinalIgnoreCase);
             foreach (var package in closure)
             {
-                if (regeneratedTextures.ContainsKey(package)) continue;
+                if (regeneratedTextures.ContainsKey(package) || sharedTextures?.Contains(package) == true) continue;
                 var source = ResolvePackageBase(package);
                 ValidateClosurePackageBase(source, package, "source character material");
                 var destination = PackageBaseUnder(contentRoot, package)

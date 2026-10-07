@@ -20,6 +20,18 @@ internal static class CustomCharacterRegressionChecks
         var before = JsonSerializer.Serialize(source);
         var character = CustomCharacterProjectService.CreateRecipe(source, "Moon Knight", "MoonKnight", "MoonKnight");
         var child = CustomCharacterProjectService.CreateRecipe(character, "Unhooded", "MoonKnight", "NoHood", character.SlotId);
+        var baseTexture = character.GeneratedTextures[0].PackagePath;
+        character.IconMenu = baseTexture;
+        character.IconSuit = baseTexture + ".T_Body";
+        var textureVariant = CustomCharacterProjectService.CreateRecipe(character, "Texture reference suit", "MoonKnight", "Reference", character.SlotId);
+        Check(textureVariant.GeneratedTextures.Count == 0 && textureVariant.IconMenu == baseTexture &&
+            textureVariant.IconSuit == baseTexture + ".T_Body" &&
+            CharacterTextureReferenceService.SharedPackages(character, textureVariant).SetEquals([baseTexture]),
+            "new cosmetic suits preserve exact base texture package/object references without duplicating editable recipes");
+        var separateCharacter = CustomCharacterProjectService.CreateRecipe(character, "Independent character", "Independent", "Independent");
+        Check(separateCharacter.GeneratedTextures.Count == 1 && separateCharacter.GeneratedTextures[0].PackagePath != baseTexture &&
+            CharacterTextureReferenceService.SharedPackages(character, separateCharacter).Count == 0,
+            "independent characters still copy their textures and never acquire implicit foreign-character dependencies");
         Check(character.CustomCharacter!.DefaultVehicleTag == "" && child.CustomCharacter!.DefaultVehicleTag == "" &&
             CharacterVehicleChoiceService.IsValidTag("None") && CharacterVehicleChoiceService.IsValidTag("Pawns.Vehicle.Batmobile1989") &&
             CharacterVehicleChoiceService.IsValidTag("Pawns.Vehicle.Batcomputer.TestCar"),
@@ -38,9 +50,9 @@ internal static class CustomCharacterRegressionChecks
         Check(character.ProgressTag == "GameProgress.Definitions.Characters.MoonKnight.MoonKnight" && child.ProgressTag.EndsWith("MoonKnight.NoHood"),
             "character variants own their unlock/save progress tags");
         Check(JsonSerializer.Serialize(source) == before && character.TargetPackages.Dcmd != child.TargetPackages.Dcmd &&
-            character.GeneratedTextures[0].PackagePath != child.GeneratedTextures[0].PackagePath &&
+            child.GeneratedTextures.Count == 0 &&
             character.MaterialAssignments[0].MiPackagePath.StartsWith("/Game/Mods/CC_MoonKnight_MoonKnight/", StringComparison.Ordinal),
-            "copying a character design preserves the source and isolates editable asset package roots");
+            "character copies isolate editable assets, while child suits do not copy or cook base texture recipes");
         Check(CustomCharacterProjectService.IdentityError(character, "Pawns.Playable.Batman.TheBatman2025") is null &&
             CustomCharacterProjectService.IdentityError(child, "Pawns.Playable.Batman.TheBatman2025") is null &&
             CustomCharacterProjectService.IdentityError(new() { PawnTag = child.PawnTag }, "Pawns.Playable.Batman.TheBatman2025") is not null,
@@ -119,6 +131,19 @@ internal static class CustomCharacterRegressionChecks
                 new Dictionary<string, (GeneratedTextureEntry, string)> { ["/Game/Mods/Old/T_Cape"] = (new(), Path.Combine(root, "missing")) })) &&
                 !Directory.Exists(copyContent), "character material copy rejects uncertified texture substitutes before copying any files");
             suits.SaveProject(character); suits.SaveProject(child);
+            var browserTextures = CharacterTextureReferenceService.BaseTextures(child, suits);
+            browserTextures[0].DisplayName = "browser-only label";
+            Check(browserTextures[0].PackagePath == baseTexture && child.GeneratedTextures.Count == 0 &&
+                suits.LoadProject(suits.ProjectPathForSlot(character.SlotId))!.GeneratedTextures[0].DisplayName != "browser-only label",
+                "base texture filter reads detached saved-owner metadata without modifying either suit or character");
+            var textureOnlyOwner = JsonSerializer.Deserialize<NativeSuitProject>(JsonSerializer.Serialize(character))!;
+            textureOnlyOwner.MaterialAssignments.Clear();
+            textureVariant.MaterialAssignments.Clear();
+            CustomCharacterProjectService.CopyVisualAssets(textureOnlyOwner, textureVariant, suits, _ => { });
+            Check(textureVariant.GeneratedTextures.Count == 0 &&
+                !Directory.Exists(Path.Combine(suits.ProjectOutputDirectory(textureVariant), "CopiedTextureSources")) &&
+                !Directory.Exists(Path.Combine(AppSettings.GeneratedRootFor(root), "TextureImports", textureVariant.SlotId)),
+                "creating a texture-sharing suit performs no PNG copy or texture cook, even with no source PNG to recook");
             Check(suits.ListProjects().Count(summary => summary.IsCharacter) == 1 &&
                 suits.LoadProject(suits.ProjectPathForSlot(child.SlotId))?.CustomCharacter?.DefinitionSlotId == character.SlotId,
                 "character kind and parent identity persist through save, discovery and reload");

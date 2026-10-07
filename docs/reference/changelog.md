@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.0-beta.2 — 2026-10-07
+
+Changes since Beta 1 include expanded Animation Studio imports, multi-bone editing and named
+groups; Character Voice Studio; revised icon cameras/lighting and JSON presets; improved held-item
+and material tools; explicit character-to-suit rebasing and shared asset/texture reuse; independent
+tracking and healing controls; and imported-body takedown compatibility repairs.
+
+Short, tall and native-rig custom-body takedown tests passed in-game. Existing body imports need
+to be rebuilt for the metadata repair; arbitrary rig/paired-pose compatibility is not guaranteed.
+See the [complete beta notes](../releases/1.1.0-beta.2.md), including important animation and voice
+limits. 1.0.0 remains the stable release.
+
 ## 1.1.0-beta.1 — 2026-09-27
 
 This beta brings together the new animation creator, character animation previews,

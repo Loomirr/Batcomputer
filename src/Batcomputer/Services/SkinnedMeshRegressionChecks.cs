@@ -9,6 +9,28 @@ internal static class SkinnedMeshRegressionChecks
     {
         var results = new List<(bool, string)>();
         void Check(bool pass, string name) => results.Add((pass, name));
+        foreach (var family in new[] { "Minifig", "Smallfig" })
+        {
+            var donor = new UAssetAPI.UAsset(UAssetAPI.UnrealTypes.EngineVersion.VER_UE5_6); var body = new UAssetAPI.UAsset(UAssetAPI.UnrealTypes.EngineVersion.VER_UE5_6);
+            donor.ClearNameIndexList(); body.ClearNameIndexList(); donor.Exports = []; body.Exports = []; donor.Imports = []; body.Imports = [];
+            var nativeMesh = new UAssetAPI.ExportTypes.NormalExport { Asset = donor, ObjectName = new UAssetAPI.UnrealTypes.FName(donor, "SK_Native"),
+                ClassIndex = SwordCombatService.Obj(donor, "/Script/Engine", "SkeletalMesh", "/Script/CoreUObject", "Class"), Data = [] };
+            donor.Exports.Add(nativeMesh);
+            var metadata = new UAssetAPI.ExportTypes.NormalExport { Asset = donor, ObjectName = new UAssetAPI.UnrealTypes.FName(donor, "RigMetadata"),
+                ClassIndex = SwordCombatService.Obj(donor, "/Script/SynchronisedAnimations", SynchronisedMeshCompatibilityService.UserDataClass, "/Script/CoreUObject", "Class"),
+                OuterIndex = UAssetAPI.UnrealTypes.FPackageIndex.FromExport(0), Data = [new UAssetAPI.PropertyTypes.Structs.StructPropertyData(new UAssetAPI.UnrealTypes.FName(donor, "CompatibleTags"))
+                    { StructType = new UAssetAPI.UnrealTypes.FName(donor, "GameplayTagContainer"), Value = [new UAssetAPI.PropertyTypes.Structs.GameplayTagContainerPropertyData(new UAssetAPI.UnrealTypes.FName(donor, "CompatibleTags"))
+                    { Value = [new UAssetAPI.UnrealTypes.FName(donor, "Animation.Skeleton." + family)] }] }] };
+            donor.Exports.Add(metadata);
+            var custom = new UAssetAPI.ExportTypes.NormalExport { Asset = body, ObjectName = new UAssetAPI.UnrealTypes.FName(body, "SK_Custom"),
+                ClassIndex = SwordCombatService.Obj(body, "/Script/Engine", "SkeletalMesh", "/Script/CoreUObject", "Class"), Data = [], Extras = [2, 7, 9] };
+            body.Exports.Add(custom);
+            SynchronisedMeshCompatibilityService.Copy(body, donor); SynchronisedMeshCompatibilityService.Copy(body, donor);
+            Check(SynchronisedMeshCompatibilityService.Tags(body).SequenceEqual(["Animation.Skeleton." + family]), family + " imported bodies retain the native paired-animation rig tags");
+            Check(body.Exports.Count == 2 && custom.Extras.SequenceEqual(new byte[] { 2, 7, 9 }) && custom.Data.OfType<UAssetAPI.PropertyTypes.Objects.ArrayPropertyData>().Single().Value.Length == 1,
+                family + " paired-animation metadata replay preserves geometry and avoids duplicate objects");
+            Check(SynchronisedMeshCompatibilityService.Tags(donor).SequenceEqual(["Animation.Skeleton." + family]), family + " imported rig metadata replay does not mutate its donor");
+        }
         bool Reject(Action action) { try { action(); return false; } catch (InvalidDataException) { return true; } }
         Check(new[] { "Torso", "Torso2", "Collar", "Cape" }.All(slot =>
                 AttachmentClearanceService.BoneForSlot(slot) == "Neck" &&
