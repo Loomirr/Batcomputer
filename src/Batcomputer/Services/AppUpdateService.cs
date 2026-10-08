@@ -11,6 +11,15 @@ internal sealed record UpdateFile(string Path, long Size, string Sha256);
 internal sealed record UpdateManifest(int Schema, string Version, List<UpdateFile> Files);
 internal sealed record AppUpdateRelease(string Version, string Notes, Uri Download, long Size, string Sha256, FileUpdatePlan? FilePlan = null, PatchUpdatePlan? PatchPlan = null);
 internal sealed record StagedAppUpdate(string Directory, UpdateManifest Manifest);
+internal sealed record AppUpdateCheckResult(AppUpdateRelease? Release, string? AvailableBetaVersion, bool IncludeBeta)
+{
+    internal string Channel => IncludeBeta ? "Beta (includes stable)" : "Stable";
+    internal string NoUpdateHeadline => AvailableBetaVersion != null ? "A newer beta is available"
+        : IncludeBeta ? "Beta channel is current" : "Stable channel is current";
+    internal string NoUpdateStatus => AvailableBetaVersion != null
+        ? $"{AvailableBetaVersion} is a beta. Select Beta in Settings & recovery to check and download it. Nothing has been installed."
+        : $"No newer compatible update was found on the {Channel} channel.";
+}
 
 /// <summary>Fixed-origin, bounded download + validated staging. Never writes application or user files.</summary>
 internal sealed partial class AppUpdateService : IDisposable
@@ -38,9 +47,13 @@ internal sealed partial class AppUpdateService : IDisposable
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("Batcomputer/" + AppVersion.Current);
     }
 
-    public async Task<AppUpdateRelease?> CheckAsync(bool includeBeta, CancellationToken ct)
+    public async Task<AppUpdateRelease?> CheckAsync(bool includeBeta, CancellationToken ct) =>
+        (await CheckDetailedAsync(includeBeta, ct)).Release;
+
+    public async Task<AppUpdateCheckResult> CheckDetailedAsync(bool includeBeta, CancellationToken ct)
     {
         AppUpdateRelease? best = null;
+        string? availableBeta = null;
         // Bounded pagination: don't assume the most recently published release has the highest version.
         const int pageSize = 5; // File-based releases carry hundreds of assets; keep each response bounded.
         for (var page = 1; page <= (_testFeed == null ? 6 : 1); page++)
@@ -56,10 +69,18 @@ internal sealed partial class AppUpdateService : IDisposable
                 var version = release.GetProperty("tag_name").GetString() ?? "";
                 try
                 {
-                    if (!IsSupportedRelease(version)
-                        || (!includeBeta && (release.GetProperty("prerelease").GetBoolean() || AppVersion.IsPrerelease(version)))
-                        || AppVersion.Compare(version, AppVersion.Current) <= 0
-                        || (best != null && AppVersion.Compare(version, best.Version) <= 0)) continue;
+                    if (!IsSupportedRelease(version) || AppVersion.Compare(version, AppVersion.Current) <= 0) continue;
+                    if (!includeBeta && (release.GetProperty("prerelease").GetBoolean() || AppVersion.IsPrerelease(version)))
+                    {
+                        // Explain a channel-filtered release without opting the user in or fetching its payload/catalog.
+                        // Drafts, old versions and manual-only releases must not produce an updater offer.
+                        if ((availableBeta == null || AppVersion.Compare(version, availableBeta) > 0)
+                            && release.GetProperty("assets").EnumerateArray().Any(a =>
+                                a.GetProperty("name").GetString() is AssetName or FileCatalogName))
+                            availableBeta = version;
+                        continue;
+                    }
+                    if (best != null && AppVersion.Compare(version, best.Version) <= 0) continue;
                 }
                 catch (Exception e) when (e is InvalidDataException or OverflowException) { continue; }
                 var fileAssets = release.GetProperty("assets").EnumerateArray()
@@ -88,7 +109,8 @@ internal sealed partial class AppUpdateService : IDisposable
             }
             if (doc.RootElement.GetArrayLength() < pageSize) break;
         }
-        return best;
+        if (best != null && availableBeta != null && AppVersion.Compare(availableBeta, best.Version) <= 0) availableBeta = null;
+        return new(best, availableBeta, includeBeta);
     }
 
     public async Task<StagedAppUpdate> DownloadAsync(AppUpdateRelease release, string transaction,

@@ -13,6 +13,7 @@ internal static class AppUpdateInstaller
     internal const string LockFile = ".batcomputer-update.lock";
     internal const string SandboxMarker = ".batcomputer-updater-sandbox";
     internal const string GitHubTestMarker = ".batcomputer-updater-github-test";
+    internal const string HelperReadyFile = "helper-started.txt";
 
     internal static string NewTransaction(string installRoot)
     {
@@ -79,10 +80,37 @@ internal static class AppUpdateInstaller
     {
         var helper = PrepareHelper(update.Directory);
         var process = Process.GetCurrentProcess();
-        var start = new ProcessStartInfo(helper) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(helper)! };
+        var start = new ProcessStartInfo(AppLayout.LaunchPath(helper)) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(helper)! };
         start.ArgumentList.Add("--apply-app-update"); start.ArgumentList.Add(update.Directory);
         start.ArgumentList.Add(process.Id.ToString()); start.ArgumentList.Add(process.StartTime.ToUniversalTime().Ticks.ToString());
         using var helperProcess = Process.Start(start) ?? throw new IOException("Could not start the update helper. Batcomputer will stay open.");
+        try { WaitForHelperStartup(helperProcess, update.Directory, TimeSpan.FromSeconds(15)); }
+        catch (Exception ex)
+        {
+            // The parent still owns the app's read lock: this helper cannot have applied any files.
+            // Never leave a late helper waiting to install after reporting a scheduling failure.
+            if (!helperProcess.HasExited) { helperProcess.Kill(); helperProcess.WaitForExit(5000); }
+            var message = "The update helper did not start correctly. Nothing was installed. " +
+                "Keep Batcomputer open and check Technical details. If this installation is in a deeply nested folder, " +
+                "close it and move the complete portable folder to a shorter path, then try again. " + ex.Message;
+            Status(update.Directory, "Update did not complete: " + message);
+            throw new IOException(message, ex);
+        }
+    }
+
+    internal static void WaitForHelperStartup(Process helper, string transaction, TimeSpan timeout)
+    {
+        var ready = Path.Combine(transaction, HelperReadyFile);
+        var expected = helper.Id + ":" + helper.StartTime.ToUniversalTime().Ticks;
+        var timer = Stopwatch.StartNew();
+        do
+        {
+            if (helper.HasExited) throw new IOException("Helper exited with code " + helper.ExitCode + ".");
+            try { if (File.Exists(ready) && File.ReadAllText(ready).Trim() == expected) return; }
+            catch (IOException) { /* The helper may still be writing its acknowledgement. */ }
+            Thread.Sleep(50);
+        } while (timer.Elapsed < timeout);
+        throw new TimeoutException("Timed out waiting for the helper's startup confirmation.");
     }
 
     internal static int RunHelper(string[] args)
@@ -92,17 +120,20 @@ internal static class AppUpdateInstaller
         {
             var root = InstallRoot(transaction);
             var expectedHelper = Path.Combine(transaction, "helper", "Batcomputer.exe");
-            if (!string.Equals(Environment.ProcessPath, expectedHelper, StringComparison.OrdinalIgnoreCase))
+            if (Environment.ProcessPath is not { } helperPath || !string.Equals(AppLayout.NormalizePath(helperPath), expectedHelper, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Run the recovery helper from its original update folder.");
             using var schedulingLock = new FileStream(Path.Combine(root, WorkFolder, "installer.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             Status(transaction, "Waiting for Batcomputer to close. No files have changed.");
+            using (var self = Process.GetCurrentProcess())
+                File.WriteAllText(Path.Combine(transaction, HelperReadyFile), self.Id + ":" + self.StartTime.ToUniversalTime().Ticks);
             if (args[0] == "--apply-app-update" && args.Length >= 4)
             {
                 try
                 {
                     using var parent = Process.GetProcessById(int.Parse(args[2]));
                     if (parent.StartTime.ToUniversalTime().Ticks == long.Parse(args[3]) &&
-                        string.Equals(parent.MainModule?.FileName, Path.Combine(root, "Batcomputer.exe"), StringComparison.OrdinalIgnoreCase)
+                        parent.MainModule?.FileName is { } parentPath &&
+                        string.Equals(AppLayout.NormalizePath(parentPath), Path.Combine(root, "Batcomputer.exe"), StringComparison.OrdinalIgnoreCase)
                         && !parent.WaitForExit(600000))
                         throw new TimeoutException("Batcomputer stayed open for ten minutes. Check for updates again when ready.");
                 }
@@ -118,7 +149,7 @@ internal static class AppUpdateInstaller
             Apply(transaction);
             // Do not hold the exclusive lock while the restarted editor tries to acquire its read lock.
             exclusive.Dispose();
-            var start = new ProcessStartInfo(Path.Combine(root, "Batcomputer.exe")) { UseShellExecute = false, WorkingDirectory = root };
+            var start = new ProcessStartInfo(AppLayout.LaunchPath(Path.Combine(root, "Batcomputer.exe"))) { UseShellExecute = false, WorkingDirectory = root };
             start.ArgumentList.Add("--app-update-health"); start.ArgumentList.Add(Path.GetFileName(transaction));
             using var launched = Process.Start(start) ?? throw new IOException("Could not restart Batcomputer.");
             var deadline = DateTime.UtcNow.AddMinutes(2);

@@ -163,6 +163,31 @@ internal static class AppUpdateRegressionChecks
                 Reject(() => { using var exclusive = new FileStream(Path.Combine(dir, AppUpdateInstaller.LockFile), FileMode.Open, FileAccess.ReadWrite, FileShare.None); });
             using var after = new FileStream(Path.Combine(dir, AppUpdateInstaller.LockFile), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
         });
+        Check("scheduling requires acknowledgement from the exact live helper process", () =>
+        {
+            var tx = Fixture();
+            using var process = System.Diagnostics.Process.GetCurrentProcess();
+            var marker = Path.Combine(tx, AppUpdateInstaller.HelperReadyFile);
+            foreach (var contents in new[] { "", process.Id + ":0" })
+            {
+                File.WriteAllText(marker, contents);
+                try { AppUpdateInstaller.WaitForHelperStartup(process, tx, TimeSpan.Zero); }
+                catch (TimeoutException) { continue; }
+                throw new Exception("Missing or stale helper acknowledgement was accepted.");
+            }
+            File.WriteAllText(marker, process.Id + ":" + process.StartTime.ToUniversalTime().Ticks);
+            AppUpdateInstaller.WaitForHelperStartup(process, tx, TimeSpan.FromSeconds(1));
+        });
+        Check("extended-length process paths round trip without moving the portable root", () =>
+        {
+            foreach (var path in new[] { @"C:\Portable\Batcomputer.exe", @"\\server\share\Portable\Batcomputer.exe" })
+            {
+                var extended = AppLayout.LaunchPath(path);
+                if (!extended.StartsWith(@"\\?\", StringComparison.Ordinal)
+                    || AppLayout.NormalizePath(extended) != path || AppLayout.LaunchPath(extended) != extended)
+                    throw new Exception("Extended launch path changed its destination.");
+            }
+        });
 
         // Exercise real HTTP, redirects policy, package creation and extraction with the current real executable.
         var publish = Path.Combine(root, "publish"); Directory.CreateDirectory(publish);
@@ -209,6 +234,52 @@ internal static class AppUpdateRegressionChecks
             var beta = service.CheckAsync(true, CancellationToken.None).GetAwaiter().GetResult();
             var stable = service.CheckAsync(false, CancellationToken.None).GetAwaiter().GetResult();
             if (beta?.Version != "99.0.0-beta.10" || stable?.Version != "98.0.0") throw new Exception("Wrong release selected.");
+        });
+        Check("stable reports newer beta without selecting it, fetching its catalog or changing preferences", () =>
+        {
+            var preference = AppSettings.Current.IncludeBetaAppUpdates;
+            using var service = new AppUpdateService(new Uri(server.Url + "releases.json"));
+            var check = service.CheckDetailedAsync(false, CancellationToken.None).GetAwaiter().GetResult();
+            if (check.Release?.Version != "98.0.0" || check.AvailableBetaVersion != "99.0.0-beta.10" || check.IncludeBeta)
+                throw new Exception("Lost stable selection or excluded-beta explanation.");
+            server.Routes["/beta-only.json"] = JsonSerializer.SerializeToUtf8Bytes(new[] {
+                Release("99.0.0-beta.2", true), Release("100.0.0-beta.1", true, true), Release("1.0.0", false) });
+            using var betaOnly = new AppUpdateService(new Uri(server.Url + "beta-only.json"));
+            var requestsBefore = server.Requests.Count;
+            check = betaOnly.CheckDetailedAsync(false, CancellationToken.None).GetAwaiter().GetResult();
+            if (check.Release != null || check.AvailableBetaVersion != "99.0.0-beta.2"
+                || !check.NoUpdateHeadline.Contains("beta") || !check.NoUpdateStatus.Contains("Select Beta")
+                || server.Requests.Count != requestsBefore + 1 || AppSettings.Current.IncludeBetaAppUpdates != preference)
+                throw new Exception("A stable user was opted in, or received a misleading all-current message.");
+            var optedIn = betaOnly.CheckDetailedAsync(true, CancellationToken.None).GetAwaiter().GetResult();
+            if (optedIn.Release?.Version != "99.0.0-beta.2" || optedIn.AvailableBetaVersion != null)
+                throw new Exception("Explicit beta selection did not offer the update.");
+        });
+        Check("current-channel messages and saved Stable preference remain explicit", () =>
+        {
+            var settings = JsonSerializer.Deserialize<AppSettings>("{\"IncludeBetaAppUpdates\":false}")!;
+            if (settings.IncludeBetaAppUpdates) throw new Exception("Saved Stable preference was lost.");
+            if (new AppUpdateCheckResult(null, null, false).NoUpdateHeadline != "Stable channel is current"
+                || new AppUpdateCheckResult(null, null, true).NoUpdateHeadline != "Beta channel is current")
+                throw new Exception("Channel is missing from the no-update message.");
+        });
+        Check("beta notice excludes old, draft, unsupported and manual-only releases; stable supersedes beta", () =>
+        {
+            server.Routes["/ineligible.json"] = JsonSerializer.SerializeToUtf8Bytes(new object[] {
+                Release("1.0.0-beta.1", true), Release("0.9.0-beta.99", true), Release("99.0.0-beta.1", true, true),
+                new { tag_name = "99.0.0-beta.2", prerelease = true, draft = false, assets = Array.Empty<object>() } });
+            using var service = new AppUpdateService(new Uri(server.Url + "ineligible.json"));
+            var check = service.CheckDetailedAsync(false, CancellationToken.None).GetAwaiter().GetResult();
+            if (check.Release != null || check.AvailableBetaVersion != null) throw new Exception("Ineligible beta was advertised.");
+            server.Routes["/superseded.json"] = JsonSerializer.SerializeToUtf8Bytes(new[] { Release("99.0.0-beta.2", true), Release("99.0.0", false) });
+            using var superseded = new AppUpdateService(new Uri(server.Url + "superseded.json"));
+            check = superseded.CheckDetailedAsync(false, CancellationToken.None).GetAwaiter().GetResult();
+            if (check.Release?.Version != "99.0.0" || check.AvailableBetaVersion != null) throw new Exception("Stable did not supersede beta.");
+            // A prerelease tag must be filtered even if its GitHub prerelease flag is incorrect.
+            server.Routes["/tag-only.json"] = JsonSerializer.SerializeToUtf8Bytes(new[] { Release("99.0.0-beta.2", false) });
+            using var tagOnly = new AppUpdateService(new Uri(server.Url + "tag-only.json"));
+            check = tagOnly.CheckDetailedAsync(false, CancellationToken.None).GetAwaiter().GetResult();
+            if (check.Release != null || check.AvailableBetaVersion != "99.0.0-beta.2") throw new Exception("Prerelease tag filtering failed.");
         });
         Check("real HTTP ZIP download, digest, manifest, executable version and extraction", () =>
         {

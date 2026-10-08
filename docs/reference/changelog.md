@@ -2,6 +2,16 @@
 
 ## 1.1.0-beta.2 — 2026-10-07
 
+The Beta 2 packages were refreshed with updater repairs without changing the version number.
+Existing Beta 2 users need the refreshed full ZIP once.
+
+The Update center names the checked channel, explains newer betas excluded by Stable, and
+rechecks immediately after a channel change. Installing a beta still preserves a saved Stable
+preference; enabling beta updates remains an explicit choice.
+
+Update helpers and restarted apps use extended-length Windows launch paths. Scheduling waits
+for the helper to confirm startup instead of silently accepting a helper that immediately exits.
+
 Changes since Beta 1 include expanded Animation Studio imports, multi-bone editing and named
 groups; Character Voice Studio; revised icon cameras/lighting and JSON presets; improved held-item
 and material tools; explicit character-to-suit rebasing and shared asset/texture reuse; independent

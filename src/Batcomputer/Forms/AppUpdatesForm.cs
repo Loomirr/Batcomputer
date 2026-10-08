@@ -104,10 +104,10 @@ internal sealed class AppUpdatesForm : AdaptiveForm
         var loading = new Label { Dock = DockStyle.Fill, Text = "Opening Update center…", TextAlign = ContentAlignment.MiddleCenter,
             BackColor = Color.FromArgb(25, 28, 35), ForeColor = Muted };
         Controls.Add(loading);
-        _primary.Click += async (_, _) => { if (_staged != null) Schedule(); else if (_release != null) await DownloadAsync(); else await CheckAsync(); };
+        _primary.Click += async (_, _) => { if (_staged != null) await ScheduleAsync(); else if (_release != null) await DownloadAsync(); else await CheckAsync(); };
         _cancel.Click += (_, _) => _operation?.Cancel();
-        _restart.Click += (_, _) => RestartNow();
-        _stable.Click += (_, _) => ChangeChannel(false); _beta.Click += (_, _) => ChangeChannel(true);
+        _restart.Click += async (_, _) => await RestartNowAsync();
+        _stable.Click += async (_, _) => await ChangeChannelAsync(false); _beta.Click += async (_, _) => await ChangeChannelAsync(true);
         _startup.CheckedChanged += (_, _) => SavePreferences();
         _releaseTab.Click += (_, _) => SelectDetails(false); _activityTab.Click += (_, _) => SelectDetails(true);
         releases.Click += (_, _) => OpenLocation(AppUpdateService.ReleasesPage);
@@ -132,10 +132,10 @@ internal sealed class AppUpdatesForm : AdaptiveForm
                 switch (command)
                 {
                     case "primary" when !_busy && !Scheduled:
-                        if (_staged != null) Schedule(); else if (_release != null) await DownloadAsync(); else await CheckAsync(); break;
+                        if (_staged != null) await ScheduleAsync(); else if (_release != null) await DownloadAsync(); else await CheckAsync(); break;
                     case "cancel": _operation?.Cancel(); break;
-                    case "restart" when !_busy: RestartNow(); break;
-                    case "channel": ChangeChannel(value); break;
+                    case "restart" when !_busy: await RestartNowAsync(); break;
+                    case "channel": await ChangeChannelAsync(value); break;
                     case "startup": _startup.Checked = value; break;
                     case "releases": OpenLocation(AppUpdateService.ReleasesPage); break;
                     case "recovery":
@@ -156,7 +156,7 @@ internal sealed class AppUpdatesForm : AdaptiveForm
         notes = _notes.Text, activity = _activity.Text, sandbox = _sandbox, beta = AppSettings.Current.IncludeBetaAppUpdates,
         startup = _startup.Checked, action = Scheduled ? "Scheduled · close Batcomputer to install" : _busy ? (_track.Step == 2 ? "Verifying…" : "Working…")
             : _staged != null ? "Install when I exit" : _release != null ? "Download update" : "Check for updates",
-        disabled = _busy || Scheduled, busy = _busy, scheduled = Scheduled, ready = _staged != null,
+        disabled = _busy || Scheduled, busy = _busy, cancellable = _operation != null, scheduled = Scheduled, ready = _staged != null,
         step = _track.Step, error = _lastError.Length > 0, accent = ColorTranslator.ToHtml(Theme.Gold)
     });
 
@@ -176,13 +176,14 @@ internal sealed class AppUpdatesForm : AdaptiveForm
         _activity.Visible = activity; _notes.Visible = !activity;
         _releaseTab.ForeColor = activity ? Muted : Theme.Gold; _activityTab.ForeColor = activity ? Theme.Gold : Muted;
     }
-    private void ChangeChannel(bool beta)
+    private async Task ChangeChannelAsync(bool beta)
     {
         if (_busy || Scheduled) return;
         AppSettings.Current.IncludeBetaAppUpdates = beta; SavePreferences();
         _release = null; _staged = null; Pending = null; PendingRelease = null;
         _headline.Text = "Channel changed"; _status.Text = "Check again to see releases in this channel."; _target.Text = beta ? "Stable + beta releases" : "Stable releases only";
         _track.Step = 0; UpdateButtons();
+        await CheckAsync();
     }
     private void SavePreferences()
     {
@@ -194,19 +195,20 @@ internal sealed class AppUpdatesForm : AdaptiveForm
         _stable.Enabled = _beta.Enabled = !_busy && !Scheduled;
         _stable.BackColor = !AppSettings.Current.IncludeBetaAppUpdates ? Color.FromArgb(68, 61, 37) : Surface;
         _beta.BackColor = AppSettings.Current.IncludeBetaAppUpdates ? Color.FromArgb(68, 61, 37) : Surface;
-        _cancel.Visible = _busy; _primary.Enabled = !_busy && !Scheduled;
+        _cancel.Visible = _busy && _operation != null; _primary.Enabled = !_busy && !Scheduled;
         _restart.Visible = _staged != null; _restart.Enabled = !_busy && _staged != null;
         _primary.Text = Scheduled ? "Scheduled · exit Batcomputer to install" : _busy ? "Working…" : _staged != null ? "Install on exit →" : _release != null ? "Download update →" : "Check for updates →";
         _primary.BackColor = _primary.Enabled ? Theme.Gold : Color.FromArgb(66, 64, 50); _primary.ForeColor = _primary.Enabled ? Color.FromArgb(24, 26, 31) : Muted;
         PresentCinematic();
     }
-    private void ShowRelease(AppUpdateRelease? release)
+    private void ShowRelease(AppUpdateRelease? release, AppUpdateCheckResult? check = null)
     {
+        check ??= new(release, null, AppSettings.Current.IncludeBetaAppUpdates);
         _release = release; _staged = null; _lastError = "";
-        _headline.Text = release == null ? "You're all set" : "An update is available";
-        _target.Text = release == null ? "Installed " + AppVersion.Display : AppVersion.Display + "  →  " + release.Version;
-        _notes.Text = release?.Notes ?? "No newer compatible updater package was found in this channel. Older manual-only packages remain available in Release history.";
-        _status.Text = release == null ? "No newer compatible update was found for this channel."
+        _headline.Text = release == null ? check.NoUpdateHeadline : "An update is available";
+        _target.Text = (release == null ? "Installed " + AppVersion.Display : AppVersion.Display + "  →  " + release.Version) + " · " + check.Channel;
+        _notes.Text = release?.Notes ?? check.NoUpdateStatus + "\r\n\r\nYour saved release-channel preference is kept when you update or manually install a beta. Stable excludes prereleases. Beta includes both stable and beta releases.\r\n\r\nOlder manual-only packages remain available in Release history.";
+        _status.Text = release == null ? check.NoUpdateStatus
             : release.FilePlan is { } plan ? $"{release.Size / 1048576d:0.00} MB to download · reusing {plan.ReusedFiles} unchanged files. Full file payloads: {plan.FullSize / 1048576d:0.00} MB."
             : release.PatchPlan is { } patch ? $"{release.Size / 1048576d:0.00} MB patch from {patch.Catalog.BaseVersion} · {patch.Catalog.ChangedPaths.Count} changed files. Full ZIP fallback: {patch.FullZipSize / 1048576d:0.00} MB."
             : $"{release.Size / 1048576d:0.0} MB · Download now, install when you're ready.";
@@ -224,8 +226,9 @@ internal sealed class AppUpdatesForm : AdaptiveForm
     {
         using var operation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         operation.CancelAfter(TimeSpan.FromSeconds(45)); _operation = operation; _busy = true;
+        _lastError = "";
         _headline.Text = "Looking for updates"; _status.Text = "Checking " + (_sandbox ? "the local test feed…" : "GitHub releases…"); _track.Step = 0; UpdateButtons();
-        try { var release = await _service.CheckAsync(AppSettings.Current.IncludeBetaAppUpdates, operation.Token); if (!_closing) ShowRelease(release); }
+        try { var check = await _service.CheckDetailedAsync(AppSettings.Current.IncludeBetaAppUpdates, operation.Token); if (!_closing) ShowRelease(check.Release, check); }
         catch (OperationCanceledException) { if (!_closing) { _headline.Text = "Check stopped"; _status.Text = "Cancelled or timed out. Nothing was changed; you can try again."; } }
         catch (Exception ex) { if (!_closing) ShowError("Couldn't check for updates", ex); }
         finally { _operation = null; if (!_closing) { _busy = false; UpdateButtons(); } }
@@ -261,22 +264,26 @@ internal sealed class AppUpdatesForm : AdaptiveForm
         }
         finally { _operation = null; if (!_closing) { _busy = false; UpdateButtons(); } }
     }
-    private void Schedule()
+    private async Task ScheduleAsync()
     {
         if (_staged == null) return;
         if (MessageBox.Show(this, "Install this verified update after you exit Batcomputer?\n\nSave your work, then close every Batcomputer window from this folder within ten minutes. Closing just the Update center is not enough. Your editor will restart automatically.",
             "Install on exit", MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK) return;
-        try { AppUpdateInstaller.Schedule(_staged); Scheduled = true; SetReady(); SelectDetails(true); }
-        catch (Exception ex) { ShowError("Couldn't schedule the update", ex); }
+        _busy = true; UpdateButtons();
+        try { await Task.Run(() => AppUpdateInstaller.Schedule(_staged)); Scheduled = true; if (!_closing) { SetReady(); SelectDetails(true); } }
+        catch (Exception ex) { if (!_closing) ShowError("Couldn't schedule the update", ex); }
+        finally { _busy = false; if (!_closing) UpdateButtons(); }
     }
-    private void RestartNow()
+    private async Task RestartNowAsync()
     {
         if (_busy || _staged == null || _closing) return;
         if (MessageBox.Show(this, "Save your work before continuing. Restart now will close all windows in this Batcomputer instance, install the verified update, then reopen Batcomputer.\n\nOther instances from this folder must also be closed before installation can start. If an editor blocks closing, no files will be replaced; the update will remain scheduled for normal exit.\n\nHave you saved your work and are you ready to restart?",
             "Restart and update", MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK) return;
+        _busy = true; UpdateButtons();
         try
         {
-            if (!Scheduled) { AppUpdateInstaller.Schedule(_staged); Scheduled = true; }
+            if (!Scheduled) { await Task.Run(() => AppUpdateInstaller.Schedule(_staged)); Scheduled = true; }
+            if (_closing) return;
             SetReady();
             // Defer until the WebView/native click callback has returned. Application.Exit
             // raises every FormClosing guard, including owned/modal editors. The helper,
@@ -293,7 +300,8 @@ internal sealed class AppUpdatesForm : AdaptiveForm
                 }
             }));
         }
-        catch (Exception ex) { ShowError("Couldn't restart for the update", ex); }
+        catch (Exception ex) { if (!_closing) ShowError("Couldn't restart for the update", ex); }
+        finally { _busy = false; if (!_closing) UpdateButtons(); }
     }
     private void ShowError(string title, Exception ex)
     {

@@ -8,7 +8,7 @@
  function apply(s){
   latest=s;for(const id of ['headline','target','status','installed','notes','activity'])if(typeof s[id]==='string')$(id).textContent=s[id];
   $('sandbox').hidden=!s.sandbox;$('primary').textContent=s.action||'Check for updates';$('primary').disabled=!!s.disabled;
-  $('cancel').hidden=!s.busy;$('channel').disabled=!!s.busy||!!s.scheduled;$('channel').value=s.beta?'beta':'stable';$('startup').checked=!!s.startup;
+  $('cancel').hidden=!s.busy||s.cancellable===false;$('channel').disabled=!!s.busy||!!s.scheduled;$('channel').value=s.beta?'beta':'stable';$('startup').checked=!!s.startup;
   $('restart').hidden=!(s.ready||s.scheduled);$('restart').disabled=!!s.busy;
   $('progressArea').hidden=!(s.busy||s.ready||s.scheduled);
   // This is actual byte progress, never an invented percent for verification.

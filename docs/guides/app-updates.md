@@ -23,6 +23,15 @@ scheduled window. Batcomputer does not force-close your editors.
 - Optional startup checks notify you; they do not download or install automatically.
 - Versions before 1.0 are legacy and are never offered by the updater. 1.0 betas remain eligible with betas enabled.
 
+Your saved channel survives updates and manual installations. Installing a beta over a Stable
+installation does **not** change that saved preference. If an announced beta is missing, open
+**Settings & recovery**, select **Beta**, then **Check for updates**. For example, 1.0.0 is still
+the latest stable release while 1.1.0-beta.2 requires the Beta channel. Older Update centers can
+say “You're all set” when they mean only that the selected channel has no newer update.
+
+The revised Update center names the checked channel, explains when a newer beta is excluded,
+and checks again immediately when you switch channels. It never enables betas automatically.
+
 If an older version has no Updates menu or cannot read the new package layout, use the
 [manual update instructions](../getting-started/install.md#updating-an-existing-installation) once.
 
@@ -80,6 +89,13 @@ with the update; it contains the backup and recovery journal. Do not delete it w
 or recovery is pending. Older finished transactions can be removed manually after all helpers exit.
 
 ## If an update fails
+
+Older updaters can fail to start their installation helper from deeply nested folders, even
+when the main app opens normally. If a verified download never installs after exit, check the
+transaction's `status.txt`. Close Batcomputer, move the **complete portable folder** to a shorter
+path (for example `C:\Tools\Batcomputer`), then check/download again. Do not move only the EXE
+or run a helper from a different transaction. The revised updater confirms helper startup and
+uses extended-length launch paths; older installed clients cannot gain that fix before updating.
 
 Check **Technical details** and copy the useful error text. For a checksum/verification error,
 retry the download rather than extracting the rejected payload yourself. For a file-lock error,

@@ -4,6 +4,11 @@
 
 ## 1.1.0-beta.2 — 2026-10-07
 
+The Beta 2 packages were refreshed with these updater repairs. Existing Beta 2 users need the refreshed full ZIP once; the version number is unchanged.
+
+- Clarifies update-channel results: a Stable check explains when a newer beta is available instead of saying the app is unconditionally current. Switching channels immediately rechecks; saved channel preferences remain unchanged by installation.
+- Uses extended-length paths when launching update helpers and the restarted app. Scheduling now waits for the exact helper process to acknowledge startup, keeping the UI responsive and reporting failures before asking the user to exit.
+
 These changes are relative to 1.1.0-beta.1. See the [release notes](docs/releases/1.1.0-beta.2.md) for workflows, update instructions and limits.
 
 - Restores native synchronized-animation compatibility metadata on imported character bodies and warns about mismatched body/takedown families. Short, tall and both native-rig custom-body test cases passed in-game; this does not retarget arbitrary rigs.
