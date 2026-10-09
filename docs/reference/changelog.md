@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0-beta.3 — 2026-10-09
+
+- Fixes false "different skeleton" build errors for custom animations whose separately named skeleton matches the donor's bone names, hierarchy and reference transforms.
+- Keeps incompatible rigs and normal/additive animation mismatches blocked, with more specific skeleton diagnostics.
+- Adds 14 compatibility regression cases and verifies the correction with a controlled cooked-animation fixture.
+
+Update with **Stable + beta** enabled, then rerun **Check mod** and **Build mod**. Compatible imports do not need to be renamed or reimported solely for this fix. See the [Beta 3 notes](../releases/1.1.0-beta.3.md) for limits and update instructions.
+
 ## 1.1.0-beta.2 — 2026-10-07
 
 The Beta 2 packages were refreshed with updater repairs without changing the version number.

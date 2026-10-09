@@ -96,6 +96,7 @@ nav:
       - Frequently asked questions: reference/faq.md
       - Changelog: reference/changelog.md
       - Release notes:
+          - 1.1 Beta 3: releases/1.1.0-beta.3.md
           - 1.1 Beta 2: releases/1.1.0-beta.2.md
           - 1.1 Beta 1: releases/1.1.0-beta.1.md
           - 1.0 stable: releases/1.0.0.md

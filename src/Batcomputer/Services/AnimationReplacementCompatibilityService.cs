@@ -7,7 +7,8 @@ namespace Batcomputer;
 internal static class AnimationReplacementCompatibilityService
 {
     internal sealed record Pair(string Donor, string Replacement, string Role);
-    internal sealed record Motion(string Skeleton, string AdditiveMode);
+    internal sealed record Motion(string Skeleton, string AdditiveMode,
+        IReadOnlyList<AnimationSkeletonRemapService.Bone>? Bones = null);
     internal sealed record Metadata(string Kind, IReadOnlyList<Motion> Motions,
         IReadOnlyDictionary<string, Metadata>? Slots = null);
 
@@ -36,6 +37,7 @@ internal static class AnimationReplacementCompatibilityService
             ?? throw new InvalidDataException("Configure game mappings before checking animation compatibility.");
         using var provider = ModelPreviewService.MakeProvider(AppSettings.Current.EffectiveGamePaksRoot(), mappings, [contentRoot]);
         var cache = new Dictionary<string, Metadata>(StringComparer.OrdinalIgnoreCase);
+        var skeletons = new Dictionary<string, AnimationSkeletonRemapService.Bone[]>(StringComparer.OrdinalIgnoreCase);
         var loading = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         Metadata Read(string package)
         {
@@ -49,9 +51,12 @@ internal static class AnimationReplacementCompatibilityService
                 Metadata result;
                 if (sequence is not null)
                 {
-                    var skeleton = sequence.Skeleton?.Load<USkeleton>()?.GetPathName();
-                    if (string.IsNullOrWhiteSpace(skeleton)) throw new InvalidDataException("Sequence has no readable skeleton: " + package);
-                    result = new("AnimSequence", [new(Canonical(skeleton), sequence.AdditiveAnimType.ToString())]);
+                    var skeleton = sequence.Skeleton?.Load<USkeleton>()
+                        ?? throw new InvalidDataException("Sequence has no readable skeleton: " + package);
+                    var skeletonPath = Canonical(skeleton.GetPathName());
+                    if (!skeletons.TryGetValue(skeletonPath, out var bones))
+                        skeletons[skeletonPath] = bones = AnimationSkeletonRemapService.Bones(skeleton.ReferenceSkeleton);
+                    result = new("AnimSequence", [new(skeletonPath, sequence.AdditiveAnimType.ToString(), bones)]);
                 }
                 else
                 {
@@ -105,13 +110,19 @@ internal static class AnimationReplacementCompatibilityService
             }
             // Empty native placeholder montages have no pose semantics to compare.
             if (donor.Motions.Count == 0 || replacement.Motions.Count == 0) return;
-            var expected = donor.Motions.Select(m => Canonical(m.Skeleton)).Distinct(StringComparer.OrdinalIgnoreCase).Order().ToArray();
-            var actual = replacement.Motions.Select(m => Canonical(m.Skeleton)).Distinct(StringComparer.OrdinalIgnoreCase).Order().ToArray();
-            if (!expected.SequenceEqual(actual, StringComparer.OrdinalIgnoreCase))
-                throw new InvalidDataException("Replacement motion targets a different skeleton.");
-            foreach (var skeleton in expected)
+            // Cooked UE motions can use separately named copies of the same rig. Compare the
+            // actual hierarchy/rest pose instead of treating asset-path inequality as incompatibility.
+            // This is validation only: never relabel a skeleton or rewrite compressed track indices.
+            bool Matches(Motion a, Motion b) => SkeletonIssue(a, b) == null;
+            void RejectRig(Motion expected, Motion actual) => throw new InvalidDataException(
+                $"Replacement skeleton '{Canonical(actual.Skeleton)}' does not match donor '{Canonical(expected.Skeleton)}': " +
+                SkeletonIssue(expected, actual) + " Cook/retarget the clip for the donor's rig; renaming the Skeleton asset alone is not a repair.");
+            foreach (var actual in replacement.Motions)
+                if (!donor.Motions.Any(expected => Matches(expected, actual))) RejectRig(donor.Motions[0], actual);
+            foreach (var expected in donor.Motions)
             {
-                string[] Modes(Metadata metadata) => metadata.Motions.Where(m => Canonical(m.Skeleton).Equals(skeleton, StringComparison.OrdinalIgnoreCase))
+                if (!replacement.Motions.Any(actual => Matches(expected, actual))) RejectRig(expected, replacement.Motions[0]);
+                string[] Modes(Metadata metadata) => metadata.Motions.Where(m => Matches(expected, m))
                     .Select(m => NormalizeMode(m.AdditiveMode)).Distinct().Order().ToArray();
                 var before = Modes(donor); var after = Modes(replacement);
                 if (!before.SequenceEqual(after))
@@ -130,6 +141,25 @@ internal static class AnimationReplacementCompatibilityService
             catch (Exception ex) { issues.Add($"Animation '{pair.Role}' ({pair.Replacement}) cannot safely replace {pair.Donor}: {ex.Message}"); }
         }
         return issues;
+    }
+
+    internal static string? SkeletonIssue(Motion donor, Motion replacement)
+    {
+        if (Canonical(donor.Skeleton).Equals(Canonical(replacement.Skeleton), StringComparison.OrdinalIgnoreCase)) return null;
+        if (donor.Bones == null || replacement.Bones == null)
+            return "The skeleton paths differ and their bone hierarchies could not be verified.";
+        if (donor.Bones.Count != replacement.Bones.Count)
+            return $"Bone counts differ ({donor.Bones.Count} expected, {replacement.Bones.Count} supplied).";
+        try
+        {
+            // The runtime maps skeleton bones by name, so different serialization order is OK.
+            // Plan checks unique names, parents and finite matching reference transforms (including
+            // root scale). Requiring equal counts also prevents silently accepting a subset rig.
+            _ = AnimationSkeletonRemapService.Plan(Enumerable.Range(0, replacement.Bones.Count).ToArray(),
+                replacement.Bones, donor.Bones);
+            return null;
+        }
+        catch (InvalidDataException ex) { return ex.Message; }
     }
 
     private static bool IsMotion(string? kind) => kind is "AnimSequence" or "AnimMontage" or "AnimComposite" or "AnimBlueprintGeneratedClass" or "BlendSpace" or "BlendSpace1D";

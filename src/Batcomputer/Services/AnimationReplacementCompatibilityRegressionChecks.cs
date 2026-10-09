@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace Batcomputer;
 
 internal static class AnimationReplacementCompatibilityRegressionChecks
@@ -22,6 +24,33 @@ internal static class AnimationReplacementCompatibilityRegressionChecks
             (Check("AAT_None", "AAT_None", kind: "AnimMontage").Count == 1, "a sequence slot cannot be filled with a montage"),
             (AnimationReplacementCompatibilityService.ValidatePairs([pair], _ => throw new FileNotFoundException("missing")).Count == 1, "missing native replacement is reported before packaging"),
         };
+        const string copiedRig = "/Game/Mods/Example/SKEL_CustomBody";
+        AnimationSkeletonRemapService.Bone[] bones = [
+            new("Root", "", Vector3.Zero, Quaternion.Identity, Vector3.One),
+            new("Left", "Root", new(-1, 0, 0), Quaternion.Identity, Vector3.One),
+            new("Right", "Root", new(1, 0, 0), Quaternion.Identity, Vector3.One)];
+        IReadOnlyList<string> CopyCheck(AnimationSkeletonRemapService.Bone[] copy, string mode = "AAT_None") =>
+            AnimationReplacementCompatibilityService.ValidatePairs([pair], p => new("AnimSequence",
+                [p == donor ? new(rig, "AAT_None", bones) : new(copiedRig, mode, copy)]));
+        results.Add((CopyCheck(bones.ToArray()).Count == 0, "separately named identical cooked rigs remain usable"));
+        results.Add((CopyCheck([bones[0], bones[2], bones[1]]).Count == 0, "equivalent rigs match bones by name rather than serialization order"));
+        results.Add((CopyCheck(bones, "AAT_LocalSpaceBase").Count == 1, "equivalent skeleton paths cannot bypass additive-mode validation"));
+        results.Add((CopyCheck(bones[..2]).Count == 1, "a partial imported skeleton is not treated as an equivalent rig"));
+        results.Add((CopyCheck([..bones, bones[2] with { Name = "Extra" }]).Count == 1, "additional unmatched bones still require rig repair"));
+        results.Add((CopyCheck([bones[0], bones[1] with { Name = "Other" }, bones[2]]).Count == 1, "matching bone counts cannot hide different bone names"));
+        results.Add((CopyCheck([bones[0], bones[1], bones[2] with { Parent = "Left" }]).Count == 1, "matching names cannot hide changed bone parents"));
+        results.Add((CopyCheck([bones[0] with { Scale = new(100) }, bones[1], bones[2]]).Count == 1, "imported root-unit scale mismatches remain blocked"));
+        results.Add((CopyCheck([bones[0], bones[1] with { Translation = new(-3, 0, 0) }, bones[2]]).Count == 1, "different reference-pose proportions remain blocked"));
+        results.Add((CopyCheck([bones[0], bones[1] with { Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitX, .5f) }, bones[2]]).Count == 1,
+            "different reference-pose orientations remain blocked"));
+        results.Add((CopyCheck([bones[0], bones[1] with { Translation = new(float.NaN, 0, 0) }, bones[2]]).Count == 1, "non-finite imported reference transforms fail closed"));
+        results.Add((CopyCheck([bones[0], bones[1], bones[1]]).Count == 1, "duplicate bone names fail closed"));
+        var detail = CopyCheck([bones[0] with { Scale = new(100) }, bones[1], bones[2]]).Single();
+        results.Add((detail.Contains(copiedRig) && detail.Contains(rig) && detail.Contains("Root") && detail.Contains("scale"),
+            "rig rejection identifies both asset paths and the actual bone/transform mismatch"));
+        var mixedAliases = AnimationReplacementCompatibilityService.ValidatePairs([pair], p => new("AnimMontage",
+            p == donor ? [new(rig, "AAT_None", bones)] : [new(rig, "AAT_None", bones), new(copiedRig, "AAT_LocalSpaceBase", bones)]));
+        results.Add((mixedAliases.Count == 1, "montage segments on equivalent rig aliases cannot hide an additive mixture"));
         var project = new NativeSuitProject { LocomotionOverrides = [new() { DonorSequencePackage = donor, ReplacementPackage = replacement, DonorSequence = "Stop" }] };
         project.AnimationSlotOverrides.Add(new() { DonorPackage = donor, ReplacementPackage = replacement, DonorClass = "AnimSequence", ReplacementClass = "AnimSequence" });
         results.Add((AnimationReplacementCompatibilityService.Pairs(project, "Example").Count == 1, "duplicated locomotion and exact-slot assignments are inspected once"));

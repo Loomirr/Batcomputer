@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.1.0-beta.3 — 2026-10-09
+
+- Fixes animation replacement checks rejecting separately named but equivalent skeleton assets. Bone names, hierarchy and reference transforms are verified; incompatible rigs and additive-mode mismatches still block builds with more specific diagnostics.
+- Includes 14 additional compatibility regression cases. A controlled cooked animation with a copied skeleton reproduces the old rejection and passes the corrected check without modifying the asset files.
+- Uses a new beta version so Beta 2 installations can receive this fix through the updater. See the [update instructions](docs/releases/1.1.0-beta.3.md).
 
 ## 1.1.0-beta.2 — 2026-10-07
 

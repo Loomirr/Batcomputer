@@ -26,7 +26,7 @@ scheduled window. Batcomputer does not force-close your editors.
 Your saved channel survives updates and manual installations. Installing a beta over a Stable
 installation does **not** change that saved preference. If an announced beta is missing, open
 **Settings & recovery**, select **Beta**, then **Check for updates**. For example, 1.0.0 is still
-the latest stable release while 1.1.0-beta.2 requires the Beta channel. Older Update centers can
+the latest stable release while 1.1.0-beta.3 requires the Beta channel. Older Update centers can
 say “You're all set” when they mean only that the selected channel has no newer update.
 
 The revised Update center names the checked channel, explains when a newer beta is excluded,
