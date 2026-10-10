@@ -191,6 +191,9 @@ public static class CustomEquipmentService
             throw new InvalidDataException("Equipment clone export count changed: " + package);
         for (var index = 0; index < expected.Exports.Count; index++)
         {
+            if (expected.Exports[index] is RawExport raw && raw.ObjectName.ToString().StartsWith("Default__", StringComparison.Ordinal))
+                throw new InvalidDataException($"The equipment donor default object could not be parsed: {package}, {raw.ObjectName}. " +
+                    "Select current game mappings and run a fresh character extraction before rebuilding. A byte-identical opaque copy is not proof of runtime compatibility.");
             if (expected.Exports[index] is not NormalExport source) continue;
             if (actual.Exports[index] is not NormalExport written ||
                 source.ObjectName.ToString() != written.ObjectName.ToString() ||

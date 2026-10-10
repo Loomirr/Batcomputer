@@ -1418,6 +1418,14 @@ public sealed partial class MainForm
             AppSettings.Current.EffectiveExportContentRoot(),
             AppSettings.GeneratedRootFor(_projectRootText.Text.Trim()),
             EffectiveGameContentPacksFolder());
+        try
+        {
+            GameAssetCompatibilityService.Validate(
+                GameAssetCompatibilityService.Capture(AppSettings.Current.EffectiveGamePaksRoot()),
+                AppSettings.Current.EffectiveExtractedContentRoot(),
+                AppSettings.Current.EffectiveUsmapPath() ?? "", result);
+        }
+        catch (Exception ex) { result.AddError("game compatibility", ex.Message); }
         if (inputs.Any(input => input.Project?.CustomCharacter is not null))
         {
             var nativeContent = AppSettings.Current.EffectiveExtractedContentRoot();

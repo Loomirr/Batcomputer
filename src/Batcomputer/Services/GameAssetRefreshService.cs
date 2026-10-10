@@ -42,6 +42,10 @@ public sealed class GameAssetRefreshService
     public const string GameFeatureContentFilter = "Plugins/GameFeatures/";
     public const string CapeTransparentMaterialFilter =
         "Content/Art/TechnicalArt/Optimisation/M_Cape_Transparent";
+    public const string CharacterEmblemMaterialFilter = "Content/UI/Icons/Characters/Emblems/MI_UI_EmblemBatman";
+    // Animation-library validation must be able to resolve native footstep notify events.
+    // These are event metadata, not the game's bulk audio banks.
+    public const string CharacterFootstepEventFilter = "Content/Wub/AudioEvents/Play_FFB_FS_";
 
     // Serialized character AbilitySets and equipment definitions also point at a small number of
     // shared gameplay packages outside the character-adjacent trees below. Keep these filters
@@ -138,6 +142,8 @@ public sealed class GameAssetRefreshService
         // One metadata asset used only by the Playable 3D viewer's read-only native
         // colour-preset selector. This does not restore Red Brick authoring assets.
         ViewerBaseGameRedBrickPaletteService.RetocFilter,
+        CharacterEmblemMaterialFilter,
+        CharacterFootstepEventFilter,
         // Native character default-vehicle picker: metadata only, not every vehicle mesh.
         "Content/Vehicles/DA_Vehicle_",
         // Shared parent used by native cape materials. It lives outside Characters,
@@ -177,6 +183,8 @@ public sealed class GameAssetRefreshService
         // Keep the clean-install viewer self-sufficient without broadening this into
         // a Red Brick authoring or collectables extraction profile.
         ViewerBaseGameRedBrickPaletteService.RetocFilter,
+        CharacterEmblemMaterialFilter,
+        CharacterFootstepEventFilter,
     }.Concat(HeldItemFilters).Concat(HeldItemEffectService.ExtractionFilters).Concat(CharacterDependencyAbilityFilters)
         .Concat(EquipmentAssetService.ExtractionFilters)
         .Concat(VehicleAssetService.ExtractionFilters)
@@ -325,6 +333,9 @@ public sealed class GameAssetRefreshService
         var settings = AppSettings.Current;
         var retoc = settings.EffectiveRetocExePath();
         var paksRoot = settings.EffectiveGamePaksRoot();
+        var gameSource = GameAssetCompatibilityService.Capture(paksRoot);
+        var mappingPath = settings.EffectiveUsmapPath();
+        GameAssetCompatibilityService.RequireMatchingMapping(gameSource, mappingPath ?? "");
 
         if (!File.Exists(retoc))
         {
@@ -480,7 +491,7 @@ public sealed class GameAssetRefreshService
         result.Logs.Add($"Validation scope: {assetsToValidate.Count} {validationKind} asset(s) of {assets.Count} extracted asset(s).");
         progress?.Report(new Progress(78, "Validating", $"Parsing {assetsToValidate.Count} character assets with UAssetAPI..."));
         var validation = await Task.Run(
-            () => ValidateAssets(contentRoot, assetsToValidate, cancellationToken),
+            () => ValidateAssets(contentRoot, assetsToValidate, cancellationToken, progress),
             cancellationToken);
         result.AssetsValidated = validation.Validated;
         result.ValidationErrors = validation.Errors.Count;
@@ -491,6 +502,13 @@ public sealed class GameAssetRefreshService
             result.Warnings.Add($"{validation.MissingPairs} extracted .uasset file(s) have no matching .uexp file.");
         }
 
+        if (validation.Errors.Count > 0)
+            throw new InvalidDataException("The fresh extraction failed mapping validation; the previous extraction remains active. " +
+                string.Join(Environment.NewLine, validation.Errors.Take(5)));
+        if (gameSource != GameAssetCompatibilityService.Capture(paksRoot))
+            throw new InvalidDataException("The game changed during extraction. Retry after the game update has finished; the previous extraction remains active.");
+        if (gameSource is not null && !string.IsNullOrWhiteSpace(mappingPath) && File.Exists(mappingPath))
+            GameAssetCompatibilityService.Record(contentRoot, gameSource, mappingPath);
         progress?.Report(new Progress(88, "Validated", $"Parsed {validation.Validated} assets; rebuilding indexes next."));
         progress?.Report(new Progress(90, "Complete", "Extraction and validation complete."));
         return result;
@@ -938,7 +956,7 @@ public sealed class GameAssetRefreshService
         public List<string> Errors { get; } = new();
     }
 
-    private static ValidationResult ValidateAssets(string contentRoot, List<string> assets, CancellationToken cancellationToken)
+    private static ValidationResult ValidateAssets(string contentRoot, List<string> assets, CancellationToken cancellationToken, IProgress<Progress>? progress = null)
     {
         var result = new ValidationResult();
         Usmap? mappings = null;
@@ -955,9 +973,13 @@ public sealed class GameAssetRefreshService
             }
         }
 
+        var checkedCount = 0;
         foreach (var assetPath in assets)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (checkedCount++ % 250 == 0)
+                progress?.Report(new Progress(78 + checkedCount * 9 / Math.Max(1, assets.Count), "Validating",
+                    $"Checking asset {checkedCount:N0} of {assets.Count:N0}: {Path.GetFileName(assetPath)}"));
             var uexp = Path.ChangeExtension(assetPath, ".uexp");
             if (!File.Exists(uexp))
             {

@@ -48,6 +48,10 @@ internal static class DlcUpdateRegressionChecks
             "Joker and Harley DLC playables retain their own archetypes while Villain Mode enemies stay ineligible");
 
         var equipment = new UAsset { Exports = [], Imports = [] }; equipment.ClearNameIndexList();
+        var opaqueEquipment = new UAsset { Exports = [], Imports = [] }; opaqueEquipment.ClearNameIndexList();
+        opaqueEquipment.Exports.Add(new RawExport([], opaqueEquipment, []) { ObjectName = new FName(opaqueEquipment, "Default__Equipment_C") });
+        Check(Rejects(() => CustomEquipmentService.RequirePropertyLayoutRoundtrip(opaqueEquipment, opaqueEquipment, "/Game/Test")),
+            "an unreadable equipment donor CDO is rejected even when an opaque byte-copy roundtrips unchanged");
         var equipmentCdo = new NormalExport(equipment, []) { ObjectName = new FName(equipment, "Default__Equipment_C"),
             Data = [new FloatPropertyData(new FName(equipment, "MaxRadius")) { Value = 1 },
                 new FloatPropertyData(new FName(equipment, "Lifetime")) { Value = 2 }] };

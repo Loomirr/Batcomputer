@@ -246,7 +246,8 @@ public sealed class BuildManifestService
 
     private static string SafeGameBuild()
     {
-        try { return GameDataService.Instance.Db.GameBuild; }
+        try { return GameAssetCompatibilityService.Capture(AppSettings.Current.EffectiveGamePaksRoot())?.GameBuild
+                ?? GameDataService.Instance.Db.GameBuild; }
         catch { return ""; }
     }
 }
