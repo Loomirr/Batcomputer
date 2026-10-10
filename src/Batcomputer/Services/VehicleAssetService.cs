@@ -187,7 +187,7 @@ internal static class VehicleAssetService
         if (p.BoostColor is not null) redirects[VehicleBoostColorService.NativePawnData] = VehicleProjectService.PawnData(p);
         foreach (var (from, to) in VehicleExhaustService.Redirects(p, donor)) redirects[from] = to;
         if (meshPackage is not null) redirects[NativeMesh] = meshPackage;
-        if (summon is not null) redirects[summon.DonorMeshPackage] = summon.MeshPackage;
+        if (summon is not null) redirects[donor.SummonMesh] = summon.MeshPackage;
         foreach (var source in new[] { NativeBlueprint, NativeMetadata, NativeUi, NativeMenu, NativePlinth })
         {
             var a = Read(nativeContent, source); CustomEquipmentService.Rename(a, redirects);
@@ -299,10 +299,19 @@ internal static class VehicleAssetService
     {
         if (project.SummonModel is not { } model) return;
         var donor = VehicleDonorService.Get(project);
-        Require(model.DonorMeshPackage == donor.SummonMesh && model.SkeletonPackage == donor.SummonSkeleton && model.MeshPackage == VehicleProjectService.Mesh(project) + "_Summon", "The assembly model must use this driving base's summon rig.");
+        Require(MatchesSummonIdentity(project, model), "The assembly model must use this driving base's summon rig.");
         Require(ExtractedPackagePathService.ResolvePackageUasset(nativeContent, donor.SummonMesh) is not null, "Extract this driving base's summon model before building.");
         SkinnedMeshStageService.ValidateRecipe(model); SkinnedMeshStageService.ReadManifest(directory, model);
         Require(model.HiddenComponents.Count == 0, "Assembly imports cannot hide driving components.");
+    }
+    internal static bool MatchesSummonIdentity(VehicleProject project, SkinnedMeshImport model)
+    {
+        var donor = VehicleDonorService.Get(project);
+        // Native package names are case-insensitive. Older recipes retain the
+        // catalog spelling while the cooker reports the asset's canonical case.
+        return model.DonorMeshPackage.Equals(donor.SummonMesh, StringComparison.OrdinalIgnoreCase) &&
+            model.SkeletonPackage.Equals(donor.SummonSkeleton, StringComparison.OrdinalIgnoreCase) &&
+            model.MeshPackage == VehicleProjectService.Mesh(project) + "_Summon";
     }
     internal static byte[] CreateProgress(UAsset a, byte[] source, string tag)
     {

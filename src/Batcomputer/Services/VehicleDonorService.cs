@@ -74,8 +74,8 @@ internal static class VehicleDonorService
             Metadata = "/Game/Vehicles/DA_Vehicle_Batbike2022",
             Ui = "/Game/Vehicles/DA_UI_Batbike2022",
             Menu = "/Game/Vehicles/MenuActors/BP_MenuActor_Batbike2022",
-            SummonMesh = "/Game/Models/Vehicles/Summon/SK_VEH_Batbike2022_theBatman_Summon",
-            SummonSkeleton = "/Game/Models/Vehicles/Summon/SKEL_VEH_Batbike2022_theBatman_Summon",
+            SummonMesh = "/Game/Models/Vehicles/Summon/SK_VEH_Batbike2022_TheBatman_Summon",
+            SummonSkeleton = "/Game/Models/Vehicles/Summon/SKEL_VEH_Batbike2022_TheBatman_Summon",
             HeadlightEditing = false,
             PawnData = "/Game/Models/Vehicles/VEH_Batbike2022_theBatman/DA_DPRD_Batbike2022_Batman_PawnData", BoostData = "/Game/Vehicles/Abilities/Boost/DataSets/AS_VehicleBoostData_Bike_TwinExhausts_Generic",
             Notes = "Experimental two-wheeler. Uses Wheel_F and Wheel_B rather than four car-wheel bones; fit and test both rider seats, steering and ground clearance in game. Light controllers stay native."

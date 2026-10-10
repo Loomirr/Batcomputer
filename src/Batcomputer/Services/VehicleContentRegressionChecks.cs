@@ -29,7 +29,13 @@ internal static class VehicleContentRegressionChecks
         Check(new[] { float.NaN, float.PositiveInfinity, .49f, 2.01f }.All(scale => Rejects(() => VehicleProjectService.ValidateIdentity(new() { SizeMultiplier = scale }))), "unsafe whole-vehicle sizes are rejected");
         Check(VehicleDonorService.All.Select(d => d.Id).Distinct().Count() == VehicleDonorService.All.Length && VehicleDonorService.All.Length == 7, "seven driving bases have distinct stable identities");
         var batbike = VehicleDonorService.All.Single(d => d.Id == "batbike2022");
-        Check(batbike.Blueprint.Contains("BP_VEH-Batbike2022_theBatman", StringComparison.Ordinal) && batbike.Mesh.Contains("SK_VEH_Batbike2022_theBatman", StringComparison.Ordinal) && batbike.SummonMesh.Contains("SK_VEH_Batbike2022_theBatman_Summon", StringComparison.Ordinal), "Batbike uses its verified bike blueprint, driving mesh and summon rig");
+        Check(batbike.Blueprint.Contains("BP_VEH-Batbike2022_theBatman", StringComparison.Ordinal) && batbike.Mesh.Contains("SK_VEH_Batbike2022_theBatman", StringComparison.Ordinal) && batbike.SummonMesh.Contains("SK_VEH_Batbike2022_TheBatman_Summon", StringComparison.Ordinal), "Batbike uses its verified bike blueprint, driving mesh and canonical summon rig");
+        var bikeRecipe = new VehicleProject { Id = "ExampleBike", DonorId = batbike.Id };
+        var assembly = new SkinnedMeshImport { DonorMeshPackage = batbike.SummonMesh.Replace("TheBatman", "theBatman"),
+            SkeletonPackage = batbike.SummonSkeleton, MeshPackage = VehicleProjectService.Mesh(bikeRecipe) + "_Summon" };
+        Check(VehicleAssetService.MatchesSummonIdentity(bikeRecipe, assembly), "summon identity accepts old catalog casing and canonical cooked skeleton casing");
+        assembly.SkeletonPackage = VehicleDonorService.All[0].SummonSkeleton;
+        Check(!VehicleAssetService.MatchesSummonIdentity(bikeRecipe, assembly), "summon identity still rejects a different driving base's skeleton");
         Check(VehicleDonorService.ExtractionFilter("/DLC_PartyPack/Vehicles/DA_Test") == "Plugins/GameFeatures/DLC_PartyPack/Content/Vehicles/DA_Test", "DLC donor extraction uses the plugin mount");
         Check(VehicleDonorService.All.Single(d => d.Id == "batmobilemonstertruck").RequiredDlc == "Party Pack DLC", "Batmobeast declares its DLC requirement");
         Check(VehicleDonorService.All.Where(d => d.Id is "batmobile1995" or "batmobile1989" or "batmobile2005").All(d => d.Animations.Count >= 3), "native mechanics clips are catalogued for three driving bases");
