@@ -18,7 +18,7 @@ internal static class SkinnedMeshCookService
     internal const string Warning = "Your FBX must already be rigged and weighted to the selected game skeleton in Blender or another 3D editor. Batcomputer does not automatically rig or weight models. After importing Batcomputer's GLB reference, run the adjacent Batcomputer_PrepareBlenderRig.py once in Blender; it preserves native bone names while preparing the correct FBX rest-space basis. Export one joined mesh with Armature (the object, not a bone) as the armature name, and disable extra leaf bones. Cloth, morph targets and new rigs are not supported in this first pass.";
     internal const int RigValidationVersion = 2;
     internal sealed record CookManifest(string SourceHash, string Donor, string Skeleton, string Package,
-        string TemporarySkeleton, string[] Slots, Dictionary<string, string> Files, int RigValidationVersion = 0);
+        string TemporarySkeleton, string[] Slots, Dictionary<string, string> Files, int RigValidationVersion = 0, bool AllowVehicleWheelPlacement = false);
 
     internal static DefaultFileProvider OpenProvider(string? extraContainers = null)
     {
@@ -62,6 +62,8 @@ internal static class SkinnedMeshCookService
     {
         var recipe = request.Clone();
         var allowVehicleWheelRaise = VehicleDonorService.All.Any(d => d.Mesh == recipe.DonorMeshPackage && recipe.Component == "SkeletalMeshComponent");
+        if (recipe.AllowVehicleWheelPlacement && (!allowVehicleWheelRaise || !VehicleDonorService.All.Any(d => d.Id == "batbike2022" && d.Mesh == recipe.DonorMeshPackage)))
+            throw new InvalidDataException("Wheel placement is only supported on a native vehicle driving-body rig.");
         RequireDefaultImportScale(recipe.ImportScale);
         RequireNativeDonor(recipe.DonorMeshPackage);
         if (!recipe.MeshPackage.StartsWith("/Game/Mods/", StringComparison.Ordinal) ||
@@ -106,7 +108,7 @@ internal static class SkinnedMeshCookService
             new { Name = "PythonScriptPlugin", Enabled = true }, new { Name = "EditorScriptingUtilities", Enabled = true },
             new { Name = "MeshModelingToolset", Enabled = true } } }));
         var cookSource = Path.Combine(cookRoot, "source.fbx"); File.Copy(sourceCopy, cookSource);
-        File.WriteAllText(Path.Combine(cookRoot, "import.json"), JsonSerializer.Serialize(new { source = cookSource, scale = recipe.ImportScale, package = recipe.MeshPackage, donor_bones = donorBones, allow_wheel_raise = allowVehicleWheelRaise }));
+        File.WriteAllText(Path.Combine(cookRoot, "import.json"), JsonSerializer.Serialize(new { source = cookSource, scale = recipe.ImportScale, package = recipe.MeshPackage, donor_bones = donorBones, allow_wheel_raise = allowVehicleWheelRaise, allow_wheel_placement = recipe.AllowVehicleWheelPlacement }));
         var script = Path.Combine(cookRoot, "import_mesh.py");
         using (var resource = typeof(SkinnedMeshCookService).Assembly.GetManifestResourceStream("Batcomputer.Tools.SkinnedMesh.import_mesh.py")
             ?? throw new InvalidDataException("The bundled skeletal import script is missing."))
@@ -167,7 +169,7 @@ bSkipEditorContent=True
         {
             var donor = provider.LoadPackageObject<USkeletalMesh>(recipe.DonorMeshPackage);
             var mesh = provider.LoadPackageObject<USkeletalMesh>(recipe.MeshPackage);
-            ValidateRigWithReport(donor, mesh, Path.Combine(root, "rig-comparison.json"), log, allowVehicleWheelRaise);
+            ValidateRigWithReport(donor, mesh, Path.Combine(root, "rig-comparison.json"), log, allowVehicleWheelRaise, recipe.AllowVehicleWheelPlacement);
             recipe.SkeletonPackage = UnrealPathUtil.NormalizePackagePath(donor.Skeleton?.ResolvedObject?.GetPathName() ?? "");
             if (!ExtractedPackagePathService.IsContentPackagePath(recipe.SkeletonPackage)) throw new InvalidDataException("The donor has no usable native skeleton.");
         }
@@ -180,7 +182,7 @@ bSkipEditorContent=True
         }
         if (!files.ContainsKey("mesh.uasset") || !files.ContainsKey("mesh.uexp")) throw new InvalidDataException("Cooked mesh pair is incomplete.");
         var manifest = new CookManifest(recipe.SourceSha256, recipe.DonorMeshPackage, recipe.SkeletonPackage, recipe.MeshPackage,
-            UnrealPathUtil.NormalizePackagePath(report.RootElement.GetProperty("skeleton").GetString()), slots, files, RigValidationVersion);
+            UnrealPathUtil.NormalizePackagePath(report.RootElement.GetProperty("skeleton").GetString()), slots, files, RigValidationVersion, recipe.AllowVehicleWheelPlacement);
         AtomicFileUtil.WriteAllText(Path.Combine(root, "validated.json"), JsonSerializer.Serialize(manifest));
         var previous = recipe.Materials.ToDictionary(m => m.SourceMaterialName, StringComparer.Ordinal);
         var vehicle = VehicleDonorService.All.Any(d => d.Mesh == recipe.DonorMeshPackage || d.SummonMesh == recipe.DonorMeshPackage);
@@ -205,9 +207,9 @@ bSkipEditorContent=True
     internal static void ValidateRig(USkeletalMesh donor, USkeletalMesh mesh)
         => ValidateRigWithReport(donor, mesh, null, null);
 
-    private static void ValidateRigWithReport(USkeletalMesh donor, USkeletalMesh mesh, string? reportPath, Action<string>? log, bool allowVehicleWheelRaise = false)
+    private static void ValidateRigWithReport(USkeletalMesh donor, USkeletalMesh mesh, string? reportPath, Action<string>? log, bool allowVehicleWheelRaise = false, bool allowVehicleWheelPlacement = false)
     {
-        var comparison = SkinnedRigComparisonService.Compare(SkinnedGlbExportService.Bones(donor.ReferenceSkeleton), SkinnedGlbExportService.Bones(mesh.ReferenceSkeleton), allowVehicleWheelRaise);
+        var comparison = SkinnedRigComparisonService.Compare(SkinnedGlbExportService.Bones(donor.ReferenceSkeleton), SkinnedGlbExportService.Bones(mesh.ReferenceSkeleton), allowVehicleWheelRaise, allowVehicleWheelPlacement);
         if (reportPath is not null)
         {
             SkinnedRigComparisonService.Write(reportPath, comparison);

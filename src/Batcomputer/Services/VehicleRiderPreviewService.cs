@@ -11,16 +11,23 @@ internal static class VehicleRiderPreviewService
     internal const string Catwoman = "/Game/Characters/Minifig/Catwoman/BP_CatWoman_Default_Mask_Playable";
     internal const string DriverPose = "/Game/Animation/LEGOfig/_Shared/Vehicles/Drive_SteeringWheel_Setups/A_Drive_SteeringWheel_Idle_Jumper_R_03_Minifig";
     internal const string PassengerPose = "/Game/Animation/LEGOfig/_Shared/Vehicles/Batmobile1966/A_Ride_Batmobile1966_Passenger";
+    internal const string BikeDriverPose = "/Game/Animation/LEGOfig/_Shared/Vehicles/Bike/Batbike2022/A_Ride_BatBike2022_Idle_Batman";
+    internal const string BikePassengerPose = "/Game/Animation/LEGOfig/_Shared/Vehicles/Bike/Batbike2022/A_Ride_Idle_BatBike2022_passenger";
+    // These are the Idle_AnimSequence references on the native Batbike's two
+    // riding blueprints, not similarly named mount or passenger-prone clips.
+    internal static (string Driver, string Passenger) Poses(string donorId) => donorId == "batbike2022"
+        ? (BikeDriverPose, BikePassengerPose) : (DriverPose, PassengerPose);
     internal sealed record Bone(string Name, int Parent, float[] Reference, float[] Animated);
     internal sealed record Rider(string Seat, string Name, string Folder, string Animation, IReadOnlyList<Bone> Bones);
-    internal static IReadOnlyList<Rider> Create(string folder, CancellationToken cancellation, Action<string>? progress = null)
+    internal static IReadOnlyList<Rider> Create(string folder, CancellationToken cancellation, Action<string>? progress = null, string donorId = "batmobile1995")
     {
         var settings = AppSettings.Current;
         var riders = new List<Rider>();
+        var poses = Poses(donorId);
         // Sequential: the existing character texture/face exporter has per-preview state.
         foreach (var (id, seat, name, bp, animation) in new[] {
-            ("Batman", "seat:SeatDriver", "Batman · The Batman 2025", Batman, DriverPose),
-            ("Catwoman", "seat:SeatPassenger", "Catwoman · default", Catwoman, PassengerPose) })
+            ("Batman", "seat:SeatDriver", "Batman · The Batman 2025", Batman, poses.Driver),
+            ("Catwoman", "seat:SeatPassenger", "Catwoman · default", Catwoman, poses.Passenger) })
         {
             cancellation.ThrowIfCancellationRequested(); progress?.Invoke("Preparing seated " + name + "…");
             var target = Path.Combine(folder, id);

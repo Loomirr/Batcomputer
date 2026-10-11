@@ -14,6 +14,10 @@ namespace Batcomputer;
 /// <summary>Read-only, bind-pose vehicle assembly for the offline workshop. Never writes donor files.</summary>
 internal static class VehicleWorkshopService
 {
+    // WebView2's virtual-folder image loader fails at MAX_PATH even when .NET
+    // successfully writes the files. Rider texture names make portable app paths
+    // exceed that limit, so keep this disposable scene outside the install tree.
+    internal static string PreviewRoot => Path.GetFullPath(Path.Combine(Path.GetTempPath(), "BCV"));
     internal sealed record Pose(float[] Position, float[] Quaternion, float[] Scale);
     internal sealed record MaterialSlot(int Slot, string Package, string Family, float[]? Color, string[] Parameters);
     internal sealed record DeferredMesh(string File, int[] PrimitiveSlots, IReadOnlyList<MaterialSlot> Materials);
@@ -143,7 +147,8 @@ internal static class VehicleWorkshopService
         }
         progress?.Invoke("Reading the native driving rig and sockets…");
         using var provider = ModelPreviewService.MakeProvider(settings.EffectiveGamePaksRoot(), settings.EffectiveUsmapPath()!, overlays);
-        var body = provider.LoadPackageObject<USkeletalMesh>(donor.Mesh);
+        var nativeBody = provider.LoadPackageObject<USkeletalMesh>(donor.Mesh);
+        var body = useCustomPreviewBody ? provider.LoadPackageObject<USkeletalMesh>(project.Model!.MeshPackage) : nativeBody;
         var bones = new Dictionary<string, Pose>(StringComparer.OrdinalIgnoreCase);
         var boneWorld = new List<Pose>();
         for (int i = 0; i < body.ReferenceSkeleton.FinalRefBoneInfo.Length; i++)
@@ -192,7 +197,7 @@ internal static class VehicleWorkshopService
             if (FileSystemPathUtil.IsWithinDirectory(exportDir, Path.Combine(folder, "MeshExport"))) Directory.Delete(exportDir, true);
             exports.Add(package, name); return name;
         }
-        var nativeMaterials = Slots(body, null, provider);
+        var nativeMaterials = Slots(nativeBody, null, provider);
         var bodyPackage = useCustomPreviewBody ? project.Model!.MeshPackage : donor.Mesh;
         var bodySlots = !useCustomPreviewBody ? nativeMaterials : project.Model!.Materials.Select(m => new MaterialSlot(m.Slot, m.MaterialPath, project.Palette.FirstOrDefault(c => c.Slot == m.Slot)?.Finish ?? "Custom material",
             project.Palette.FirstOrDefault(c => c.Slot == m.Slot) is { } color ? [color.R, color.G, color.B] : null, [])).ToArray();
@@ -244,7 +249,8 @@ internal static class VehicleWorkshopService
                 project.Transforms.FirstOrDefault(t => t.Component == seat.Name) ?? seat.Transform, [], "Seated figures previews native idle poses at this seat. Capes and flight gear are hidden. Runtime mounting, hand IK and entry/exit need an in-game comparison."));
         }
         var nativeSkeleton = VehicleAssetService.Read(settings.EffectiveExtractedContentRoot(), donor.Skeleton);
-        foreach (var socketName in VehicleSocketService.EditableSockets.Where(sockets.ContainsKey))
+        foreach (var socketName in VehicleSocketService.EditableSockets.Where(sockets.ContainsKey)
+                     .Where(socket => project.TwinExhausts || socket != VehicleExhaustService.SecondSocket))
         {
             var id = "socket:" + socketName; var socket = sockets[socketName];
             var original = VehicleSocketService.Transform(VehicleSocketService.Socket(nativeSkeleton,
@@ -270,7 +276,7 @@ internal static class VehicleWorkshopService
         { Animations = animations, Rig = VehicleAnimationPreviewService.Rig(body), SizeMultiplier = project.SizeMultiplier, ToyboxCatalog = VehicleToyboxService.Catalog(provider), LightControls = donor.FullWorkshop, MaterialCatalog = VehicleMaterialCatalogService.Read(settings.EffectiveProjectRoot(), provider), MaterialOverrides = project.MaterialOverrides, DisabledParts = project.DisabledParts, Lights = project.Lights, AccentColor = project.AccentColor,
             LightRoles = donor.FullWorkshop ? VehicleLightSurfaceService.Roles : [], LightSurfaces = project.LightSurfaces, LightSurfaceChoices = !donor.FullWorkshop || !useCustomPreviewBody ? [] : VehicleLightSurfaceService.Analyze(provider.LoadPackageObject<USkeletalMesh>(bodyPackage), project),
             PreviewQuality = settings.PreviewQuality, DetailPartBudget = Math.Clamp(settings.VehicleDetailedPartBudget, 1, 24), FrameRateLimit = Math.Clamp(settings.ViewerFrameRateLimit, 0, 144), Boost = Boost(project) };
-        foreach (var asset in new[] { "three.min.js", "GLTFLoader.js", "OrbitControls.js", "TransformControls.js", "VehicleWorkshop.js", "VehicleMotion.js", "VehicleBoostPreview.js", "VehicleRiders.js", "VehicleWorkshop.html", "VehicleWorkshop.css" })
+        foreach (var asset in new[] { "three.min.js", "GLTFLoader.js", "OrbitControls.js", "TransformControls.js", "VehicleGroupTransform.js", "VehicleWorkshop.js", "VehicleMotion.js", "VehicleBoostPreview.js", "VehicleRiders.js", "VehicleWorkshop.html", "VehicleWorkshop.css" })
             File.WriteAllBytes(Path.Combine(folder, asset == "VehicleWorkshop.html" ? "index.html" : asset), EmbeddedAssets.ReadBytes("preview/" + asset) ?? throw new FileNotFoundException("Missing vehicle viewer asset: " + asset));
         File.WriteAllText(Path.Combine(folder, "scene.js"), "window.VEHICLE_SCENE=" + JsonSerializer.Serialize(scene, Json) + ";");
         return scene;
@@ -280,7 +286,7 @@ internal static class VehicleWorkshopService
     {
         if (string.IsNullOrWhiteSpace(part.MeshPackage) || !ExtractedPackagePathService.IsContentPackagePath(part.MeshPackage))
             throw new InvalidDataException("This preview part has no supported mesh source.");
-        var workshopRoot = Path.Combine(AppSettings.RuntimeRoot, "VehicleWorkshops");
+        var workshopRoot = PreviewRoot;
         if (!FileSystemPathUtil.IsWithinDirectory(folder, workshopRoot))
             throw new InvalidDataException("Vehicle preview output is outside its managed workshop folder.");
         var key = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(part.MeshPackage))).ToLowerInvariant()[..16];

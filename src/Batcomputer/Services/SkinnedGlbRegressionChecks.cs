@@ -71,6 +71,23 @@ internal static class SkinnedGlbRegressionChecks
         raised = vehicleRig.ToArray(); raised[2] = raised[2] with { Translation = raised[2].Translation + Vector3.UnitZ };
         Check(!SkinnedRigComparisonService.Compare(vehicleRig, raised, allowVehicleWheelRaise: true).Passed,
             "wheel and other animation bones must retain their native local pose");
+        var bikeRig = new SkinnedGlbExportService.Bone[] {
+            new("Root", -1, Vector3.Zero, Quaternion.Identity, Vector3.One),
+            new("ChassisAttach_F", 0, new(144, 0, 93), Quaternion.Identity, Vector3.One),
+            new("Wheel_F", 1, new(48, 0, 0), Quaternion.Identity, Vector3.One) };
+        var shorter = bikeRig.ToArray(); shorter[1] = shorter[1] with { Translation = new(91, 0, 92) };
+        Check(!SkinnedRigComparisonService.Compare(bikeRig, shorter, true).Passed &&
+            SkinnedRigComparisonService.Compare(bikeRig, shorter, true, true).Passed,
+            "shorter bike wheel placement requires explicit opt-in while keeping the native wheel child");
+        foreach (var invalid in new[] { new Vector3(91, 1, 92), new Vector3(43, 0, 93), new Vector3(-10, 0, 93), new Vector3(float.NaN, 0, 93) })
+        {
+            shorter[1] = shorter[1] with { Translation = invalid };
+            Check(!SkinnedRigComparisonService.Compare(bikeRig, shorter, true, true).Passed,
+                "bike placement rejects sideways, excessive, reversed and non-finite mount positions");
+        }
+        shorter = bikeRig.ToArray(); shorter[2] = shorter[2] with { Translation = new(45, 0, 0) };
+        Check(!SkinnedRigComparisonService.Compare(bikeRig, shorter, true, true).Passed,
+            "bike mount placement never permits changing the wheel animation offset");
         return results;
     }
 }

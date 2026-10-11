@@ -55,7 +55,8 @@ internal static class VehicleExhaustService
     internal static Style? FindStyle(string? id) => Styles.FirstOrDefault(s => s.Id == id);
     internal static IEnumerable<string> StylePackages => Styles.Select(s => s.BoostBlueprint);
     /// <summary>The vehicle gets private boost data when it changes the boost style, adds a second outlet or changes boost speed.</summary>
-    internal static bool PrivateBoost(VehicleProject p) => p.TwinExhausts || !string.IsNullOrEmpty(p.BoostStyle) || VehicleBoostSpeedService.Applies(p);
+    internal static bool PrivateBoost(VehicleProject p) => p.TwinExhausts || !string.IsNullOrEmpty(p.BoostStyle) || VehicleBoostSpeedService.Applies(p) ||
+        Styles.Any(s => s.Twin && s.BoostBlueprint == VehicleDonorService.Get(p).BoostBlueprint);
 
     internal static string PawnData(VehicleProject p) => VehicleProjectService.ContentRoot(p) + "/Boost/DA_DPRD_" + p.Id;
     internal static string BoostData(VehicleProject p) => VehicleProjectService.ContentRoot(p) + "/Boost/AS_BoostData_" + p.Id;
@@ -71,9 +72,7 @@ internal static class VehicleExhaustService
         VehicleAssetService.Require(Unavailable(donor) is null, Unavailable(donor) ?? "");
         var style = string.IsNullOrEmpty(p.BoostStyle) ? null : FindStyle(p.BoostStyle)
             ?? throw new InvalidDataException("Unknown boost style: " + p.BoostStyle);
-        VehicleAssetService.Require(style is null || !style.Twin || p.TwinExhausts, style?.Label + " is a twin-exhaust boost; turn on twin exhausts.");
-        VehicleAssetService.Require(p.TwinExhausts || !p.Transforms.Any(t => t.Component == "socket:" + SecondSocket),
-            "Remove the second outlet transform or enable twin exhausts.");
+        // Style chooses the effects; the outlet checkbox always chooses the count.
     }
 
     internal static void Validate(VehicleProject p, VehicleDonorService.Donor donor, string nativeContent)
@@ -157,7 +156,13 @@ internal static class VehicleExhaustService
             foreach (var map in EngineMaps(gameplay)) map.Value.Clear();
             return;
         }
-        if (!p.TwinExhausts) return;
+        if (!p.TwinExhausts)
+        {
+            foreach (var map in EngineMaps(gameplay))
+                foreach (var key in map.Value.Keys.OfType<NamePropertyData>().Where(k => k.Value.ToString() == SecondSocket).ToArray())
+                    map.Value.Remove(key);
+            return;
+        }
         var outlet = VehicleDonorService.Get(p).ExhaustSocket;
         foreach (var map in EngineMaps(gameplay))
         {
@@ -177,6 +182,9 @@ internal static class VehicleExhaustService
     {
         if (!PrivateBoost(p)) return;
         VehicleBoostSpeedService.Verify(p, content);
+        if (!p.TwinExhausts)
+            VehicleAssetService.Require(EngineMaps(stagedGameplay).All(m => !m.Value.Keys.OfType<NamePropertyData>().Any(k => k.Value.ToString() == SecondSocket)),
+                "Single-exhaust mode still has a second engine-effect outlet.");
         
         var names = stagedGameplay.GetNameMapIndexList().Select(n => n.ToString()).ToHashSet(StringComparer.Ordinal);
         VehicleAssetService.Require(names.Contains(PawnData(p)) && !names.Contains(donor.PawnData!), "The vehicle doesn't use its twin-exhaust pawn data.");

@@ -1,4 +1,7 @@
 using System.Text.Json;
+using UAssetAPI.Kismet.Bytecode;
+using UAssetAPI.Kismet.Bytecode.Expressions;
+using UAssetAPI.UnrealTypes;
 
 namespace Batcomputer;
 
@@ -10,6 +13,18 @@ internal static class VehicleRegressionChecks
         void Check(bool value, string text) => checks.Add((value, "vehicle: " + text));
         bool Throws(Action action) { try { action(); return false; } catch { return true; } }
         var p = new VehicleProject { Id = "ExampleCar", DisplayName = "Example car" };
+        using (var meshMessage = JsonDocument.Parse(ModelPreviewControl.SerializeVehicleWorkshopMesh(
+            new("part.glb", [0], [new(0, "/Game/Example/MI_Part", "Surface", null, [])]))))
+        {
+            var payload = meshMessage.RootElement;
+            Check(payload.GetProperty("file").GetString() == "part.glb" && payload.GetProperty("primitiveSlots")[0].GetInt32() == 0 &&
+                payload.GetProperty("materials")[0].GetProperty("package").GetString() == "/Game/Example/MI_Part" && !payload.TryGetProperty("File", out _),
+                "deferred part/weapon meshes use the browser's camel-case payload, including nested material slots");
+        }
+        Check(!Throws(() => VehicleScaleService.RequireUnitScale(new())), "native vehicle size remains supported");
+        foreach (var size in new[] { .8f, 1.2f, float.NaN, float.PositiveInfinity })
+            Check(Throws(() => VehicleScaleService.RequireUnitScale(new() { SizeMultiplier = size })),
+                "unproven runtime resizing is rejected before asset mutation: " + size);
         var repairFixture = Path.Combine(Path.GetTempPath(), "BatcomputerVehicleRepair-" + Guid.NewGuid().ToString("N"));
         try
         {
@@ -57,6 +72,28 @@ internal static class VehicleRegressionChecks
         Check(VehicleSoundService.Applies(soundRecipe) && !VehicleSoundService.Applies(p) && p.SoundStyle == "",
             "sound swaps are opt-in and old projects keep donor audio");
         var boostRecipe = p.Clone(); boostRecipe.BoostStyle = "bvs-twin"; boostRecipe.TwinExhausts = true;
+        var dormantOutlet = p.Clone(); dormantOutlet.BoostStyle = "generic";
+        var savedOutlet = new VehicleComponentTransform { Component = "socket:" + VehicleExhaustService.SecondSocket, X = 12, Y = 34, Z = 56 };
+        dormantOutlet.Transforms.Add(savedOutlet);
+        VehicleProjectService.ValidateIdentity(dormantOutlet);
+        var outletWarnings = new List<string>();
+        // A disabled-only edit must not access or require any mesh socket.
+        VehicleSocketService.Apply(null!, null!, dormantOutlet, outletWarnings.Add);
+        VehicleSocketService.Verify(null!, dormantOutlet);
+        Check(outletWarnings.Count == 1 && outletWarnings[0].StartsWith("Warning:") &&
+            !VehicleSocketService.AppliedTransforms(dormantOutlet).Any() &&
+            dormantOutlet.Transforms.Single() == savedOutlet && savedOutlet.X == 12,
+            "disabled second outlet warns, skips apply and verification, and retains its saved placement");
+        var primaryOutlet = new VehicleComponentTransform { Component = "socket:" + VehicleExhaustService.FirstSocket };
+        dormantOutlet.Transforms.Add(primaryOutlet);
+        Check(VehicleSocketService.AppliedTransforms(dormantOutlet).SequenceEqual([primaryOutlet]),
+            "disabled second outlet does not suppress other socket edits");
+        dormantOutlet.TwinExhausts = true;
+        Check(VehicleSocketService.Warning(dormantOutlet) is null &&
+            VehicleSocketService.AppliedTransforms(dormantOutlet).SequenceEqual([savedOutlet, primaryOutlet]),
+            "enabling twin exhausts restores the saved second outlet without a warning");
+        savedOutlet.ScaleX = 2;
+        Check(Throws(() => VehicleSocketService.Validate(dormantOutlet)), "invalid socket scale remains a build error");
         VehicleProjectService.ValidateIdentity(boostRecipe);
         Check(VehicleExhaustService.Styles.Count == 10 && VehicleExhaustService.PrivateBoost(boostRecipe) && !VehicleExhaustService.PrivateBoost(p) &&
             boostRecipe.Clone().TwinExhausts && boostRecipe.Clone().BoostStyle == "bvs-twin",
@@ -65,7 +102,8 @@ internal static class VehicleRegressionChecks
             preview.Outlets.SequenceEqual(["VFX_Exhaust_01", "VFX_Exhaust_02"]),
             "workshop boost preview follows the selected style and both editable outlets");
         boostRecipe.TwinExhausts = false;
-        Check(Throws(() => VehicleProjectService.ValidateIdentity(boostRecipe)), "a twin boost style cannot lose its second outlet");
+        Check(!Throws(() => VehicleProjectService.ValidateIdentity(boostRecipe)) && VehicleWorkshopService.Boost(boostRecipe)!.Outlets.Length == 1,
+            "single-outlet mode also works with effects from a native twin style");
         boostRecipe.TwinExhausts = true; boostRecipe.BoostColor = new() { R = 40, G = 80, B = 255 };
         Check(Throws(() => VehicleProjectService.ValidateIdentity(boostRecipe)), "separate boost-style and recolor chains cannot collide");
         boostRecipe.BoostColor = null; boostRecipe.BoostStyle = "unknown";
@@ -160,12 +198,13 @@ internal static class VehicleRegressionChecks
                     finally { Directory.Delete(temp, true); }
                 }
             }
-            foreach (var (donorId, styleId) in new[] { ("batmobile1989", "charger"), ("batmobile2005", "forever") })
+            foreach (var (donorId, styleId) in new[] { ("batmobile1989", "charger"), ("batmobile2005", "forever"), ("batbike2022", "") })
             {
-                var alternate = p.Clone(); alternate.DonorId = donorId; alternate.BoostStyle = styleId; alternate.TwinExhausts = true;
+                var alternate = p.Clone(); alternate.DonorId = donorId; alternate.BoostStyle = styleId; alternate.TwinExhausts = styleId.Length > 0;
                 var driving = VehicleDonorService.Get(alternate);
-                var style = VehicleExhaustService.FindStyle(styleId)!;
-                if (!driving.BoostPackages.Append(style.BoostBlueprint).All(package => VehicleDonorService.PackageComplete(activeVehicleContent, package))) continue;
+                var style = VehicleExhaustService.FindStyle(styleId);
+                Check(VehicleExhaustService.PrivateBoost(alternate), donorId + " stages private boost data, including single-outlet native twin donors");
+                if (!driving.BoostPackages.Concat(style is null ? [] : new[] { style.BoostBlueprint }).All(package => VehicleDonorService.PackageComplete(activeVehicleContent, package))) continue;
                 var stage = Path.Combine(Path.GetTempPath(), "BatcomputerBoostDonor-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(stage);
                 try

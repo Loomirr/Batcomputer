@@ -13,6 +13,9 @@ public sealed class SkinnedMeshImport
     public string MeshPackage { get; set; } = "";
     public string Component { get; set; } = "CharacterMesh0";
     public float ImportScale { get; set; } = 1;
+    // Explicit vehicle-only authoring option. Rotations, scales, wheel offsets and
+    // the rest of the hierarchy still have to match the native driving rig.
+    public bool AllowVehicleWheelPlacement { get; set; }
     public List<CustomStaticMeshMaterialSlot> Materials { get; set; } = [];
     // Explicit visual exclusions only. Never delete the authored component graph.
     public List<string> HiddenComponents { get; set; } = [];

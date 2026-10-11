@@ -2305,7 +2305,8 @@ public sealed partial class MainForm
                 item.Recipes.Any(recipe => MatchesPartSearch(recipe, search)));
 
         var matches = query.ToArray();
-        var tiles = matches.Select(item => new VirtualTilePanel.Tile
+        var tiles = matches.Select(item => item.Recipe is { } draggable && AttachmentAssetCatalogService.CanDragPart(item.Asset, draggable)
+            ? PartTile(draggable) : new VirtualTilePanel.Tile
         {
             Title = item.Asset.Name,
             Subtitle = item.GroupedRecipes is { } group
@@ -2327,7 +2328,7 @@ public sealed partial class MainForm
             tiles.InsertRange(0, CustomStaticMeshTiles(search, pointFilter));
         ShowVirtualTiles(tiles,
             header: $"{matches.Length:N0} shown of {allItems.Count:N0} parts. Frequently reused meshes are grouped by attachment point; " +
-                    "open a group to choose its exact Blueprint donor. Face, root-body, cape, and glider usages are inspect-only here.",
+                    "drag an exact part onto the figure, or right-click for its actions. Open a group to choose its exact Blueprint donor. Faces, root bodies and gliders use their dedicated workflows; regular capes retain the normal compatibility checks.",
             emptyMessage: "No parts matched. Check your search and filters.");
     }
 
@@ -2359,7 +2360,7 @@ public sealed partial class MainForm
             ForeColor = Theme.OnDark, Font = Theme.Body, IntegralHeight = false };
         foreach (var recipe in visibleRecipes)
         {
-            var safe = AttachmentAssetCatalogService.CanOneClickGraft(entry, recipe);
+            var safe = AttachmentAssetCatalogService.CanDragPart(entry, recipe);
             recipes.Items.Add($"{(safe ? "READY" : "INSPECT")}  ·  {recipe.Context}  ·  {recipe.Slot}  ·  " +
                 $"{recipe.ComponentClass}  ·  {recipe.AttachSocket}  ·  {recipe.SourcePackagePath}");
         }
@@ -2373,13 +2374,13 @@ public sealed partial class MainForm
         var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
         var close = new Button { Text = "Close", Width = 105, Height = 36 };
         var inspect = new Button { Text = "Inspect in 3D", Width = 135, Height = 36 };
-        var use = new Button { Text = "Use selected recipe", Width = 160, Height = 36 };
+        var use = new Button { Text = "Use selected part", Width = 160, Height = 36 };
         Theme.StyleDarkButton(close); Theme.StyleDarkButton(inspect); Theme.StyleGoldButton(use);
         actions.Controls.Add(close); actions.Controls.Add(use); actions.Controls.Add(inspect);
         layout.Controls.Add(actions, 0, 3);
         NativeSuitPartRecord? Selected() => recipes.SelectedIndex >= 0 ? visibleRecipes[recipes.SelectedIndex] : null;
         void UpdateUse() => use.Enabled = Selected() is { } p &&
-            AttachmentAssetCatalogService.CanOneClickGraft(entry, p);
+            AttachmentAssetCatalogService.CanDragPart(entry, p);
         recipes.SelectedIndexChanged += (_, _) => UpdateUse();
         UpdateUse();
         close.Click += (_, _) => dialog.Close();
@@ -2394,7 +2395,7 @@ public sealed partial class MainForm
                 MeshKind = entry.MeshClass,
                 SourcePackagePath = entry.MeshPackagePath
             };
-            var safe = Selected() is { } p && AttachmentAssetCatalogService.CanOneClickGraft(entry, p);
+            var safe = Selected() is { } p && AttachmentAssetCatalogService.CanDragPart(entry, p);
             using var inspector = new PartInspectorForm(part, allowApply: safe);
             if (safe)
                 inspector.ApplyRequested += (_, _) =>
@@ -2407,7 +2408,7 @@ public sealed partial class MainForm
         };
         use.Click += (_, _) =>
         {
-            if (Selected() is not { } p || !AttachmentAssetCatalogService.CanOneClickGraft(entry, p)) return;
+            if (Selected() is not { } p || !AttachmentAssetCatalogService.CanDragPart(entry, p)) return;
             toApply = p;
             dialog.Close();
         };
@@ -2418,7 +2419,7 @@ public sealed partial class MainForm
     private async Task ApplySelectedAttachmentRecipeAsync(
         AttachmentAssetCatalogService.Entry entry, NativeSuitPartRecord selected)
     {
-        if (!AttachmentAssetCatalogService.CanOneClickGraft(entry, selected)) return;
+        if (!AttachmentAssetCatalogService.CanDragPart(entry, selected)) return;
         var oppositeRole = selected.Context.Equals("playable", StringComparison.OrdinalIgnoreCase)
             ? "cutscene" : "playable";
         // Only pair a unique, equally wired native role. Conflicting usages never get guessed.
@@ -3083,6 +3084,7 @@ public sealed partial class MainForm
         if (isUserMade)
         {
             menu.Items.Add("Edit this face material…", null, (_, _) => OpenMaterialFromBase(materialPath, editInPlace: true));
+            menu.Items.Add("Use as base for a custom face…", null, (_, _) => OpenMaterialFromBase(materialPath, editInPlace: false));
             if (allowDelete)
             {
                 menu.Items.Add("Delete this face material…", null, async (_, _) => await DeleteGeneratedMaterialAsync(materialPath));

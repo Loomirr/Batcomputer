@@ -159,6 +159,18 @@ internal static class AttachmentAssetCatalogService
             .ToArray();
     }
 
+    internal static bool CanDragPart(Entry entry, NativeSuitPartRecord recipe)
+    {
+        if (CanOneClickGraft(entry, recipe)) return true;
+        // Regular capes use the same guarded graft path as the Cape filter. This
+        // does not authorize an unpaired glider, a face mesh, or a Cape-tagged satchel.
+        return entry.NativeRecipes.Contains(recipe) && !recipe.IsSynthesized &&
+            recipe.Context is "playable" or "cutscene" &&
+            entry.MeshPackagePath.Contains("/Cape/", StringComparison.OrdinalIgnoreCase) &&
+            recipe.MeshKind == "SkeletalMesh" && GliderService.IsCosmeticCapeAttachment(recipe) &&
+            PartRecipeService.Confidence(recipe).Level == PartRecipeService.RecipeConfidence.Native;
+    }
+
     internal static bool CanOneClickGraft(Entry entry, NativeSuitPartRecord recipe)
     {
         if (!entry.NativeRecipes.Contains(recipe)) return false;
@@ -190,7 +202,7 @@ internal static class AttachmentAssetCatalogService
             candidate.Slot.Equals(selected.Slot, StringComparison.OrdinalIgnoreCase) &&
             candidate.ComponentClass.Equals(selected.ComponentClass, StringComparison.OrdinalIgnoreCase) &&
             candidate.MeshKind.Equals(selected.MeshKind, StringComparison.OrdinalIgnoreCase) &&
-            CanOneClickGraft(entry, candidate)).ToArray();
+            CanDragPart(entry, candidate)).ToArray();
         if (matches.Length == 1) return matches[0];
         if (matches.Length > 1) return null; // conflicting native usages require an explicit pick
         if (selected.MeshKind.Equals("StaticMesh", StringComparison.OrdinalIgnoreCase) &&

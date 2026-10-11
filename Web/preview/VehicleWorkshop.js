@@ -23,7 +23,7 @@
     pushHost('vehicleWorkshopSurface', { ...draft(), surfaceComponent: surfaceTarget.id, surfaceSlot: surfaceTarget.slot, surfaceAction: action, surfaceFinish: $('surfaceFinish').value, surfaceColor: $('surfaceColor').value });
   };
   function openSurface(id, slot) {
-    if (!ready) return;
+    if (!ready || riderBusy || activePartLoad!==null) return;
     const part = data.parts.find(p => p.id === id), original = part?.materials.find(m => m.slot === slot);
     if (!original) return;
     const current = effectiveSlot(part, original), paint = byPath.get(current.package)?.paint;
@@ -42,7 +42,7 @@
   toybox.innerHTML='<div class="dialog-layout"><header><h2>Vehicle parts toybox</h2><button data-close>Close</button></header><div class="library-filters"><input aria-label="Find vehicle parts" placeholder="Search mesh or vehicle name…"><select aria-label="Toybox category"><option value="">All pieces</option><option>Light pieces</option><option>Vehicle pieces</option></select></div><p class="muted" style="padding:0 16px" data-note></p><div data-cards style="overflow:auto;flex:1;padding:0 16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;align-content:start"></div><div class="library-footer" data-count></div></div>';
   document.body.append(toybox);toybox.querySelector('[data-close]').onclick=()=>toybox.close();let toyboxTarget='';
   function renderToybox(){const query=toybox.querySelector('input').value.toLowerCase(),group=toybox.querySelector('select').value,cards=toybox.querySelector('[data-cards]');cards.replaceChildren();const matches=(data.toyboxCatalog||[]).filter(p=>(!group||p.group===group)&&(p.name+' '+p.path).toLowerCase().includes(query));for(const part of matches.slice(0,160)){const button=document.createElement('button');button.className='material-card';const title=document.createElement('strong'),description=document.createElement('small');title.textContent=part.name;description.textContent=part.path;button.append(title,description);button.onclick=()=>{toybox.close();pushHost('vehicleWorkshopToybox',Object.assign(draft(),{targetComponent:toyboxTarget,meshPackage:part.path}));};cards.append(button);}toybox.querySelector('[data-count]').textContent=matches.length+' installed meshes'+(matches.length>160?' · showing 160; narrow your search':'');}
-  function openToybox(target){if(!ready||riderBusy)return;toyboxTarget=target;toybox.querySelector('[data-note]').textContent=target?'Changes this part’s mesh. Its existing controller and placement stay; material overrides reset.':'Adds a movable, non-colliding visual part. Brake/headlight behavior is not added automatically.';renderToybox();toybox.showModal();toybox.querySelector('input').focus();}
+  function openToybox(target){if(!ready||riderBusy||activePartLoad!==null)return;toyboxTarget=target;toybox.querySelector('[data-note]').textContent=target?'Changes this part’s mesh. Its existing controller and placement stay; material overrides reset.':'Adds a movable, non-colliding visual part. Brake/headlight behavior is not added automatically.';renderToybox();toybox.showModal();toybox.querySelector('input').focus();}
   toybox.querySelector('input').oninput=renderToybox;toybox.querySelector('select').onchange=renderToybox;toyboxButton.onclick=()=>openToybox('');replaceMesh.onclick=()=>openToybox(selected?.id||'');
   const viewState = document.createElement('span'); viewState.id = 'viewState'; viewState.setAttribute('aria-live','polite'); $('undo').before(viewState);
   const expandView = document.createElement('button'); expandView.id = 'expandView'; expandView.textContent = 'Expand view';
@@ -81,6 +81,20 @@
   const selectionBox = new THREE.Box3Helper(new THREE.Box3(), 0xffd43b); selectionBox.visible = false; scene.add(selectionBox);
   const loaded = new Map(), detailOrder = [], undo = [], redo = [], fields = new Map();
   let selected = null, selectedSlot = null, dragBefore = null, isolate = false, lights = true, mode = 'translate', ready = false, libraryPage = 0, libraryTarget = null, libraryChoice = null;
+  const selection = new Set(), groupPivot = new THREE.Object3D(); scene.add(groupPivot);
+  let groupStart = null;
+  const selectedParts = () => data.parts.filter(p => selection.has(p.id));
+  const groupScaleLocked = () => selectedParts().some(p => !p.editable || p.group === 'Seating' || p.lockScale);
+  const selectionHint = document.createElement('p'); selectionHint.className='muted'; selectionHint.textContent='Ctrl/Shift-click parts to select together. W move · R rotate · E scale. Group scale is uniform.'; $('counts').after(selectionHint);
+  function selectionBounds() { const box=new THREE.Box3(); selection.forEach(id=>{const s=loaded.get(id);if(s?.node.visible)box.union(bounds(id));});return box; }
+  function attachSelection() {
+    gizmo.detach();
+    const states=selectedParts().map(p=>loaded.get(p.id));
+    if(!states.length || states.some(s=>!s || !s.part.editable || !s.node.visible))return;
+    if(states.length===1){gizmo.attach(states[0].node);return;}
+    const box=selectionBounds();if(box.isEmpty())return;
+    groupPivot.position.copy(box.getCenter(new THREE.Vector3()));groupPivot.quaternion.identity();groupPivot.scale.setScalar(1);groupPivot.updateMatrixWorld(true);gizmo.attach(groupPivot);
+  }
   const axisLegend = document.createElement('div'); axisLegend.className = 'axis-legend'; axisLegend.innerHTML = '<span class="ax">X · forward/back</span><span class="ay">Y · left/right</span><span class="az">Z · up/down</span>'; $('viewport').appendChild(axisLegend);
   const disableButton = document.createElement('button'); disableButton.id = 'disablePart'; disableButton.className = 'danger'; $('fields').before(disableButton);
   const weaponsButton = document.createElement('button'); weaponsButton.id = 'weaponsMode'; weaponsButton.textContent = 'Weapons'; $('seatsMode').before(weaponsButton);
@@ -102,6 +116,14 @@
   const riderButton = document.createElement('button'); riderButton.id='riders';riderButton.textContent='Seated figures';$('glow').after(riderButton);
   const ghostButton=document.createElement('button');ghostButton.id='ghostBody';ghostButton.textContent='Ghost body';riderButton.after(ghostButton);ghostButton.onclick=()=>{if(!ready)return;ghostBody=!ghostBody;ghostButton.classList.toggle('active',ghostBody);repaint(loaded.get('body'));};
   let ridersLoaded=false,ridersVisible=true,riderBusy=false;
+  const partLoadQueue=[]; let activePartLoad=null, showAllPartMeshes=false;
+  const partMeshesButton=document.createElement('button');partMeshesButton.id='partMeshes';partMeshesButton.textContent='Part meshes';riderButton.before(partMeshesButton);
+  partMeshesButton.title='Load all visible attachment and launcher meshes together (uses more memory). No build settings change.';
+  partMeshesButton.onclick=()=>{
+    if(!ready)return;showAllPartMeshes=!showAllPartMeshes;partMeshesButton.classList.toggle('active',showAllPartMeshes);
+    if(showAllPartMeshes)loaded.forEach(s=>{if(!disabled.has(s.part.id))ensureLoaded(s);});
+    else {partLoadQueue.splice(0,partLoadQueue.length,...partLoadQueue.filter(id=>id===selected?.id));enforceDetailBudget();}
+  };
   riderButton.onclick=()=>{if(!ready)return;if(!ridersLoaded){riderBusy=true;updateUi();riderButton.disabled=true;riderButton.textContent='Preparing figures…';pushHost('vehicleWorkshopRiders',{});}else{ridersVisible=!ridersVisible;loaded.forEach(s=>{if(s.rider)s.rider.visible=ridersVisible;});riderButton.classList.toggle('active',ridersVisible);}};
   const beamPanel = document.createElement('fieldset'); beamPanel.id = 'beamPanel'; beamPanel.hidden = true;
   beamPanel.innerHTML = '<legend>Light beam</legend><label>Color <input id="beamColor" type="color" aria-label="Beam color"></label><div class="triple"><label>Brightness<input id="beamIntensity" type="number" min="0" max="10000" step="any"></label><label>Range · cm<input id="beamRadius" type="number" min="1" max="10000" step="any"></label><label>Cone · °<input id="beamCone" type="number" min="1" max="89" step="any"></label></div><p id="beamState" class="muted"></p><button id="resetBeam">Use native light settings</button>';
@@ -139,11 +161,12 @@
   function snapshot() { return JSON.stringify(draft()); }
   function checkpoint(before) { if (before === snapshot()) return; undo.push(before); if (undo.length > 60) undo.shift(); redo.length = 0; updateUi(); }
   function restore(value) { const state = JSON.parse(value); saved = new Map(state.transforms.map(t => [t.component, t])); materials = new Map(state.materialOverrides.map(m => [materialKey(m.component, m.slot), m])); disabled = new Set(state.disabledParts); beamSettings = new Map((state.lights || []).map(l => [l.component,l]));accentColor=state.accentColor||null; lightSurfaces=new Map((state.lightSurfaces||[]).map(s=>[s.slot,s])); loaded.forEach(s => { toNode(s.node, current(s.part)); repaint(s); paintBeam(s); }); syncLightSurfaces(); visibility(); updateUi(); }
-  function numeric(name, input) { if (!selected || !editable.has(selected.id)) return; const before = snapshot(), t = clone(current(selected)); t[name] = input.value === '' ? NaN : Number(input.value); if (!valid(t)) { $('status').textContent = 'Enter a valid value inside the shown limits.'; updateInspector(); return; } saved.set(selected.id, t); toNode(loaded.get(selected.id).node, t); checkpoint(before); }
+  function numeric(name, input) { if (selection.size>1 || !selected || !editable.has(selected.id)) return; const before = snapshot(), t = clone(current(selected)); t[name] = input.value === '' ? NaN : Number(input.value); if (!valid(t)) { $('status').textContent = 'Enter a valid value inside the shown limits.'; updateInspector(); return; } saved.set(selected.id, t); toNode(loaded.get(selected.id).node, t); checkpoint(before); }
   function pushHost(type, values) { if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage(Object.assign({ type, vehicleId: data.vehicleId, session: data.session }, values)); }
+  function errorText(error) { return typeof error?.message === 'string' && error.message ? error.message : String(error ?? 'Unknown preview error'); }
   function changed(id) { return saved.has(id) || disabled.has(id) || beamSettings.has(id) || id==='body'&&lightSurfaces.size>0 || surfaceRole(id) || accentColor&&id.startsWith('C_') || Array.from(materials.values()).some(m => m.component === id); }
   function partLabel(part) { const role=surfaceRole(part.id);return role?role.label+' · custom lens':part.label; }
-  function updateUi() { $('undo').disabled = !undo.length; $('redo').disabled = !redo.length; $('apply').disabled = !ready||riderBusy; $('setup').disabled=riderBusy;$('paintMode').disabled=riderBusy; $('counts').textContent = editable.size + ' adjustable · ' + materials.size + ' material edits'; const dirty = snapshot() !== initial; viewState.textContent = dirty ? 'Unsaved changes' : 'No new changes'; viewState.classList.toggle('dirty',dirty); $('status').textContent = riderBusy?'Preparing figures · seat edits can continue':dirty ? 'Unsaved changes · Save vehicle to keep them' : 'Orbit: drag · Pan: right drag · Zoom: wheel · W move · R rotate · E scale'; sectionButtons.forEach((button,id)=>{button.classList.toggle('active',section===id);button.setAttribute('aria-pressed',String(section===id));}); renderList(); updateInspector(); }
+  function updateUi() { const previewBusy=riderBusy||activePartLoad!==null; $('undo').disabled = !undo.length; $('redo').disabled = !redo.length; $('apply').disabled = !ready||previewBusy; $('setup').disabled=previewBusy;$('paintMode').disabled=previewBusy;riderButton.disabled=previewBusy;toyboxButton.disabled=previewBusy; $('counts').textContent = editable.size + ' adjustable · ' + materials.size + ' material edits'; const dirty = snapshot() !== initial; viewState.textContent = dirty ? 'Unsaved changes' : 'No new changes'; viewState.classList.toggle('dirty',dirty); $('status').textContent = riderBusy?'Preparing figures · seat edits can continue':activePartLoad!==null?'Loading part meshes · '+(partLoadQueue.length+1)+' remaining':dirty ? 'Unsaved changes · Save vehicle to keep them' : 'Orbit: drag · Pan: right drag · Zoom: wheel · W move · R rotate · E scale'; sectionButtons.forEach((button,id)=>{button.classList.toggle('active',section===id);button.setAttribute('aria-pressed',String(section===id));}); renderList(); updateInspector(); }
   function effectiveSlot(part, slot) { const override = materials.get(materialKey(part.id, slot.slot)), packagePath = override?.materialPath || slot.package, choice = byPath.get(packagePath), paint = choice?.paint; return { ...slot, package: packagePath, color: paint ? [paint.r,paint.g,paint.b] : override ? null : slot.color, family: paint?.finish || (override ? choice?.family || 'Assigned material' : slot.family), parameters: override ? [] : slot.parameters }; }
   function materialList(target, slots) {
     target.replaceChildren();
@@ -156,7 +179,7 @@
     const scroll = $('parts').scrollTop, focused = document.activeElement?.dataset.part;
     const search = $('search').value.toLowerCase(), filter = $('filter').value; $('parts').replaceChildren();
     const groups = new Map(); for (const p of data.parts) { if (!inSection(p) || !(partLabel(p) + ' ' + p.label + ' ' + p.id + ' ' + p.socket).toLowerCase().includes(search) || filter === 'editable' && !p.editable || filter === 'changed' && !changed(p.id)) continue; if (!groups.has(p.group)) groups.set(p.group, []); groups.get(p.group).push(p); }
-    groups.forEach((parts, group) => { const label = document.createElement('div'); label.className = 'group'; label.textContent = group.toUpperCase() + ' / ' + parts.length; $('parts').appendChild(label); for (const p of parts) { const button = document.createElement('button'); button.className = 'part' + (selected && selected.id === p.id ? ' active' : '') + (disabled.has(p.id) ? ' disabled' : ''); button.textContent = partLabel(p); button.dataset.part = p.id; if (changed(p.id)) { const tag = document.createElement('span'); tag.className = 'badge'; tag.textContent = disabled.has(p.id) ? 'REMOVED' : 'EDITED'; button.appendChild(tag); } const sub = document.createElement('small'); sub.textContent = surfaceRole(p.id)?'Custom surface · independent placement':p.socket || (p.id === 'body' ? 'Select surfaces to paint' : p.editable ? 'Component origin' : 'Reference'); button.appendChild(sub); button.onclick = () => select(p.id); $('parts').appendChild(button); } });
+    groups.forEach((parts, group) => { const label = document.createElement('div'); label.className = 'group'; label.textContent = group.toUpperCase() + ' / ' + parts.length; $('parts').appendChild(label); for (const p of parts) { const button = document.createElement('button'); button.className = 'part' + (selection.has(p.id) ? ' active' : '') + (disabled.has(p.id) ? ' disabled' : ''); button.setAttribute('aria-pressed',String(selection.has(p.id))); button.textContent = partLabel(p); button.dataset.part = p.id; if (changed(p.id)) { const tag = document.createElement('span'); tag.className = 'badge'; tag.textContent = disabled.has(p.id) ? 'REMOVED' : 'EDITED'; button.appendChild(tag); } const sub = document.createElement('small'); sub.textContent = surfaceRole(p.id)?'Custom surface · independent placement':p.socket || (p.id === 'body' ? 'Select surfaces to paint' : p.editable ? 'Component origin' : 'Reference'); button.appendChild(sub); button.onclick = e => select(p.id,null,e.ctrlKey||e.metaKey||e.shiftKey); $('parts').appendChild(button); } });
     if (!groups.size) { const empty = document.createElement('p'); empty.className = 'empty-parts'; empty.textContent = 'No matching parts. Try another section or clear the search and filter.'; $('parts').appendChild(empty); }
     if (focused) Array.from($('parts').querySelectorAll('button')).find(b=>b.dataset.part===focused)?.focus({preventScroll:true});
     $('parts').scrollTop = scroll;
@@ -168,6 +191,14 @@
     if (first && (!selected || !inSection(selected))) select(first.id); else updateUi();
   }
   function updateInspector() {
+    if(selection.size>1) {
+      $('selection').textContent=selection.size+' parts selected';$('detail').textContent='Shared center · use the gizmo to move/rotate or uniformly scale the group';
+      replaceMesh.hidden=true;disableButton.style.display='none';surfacePanel.hidden=beamPanel.hidden=accentPanel.hidden=true;
+      $('fields').style.display='none';$('reset').parentElement.style.display='flex';$('reset').disabled=!selectedParts().some(p=>saved.has(p.id));
+      $('focus').disabled=false;$('hide').textContent='Hide selected in preview';$('isolate').classList.toggle('active',isolate);
+      $('partNote').textContent='Ctrl/Shift-click to add or remove parts. Click normally to select one. A group edit is one undo step. Seats and size-locked parts cannot be scaled.';
+      $('materials').textContent='Select one part to edit its materials.';return;
+    }
     replaceMesh.hidden=!selected?.canDisable || !!surfaceRole(selected.id);
     if (!selected) return; const t = current(selected), state = loaded.get(selected.id);
     $('selection').textContent = partLabel(selected); $('detail').textContent = surfaceRole(selected.id)?'Offset from the imported lens center · vehicle axes':(selected.socket ? 'Socket: ' + selected.socket + ' · Bone: ' + selected.bone : 'Vehicle origin') + (selected.id === 'body' ? ' · materials editable, rig locked' : selected.editable ? ' · editable' : ' · reference only');
@@ -192,16 +223,26 @@
     if(surfaceRole(selected.id)) { $('materials').textContent='Custom light surface · uses the native bulb shader. Change its assignment on Vehicle body.'; }
     else materialList($('materials'), selected.materials);
   }
-  function select(id, slot = null) { const state = loaded.get(id); selected = data.parts.find(p => p.id === id); selectedSlot = slot; if (!selected) return; ensureLoaded(state); gizmo.detach(); if (state && selected.editable && state.node.visible) gizmo.attach(state.node); $('scale').disabled = selected.group === 'Seating'||selected.lockScale; if ((selected.group === 'Seating'||selected.lockScale) && mode === 'scale') modeTo('translate'); if (isolate) visibility(); updateUi(); if (slot !== null && id==='body'&&surfaceChoices.length)surfacePanel.scrollIntoView({block:'nearest'});else if (slot !== null) $('materials').querySelector('[data-slot="' + slot + '"]')?.scrollIntoView({block:'nearest'});else $('inspector').scrollTop=0; }
+  function select(id, slot = null, additive = false) {
+    if(gizmo.dragging)return;
+    const part=data.parts.find(p=>p.id===id);if(!part)return;
+    if(!additive || !part.editable)selection.clear();
+    else for(const key of selection)if(!editable.has(key))selection.delete(key);
+    if(additive && selection.has(id) && selection.size>1)selection.delete(id);else selection.add(id);
+    selected=selection.has(id)?part:data.parts.find(p=>selection.has(p.id));selectedSlot=selection.size===1?slot:null;
+    selection.forEach(key=>ensureLoaded(loaded.get(key)));$('scale').disabled=groupScaleLocked();
+    if(groupScaleLocked() && mode==='scale')modeTo('translate');
+    if(isolate)visibility();else attachSelection();updateUi();$('inspector').scrollTop=0;
+  }
   function bounds(id) { const state = id ? loaded.get(id) : null; return new THREE.Box3().setFromObject(state ? state.node : vehicle); }
   function frame(id, view) {
-    const box = bounds(id); if (box.isEmpty()) return; const center = box.getCenter(new THREE.Vector3()), radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, .2);
+    const box = id && selection.size>1 && selection.has(id) ? selectionBounds() : bounds(id); if (box.isEmpty()) return; const center = box.getCenter(new THREE.Vector3()), radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, .2);
     const direction = view === 'top' ? new THREE.Vector3(.001, 0, 1) : view === 'front' ? new THREE.Vector3(1, 0, .08) : view === 'side' ? new THREE.Vector3(0, -1, .08) : new THREE.Vector3(1, -1.2, .8).normalize();
     const fov = Math.min(camera.fov * rad, 2 * Math.atan(Math.tan(camera.fov * rad / 2) * camera.aspect));
     orbit.target.copy(center); camera.position.copy(center).addScaledVector(direction.normalize(), radius / Math.sin(fov / 2) * 1.12); camera.near = .01; camera.far = Math.max(1000, radius * 30); camera.updateProjectionMatrix(); orbit.update();
   }
-  function visibility() { loaded.forEach((s, id) => s.node.visible = !s.hidden && !disabled.has(id) && !lightRoles.some(r=>r.glow===id&&Array.from(lightSurfaces.values()).some(b=>b.role===r.id)) && (!isolate || selected && id === selected.id || id === 'body')); if (selected && loaded.get(selected.id)?.node.visible && selected.editable) gizmo.attach(loaded.get(selected.id).node); else gizmo.detach(); updateInspector(); }
-  function modeTo(value) { if (value === 'scale' && (selected?.group === 'Seating'||selected?.lockScale)) return; mode = value; gizmo.setMode(value); for (const id of ['translate', 'rotate', 'scale']) $(id).classList.toggle('active', id === value); }
+  function visibility() { loaded.forEach((s, id) => s.node.visible = !s.hidden && !disabled.has(id) && !lightRoles.some(r=>r.glow===id&&Array.from(lightSurfaces.values()).some(b=>b.role===r.id)) && (!isolate || selection.has(id) || id === 'body')); attachSelection(); updateInspector(); }
+  function modeTo(value) { if (value === 'scale' && groupScaleLocked()) return; mode = value; gizmo.setMode(value); for (const id of ['translate', 'rotate', 'scale']) $(id).classList.toggle('active', id === value); }
   $('name').textContent = data.name; materialList($('nativeMaterials'), data.nativeMaterials);
   $('search').oninput = renderList; $('filter').onchange = renderList;
   for (const id of ['translate', 'rotate', 'scale']) $(id).onclick = () => modeTo(id);
@@ -209,12 +250,12 @@
   $('snap').onchange = () => { const value = Number($('snap').value); gizmo.setTranslationSnap(value ? value / 100 : null); gizmo.setRotationSnap(value ? ({ 1: 5, 5: 15, 10: 30 }[value] * rad) : null); gizmo.setScaleSnap(value ? .05 : null); };
   $('undo').onclick = () => { if (undo.length) { redo.push(snapshot()); restore(undo.pop()); } };
   $('redo').onclick = () => { if (redo.length) { undo.push(snapshot()); restore(redo.pop()); } };
-  $('reset').onclick = () => { if (!selected || !selected.editable) return; const before = snapshot(); saved.delete(selected.id); toNode(loaded.get(selected.id).node, nativeTransform(selected)); checkpoint(before); };
+  $('reset').onclick = () => { if (!selected || !selected.editable) return; const before = snapshot(); selectedParts().filter(p=>p.editable).forEach(p=>{saved.delete(p.id);toNode(loaded.get(p.id).node,nativeTransform(p));});attachSelection();checkpoint(before); };
   $('frame').onclick = () => frame(); $('focus').onclick = () => selected && frame(selected.id);
   document.querySelectorAll('[data-view]').forEach(button => button.onclick = () => frame(null, button.dataset.view));
   $('grid').onclick = () => { grid.visible = !grid.visible; $('grid').classList.toggle('active', grid.visible); };
   $('glow').onclick = () => { lights = !lights; vehicle.traverse(n => { if (n.isMesh && n.userData.glow) (Array.isArray(n.material) ? n.material : [n.material]).forEach(m => m.emissiveIntensity = lights ? 1.3 : 0); }); loaded.forEach(paintBeam); $('glow').classList.toggle('active', lights); };
-  $('hide').onclick = () => { if (!selected) return; const state = loaded.get(selected.id); state.hidden = !state.hidden; visibility(); };
+  $('hide').onclick = () => { if (!selected) return; const hidden=selection.size>1||!loaded.get(selected.id).hidden;selection.forEach(id=>loaded.get(id).hidden=hidden);visibility(); };
   $('showAll').onclick = () => { isolate = false; loaded.forEach(s => s.hidden = false); visibility(); };
   $('isolate').onclick = () => { isolate = !isolate; visibility(); };
   $('apply').onclick = () => pushHost('vehicleWorkshopSave', draft());
@@ -224,15 +265,28 @@
   $('seatsMode').onclick = () => changeSection('seating');
   disableButton.onclick = () => { if (!selected?.canDisable) return; const before = snapshot(); if (disabled.has(selected.id)) disabled.delete(selected.id); else disabled.add(selected.id); visibility(); checkpoint(before); };
   gizmo.addEventListener('dragging-changed', event => { if(event.value) motion?.rest(); orbit.enabled = !event.value; });
-  gizmo.addEventListener('mouseDown', () => { dragBefore = snapshot(); });
-  gizmo.addEventListener('objectChange', () => { if (!selected || !selected.editable) return; const state = loaded.get(selected.id), value = fromNode(selected.id, state.node); if (valid(value)) { saved.set(selected.id, value); fields.forEach((input, name) => input.value = value[name].toFixed(3)); } else toNode(state.node, current(selected)); });
-  gizmo.addEventListener('mouseUp', () => { if (dragBefore !== null) checkpoint(dragBefore); dragBefore = null; });
+  gizmo.addEventListener('mouseDown', () => { dragBefore = snapshot();groupStart=selection.size>1?VehicleGroupTransform.begin(THREE,selectedParts().map(p=>loaded.get(p.id).node),groupPivot):null; });
+  gizmo.addEventListener('objectChange', () => {
+    if (!selected || !selected.editable) return;
+    if(groupStart) {
+      try {
+        if(mode==='scale'){const s=groupPivot.scale;const factor=[s.x,s.y,s.z].sort((a,b)=>Math.abs(b-1)-Math.abs(a-1))[0];s.setScalar(factor);}
+        const pending=VehicleGroupTransform.evaluate(THREE,groupStart,groupPivot).map(p=>({...p,value:fromNode(p.target.userData.part,p.node)}));
+        if(pending.some(p=>!valid(p.value)))throw new Error('Group edit exceeds a part’s transform limits.');
+        pending.forEach(p=>{saved.set(p.value.component,p.value);toNode(p.target,p.value);});
+      } catch(error){$('error').textContent=error.message;}
+      return;
+    }
+    if(selection.size>1)return;
+    const state = loaded.get(selected.id), value = fromNode(selected.id, state.node); if (valid(value)) { saved.set(selected.id, value); fields.forEach((input, name) => input.value = value[name].toFixed(3)); } else toNode(state.node, current(selected));
+  });
+  gizmo.addEventListener('mouseUp', () => { if (dragBefore !== null) checkpoint(dragBefore); dragBefore = null;groupStart=null;if(selection.size>1)attachSelection(); });
   const ray = new THREE.Raycaster(); let pointerDown = null;
   renderer.domElement.addEventListener('pointerdown', e => { pointerDown = [e.clientX, e.clientY]; });
   renderer.domElement.addEventListener('pointerup', e => {
     if (!pointerDown || Math.hypot(e.clientX - pointerDown[0], e.clientY - pointerDown[1]) > 4 || gizmo.axis || e.button !== 0) return;
     const rect = renderer.domElement.getBoundingClientRect(); ray.setFromCamera(new THREE.Vector2((e.clientX - rect.left) / rect.width * 2 - 1, -(e.clientY - rect.top) / rect.height * 2 + 1), camera);
-    const hits = ray.intersectObject(vehicle, true); for (const hit of hits) { let n = hit.object; while (n && !n.userData.part) n = n.parent; if (n && loaded.get(n.userData.part).node.visible) { const slots = hit.object.userData.materialSlots; select(n.userData.part, slots?.[hit.face?.materialIndex || 0] ?? null); break; } }
+    const hits = ray.intersectObject(vehicle, true); for (const hit of hits) { let n = hit.object; while (n && !n.userData.part) n = n.parent; if (n && loaded.get(n.userData.part).node.visible) { const slots = hit.object.userData.materialSlots; select(n.userData.part, slots?.[hit.face?.materialIndex || 0] ?? null,e.ctrlKey||e.metaKey||e.shiftKey); break; } }
   });
   addEventListener('keydown', e => { if (document.querySelector('dialog[open]') || /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return; if (e.ctrlKey && ['z', 'y'].includes(e.key.toLowerCase())) { e.preventDefault(); $(e.key.toLowerCase() === 'z' ? 'undo' : 'redo').click(); } else if (!e.ctrlKey && !e.altKey) { if (e.key.toLowerCase() === 'w') modeTo('translate'); if (e.key.toLowerCase() === 'r') modeTo('rotate'); if (e.key.toLowerCase() === 'e') modeTo('scale'); if (e.key.toLowerCase() === 'f') frame(selected && selected.id); } });
   function appearance(node, part, parser) {
@@ -245,6 +299,18 @@
         if (glowing) { m.emissive.copy(color); m.emissiveIntensity = 1.3; n.userData.glow = true; } return m; };
       n.material = Array.isArray(n.material) ? n.material.map(one) : one(n.material);
     });
+  }
+  function updateMaterials(change) {
+    if (!change || change.session !== data.session || !Array.isArray(change.catalog) ||
+        !data.parts.some(p => p.id === change.component && p.materials.some(m => m.slot === change.slot))) return false;
+    const before = snapshot();
+    catalog.splice(0, catalog.length, ...change.catalog);
+    byPath.clear(); catalog.forEach(m => byPath.set(m.path, m));
+    materials.set(materialKey(change.component, change.slot), { component:change.component, slot:change.slot, materialPath:change.package });
+    // Shared owned materials may be used by several parts. Refresh all swatches, not geometry.
+    loaded.forEach(repaint);
+    checkpoint(before); updateUi();
+    return true;
   }
   function repaint(state) {
     state.node.traverse(n => { if (!n.isMesh || !n.userData.materialSlots) return;
@@ -297,7 +363,7 @@
     motion?.reanchor();
   }
   function openMaterials(id,slot) {
-    if(riderBusy)return;
+    if(riderBusy||activePartLoad!==null)return;
     const part=data.parts.find(p=>p.id===id);if(!part?.materials.some(m=>m.slot===slot))return;
     select(id,slot);libraryTarget={id,slot};libraryChoice=null;libraryPage=0;$('useMaterial').disabled=true;
     $('materialPickerTitle').textContent=part.label+' · slot '+slot;
@@ -318,10 +384,23 @@
   function disposeObject(root) { root.traverse(n => { if (n.geometry) n.geometry.dispose(); const materials = n.material ? (Array.isArray(n.material) ? n.material : [n.material]) : []; materials.forEach(m => m.dispose?.()); }); }
   function addMarker(state) { const p=state.part, marker = new THREE.Mesh(p.group === 'Seating' ? new THREE.BoxGeometry(.26,.32,.08) : new THREE.OctahedronGeometry(.045), new THREE.MeshBasicMaterial({ color: p.editable ? 0xffd43b : 0x71ccef, wireframe: true })); state.modelRoot.add(marker); if (p.group === 'Light sources (reference)' || p.group === 'Seating') state.modelRoot.add(new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), .6, 0x71ccef, .12, .07)); }
   function unloadDetail(state) { if (!state || !state.detail || state.part.id === 'body') return; disposeObject(state.modelRoot); state.modelRoot.clear(); state.detail=false; addMarker(state); }
-  function enforceDetailBudget() { const budget=Math.max(1,Number(data.detailPartBudget)||6); while (detailOrder.length > budget) { const id=detailOrder.shift(), state=loaded.get(id); if (state && state.part.id !== 'body') unloadDetail(state); } }
+  function enforceDetailBudget() { if(showAllPartMeshes)return; const budget=Math.max(1,Number(data.detailPartBudget)||6); while (detailOrder.length > budget) { const id=detailOrder.shift(), state=loaded.get(id); if (state && state.part.id !== 'body') unloadDetail(state); } }
   async function loadDetail(state, file) { if (!state || state.loading || state.detail) return; state.loading=true; try { const gltf=await new THREE.GLTFLoader().loadAsync(file), model=gltf.scene; disposeObject(state.modelRoot); state.modelRoot.clear(); model.rotation.x=Math.PI/2; model.scale.z=-1; appearance(model,state.part,gltf.parser); state.modelRoot.add(model); state.detail=true; if(state.part.id==='body')bodyModel=model;else{detailOrder.push(state.part.id);enforceDetailBudget();} repaint(state); if(selected?.id===state.part.id)frame(state.part.id); } catch(error) { addMarker(state); $('error').textContent='Could not load '+state.part.label+': '+error.message; } finally { state.loading=false; updateUi(); } }
-  function ensureLoaded(state) { if (state && !state.detail && !state.loading && state.part.meshPackage) { state.loading=true; updateUi(); pushHost('vehicleWorkshopLoadPart',{component:state.part.id}); } }
-  async function loadPart(id, mesh, error) { const state=loaded.get(id); if (!state) return; state.loading=false; if (!mesh?.file) { $('error').textContent='Could not load '+state.part.label+': '+(error||'unknown error'); updateUi(); return; } state.part.file=mesh.file; state.part.materials=mesh.materials||[]; state.part.primitiveSlots=mesh.primitiveSlots||[]; await loadDetail(state,mesh.file); if(selected?.id===id)updateUi(); }
+  function ensureLoaded(state) {
+    if(!state||state.detail||state.loading||!state.part.meshPackage||partLoadQueue.includes(state.part.id))return;
+    partLoadQueue.push(state.part.id);pumpPartLoads();
+  }
+  function pumpPartLoads() {
+    if(!ready||riderBusy||activePartLoad!==null)return;
+    while(partLoadQueue.length){const id=partLoadQueue.shift(),state=loaded.get(id);if(!state||state.detail||state.loading)continue;
+      activePartLoad=id;state.loading=true;updateUi();pushHost('vehicleWorkshopLoadPart',{component:id});break;}
+  }
+  async function loadPart(id, mesh, error) {
+    const state=loaded.get(id);if(!state)return;
+    try {state.loading=false;if(!mesh?.file){$('error').textContent='Could not load '+state.part.label+': '+(error||'missing mesh file');return;}
+      state.part.file=mesh.file;state.part.materials=mesh.materials||[];state.part.primitiveSlots=mesh.primitiveSlots||[];await loadDetail(state,mesh.file);
+    } finally {if(activePartLoad===id)activePartLoad=null;updateUi();pumpPartLoads();}
+  }
   async function load() {
     for (const part of data.parts) {
       const anchor=new THREE.Group();anchor.position.fromArray(part.anchor.position).multiplyScalar(.01);anchor.quaternion.fromArray(part.anchor.quaternion);anchor.scale.fromArray(part.anchor.scale);vehicle.add(anchor);
@@ -332,6 +411,9 @@
     }
     await loadDetail(loaded.get('body'),data.parts.find(p=>p.id==='body')?.file);
     ready=true;$('loading').style.display='none';select('body');syncLightSurfaces();visibility();frame();
+    // Show authored additions and weapon placement references without requiring a
+    // discovery click. Other parts can be selected or loaded with Part meshes.
+    Array.from(loaded.values()).filter(s=>s.part.meshPackage&&!disabled.has(s.part.id)&&(s.part.group==='Toybox attachments'||s.part.group==='Weapons & grapple')).slice(0,Math.max(1,Number(data.detailPartBudget)||6)).forEach(ensureLoaded);
     if(bodyModel&&window.createVehicleMotion)motion=window.createVehicleMotion({data,vehicle,loaded,bodyModel,viewport:$('viewport'),viewbar:document.querySelector('.viewbar')});
     if(window.createVehicleBoostPreview)boostPreview=window.createVehicleBoostPreview({data,loaded,viewbar:document.querySelector('.viewbar')});
     if(data.warnings.length)$('error').textContent=data.warnings.length+' preview warnings · see part details';pushHost('vehicleWorkshopReady',{parts:loaded.size});
@@ -342,15 +424,15 @@
       if (!riders) return;
       for(const rider of riders){const state=loaded.get(rider.seat);if(!state)throw new Error('Unknown seat');if(state.rider)continue;state.rider=await window.buildVehicleRider(rider);state.rider.scale.multiplyScalar(1/(data.sizeMultiplier||1));state.node.add(state.rider);}
       ridersLoaded=true;ridersVisible=true;riderButton.classList.add('active');$('status').textContent='Native seated idle poses · placement preview, not live driving IK';
-    } catch(error){$('error').textContent='Seated preview: '+error.message;pushHost('vehicleWorkshopError',{error:error.message});}
-    finally {riderBusy=false;riderButton.disabled=false;riderButton.textContent='Seated figures';updateUi();}
+    } catch(error){const message=errorText(error);$('error').textContent='Seated preview: '+message;pushHost('vehicleWorkshopError',{error:message});}
+    finally {riderBusy=false;riderButton.disabled=false;riderButton.textContent='Seated figures';updateUi();pumpPartLoads();}
   }
   function resize() { const rect = $('viewport').getBoundingClientRect(); if (!rect.width || !rect.height) return; renderer.setSize(rect.width, rect.height); camera.aspect = rect.width / rect.height; camera.updateProjectionMatrix(); }
   new ResizeObserver(resize).observe($('viewport')); resize();
   const frameLimit=Math.max(0,Number(data.frameRateLimit ?? 60)), frameInterval=frameLimit ? 1000/frameLimit : 0; let lastFrame=0;
-  function tick(now=0) { requestAnimationFrame(tick); if(frameInterval&&now-lastFrame<frameInterval)return;lastFrame=now;orbit.update();motion?.update();boostPreview?.update();if (selected && loaded.has(selected.id)) { selectionBox.box.copy(bounds(selected.id)); selectionBox.visible = selected.editable && loaded.get(selected.id).node.visible; } renderer.render(scene, camera); } tick();
-  load().catch(error => { $('loading').textContent = 'Preview could not be loaded: ' + error.message; $('error').textContent = 'Nothing was saved'; pushHost('vehicleWorkshopError', { error: error.message }); });
+  function tick(now=0) { requestAnimationFrame(tick); if(frameInterval&&now-lastFrame<frameInterval)return;lastFrame=now;orbit.update();motion?.update();boostPreview?.update();if (selected && loaded.has(selected.id)) { selectionBox.box.copy(selectionBounds()); selectionBox.visible = selected.editable && loaded.get(selected.id).node.visible; } renderer.render(scene, camera); } tick();
+  load().catch(error => { const message=errorText(error);$('loading').textContent = 'Preview could not be loaded: ' + message; $('error').textContent = 'Nothing was saved'; pushHost('vehicleWorkshopError', { error: message }); });
   // Deterministic hooks used by the local, headless interaction checks.
   window.addEventListener('pagehide',()=>{loaded.forEach(state=>disposeObject(state.modelRoot));renderer.dispose();});
-  window.vehicleWorkshop = { select, fromNode, ueQuaternion, valid, frame, camera, gizmo, openSettings, openMaterials, loadRiders, loadPart, get motion() { return motion; }, get ready() { return ready; }, get saved() { return clone(Array.from(saved.values())); }, get draft() { return clone(draft()); }, get loaded() { return loaded; }, get selectedSlot() { return selectedSlot; } };
+  window.vehicleWorkshop = { select, fromNode, ueQuaternion, valid, frame, camera, gizmo, openSettings, openMaterials, loadRiders, loadPart, updateMaterials, get motion() { return motion; }, get ready() { return ready; }, get saved() { return clone(Array.from(saved.values())); }, get draft() { return clone(draft()); }, get loaded() { return loaded; }, get selectedSlot() { return selectedSlot; } };
 })();

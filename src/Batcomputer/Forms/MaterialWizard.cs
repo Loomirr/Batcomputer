@@ -27,6 +27,8 @@ public sealed partial class MaterialWizard : AdaptiveForm
     private bool _faceHelpersEnabled;
     private MaterialGenService.MaterialTemplateInfo? _lastTemplateInfo;
     private MaterialTemplateCatalogService.Recipe? _selectedRecipe;
+    private bool _createFromBase;
+    internal Func<string, bool>? OutputPackageExists { get; set; }
 
     // These are the same shipped placeholders used by the game's LEGO face defaults.
     // A disabled face layer should point at an inert texture of the correct map type;
@@ -511,6 +513,8 @@ public sealed partial class MaterialWizard : AdaptiveForm
     /// </summary>
     public void PrefillBase(string baseUassetDiskPath, string newName, bool editInPlace)
     {
+        _createFromBase = !editInPlace;
+        _selectedRecipe = null;
         if (!string.IsNullOrWhiteSpace(baseUassetDiskPath))
         {
             _baseText.Text = baseUassetDiskPath;
@@ -1288,7 +1292,7 @@ public sealed partial class MaterialWizard : AdaptiveForm
                 scalarMap[parameter] = scalar;
             }
         }
-        if (_selectedRecipe is null && textureMap.Count == 0 && clearedTextureParams.Count == 0 && colourMap.Count == 0 && scalarMap.Count == 0)
+        if (!_createFromBase && _selectedRecipe is null && textureMap.Count == 0 && clearedTextureParams.Count == 0 && colourMap.Count == 0 && scalarMap.Count == 0)
         {
             _status.Text = "Enter an override before generating.";
             return;
@@ -1340,6 +1344,20 @@ public sealed partial class MaterialWizard : AdaptiveForm
                     basePath),
             };
         var generator = new MaterialGenService(_projectRoot);
+        // Preflight every output before copying anything. A new variant must never
+        // replace its base (or an earlier variant), even if the author edits its name.
+        if (_createFromBase)
+        {
+            foreach (var output in outputs)
+            {
+                var package = $"/Game/Mods/{_modFolder}/{MaterialOutputName(name, output.Definition.NameSuffix)}";
+                if (NewMaterialOutputExists(package))
+                {
+                    _status.Text = "That material already exists. Choose a new name; the original has not been changed.";
+                    return;
+                }
+            }
+        }
         var generatedPackages = new List<string>();
         var templateGroupId = outputs.Count > 1 ? Guid.NewGuid().ToString("N") : "";
         ResultGeneratedMaterials.Clear();
@@ -1422,6 +1440,15 @@ public sealed partial class MaterialWizard : AdaptiveForm
         ResultIsFaceMaterial = primary.IsFaceMaterial;
         DialogResult = DialogResult.OK;
         Close();
+    }
+
+    internal bool NewMaterialOutputExists(string package)
+    {
+        package = UnrealPathUtil.NormalizePackagePath(package);
+        return package.Equals(UnrealPathUtil.NormalizePackagePath(_lastTemplateInfo?.SourcePackagePath ?? ""), StringComparison.OrdinalIgnoreCase)
+            || OutputPackageExists?.Invoke(package) == true
+            || File.Exists(Path.Combine(AppSettings.Current.EffectiveExportContentRoot(), package["/Game/".Length..].Replace('/', Path.DirectorySeparatorChar) + ".uasset"))
+            || new ToolMaterialLibraryService(_projectRoot).ResolvePackageUasset(package) is not null;
     }
 
     private List<string> FindSurfaceWarnings(

@@ -61,6 +61,19 @@ public sealed class ModReleaseValidationService
             else if (family.Any(project => !CustomCharacterProjectService.Scope(project.CustomCharacter!).Equals(
                          CustomCharacterProjectService.Scope(definitions[0].CustomCharacter!), StringComparison.OrdinalIgnoreCase)))
                 result.AddError("character dependencies", $"A suit for '{family.Key}' has a stale pawn-tag family. Open Character identity on the definition and save to synchronize saved child suits.");
+            else
+                foreach (var child in family.Where(project => !CustomCharacterProjectService.IsCharacter(project)))
+                {
+                    try
+                    {
+                        if (CharacterRebaseService.GameplayUpdateWarning(definitions[0], child) is { } warning)
+                            result.AddWarning("character inheritance", warning, child.SlotId);
+                    }
+                    catch (InvalidDataException ex)
+                    {
+                        result.AddWarning("character inheritance", ex.Message, child.SlotId);
+                    }
+                }
         }
 
         var suitIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

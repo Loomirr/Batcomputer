@@ -39,6 +39,8 @@ internal static class SkinnedMeshStageService
     internal static void ValidateRecipe(SkinnedMeshImport mesh)
     {
         SkinnedMeshCookService.RequireNativeDonor(mesh.DonorMeshPackage);
+        if (mesh.AllowVehicleWheelPlacement && (mesh.Component != "SkeletalMeshComponent" || !VehicleDonorService.All.Any(d => d.Id == "batbike2022" && d.Mesh == mesh.DonorMeshPackage)))
+            throw new InvalidDataException("Wheel placement cannot be used on a character or assembly rig.");
         if (!mesh.MeshPackage.StartsWith("/Game/Mods/", StringComparison.Ordinal) ||
             mesh.MeshPackage.Split('/').Skip(1).Any(s => !UnrealPathUtil.IsValidIdentifier(s)))
             throw new InvalidDataException("The skinned mesh must use a valid mod-owned package.");
@@ -106,7 +108,7 @@ internal static class SkinnedMeshStageService
             ?? throw new InvalidDataException("Missing validated skeletal cook. Reimport the FBX.");
         if (manifest.RigValidationVersion != SkinnedMeshCookService.RigValidationVersion)
             throw new InvalidDataException("This skinned mesh was cooked before the root-scale fix. Use Reimport saved FBX to rebuild and validate its bind pose before previewing or packaging.");
-        if (manifest.SourceHash != mesh.SourceSha256 || manifest.Donor != mesh.DonorMeshPackage || manifest.Skeleton != mesh.SkeletonPackage || manifest.Package != mesh.MeshPackage ||
+        if (manifest.AllowVehicleWheelPlacement != mesh.AllowVehicleWheelPlacement || manifest.SourceHash != mesh.SourceSha256 || manifest.Donor != mesh.DonorMeshPackage || manifest.Skeleton != mesh.SkeletonPackage || manifest.Package != mesh.MeshPackage ||
             SkinnedMeshCookService.Hash(SkinnedMeshCookService.SafePath(directory, mesh.SourceRelativePath)) != manifest.SourceHash)
             throw new InvalidDataException("Skinned source or rig changed since validation. Reimport before building.");
         if (manifest.Files.Count is < 2 or > 3 || !manifest.Files.ContainsKey("mesh.uasset") || !manifest.Files.ContainsKey("mesh.uexp")) throw new InvalidDataException("Invalid skeletal cook manifest.");

@@ -460,7 +460,7 @@ public sealed partial class MainForm
         }
 
         // In batch mode the bulk operation owns the progress window (one per suit would flicker).
-        using var progress = _batchMode ? null : new ProgressDialog(this, "Packaging suit");
+        using var progress = _batchMode ? null : new ProgressDialog(this, "Packaging suit", detailed: true);
         _packageProgress = progress ?? _packageProgress;
         try
         {
@@ -603,7 +603,8 @@ public sealed partial class MainForm
         // patched/grafted stage. Copy the suit's own /Game/Mods/<mod> assets into
         // the content root so they get bundled into the pak (otherwise materials
         // resolve to null at runtime and render grey).
-        _packageProgress?.Report("Staging materials and textures…");
+        _packageProgress?.SetContext(packageProject.DisplayName);
+        PackageStep("Staging materials and textures…");
         if (!StageGeneratedTexturesIntoContentRoot(
                 packageProject,
                 contentRootToPackage,
@@ -621,7 +622,7 @@ public sealed partial class MainForm
 
         // Every suit needs its own DCMD (points to the menu icon + equipment + the
         // generated pawn/cutscene classes). Generate it into the pack content root.
-        _packageProgress?.Report("Generating DCMD / UIMD metadata…");
+        PackageStep("Generating DCMD / UIMD metadata…");
         StageGeneratedDcmdIntoContentRoot(
             packageProject,
             contentRootToPackage,
@@ -639,7 +640,7 @@ public sealed partial class MainForm
         // or archetype suits with grafted parts package without their animations.
         if (AnimArchetypeGraftService.RequiresCustomArchetype(packageProject))
         {
-            _packageProgress?.Report("Applying custom archetype + animation pipeline…");
+            PackageStep("Applying custom archetype + animation pipeline…");
             var archAnim = new AnimArchetypeGraftService().ApplyToPackagedRoot(packageProject, contentRootToPackage);
             AppendLog($"Custom archetype pipeline: {archAnim.Status}");
             foreach (var line in archAnim.Log) AppendLog("  " + line);
@@ -677,7 +678,7 @@ public sealed partial class MainForm
         }
 
         GameplayAnimationGraphService.Apply(packageProject, contentRootToPackage, AppendLog);
-        _packageProgress?.Report("Preparing selected character voice profile…");
+        PackageStep("Preparing selected character voice profile…");
         var voiceBuild = await Task.Run(() => CharacterVoiceBuildService.StageAsync(packageProject, projectRoot,
             contentRootToPackage, line => AppendLog(line), CancellationToken.None));
         var toggleAudio = HeldItemToggleService.Stage(packageProject, contentRootToPackage);
@@ -686,15 +687,15 @@ public sealed partial class MainForm
         await Task.Run(() => AnimationSpawnedItemService.ApplyToPackagedRoot(packageProject, contentRootToPackage, line => AppendLog(line)));
         var runtimeJsonPath = StageRuntimeV2SuitJson(packageProject, buildId);
         AppendLog($"Runtime V2 suit JSON: {runtimeJsonPath}");
-        _packageProgress?.Report("Checking the package…");
+        PackageStep("Checking the package…");
         if (!RunV2PackagePreflight(packageProject, contentRootToPackage, runtimeJsonPath, logHeader: true,
                 out var preflightErrors, out var preflightWarnings))
         {
             AppendLog("Package check failed; nothing was sent to retoc.");
-            _packageProgress?.Report("Package check failed.");
+            PackageStep("Package check failed.");
             return PackageBuildResult.Failed("Package preflight failed.");
         }
-        _packageProgress?.Report($"Building IoStore trio ({packageBaseName})…");
+        PackageStep($"Building IoStore trio ({packageBaseName})…");
 
         var outputRoot = Path.Combine(
             AppSettings.GeneratedRootFor(projectRoot),

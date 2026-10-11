@@ -82,6 +82,8 @@ def allowed_wheel_raise(bone, actual_translation):
         return False
     delta = tuple(actual_translation[i] - bone["translation"][i] for i in range(3))
     dx, dy, dz = quat_rotate(component_rotation(bone["parent"]), delta)
+    if config.get("allow_wheel_placement") and bone["name"] in ("ChassisAttach_F", "ChassisAttach_B"):
+        return all(math.isfinite(v) for v in (dx, dy, dz)) and abs(dx) <= 100 and abs(dy) <= .001 and abs(dz) <= 100 and actual_translation[0] * bone["translation"][0] > 0
     return all(math.isfinite(v) for v in (dx, dy, dz)) and abs(dx) <= .001 and abs(dy) <= .001 and 0 < dz <= 100
 corrected_names, corrected_poses = [], []
 for bone in expected:

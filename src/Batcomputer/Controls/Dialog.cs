@@ -22,6 +22,8 @@ public static class Dialog
         public string Message = "";
         public Level Severity = Level.Info;
         public List<(string Label, string Value)> Fields = new();
+        /// <summary>Use selectable, expanded filesystem paths with explicit copy/open actions.</summary>
+        public bool ExpandPaths;
         public List<(string Text, Color? Dot)> Chips = new();
         public string CalloutTitle = "";
         public string CalloutDetail = "";
@@ -79,6 +81,7 @@ public static class Dialog
     /// </summary>
     internal static Form CreateForm(IWin32Window? owner, Model model)
     {
+        if (model.ExpandPaths) return new ReleasePathsForm(model);
         const int W = 480, Pad = 18;
         var accent = Accent(model.Severity);
 

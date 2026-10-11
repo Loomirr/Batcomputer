@@ -244,8 +244,8 @@ public sealed class AbilityExplorerForm : AdaptiveForm
             } catch (Exception ex) { if (!IsDisposed) Dialog.Warn(this, "Native held items", ex.Message); }
             finally { if (!IsDisposed) { heldItems.Enabled = true; heldItems.Text = "Held items…"; } }
         };
-        var extraTools = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Margin = Padding.Empty };
-        for (var i = 0; i < 3; i++) extraTools.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / 3));
+        var extraTools = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 1, Margin = Padding.Empty };
+        for (var i = 0; i < 4; i++) extraTools.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
         extraTools.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         extraTools.Controls.Add(heldItems, 0, 0);
         var takedowns = new Button { Text = "Takedowns…", Name = "takedown-presets", Dock = DockStyle.Fill, Margin = new Padding(0, 5, 8, 0) };
@@ -263,6 +263,25 @@ public sealed class AbilityExplorerForm : AdaptiveForm
         Theme.StyleDarkButton(utilities);
         utilities.Click += (_, _) => AddGrant();
         extraTools.Controls.Add(utilities, 2, 0);
+        var dodges = new Button { Text = "Dodges…", Name = "dodge-presets", Dock = DockStyle.Fill, Margin = new Padding(0, 5, 8, 0) };
+        Theme.StyleDarkButton(dodges);
+        var dodgeMenu = new ContextMenuStrip();
+        foreach (var preset in Enum.GetValues<DodgeProfileService.Preset>())
+            dodgeMenu.Items.Add(DodgeProfileService.Label(preset)).Click += (_, _) =>
+            {
+                if (!Dialog.Confirm(this, "Dodge / enemy vault animations", DodgeProfileService.Label(preset) +
+                    "\n\nReplaces only the melee dodge ability, including its native paired enemy-vault sequences. Takedowns, attacks and equipment stay unchanged. " +
+                    "Choose the current body's size. Custom dodge graphs can override this choice; test normal enemies, brutes and ordinary ground dodges in-game.", confirmText: "Use dodges")) return;
+                try
+                {
+                    DodgeProfileService.Apply(_working, _catalog, preset);
+                    _resetToDonor = false; _search.Clear(); _view.SelectedIndex = 0; RebuildTree();
+                }
+                catch (Exception ex) { Dialog.Error(this, "Dodges were not changed", ex.Message); }
+            };
+        dodges.Click += (_, _) => dodgeMenu.Show(dodges, new Point(0, dodges.Height));
+        FormClosed += (_, _) => dodgeMenu.Dispose();
+        extraTools.Controls.Add(dodges, 3, 0);
         layout.Controls.Add(extraTools, 0, 4);
         layout.Controls.Add(swordSettings, 1, 4);
         return card;

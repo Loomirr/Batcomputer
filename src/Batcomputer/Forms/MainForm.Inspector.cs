@@ -757,5 +757,12 @@ public sealed partial class MainForm
 
     // Adapter: preserves the original AppendLog entry point every handler calls, delegating the
     // rendering to the extracted designer-editable DiagnosticsControl. Behavior-identical.
-    private void AppendLog(string message) => _diagnostics.AppendLog(message);
+    private void AppendLog(string message)
+    {
+        _diagnostics.AppendLog(message);
+        var modProgress = _modReleaseProgress;
+        var packageProgress = _packageProgress;
+        modProgress?.AppendActivity(message);
+        if (!ReferenceEquals(modProgress, packageProgress)) packageProgress?.AppendActivity(message);
+    }
 }

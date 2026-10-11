@@ -75,6 +75,12 @@ internal static class ReleaseRegressionChecks
             Check(result.Passed, result.Description, failures, output);
         foreach (var result in DiagnosticsRegressionChecks.Run())
             Check(result.Passed, result.Description, failures, output);
+        foreach (var result in BuildProgressRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
+        foreach (var result in DodgeRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
+        foreach (var result in ReleaseOutputRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
         foreach (var result in SkinnedMeshRegressionChecks.Run())
             Check(result.Passed, result.Description, failures, output);
         foreach (var result in SavedSuitRestoreRegressionChecks.Run())

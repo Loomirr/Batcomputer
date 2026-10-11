@@ -11,6 +11,17 @@ internal static class VehicleContentRegressionChecks
         void Check(bool value, string description) => results.Add((value, description));
         static bool Rejects(Action action) { try { action(); return false; } catch (InvalidDataException) { return true; } }
         Check(ModelPreviewControl.IsVehicleWorkshopMessage("vehicleWorkshopSurface") && ModelPreviewControl.IsVehicleWorkshopMessage("vehicleWorkshopToybox") && ModelPreviewControl.IsVehicleWorkshopMessage("vehicleWorkshopLoadPart") && !ModelPreviewControl.IsVehicleWorkshopMessage("unknown"), "surface, toybox and deferred-mesh commands reach the desktop workshop host");
+        var riderScene = new VehicleWorkshopService.Scene("ExampleVehicle", "rider-session", "Example vehicle", [], [], [], []);
+        Check(VehicleWorkshopService.PreviewRoot == Path.GetFullPath(Path.Combine(Path.GetTempPath(), "BCV")) && !FileSystemPathUtil.IsWithinDirectory(VehicleWorkshopService.PreviewRoot, AppSettings.RuntimeRoot), "disposable vehicle scenes use a short temporary root instead of deep install paths");
+        using (var message = JsonDocument.Parse("{\"type\":\"vehicleWorkshopRiders\",\"vehicleId\":\"ExampleVehicle\",\"session\":\"rider-session\"}"))
+            Check(VehicleWorkshopForm.TryReadCommand(message.RootElement, riderScene, out var command) && command == "vehicleWorkshopRiders", "seated figures request needs no placement transforms");
+        foreach (var json in new[] { "{}", "null", "{\"type\":\"vehicleWorkshopRiders\",\"vehicleId\":\"ExampleVehicle\"}", "{\"type\":\"vehicleWorkshopRiders\",\"vehicleId\":\"AnotherVehicle\",\"session\":\"rider-session\"}", "{\"type\":42,\"vehicleId\":\"ExampleVehicle\",\"session\":\"rider-session\"}" })
+        {
+            using var message = JsonDocument.Parse(json);
+            Check(!VehicleWorkshopForm.TryReadCommand(message.RootElement, riderScene, out _), "incomplete, stale or malformed workshop callbacks are ignored without dictionary errors: " + json);
+        }
+        using (var message = JsonDocument.Parse("{\"type\":\"vehicleWorkshopError\"}"))
+            Check(VehicleWorkshopForm.ReadPreviewError(message.RootElement).Contains("reopening"), "viewer errors without text have an actionable fallback instead of a missing-key exception");
         Check(VehicleMaterialService.SlotName(new() { DisplayName = "70s Batmobile" }, 0) == "MI_Slot0_70sBatmobile", "vehicle material copies use readable car and slot names");
         Check(!VehicleMaterialService.Owned(new(), "/Game/Characters/MI_Black") && !VehicleMaterialService.Owned(new(), "/Game/Mods/Other/Materials/MI_Test"), "vehicle material editing cannot overwrite a native or another vehicle's package");
         Check(Rejects(() => SkinnedCookWorkspace.ValidateLength(new string('x', 180), "/Game/Mods/Test/SK_Test")), "overlong temporary cook filenames fail before launching Unreal");
@@ -29,6 +40,9 @@ internal static class VehicleContentRegressionChecks
         Check(new[] { float.NaN, float.PositiveInfinity, .49f, 2.01f }.All(scale => Rejects(() => VehicleProjectService.ValidateIdentity(new() { SizeMultiplier = scale }))), "unsafe whole-vehicle sizes are rejected");
         Check(VehicleDonorService.All.Select(d => d.Id).Distinct().Count() == VehicleDonorService.All.Length && VehicleDonorService.All.Length == 7, "seven driving bases have distinct stable identities");
         var batbike = VehicleDonorService.All.Single(d => d.Id == "batbike2022");
+        var bikePoses = VehicleRiderPreviewService.Poses(batbike.Id);
+        Check(bikePoses.Driver == VehicleRiderPreviewService.BikeDriverPose && bikePoses.Passenger == VehicleRiderPreviewService.BikePassengerPose && bikePoses.Passenger.EndsWith("/A_Ride_Idle_BatBike2022_passenger"), "Batbike seated figures use the native riding blueprints' driver and passenger idle sequences");
+        Check(VehicleDonorService.All.Where(d => d.Id != batbike.Id).All(d => VehicleRiderPreviewService.Poses(d.Id) == (VehicleRiderPreviewService.DriverPose, VehicleRiderPreviewService.PassengerPose)), "bike poses do not change existing car placement previews");
         Check(batbike.Blueprint.Contains("BP_VEH-Batbike2022_theBatman", StringComparison.Ordinal) && batbike.Mesh.Contains("SK_VEH_Batbike2022_theBatman", StringComparison.Ordinal) && batbike.SummonMesh.Contains("SK_VEH_Batbike2022_TheBatman_Summon", StringComparison.Ordinal), "Batbike uses its verified bike blueprint, driving mesh and canonical summon rig");
         var bikeRecipe = new VehicleProject { Id = "ExampleBike", DonorId = batbike.Id };
         var assembly = new SkinnedMeshImport { DonorMeshPackage = batbike.SummonMesh.Replace("TheBatman", "theBatman"),

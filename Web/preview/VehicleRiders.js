@@ -2,6 +2,11 @@
 window.buildVehicleRider = async function (rider) {
   const loader = new THREE.GLTFLoader(), textures = new THREE.TextureLoader(), result = new THREE.Group();
   const reference = [], posed = [], deltas = new Map();
+  async function loadAsset(kind, path, load) {
+    const url=rider.folder+path;
+    try { return await load(url); }
+    catch(error) { throw new Error('Could not load seated '+kind+' "'+url+'".'+(typeof error?.message==='string'?' '+error.message:'')); }
+  }
   const component = (a,i,j) => j===0?a.getX(i):j===1?a.getY(i):j===2?a.getZ(i):a.getW(i);
   const local = t => new THREE.Matrix4().compose(new THREE.Vector3(...t.slice(0,3)), new THREE.Quaternion(...t.slice(3,7)).normalize(), new THREE.Vector3(...t.slice(7,10)));
   rider.bones.forEach((b,i) => {
@@ -9,11 +14,13 @@ window.buildVehicleRider = async function (rider) {
     if (b.parent >= 0) { reference[i].premultiply(reference[b.parent]); posed[i].premultiply(posed[b.parent]); }
     deltas.set(b.name, posed[i].clone().multiply(reference[i].clone().invert()));
   });
-  const response = await fetch(rider.folder+'models.json'); if (!response.ok) throw new Error('Character preview is missing');
+  const response = await loadAsset('model list','models.json',url=>fetch(url)); if (!response.ok) throw new Error('Seated character model list is missing: '+rider.folder+'models.json (HTTP '+response.status+')');
   const models = await response.json(), textureCache = new Map();
-  async function texture(path, color) { if (!path) return null; const key=path+color; if (!textureCache.has(key)) {const t=await textures.loadAsync(rider.folder+path); t.flipY=false; if(color)t.encoding=THREE.sRGBEncoding; textureCache.set(key,t);} return textureCache.get(key); }
-  for (const model of models.filter(m => !m.isface && m.part !== 'Cape')) {
-    const g = await loader.loadAsync(rider.folder+model.file), source=g.scene;
+  async function texture(path, color) { if (!path) return null; const key=path+color; if (!textureCache.has(key)) {const t=await loadAsset('texture',path,url=>textures.loadAsync(url)); t.flipY=false; if(color)t.encoding=THREE.sRGBEncoding; textureCache.set(key,t);} return textureCache.get(key); }
+  // Respect the character export's visibility flags. Gliders are exported beside
+  // the standing figure for inspection, not worn by a seated rider.
+  for (const model of models.filter(m => !m.hidden && !m.beside && !m.isface && m.part !== 'Cape')) {
+    const g = await loadAsset('mesh',model.file,url=>loader.loadAsync(url)), source=g.scene;
     if (model.pos) source.position.fromArray(model.pos); if(model.rot)source.quaternion.fromArray(model.rot); if(model.scale)source.scale.fromArray(model.scale); source.position.add(new THREE.Vector3(...model.offset)); source.updateMatrixWorld(true);
     const meshes=[];source.traverse(n=>{if(n.isMesh)meshes.push(n);});
     const shading = await Promise.all(model.slots.map(async s=>new THREE.MeshStandardMaterial({color:s.col||0xffffff,map:await texture(s.tex,true),normalMap:await texture(s.nrm,false),alphaMap:await texture(s.alpha,false),alphaTest:s.cut?.5:0,roughness:s.rough??.5,metalness:s.metal??0,visible:!s.hide,side:THREE.DoubleSide})));

@@ -338,7 +338,10 @@ public sealed partial class MainForm
             return;
         }
 
-        var diskPath = ResolveMaterialDiskPath(miGamePath, preferExport: editInPlace);
+        // Owned bases may exist only in the project stage or shared library, even
+        // when creating a new material rather than editing the source in place.
+        var ownedBase = UnrealPathUtil.NormalizePackagePath(miGamePath).StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase);
+        var diskPath = ResolveMaterialDiskPath(miGamePath, preferExport: editInPlace || ownedBase);
         if (diskPath is null)
         {
             AppendLog(editInPlace
@@ -361,6 +364,12 @@ public sealed partial class MainForm
         var suggested = editInPlace
             ? baseStem
             : $"MI_{mod}_{baseStem.Replace("MI_", "")}_Custom";
+        if (!editInPlace)
+        {
+            var stem = suggested;
+            for (var suffix = 2; ResolveMaterialDiskPath($"/Game/Mods/{mod}/{suggested}", preferExport: true) is not null; suffix++)
+                suggested = $"{stem}_{suffix}";
+        }
 
         using var wiz = new MaterialWizard(
             _projectRootText.Text.Trim(),
@@ -369,6 +378,7 @@ public sealed partial class MainForm
             MaterialBrowserTextures(),
             CurrentMaterialTemplateTarget());
         wiz.PrefillBase(diskPath, suggested, editInPlace);
+        wiz.OutputPackageExists = package => ResolveMaterialDiskPath(package, preferExport: true) is not null;
         if (wiz.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(wiz.ResultMiPackagePath))
         {
             return;
@@ -486,6 +496,7 @@ public sealed partial class MainForm
         if (isUserMade)
         {
             menu.Items.Add("Edit this material…", null, (_, _) => OpenMaterialFromBase(miGamePath, editInPlace: true));
+            menu.Items.Add("Use as base for a new material…", null, (_, _) => OpenMaterialFromBase(miGamePath, editInPlace: false));
             menu.Items.Add("Delete this material…", null, async (_, _) => await DeleteGeneratedMaterialAsync(miGamePath));
         }
         else
@@ -505,6 +516,7 @@ public sealed partial class MainForm
     {
         var menu = new ContextMenuStrip();
         menu.Items.Add("Edit shared material…", null, (_, _) => OpenMaterialFromBase(miGamePath, editInPlace: true));
+        menu.Items.Add("Use as base for a new material…", null, (_, _) => OpenMaterialFromBase(miGamePath, editInPlace: false));
         if (!string.IsNullOrWhiteSpace(ExtractModFolder(_targetPlayableText.Text.Trim())))
         {
             menu.Items.Add(new ToolStripSeparator());

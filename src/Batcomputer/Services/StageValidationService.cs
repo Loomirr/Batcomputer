@@ -71,6 +71,8 @@ public sealed class StageValidationService
         CheckSkinnedMeshes(project, characterAssets, findings);
         if (TakedownProfileService.BodyMismatchWarning(project) is { } takedownWarning)
             findings.Add(new("WARN", takedownWarning));
+        if (DodgeProfileService.BodyMismatchWarning(project) is { } dodgeWarning)
+            findings.Add(new("WARN", dodgeWarning));
         CheckPawnTag(project, findings);
         CheckGliderAnimInjection(project, findings);
         CheckAbilityDependencyDeclarations(project, findings);

@@ -123,6 +123,12 @@ internal static class AttachmentCatalogRegressionChecks
                   byName["SK_HAIR_Skeletal"].NativeRecipes[0]),
             "inferred hair and hats are inspect-only while explicit static and skeletal recipes remain selectable");
         var satchel = byName["SK_TorsoA_Satchel"];
+        Check(AttachmentAssetCatalogService.CanDragPart(byName["SM_HAIR_Static"], byName["SM_HAIR_Static"].NativeRecipes[0]) &&
+              AttachmentAssetCatalogService.CanDragPart(byName["SK_Cape"], byName["SK_Cape"].NativeRecipes[0]) &&
+              !AttachmentAssetCatalogService.CanDragPart(byName["SK_Glider"], byName["SK_Glider"].NativeRecipes[0]) &&
+              !AttachmentAssetCatalogService.CanDragPart(satchel, satchel.NativeRecipes.Single(p => p.Slot == "Cape")) &&
+              !AttachmentAssetCatalogService.CanDragPart(byName["SM_HAT_Inferred"], byName["SM_HAT_Inferred"].InferredRecipes[0]),
+            "all-parts catalog routes exact native parts and regular capes through drag placement without enabling gliders, inferred parts or cape-tagged satchels");
         Check(AttachmentAssetCatalogService.UniqueCompatibleCounterpart(byName["SM_HAIR_Chest"],
                   byName["SM_HAIR_Chest"].NativeRecipes.Single(p => p.Context == "playable"))?.SourcePackagePath == "ChestHairCutscene" &&
               AttachmentAssetCatalogService.UniqueCompatibleCounterpart(byName["SM_HAIR_Static"],

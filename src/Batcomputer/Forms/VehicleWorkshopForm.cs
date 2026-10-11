@@ -10,7 +10,7 @@ internal sealed class VehicleWorkshopForm : AdaptiveForm
     private readonly Label _status = new() { Dock = DockStyle.Fill, ForeColor = Theme.OnDarkMuted, TextAlign = ContentAlignment.MiddleLeft };
     private VehicleProject _source;
     private readonly string _directory;
-    private readonly string _folder = Path.Combine(AppSettings.RuntimeRoot, "VehicleWorkshops", Guid.NewGuid().ToString("N"));
+    private readonly string _folder = Path.Combine(VehicleWorkshopService.PreviewRoot, Guid.NewGuid().ToString("N"));
     private readonly CancellationTokenSource _cancel = new();
     private VehicleWorkshopService.Scene? _scene;
     private bool _busy;
@@ -33,7 +33,7 @@ internal sealed class VehicleWorkshopForm : AdaptiveForm
         FormClosed += (_, _) =>
         {
             _viewer.Dispose(); _cancel.Dispose();
-            try { if (Directory.Exists(_folder) && Guid.TryParseExact(Path.GetFileName(_folder), "N", out _) && FileSystemPathUtil.IsWithinDirectory(_folder, Path.Combine(AppSettings.RuntimeRoot, "VehicleWorkshops"))) Directory.Delete(_folder, true); }
+            try { if (Directory.Exists(_folder) && Guid.TryParseExact(Path.GetFileName(_folder), "N", out _) && FileSystemPathUtil.IsWithinDirectory(_folder, VehicleWorkshopService.PreviewRoot)) Directory.Delete(_folder, true); }
             catch { /* A renderer can briefly retain a file handle; never touch another preview. */ }
         };
     }
@@ -73,21 +73,36 @@ internal sealed class VehicleWorkshopForm : AdaptiveForm
         try
         {
             using var document = JsonDocument.Parse(json); var root = document.RootElement;
-            if (root.GetProperty("session").GetString() != _scene.Session || root.GetProperty("vehicleId").GetString() != _source.Id) return;
-            if (root.GetProperty("type").GetString() == "vehicleWorkshopSave")
+            if (!TryReadCommand(root, _scene, out var command)) return;
+            if (command == "vehicleWorkshopSave")
             {
                 Result = ReadPlacementMessage(_source, _scene, json); DialogResult = DialogResult.OK; Close();
             }
-            else if (root.GetProperty("type").GetString() == "vehicleWorkshopSettings") await OpenSettings(json);
-            else if (root.GetProperty("type").GetString() == "vehicleWorkshopCopyMaterial") await CopyMaterial(json);
-            else if (root.GetProperty("type").GetString() == "vehicleWorkshopSurface") await ChangeSurface(json);
-            else if (root.GetProperty("type").GetString() == "vehicleWorkshopRiders") await PrepareRiders();
-            else if (root.GetProperty("type").GetString() == "vehicleWorkshopToybox") await ChooseToyboxPart(json);
-            else if (root.GetProperty("type").GetString() == "vehicleWorkshopLoadPart") await LoadPart(root);
-            else if (root.GetProperty("type").GetString() == "vehicleWorkshopError") _status.Text = "Preview: " + root.GetProperty("error").GetString();
+            else if (command == "vehicleWorkshopSettings") await OpenSettings(json);
+            else if (command == "vehicleWorkshopCopyMaterial") await CopyMaterial(json);
+            else if (command == "vehicleWorkshopSurface") await ChangeSurface(json);
+            else if (command == "vehicleWorkshopRiders") await PrepareRiders();
+            else if (command == "vehicleWorkshopToybox") await ChooseToyboxPart(json);
+            else if (command == "vehicleWorkshopLoadPart") await LoadPart(root);
+            else if (command == "vehicleWorkshopError") _status.Text = "Preview: " + ReadPreviewError(root);
         }
         catch (Exception ex) { _status.Text = "Placements were not applied: " + ex.Message; }
     }
+    // Viewer callbacks are not placement saves. Missing optional error text or an old
+    // page's incomplete envelope must not surface as a dictionary/placement failure.
+    internal static bool TryReadCommand(JsonElement root, VehicleWorkshopService.Scene scene, out string? command)
+    {
+        command = null;
+        if (root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty("session", out var session) || session.ValueKind != JsonValueKind.String || session.GetString() != scene.Session ||
+            !root.TryGetProperty("vehicleId", out var vehicle) || vehicle.ValueKind != JsonValueKind.String || vehicle.GetString() != scene.VehicleId ||
+            !root.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String || !ModelPreviewControl.IsVehicleWorkshopMessage(type.GetString())) return false;
+        command = type.GetString();
+        return true;
+    }
+    internal static string ReadPreviewError(JsonElement root) =>
+        root.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(error.GetString())
+            ? error.GetString()! : "The viewer could not complete this request. Try reopening the workshop.";
     private async Task LoadPart(JsonElement message)
     {
         if (_scene is null || _activeFolder is null || _busy) return;
@@ -103,13 +118,16 @@ internal sealed class VehicleWorkshopForm : AdaptiveForm
             _cancel.Token.ThrowIfCancellationRequested(); CompactPreviewMemory();
             var refreshed = part with { File = mesh.File, PrimitiveSlots = mesh.PrimitiveSlots, Materials = mesh.Materials };
             _scene = _scene with { Parts = _scene.Parts.Select(p => p.Id == refreshed.Id ? refreshed : p).ToArray() };
+            // The page may request the next queued mesh immediately after this reply.
+            _busy = false;
             await _viewer.ShowVehicleWorkshopPartAsync(part.Id, mesh);
-            _status.Text = "Loaded " + part.Label + ". Other parts load only when selected.";
+            _status.Text = "Loaded " + part.Label + ". Use Part meshes to view the full assembly.";
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
             _status.Text = "Could not load " + part.Label + ": " + ex.Message;
+            _busy = false;
             await _viewer.ShowVehicleWorkshopPartFailedAsync(part.Id, ex.Message);
         }
         finally { _busy = false; if (_cancel.IsCancellationRequested) Close(); }
@@ -117,7 +135,7 @@ internal sealed class VehicleWorkshopForm : AdaptiveForm
     private void CleanupPreviewFolder(string? folder)
     {
         if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder)) return;
-        var root = Path.Combine(AppSettings.RuntimeRoot, "VehicleWorkshops");
+        var root = VehicleWorkshopService.PreviewRoot;
         if (!FileSystemPathUtil.IsWithinDirectory(folder, root)) return;
         try { Directory.Delete(folder, recursive: true); }
         catch (IOException) { /* WebView may finish releasing the previous page after navigation. */ }
@@ -138,13 +156,14 @@ internal sealed class VehicleWorkshopForm : AdaptiveForm
         try
         {
             var riders = await Task.Run(() => VehicleRiderPreviewService.Create(Path.Combine(_activeFolder, "Riders"), _cancel.Token,
-                text => { if (!IsDisposed && IsHandleCreated) BeginInvoke(() => { if (!IsDisposed) _status.Text = text; }); }));
+                text => { if (!IsDisposed && IsHandleCreated) BeginInvoke(() => { if (!IsDisposed) _status.Text = text; }); }, _source.DonorId));
             _cancel.Token.ThrowIfCancellationRequested();
+            _busy = false;
             await _viewer.ShowVehicleRidersAsync(JsonSerializer.Serialize(riders, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
-            _status.Text = "Seated idle preview. Seat edits move the figures; steering, entry/exit and cape simulation still need in-game checks.";
+            _status.Text = (_source.DonorId == "batbike2022" ? "Native Batbike driver/passenger idle poses." : "Generic car seated idle poses.") + " Seat edits move the figures; steering, entry/exit and in-game fit still need checks.";
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { _status.Text = "Seated preview could not load: " + ex.Message; await _viewer.ShowVehicleRidersAsync("null"); }
+        catch (Exception ex) { _status.Text = "Seated preview could not load: " + ex.Message; _busy = false; await _viewer.ShowVehicleRidersAsync("null"); }
         finally { _busy = false; if (_cancel.IsCancellationRequested) Close(); }
     }
     internal static VehicleProject ReadPlacementMessage(VehicleProject source, VehicleWorkshopService.Scene scene, string json)
@@ -235,7 +254,7 @@ internal sealed class VehicleWorkshopForm : AdaptiveForm
             new ToolMaterialLibraryService(projectRoot).Register([new GeneratedMaterialEntry { DisplayName = UnrealPathUtil.AssetName(output), Kind = "Material", PackagePath = output, SourceMaterialPackagePath = package, ParentMaterialPath = wizard.ResultParentMaterialPath ?? "", CreatedUtc = DateTime.UtcNow.ToString("O") }]);
             _source.MaterialOverrides.RemoveAll(m => m.Component == component && m.Slot == slot);
             _source.MaterialOverrides.Add(new() { Component = component!, Slot = slot, MaterialPath = output });
-            await Reload();
+            await RefreshMaterials(component!, slot, output);
         }
         catch (OperationCanceledException) { }
         finally { _busy = false; if (_cancel.IsCancellationRequested) Close(); }
@@ -275,14 +294,22 @@ internal sealed class VehicleWorkshopForm : AdaptiveForm
             _cancel.Token.ThrowIfCancellationRequested();
             var output = await Task.Run(() => VehicleMaterialService.Publish(projectRoot, next, slot, component, source, action == "edit" ? package : null, paint));
             next.MaterialOverrides.RemoveAll(m => m.Component == component && m.Slot == slot);
-            if (component == "body" && next.Model is { } model)
-            {
-                model.Materials.Single(m => m.Slot == slot).MaterialPath = output;
-                next.Palette.RemoveAll(p => p.Slot == slot);
-            }
-            else next.MaterialOverrides.Add(new() { Component = component, Slot = slot, MaterialPath = output });
-            _source = next; await Reload();
+            // Keep the imported slot as the reset target, just like library assignments.
+            // An override can be undone without re-exporting geometry or restarting WebView.
+            next.MaterialOverrides.Add(new() { Component = component, Slot = slot, MaterialPath = output });
+            _source = next; await RefreshMaterials(component, slot, output);
         }
         finally { _busy = false; if (_cancel.IsCancellationRequested) Close(); }
+    }
+
+    private async Task RefreshMaterials(string component, int slot, string package)
+    {
+        if (_scene is null) return;
+        var generated = VehicleCustomizationService.Catalog(AppSettings.Current.EffectiveProjectRoot());
+        var catalog = _scene.MaterialCatalog.Concat(generated).GroupBy(m => m.Path, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.Last()).OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase).ToArray();
+        _scene = _scene with { MaterialCatalog = catalog, MaterialOverrides = _source.MaterialOverrides.ToArray() };
+        await _viewer.UpdateVehicleWorkshopMaterialsAsync(_scene.Session, component, slot, package, catalog);
+        _status.Text = "Material applied. Save vehicle keeps the assignment; the view and placements are unchanged.";
     }
 }

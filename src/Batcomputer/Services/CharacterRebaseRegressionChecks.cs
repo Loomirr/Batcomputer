@@ -14,18 +14,35 @@ internal static class CharacterRebaseRegressionChecks
             "character copies preserve animation-library package identities with independent recipe records");
         yield return (CharacterRebaseService.Preview(owner, suit).All(r => !r.HasBaseline && !r.TakeCharacterByDefault), "older character suits require an explicit inheritance review");
         CharacterRebaseService.CaptureInitial(owner, suit);
+        yield return (CharacterRebaseService.GameplayUpdateWarning(owner, suit) is null,
+            "fresh inherited gameplay does not produce an update warning");
         yield return (CharacterRebaseService.Preview(owner, suit).All(r => r.HasBaseline && !r.SuitEdited && !r.CharacterEdited), "new character suits track their independent inherited recipe baseline");
         suit.MaterialAssignments[0].MiPackagePath = "/Game/Example/SuitOnly";
         owner.MaterialAssignments[0].MiPackagePath = "/Game/Example/Updated";
+        yield return (CharacterRebaseService.GameplayUpdateWarning(owner, suit) is null,
+            "parent appearance edits alone do not report stale inherited gameplay");
         owner.AbilityLoadout = new() { HeldItems = [new() { MaterialPackage = "/Game/Example/Held" }] };
         owner.UseCustomArchetype = true; owner.IconMenu = "/Game/Example/Icon";
         var beforeOwner = JsonSerializer.Serialize(owner); var beforeSuit = JsonSerializer.Serialize(suit);
         var rows = CharacterRebaseService.Preview(owner, suit);
+        yield return (CharacterRebaseService.GameplayUpdateWarning(owner, suit)?.Contains("Abilities, fighting style and held items") == true,
+            "parent gameplay changes produce an actionable rebase warning");
         yield return (rows.Single(r => r.Section.Id == "appearance") is { SuitEdited: true, CharacterEdited: true } &&
             rows.Single(r => r.Section.Id == "abilities") is { SuitEdited: false, CharacterEdited: true }, "rebase distinguishes local suit edits from changed character settings");
         var all = CharacterRebaseService.Sections().Select(s => s.Id).ToHashSet();
         var selected = all.Where(id => id != "appearance").ToHashSet();
         var merged = CharacterRebaseService.Compose(owner, suit, owner, selected);
+        yield return (CharacterRebaseService.GameplayUpdateWarning(owner, merged) is null,
+            "reviewed gameplay no longer warns while suit appearance remains independent");
+        var keptGameplay = CharacterRebaseService.Compose(owner, suit, owner, new HashSet<string>());
+        yield return (CharacterRebaseService.GameplayUpdateWarning(owner, keptGameplay) is null,
+            "explicitly keeping suit gameplay acknowledges the current parent revision");
+        var freshOwner = CustomCharacterProjectService.CreateRecipe(null, "Current", "Current", "Current");
+        freshOwner.AbilityLoadout = new() { HeldItemToggle = new() { Version = 4, Enabled = true, PreserveNativeTakedown = true } };
+        var freshSuit = CustomCharacterProjectService.CreateRecipe(freshOwner, "New suit", "Current", "New", freshOwner.SlotId);
+        yield return (freshSuit.AbilityLoadout?.HeldItemToggle is { Version: 4, PreserveNativeTakedown: true } &&
+            !ReferenceEquals(freshOwner.AbilityLoadout.HeldItemToggle, freshSuit.AbilityLoadout.HeldItemToggle),
+            "new suits copy the current native-takedown-preserving input handler without sharing mutable records");
         yield return (JsonSerializer.Serialize(owner)==beforeOwner, "composing an inherited suit never changes its character definition");
         yield return (merged.MaterialAssignments[0].MiPackagePath == "/Game/Example/SuitOnly" && merged.AbilityLoadout?.HeldItems?.Count == 1 && merged.UseCustomArchetype && merged.IconMenu == owner.IconMenu,
             "rebase keeps selected suit-specific sections while inheriting abilities, items, animations and icons");

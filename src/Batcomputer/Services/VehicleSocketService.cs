@@ -13,6 +13,14 @@ internal static class VehicleSocketService
     internal static readonly string[] EffectSockets = ["VFX_Exhaust_01", "VFX_ExhaustBoost_01", VehicleExhaustService.SecondSocket];
     internal static IEnumerable<string> EditableSockets => GadgetSockets.Concat(EffectSockets);
     internal static bool IsEditable(string id) => id.StartsWith("socket:", StringComparison.Ordinal) && EditableSockets.Contains(id[7..], StringComparer.Ordinal);
+    // Retain saved second-outlet placement without applying it while disabled.
+    internal static IEnumerable<VehicleComponentTransform> AppliedTransforms(VehicleProject project) =>
+        project.Transforms.Where(t => IsEditable(t.Component) &&
+            (project.TwinExhausts || t.Component != "socket:" + VehicleExhaustService.SecondSocket));
+    internal static string? Warning(VehicleProject project) =>
+        !project.TwinExhausts && project.Transforms.Any(t => t.Component == "socket:" + VehicleExhaustService.SecondSocket)
+            ? "Warning: Second exhaust outlet placement ignored because twin exhausts are disabled. The saved placement is retained; enable twin exhausts to use it."
+            : null;
     // Forever's outlet is socket-local +Z. This is preview geometry only; changing
     // the saved socket rotation to fix an arrow would rotate the working game VFX.
     internal static float[] MarkerDirection(string socket) => EffectSockets.Contains(socket) ? [0, 0, 1] : [1, 0, 0];
@@ -81,9 +89,10 @@ internal static class VehicleSocketService
                     : Type((property.PropertyType.ToString(), 0));
         }
     }
-    internal static void Apply(UAsset mesh, UAsset skeleton, VehicleProject project)
+    internal static void Apply(UAsset mesh, UAsset skeleton, VehicleProject project, Action<string>? log = null)
     {
         Validate(project);
+        if (Warning(project) is { } warning) log?.Invoke(warning);
         if (project.TwinExhausts)
         {
             var source = Socket(skeleton, VehicleDonorService.Get(project).ExhaustSocket);
@@ -92,11 +101,10 @@ internal static class VehicleSocketService
                 ?? Transform(source, "socket:" + VehicleExhaustService.SecondSocket);
             Set(mesh, skeleton, VehicleExhaustService.SecondSocket, bone, edit);
         }
-        foreach (var t in project.Transforms.Where(t => IsEditable(t.Component)))
+        foreach (var t in AppliedTransforms(project))
         {
             if (t.Component == "socket:" + VehicleExhaustService.SecondSocket)
             {
-                VehicleAssetService.Require(project.TwinExhausts, "The second exhaust socket needs twin exhausts enabled.");
                 continue;
             }
             var source = Socket(skeleton, t.Component[7..]);
@@ -108,7 +116,7 @@ internal static class VehicleSocketService
     {
         if (project.TwinExhausts)
             VehicleAssetService.Require(Socket(mesh, VehicleExhaustService.SecondSocket) is not null, "The second exhaust socket was not staged.");
-        foreach (var t in project.Transforms.Where(t => IsEditable(t.Component)))
+        foreach (var t in AppliedTransforms(project))
         {
             var actual = Transform(Socket(mesh, t.Component[7..]), t.Component);
             VehicleAssetService.Require(new[] { actual.X - t.X, actual.Y - t.Y, actual.Z - t.Z, actual.Pitch - t.Pitch, actual.Yaw - t.Yaw, actual.Roll - t.Roll }.All(v => Math.Abs(v) < .001f), "Vehicle socket did not survive staging: " + t.Component);

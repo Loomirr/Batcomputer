@@ -36,6 +36,7 @@ internal static class VehicleAssetService
     internal static void Validate(VehicleProject p, string directory, string nativeContent)
     {
         VehicleProjectService.ValidateIdentity(p);
+        VehicleScaleService.RequireUnitScale(p);
         var donor = VehicleDonorService.Get(p);
         var NativeMesh = donor.Mesh; var NativeSkeleton = donor.Skeleton; var NativeBlueprint = donor.Blueprint;
         VehicleIconService.Validate(p, directory);
@@ -170,7 +171,7 @@ internal static class VehicleAssetService
             var mesh = Read(model is null ? nativeContent : content, model is null ? NativeMesh : meshPackage);
             if (model is null) CustomEquipmentService.Rename(mesh, new Dictionary<string, string> { [NativeMesh] = meshPackage });
             var skeleton = Read(nativeContent, NativeSkeleton);
-            VehicleSocketService.Apply(mesh, skeleton, p);
+            VehicleSocketService.Apply(mesh, skeleton, p, log);
             VehicleLightSurfaceService.StageGeometry(p, nativeContent, content, mesh, skeleton, log);
             var file = SkinnedMeshCookService.SafePath(content, meshPackage[6..] + ".uasset"); Directory.CreateDirectory(Path.GetDirectoryName(file)!);
             if (model is null)
@@ -233,6 +234,7 @@ internal static class VehicleAssetService
                 VehicleLightService.Apply(a, p.Lights);
                 VehicleLightService.ApplyAccent(a, p.AccentColor, gameplay: true);
                 VehicleLightSurfaceService.Apply(a, p);
+                VehicleScaleService.ApplySpawnScale(a, p);
             }
             if (source == NativeMenu)
             {
@@ -259,6 +261,7 @@ internal static class VehicleAssetService
         var staged = Read(content, VehicleProjectService.Metadata(p));
         Require(NativeAssetTextPatch.GetGameplayTag(staged, "PawnTag") == VehicleProjectService.PawnTag(p) && NativeAssetTextPatch.GetGameplayTag(staged, "OwningCharacter") == p.OwnerTag, "Vehicle identity did not survive staging.");
         var bp = Read(content, VehicleProjectService.Blueprint(p));
+        VehicleScaleService.VerifySpawnScale(bp, p);
         if (p.BoostColor is not null)
             VehicleBoostColorService.RequireRedirect(content, VehicleProjectService.Blueprint(p), VehicleProjectService.PawnData(p));
         VehicleExhaustService.Verify(p, donor, content, bp);

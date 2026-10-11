@@ -68,6 +68,17 @@ internal static class CharacterRebaseService
         RequireParent(owner, suit);
         Record(owner, suit, []);
     }
+    internal static string? GameplayUpdateWarning(NativeSuitProject owner, NativeSuitProject suit)
+    {
+        // Suit recipes are independent snapshots. Never silently overwrite deliberate
+        // overrides, but do not let a later parent fix go unnoticed at release time.
+        var changed = Preview(owner, suit).Where(row => row.HasBaseline && row.CharacterEdited &&
+            row.Section.Id is "base" or "abilities" or "equipment" or "voice" or "animations" or "gliding")
+            .Select(row => row.Section.Label).ToArray();
+        return changed.Length == 0 ? null :
+            $"The saved character '{owner.DisplayName}' has newer settings than this suit's last inheritance review: {string.Join(", ", changed)}. " +
+            "Open Rebase from character and review these sections before building. Keep Parts, models, materials and textures and Suit icons to preserve this suit's appearance. Local overrides will not be replaced automatically.";
+    }
     private static void Record(NativeSuitProject owner, NativeSuitProject suit, IEnumerable<string> kept)
     {
         var parent = Node(owner); var child = Node(suit);

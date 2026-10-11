@@ -11,6 +11,7 @@ internal sealed class SkinnedMeshWorkshopForm : AdaptiveForm
     // put the mesh far outside the pawn. Keep the supported Blender workflow fixed
     // at one; authors size geometry against the exported reference in Edit Mode.
     private readonly NumericUpDown _scale = new() { Minimum = 1, Maximum = 1, DecimalPlaces = 4, Value = 1, Dock = DockStyle.Fill, Enabled = false };
+    private readonly CheckBox _wheelPlacement = new() { Text = "Experimental: preserve authored bike wheelbase (driving test required)", Dock = DockStyle.Fill, AutoSize = true };
     private readonly DataGridView _materials = new() { Dock = DockStyle.Fill, AutoGenerateColumns = false, AllowUserToAddRows = false, AllowUserToDeleteRows = false };
     private readonly CheckedListBox _hidden = new() { Dock = DockStyle.Fill, CheckOnClick = true, BorderStyle = BorderStyle.None };
     private readonly Label _status = new() { Dock = DockStyle.Fill, AutoSize = false };
@@ -51,6 +52,11 @@ internal sealed class SkinnedMeshWorkshopForm : AdaptiveForm
         _target.Enabled = !existing; _name.Text = recipe.Name; _scale.Value = 1;
         Add("1  Which native rig did you use? (component / reference mesh)", _target, 40); Add("Name", _name, 32); Add("FBX import scale — fixed at 1.0000; size the mesh in Blender Edit Mode", _scale, 32);
         Add("2  Reference and source", Button("Export native reference + rig (GLB)…", async (_, _) => await ExportAsync()), 40);
+        if (vehicle && recipe.Component == "SkeletalMeshComponent" && VehicleDonorService.All.Any(d => d.Id == "batbike2022" && d.Mesh == recipe.DonorMeshPackage))
+        {
+            _wheelPlacement.Checked = recipe.AllowVehicleWheelPlacement; _actions.Add(_wheelPlacement);
+            Add("Wheel mount placement — takes effect on next FBX import", _wheelPlacement, 44);
+        }
         Add("", Button("Import / replace weighted FBX…", async (_, _) => await ImportAsync(false)), 40);
         Add("", Button("Reimport saved FBX", async (_, _) => await ImportAsync(true)), 40);
         _materials.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "FBX slot", ReadOnly = true, Width = 125 });
@@ -104,6 +110,7 @@ internal sealed class SkinnedMeshWorkshopForm : AdaptiveForm
         try
         {
             var request = Read(); request.ImportScale = (float)_scale.Value;
+            request.AllowVehicleWheelPlacement = _wheelPlacement.Checked;
             if (_target.SelectedItem is not SkinnedMeshStageService.Target target) throw new InvalidDataException("Select a compatible native component.");
             request.Component = target.Component; request.DonorMeshPackage = target.DonorMesh;
             if (_vehicle && FbxBaseTag.Read(source) is { } taggedBase)

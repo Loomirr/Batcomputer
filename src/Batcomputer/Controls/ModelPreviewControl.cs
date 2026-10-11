@@ -221,12 +221,23 @@ public sealed class ModelPreviewControl : UserControl
     internal async Task ShowVehicleWorkshopPartAsync(string component, VehicleWorkshopService.DeferredMesh mesh)
     {
         if (_web?.CoreWebView2 is { } core)
-            await core.ExecuteScriptAsync("window.vehicleWorkshop?.loadPart(" + JsonSerializer.Serialize(component) + "," + JsonSerializer.Serialize(mesh) + ")");
+            await core.ExecuteScriptAsync("window.vehicleWorkshop?.loadPart(" + JsonSerializer.Serialize(component) + "," + SerializeVehicleWorkshopMesh(mesh) + ")");
     }
+    internal static string SerializeVehicleWorkshopMesh(VehicleWorkshopService.DeferredMesh mesh) =>
+        JsonSerializer.Serialize(mesh, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
     internal async Task ShowVehicleWorkshopPartFailedAsync(string component, string error)
     {
         if (_web?.CoreWebView2 is { } core)
             await core.ExecuteScriptAsync("window.vehicleWorkshop?.loadPart(" + JsonSerializer.Serialize(component) + ",null," + JsonSerializer.Serialize(error) + ")");
+    }
+    internal async Task UpdateVehicleWorkshopMaterialsAsync(string session, string component, int slot, string package,
+        IReadOnlyList<VehicleCustomizationService.MaterialChoice> catalog)
+    {
+        if (_web?.CoreWebView2 is not { } core) throw new InvalidOperationException("Vehicle preview is no longer available.");
+        var payload = JsonSerializer.Serialize(new { session, component, slot, package, catalog },
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        if (await core.ExecuteScriptAsync("Boolean(window.vehicleWorkshop?.updateMaterials(" + payload + "))") != "true")
+            throw new InvalidOperationException("The material was created, but the current preview could not accept it. Reopen the workshop to refresh.");
     }
     internal async Task<bool> RequestVehicleSettingsAsync()
     {

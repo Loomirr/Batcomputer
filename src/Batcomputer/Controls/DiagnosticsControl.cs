@@ -18,6 +18,10 @@ public partial class DiagnosticsControl : UserControl
     private readonly ConcurrentQueue<string> _pendingLog = new();
     private int _logDrainPosted;
 
+    /// <summary>Optional tail limit for live progress views; zero retains the full diagnostics log.</summary>
+    internal int MaximumCharacters { get; set; }
+    internal Color LogForeColor { set => _logText.ForeColor = value; }
+
     [DllImport("user32.dll")]
     private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
@@ -112,6 +116,16 @@ public partial class DiagnosticsControl : UserControl
         var wasFollowingTail = IsFollowingTail(firstVisibleLine);
 
         _logText.AppendText(builder.ToString());
+        var removed = 0;
+        if (MaximumCharacters > 0 && _logText.TextLength > MaximumCharacters)
+        {
+            removed = _logText.TextLength - MaximumCharacters;
+            var nextLine = _logText.Text.IndexOf('\n', removed);
+            if (nextLine >= 0 && nextLine < _logText.TextLength - 1) removed = nextLine + 1;
+            firstVisibleLine = Math.Max(0, firstVisibleLine - _logText.GetLineFromCharIndex(removed));
+            _logText.Select(0, removed);
+            _logText.SelectedText = string.Empty;
+        }
         if (wasFollowingTail)
         {
             _logText.SelectionStart = _logText.TextLength;
@@ -122,7 +136,7 @@ public partial class DiagnosticsControl : UserControl
         {
             // Appending to a TextBox moves its caret and viewport to the end. Put both back when
             // the user has scrolled upward so live diagnostics do not fight older-log reading.
-            _logText.SelectionStart = Math.Min(selectionStart, _logText.TextLength);
+            _logText.SelectionStart = Math.Clamp(selectionStart - removed, 0, _logText.TextLength);
             _logText.SelectionLength = Math.Min(selectionLength, _logText.TextLength - _logText.SelectionStart);
             var currentFirstVisibleLine = FirstVisibleLine();
             SendMessage(

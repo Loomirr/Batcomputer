@@ -460,7 +460,7 @@ public sealed partial class MainForm
             if (hasBuild)
                 tiles.Add(new() { Section = "EXPORT", Title = "Create release ZIP",
                     Subtitle = "package the selected mod's existing build for installation",
-                    Accent = Theme.Info, OnClick = () => CreateModReleaseZip(modPath) });
+                    Accent = Theme.Info, OnClick = async () => await CreateModReleaseZipAsync(modPath) });
             else
                 tiles.Add(new() { Section = "EXPORT", Title = "Build before packaging",
                     Subtitle = "open Build mod to prepare an installable release",
@@ -1195,7 +1195,7 @@ public sealed partial class MainForm
     /// The archive starts one directory above LEGOBatmanLotDK, so extracting it directly into
     /// Steam's common directory preserves the game's intended layout.
     /// </summary>
-    private void CreateModReleaseZip(string modProjectPath)
+    private async Task CreateModReleaseZipAsync(string modProjectPath)
     {
         var mod = ModService.LoadMod(modProjectPath);
         if (mod is null)
@@ -1263,20 +1263,39 @@ public sealed partial class MainForm
         }
 
         var zipPath = ModReleaseZipPath(mod.ModId);
-        var temporaryZipPath = zipPath + ".tmp";
         try
         {
-            Directory.CreateDirectory(outRoot);
-            if (File.Exists(temporaryZipPath)) File.Delete(temporaryZipPath);
-            using (var stream = File.Create(temporaryZipPath))
-            using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: false))
+            using (var progress = new ProgressDialog(this, "Creating mod release ZIP", totalSteps: 1000, detailed: true))
             {
-                foreach (var (source, archivePath) in files)
+                progress.SetContext(mod.DisplayName);
+                progress.SetStep("Preparing release archive");
+                void LogArchive(string line)
                 {
-                    archive.CreateEntryFromFile(source, archivePath, CompressionLevel.Fastest);
+                    AppendLog(line);
+                    progress.AppendActivity(line);
                 }
+                LogArchive("Build output: " + outRoot);
+                LogArchive("Archive destination: " + zipPath);
+                var lastEntry = "";
+                var lastStage = "";
+                var updates = new Progress<ReleaseArchiveProgress>(update =>
+                {
+                    if (progress.IsDisposed) return;
+                    progress.SetStep(update.Stage);
+                    progress.SetContext($"{mod.DisplayName} · File {update.FileIndex} of {update.FileCount}");
+                    var amount = update.TotalBytes == 0 ? 0 : (int)(update.Bytes * 1000d / update.TotalBytes);
+                    progress.Advance(update.Stage == "Archive ready" ? 1000 : Math.Min(999, amount),
+                        $"{update.Bytes / 1048576d:0.0} / {update.TotalBytes / 1048576d:0.0} MB read" +
+                        (update.Entry.Length == 0 ? "" : " · " + Path.GetFileName(update.Entry)));
+                    if (update.Stage != lastStage || update.Entry != lastEntry)
+                    {
+                        LogArchive(update.Stage + (update.Entry.Length == 0 ? "" : $" [{update.FileIndex}/{update.FileCount}]: " + update.Entry));
+                        lastEntry = update.Entry;
+                        lastStage = update.Stage;
+                    }
+                });
+                await Task.Run(() => ReleaseArchiveService.CreateAsync(zipPath, files, updates));
             }
-            File.Move(temporaryZipPath, zipPath, overwrite: true);
 
             var sizeMb = new FileInfo(zipPath).Length / 1024d / 1024d;
             AppendLog($"Created release ZIP: {zipPath} ({sizeMb:0.0} MB, {files.Count} files).");
@@ -1287,24 +1306,22 @@ public sealed partial class MainForm
                 Subtitle = mod.DisplayName,
                 Message = "Install Loomirr's LOTDK UE4SS first, then extract this mod into your Steam common folder. Its folders are already arranged for installation.",
                 Severity = Dialog.Level.Good,
+                ExpandPaths = true,
                 PrimaryText = "Done",
                 CalloutTitle = "Ready to share",
-                CalloutDetail = $"{files.Count} mod file{(files.Count == 1 ? "" : "s")} packaged. Loomirr's LOTDK UE4SS supplies the shared registry core.",
+                CalloutDetail = $"{sizeMb:0.0} MB · {files.Count} mod file{(files.Count == 1 ? "" : "s")} packaged. Loomirr's LOTDK UE4SS supplies the shared registry core.",
                 Fields = new List<(string Label, string Value)>
                 {
                     ("Archive", zipPath),
-                    ("Extract into", "...\\Steam\\steamapps\\common"),
+                    ("Extract into (this PC)", GameLegoRoot() is { } gameRoot
+                        ? Directory.GetParent(gameRoot)?.Parent?.FullName ?? "Your Steam library's steamapps\\common folder"
+                        : "Your Steam library's steamapps\\common folder"),
                 },
             });
             RefreshToyboxTiles();
         }
         catch (Exception ex)
         {
-            try
-            {
-                if (File.Exists(temporaryZipPath)) File.Delete(temporaryZipPath);
-            }
-            catch { /* preserve the original failure */ }
             AppendLog($"Could not create release archive: {ex.Message}");
             Dialog.Error(this, "Zip mod", $"The release archive was not created.\n\n{ex.Message}");
         }
@@ -1381,7 +1398,11 @@ public sealed partial class MainForm
     private sealed record ModReleaseFailure(string ModName, ModReleaseValidationService.Result Result);
     private ModReleaseFailure? _lastModReleaseFailure;
 
-    private void ModReleaseStep(string detail) => _modReleaseProgress?.Report(detail);
+    private void ModReleaseStep(string detail)
+    {
+        _modReleaseProgress?.Report(detail);
+        AppendLog(detail);
+    }
 
     private sealed record ModReleasePreflight(
         ModReleaseValidationService.Result Result);
@@ -1600,7 +1621,7 @@ public sealed partial class MainForm
     private async Task BuildAndInstallModAsync(string modProjectPath)
     {
         _lastModReleaseFailure = null;
-        var progress = new ProgressDialog(this, "Building mod");
+        var progress = new ProgressDialog(this, "Building mod", detailed: true);
         _modReleaseProgress = progress;
         var built = false;
         ModInstallResult? install = null;
@@ -1661,6 +1682,7 @@ public sealed partial class MainForm
             Message = result.Detail,
             Severity = isComplete ? Dialog.Level.Good : isPartial ? Dialog.Level.Warn : Dialog.Level.Crit,
             PrimaryText = "Done",
+            ExpandPaths = true,
             CalloutTitle = isComplete ? "Ready for an in-game test" : "Review the installation locations",
             CalloutDetail = isComplete
                 ? "Restart the game before testing this mod."
@@ -1745,6 +1767,7 @@ public sealed partial class MainForm
         var mod = ModService.LoadMod(modProjectPath);
         if (mod is null) { AppendLog("Build mod: could not load project."); return false; }
         using var timing = new OperationTiming("Build " + mod.DisplayName, AppendLog);
+        _modReleaseProgress?.SetContext(mod.DisplayName);
         ModProjectService.ApplyDerivedFields(mod);
         ModReleaseStep("Checking selected content and gameplay tags…");
 
@@ -1930,6 +1953,7 @@ public sealed partial class MainForm
                     return false;
                 }
 
+                _modReleaseProgress?.SetContext($"{mod.DisplayName} · Character/suit {mergedSuits + 1} of {enabled.Count}: {suit.DisplayName}");
                 ModReleaseStep($"Preparing {suit.DisplayName} for the shared release…");
                 var preparation = await PrepareSuitForReleaseAsync(suit, svc, sharedVoiceMedia);
                 if (preparation.Prepared is null)
@@ -1959,14 +1983,17 @@ public sealed partial class MainForm
             }
 
             var vehicleRows = new List<RegistryPluginService.RegistryRow>();
+            var preparedVehicles = 0;
             foreach (var vehicle in vehicles)
             {
+                _modReleaseProgress?.SetContext($"{mod.DisplayName} · Vehicle {++preparedVehicles} of {vehicles.Count}: {vehicle.DisplayName}");
                 ModReleaseStep("Preparing vehicle " + vehicle.DisplayName + "…");
                 var vehicleDirectory = VehicleService.DirectoryFor(vehicle);
                 var nativeVehicleContent = AppSettings.Current.EffectiveExtractedContentRoot();
                 vehicleRows.AddRange(await Task.Run(() => VehicleAssetService.Stage(vehicle, vehicleDirectory,
                     nativeVehicleContent, stageContent, mod.ModId, projectRoot, AppendLog)));
             }
+            _modReleaseProgress?.SetContext($"{mod.DisplayName} · {mergedSuits} character/suit(s), {preparedVehicles} vehicle(s) prepared");
             var characterRows = CustomCharacterRegistrationService.Generate(stageContent,
                 AppSettings.Current.EffectiveExtractedContentRoot(), mod.ModId, preparedSuits,
                 mappings ?? throw new InvalidDataException("Character registration requires mappings."), vehicles);
@@ -2243,6 +2270,7 @@ public sealed partial class MainForm
         try
         {
             var suit = CloneProjectForPackagePreparation(authoringSuit);
+            ModReleaseStep("Creating an isolated working copy…");
             preparationStage = await CreatePackagePreparationStageAsync(suit, projectService.ProjectRoot);
             var contentRoot = preparationStage.ContentRoot;
             AppendLog($"  isolated preparation copy for '{suit.DisplayName}': {contentRoot}");
@@ -2252,6 +2280,7 @@ public sealed partial class MainForm
                 AppendLog($"  applied Head:0 removal for '{suit.DisplayName}' cross-kind head graft in the disposable preparation copy.");
             }
 
+            ModReleaseStep("Restoring saved parts and component settings…");
             var gliderComponent = ActiveGliderVisualComponent(suit);
             if (!string.IsNullOrWhiteSpace(gliderComponent))
             {
@@ -2276,6 +2305,7 @@ public sealed partial class MainForm
                     stageContentRootOverride: contentRoot),
                 "Saved component removal replay");
 
+            ModReleaseStep("Staging textures, animation sources and materials…");
             if (!StageGeneratedTexturesIntoContentRoot(
                     suit,
                     contentRoot,
@@ -2289,6 +2319,7 @@ public sealed partial class MainForm
             StageLibraryAnimsIntoContentRoot(suit, contentRoot);
             StageGeneratedMaterialsIntoContentRoot(suit, contentRoot);
             timing.Mark("stage and materials");
+            ModReleaseStep("Generating character metadata and animation setup…");
             StageGeneratedDcmdIntoContentRoot(
                 suit,
                 contentRoot,
@@ -2308,12 +2339,14 @@ public sealed partial class MainForm
                 }
             }
 
+            ModReleaseStep("Generating equipment…");
             await Task.Run(() => CustomEquipmentService.Generate(suit, contentRoot,
                 line => AppendLog("    equipment: " + line)));
             timing.Mark("metadata and equipment");
 
             // Grafting can replace the stage from the donor, so material bindings must
             // be applied after the last possible stage rebuild.
+            ModReleaseStep("Applying saved material assignments…");
             RequireCompleteDeclarativeReplay(
                 await ApplySavedMaterials(
                     suit,
@@ -2323,13 +2356,16 @@ public sealed partial class MainForm
                 "Saved material replay");
 
             GameplayAnimationGraphService.Apply(suit, contentRoot, AppendLog);
+            ModReleaseStep("Preparing voices and held-item audio…");
             var voiceBuild = await Task.Run(() => CharacterVoiceBuildService.StageAsync(suit, projectService.ProjectRoot,
                 contentRoot, line => AppendLog("    voice: " + line), CancellationToken.None, sharedVoiceMedia));
             var toggleAudio = HeldItemToggleService.Stage(suit, contentRoot);
             voiceBuild = CharacterVoiceBuildService.Combine(new[] { voiceBuild, toggleAudio }.OfType<CharacterVoiceBuildService.Result>().ToArray());
+            ModReleaseStep("Applying face animations and animation-spawned items…");
             await Task.Run(() => FaceAnimationService.ApplyToPackagedRoot(suit, contentRoot));
             await Task.Run(() => AnimationSpawnedItemService.ApplyToPackagedRoot(suit, contentRoot, line => AppendLog("    " + line)));
             timing.Mark("character voice and animation items");
+            ModReleaseStep("Verifying the prepared character assets…");
 
             var requiredPackages = new[]
             {

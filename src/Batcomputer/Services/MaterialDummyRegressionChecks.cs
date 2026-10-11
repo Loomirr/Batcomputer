@@ -34,6 +34,19 @@ internal static class MaterialDummyRegressionChecks
             try
             {
                 using var form = new MaterialWizard(Path.GetTempPath(), "Fixture", "MI_DummyCheck");
+                form.PrefillBase("", "MI_CopyCheck", editInPlace: false);
+                var copiedBase = new MaterialGenService.MaterialTemplateInfo { SourcePackagePath = "/Game/Mods/Fixture/MI_Original" };
+                typeof(MaterialWizard).GetField("_lastTemplateInfo", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(form, copiedBase);
+                checks.Add((form.NewMaterialOutputExists("/Game/Mods/Fixture/mi_original"),
+                    "new material variants reject the original package name case-insensitively"));
+                form.OutputPackageExists = package => package == "/Game/Mods/Fixture/MI_Existing";
+                checks.Add((form.NewMaterialOutputExists("/Game/Mods/Fixture/MI_Existing"),
+                    "new material variants reject existing project or shared-library names supplied by the browser"));
+                checks.Add(((bool)typeof(MaterialWizard).GetField("_createFromBase", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(form)!,
+                    "Use as base opens independent-copy mode, including unchanged copies"));
+                form.PrefillBase("", "MI_Original", editInPlace: true);
+                checks.Add((!(bool)typeof(MaterialWizard).GetField("_createFromBase", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(form)!,
+                    "Edit material remains separate from the new-copy collision guard"));
                 typeof(MaterialWizard).GetField("_lastTemplateInfo", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(form, eom);
                 var grid = (DataGridView)typeof(MaterialWizard).GetField("_grid", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(form)!;
                 grid.Rows.Add("Texture", "CT", "Donor CT", "");

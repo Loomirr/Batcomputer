@@ -83,26 +83,23 @@ internal sealed class VehicleEditorForm : AdaptiveForm
         Field("Vehicle ID", new TextBox { Text = project.Id, ReadOnly = true, Dock = DockStyle.Fill });
         var size = new NumericUpDown { Minimum = 50, Maximum = 200, Value = (decimal)_working.SizeMultiplier * 100, DecimalPlaces = 0, Increment = 5, Dock = DockStyle.Fill };
         size.ValueChanged += (_, _) => _working.SizeMultiplier = (float)size.Value / 100;
-        Field("Size % (experimental)", size);
-        Field("", new Label { Text = "Scales the vehicle and attached parts. Check wheels, seats and collision in game.", Dock = DockStyle.Fill, ForeColor = Theme.OnDarkMuted }, 44);
+        Field("Legacy size % (set 100; resize source mesh)", size);
+        Field("", new Label { Text = "100% = imported size. Scales the vehicle and attached parts; preview riders stay character-sized. Experimental: check wheels, seats and collision in game.", Dock = DockStyle.Fill, ForeColor = Theme.OnDarkMuted }, 60);
         var boostStyles = new ThemedDropDown { Dock = DockStyle.Fill };
         boostStyles.Items.Add("Driving base boost");
         foreach (var style in VehicleExhaustService.Styles) boostStyles.Items.Add(style);
         boostStyles.SelectedItem = VehicleExhaustService.FindStyle(_working.BoostStyle) ?? (object)"Driving base boost";
         var twin = new CheckBox { Text = "Two boost outlets (second outlet can be moved in the workshop)", Dock = DockStyle.Fill, Checked = _working.TwinExhausts, ForeColor = Theme.OnDark };
         twin.CheckedChanged += (_, _) => {
-            if (VehicleExhaustService.FindStyle(_working.BoostStyle)?.Twin == true && !twin.Checked) { twin.Checked = true; return; }
             _working.TwinExhausts = twin.Checked;
-            if (!twin.Checked) _working.Transforms.RemoveAll(t => t.Component == "socket:" + VehicleExhaustService.SecondSocket);
+            // Keep dormant outlet placement so re-enabling restores it.
             drivingBase.Enabled = false;
         };
         boostStyles.SelectedIndexChanged += (_, _) => {
             _working.BoostStyle = boostStyles.SelectedItem is VehicleExhaustService.Style style ? style.Id : "";
             if (VehicleExhaustService.FindStyle(_working.BoostStyle)?.Twin == true) twin.Checked = true;
-            twin.Enabled = VehicleExhaustService.FindStyle(_working.BoostStyle)?.Twin != true;
             drivingBase.Enabled = false;
         };
-        twin.Enabled = VehicleExhaustService.FindStyle(_working.BoostStyle)?.Twin != true;
         Field("Boost style", boostStyles);
         Field("", twin, 44);
         void BoostSpeedField(string label, float? current, decimal native, decimal maximum, Action<float?> set)
