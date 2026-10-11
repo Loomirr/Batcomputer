@@ -7,7 +7,7 @@ different bones still needs to be weighted to the native rig.
 ## Before editing
 
 1. Export **native reference + rig (GLB)** from the skinned-mesh workshop for the component you intend to replace.
-2. Keep the GLB and its adjacent `Batcomputer_PrepareBlenderRig.py` together. A copy of the helper also ships under `Tools/SkinnedMesh/prepare_blender_rig.py`.
+2. Keep the GLB and its adjacent `Batcomputer_PrepareBlenderRig.py` together. A copy also ships as `Tools/SkinnedMesh/Batcomputer_PrepareBlenderRig.py` (named `prepare_blender_rig.py` in the source repository).
 3. In Blender, import the GLB using the glTF importer, then save a working `.blend` copy.
 4. Keep the reference geometry available for size and placement comparisons. Do not scale its rig to fit your custom model.
 

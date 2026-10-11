@@ -26,6 +26,11 @@ The old standalone Mode Access helper is superseded by integrated support; follo
 migration instructions and do not run duplicate mode handlers. Batcomputer's application updater
 does not update your game-side framework.
 
+After a game update, a framework can still load ordinary suits while its mode-filtering hooks
+no longer match. If a Mayhem-only character appears in the Normal roster, collect the framework
+startup log, selected mode and game build. Check the runtime's compatibility first rather than
+renaming the character or resetting saves. An editor update alone does not repair game-side hooks.
+
 Native Joker/Harley gameplay donors also require their DLC to be installed. Refresh the full
 extraction and part index after installing DLC or updating mappings.
 

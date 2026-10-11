@@ -2,13 +2,17 @@ param(
     [Parameter(Mandatory)][string]$PackageDirectory,
     [Parameter(Mandatory)][string]$Commit,
     [Parameter(Mandatory)][string]$NotesFile,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$Stable
 )
 $ErrorActionPreference='Stop'
 $package=[IO.Path]::GetFullPath($PackageDirectory)
 $manifest=Get-Content -LiteralPath (Join-Path $package 'Batcomputer.update.json') -Raw | ConvertFrom-Json
 $version=$manifest.Version.TrimStart('v')
-if($version -notmatch '^\d+\.\d+\.\d+-beta\.\d+$' -or $version.StartsWith('99.')){throw 'Only genuine numbered beta versions may be published.'}
+if($version.StartsWith('99.') -or ($Stable -and $version -notmatch '^\d+\.\d+\.\d+$') -or
+   (!$Stable -and $version -notmatch '^\d+\.\d+\.\d+-beta\.\d+$')){throw 'Version must match the explicitly selected stable or beta publication channel.'}
+$isPrerelease = !$Stable
+$makeLatest = if ($Stable) { 'true' } else { 'false' }
 if($Commit -notmatch '^[0-9a-f]{40}$'){throw 'Use the exact pushed commit SHA.'}
 $files=@((Join-Path $package 'Batcomputer-update-win-x64.zip'),(Join-Path $package 'Batcomputer-update-win-x64.zip.sha256'))
 $catalogPath=Join-Path $package 'Batcomputer-update-win-x64.patches.json'
@@ -53,7 +57,7 @@ try {
         if($existing.Count -lt 100){break}
     }
     $null=Invoke-RestMethod -Uri "$api/commits/$Commit" -Headers $headers
-    $body=@{tag_name=$tag;target_commitish=$Commit;name="Batcomputer $version";body=(Get-Content -LiteralPath $NotesFile -Raw);draft=$true;prerelease=$true;make_latest='false'} | ConvertTo-Json
+    $body=@{tag_name=$tag;target_commitish=$Commit;name="Batcomputer $version";body=(Get-Content -LiteralPath $NotesFile -Raw);draft=$true;prerelease=$isPrerelease;make_latest='false'} | ConvertTo-Json
     $release=Invoke-RestMethod -Uri "$api/releases" -Method Post -Headers $headers -ContentType 'application/json' -Body $body
     [IO.File]::WriteAllText((Join-Path $package 'github-release-receipt.json'),($release|ConvertTo-Json -Depth 10))
     foreach($file in $files){
@@ -64,7 +68,8 @@ try {
         if($asset.digest -ne $expected -or $asset.size -ne (Get-Item -LiteralPath $file).Length){throw 'GitHub asset digest/size mismatch; release left as draft.'}
         Write-Output "Verified uploaded asset: $name"
     }
-    $published=Invoke-RestMethod -Uri "$api/releases/$($release.id)" -Method Patch -Headers $headers -ContentType 'application/json' -Body '{"draft":false,"prerelease":true,"make_latest":"false"}'
+    $publishBody = @{draft=$false;prerelease=$isPrerelease;make_latest=$makeLatest} | ConvertTo-Json
+    $published=Invoke-RestMethod -Uri "$api/releases/$($release.id)" -Method Patch -Headers $headers -ContentType 'application/json' -Body $publishBody
     [IO.File]::WriteAllText((Join-Path $package 'github-release-receipt.json'),($published|ConvertTo-Json -Depth 10))
     Write-Output $published.html_url
 } finally {$credential.Clear(); $lines=$null; $headers=$null}

@@ -22,7 +22,7 @@ Close the game before building, then choose **Build mod**:
 
 ![Build Mod workspace](../assets/screenshots/build-mod-workspace.jpg){ .bc-doc-shot loading=lazy }
 
-*Some screenshots show an earlier layout. In 1.0, archive import/export actions are under
+*Some screenshots show an earlier layout. Archive import/export actions are under
 Home → Import/Export; Build mod is for checking and building.*
 
 1. Stages every enabled suit, vehicle and shared mod asset. Vehicle-only mods are supported.
@@ -62,12 +62,34 @@ Test at least:
 For inspecting or removing saved edits first, use [Review](review-changes.md). Recorded edit statuses
 are not a substitute for these build and gameplay checks.
 
+## Watching a build
+
+Mod builds and suit packaging open a resizable progress window with the current phase,
+content item, elapsed time, and timestamped activity. Combined mod builds also show the
+current character/suit or vehicle number. The activity bar is indeterminate when the tools
+cannot report a reliable percentage.
+
+Scroll up in the log to read earlier messages without following new output; scroll back
+to the bottom to follow again. **Copy activity log** copies the recent output displayed in
+the window. The window keeps a bounded recent history, while the full output remains in
+**Diagnostics** after it closes. Closing this window is not a build-cancellation command.
+
+Release ZIP creation uses the same detailed view, with the current archive entry, file count,
+bytes read and elapsed time. Compression runs in the background. The previous ZIP is only
+replaced after the new archive finishes successfully.
+
+After building/installing or creating a ZIP, the result window shows selectable, wrapped
+paths. Use **Copy path**, **Copy all paths**, or **Open folder** (for existing locations).
+Resize the window or scroll to reach every location; long paths are not shortened with ellipses.
+The ZIP result also shows archive size and, when the game location is configured, the extraction
+folder for this PC. Recipients should use their own Steam library's `steamapps/common` folder.
+
 ## Create the ZIP
 
 On **Home** → **Import/Export**, select your mod and choose **Create release ZIP** after a successful build. The archive
-uses game-relative paths
-and starts above `LEGOBatmanLotDK`, so users can extract it into the game's installation directory or
-install it with a compatible mod manager.
+includes the Steam game folder above `LEGOBatmanLotDK`. Extract into your Steam library's
+`steamapps/common` directory as shown in the result dialog, or use a compatible mod manager.
+Check the ZIP's top-level folder before extracting; do not nest a second game folder inside the first.
 
 Suit releases require Loomirr's LOTDK UE4SS. They must not include or overwrite its shared
 `LOTDKExpandedCoreRegistry`.

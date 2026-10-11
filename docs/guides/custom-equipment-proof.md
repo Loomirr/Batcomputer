@@ -1,5 +1,7 @@
 # Custom equipment: registration and testing
 
+> Historical investigation. For current authoring steps and limits, use the [Equipment workshop](equipment-workshop.md).
+
 The banana Batarang metadata fix is **confirmed working in-game**: the custom equipment appears, can be used, and inherits working Batarang upgrades. Some native Batarang effects remain. The first [Equipment workshop](equipment-workshop.md) now brings independent static-model and visual bindings into the tool; that generalized authoring flow still needs in-game acceptance testing. Independent held props and fighting styles remain separate systems.
 
 ## September 5 metadata-loading correction

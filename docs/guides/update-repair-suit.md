@@ -22,6 +22,11 @@ manual rebase is needed only when that exact package is not present or the game 
 
 ## Before you start
 
+**Rebase suit to current dump** refreshes native source references. **Rebase from character**
+is a separate operation that inherits selected saved sections from a custom-character parent.
+Use the [character inheritance guide](custom-characters.md#refresh-a-suit-from-its-character)
+when a child suit is missing its parent's newer abilities or animation settings.
+
 1. Close the game and any asset tools using the same files.
 2. [Back up the workspace](backups-and-moving.md), including settings, projects and shared authoring libraries.
 3. Keep the source images, OBJ/FBX files and Blender projects.

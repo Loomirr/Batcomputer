@@ -8,6 +8,9 @@
 4. Start the top-level **Batcomputer.exe** and complete [first-time setup](setup.md).
 
 Keep the whole folder together. Batcomputer includes its .NET runtime; moving only the EXE will not work.
+If Windows asks to install .NET despite an existing runtime, check that you downloaded the **full**
+ZIP rather than a version-specific `update-from-…` patch, and that `app/` was fully extracted.
+Do not combine files from unrelated releases to repair an incomplete installation.
 Avoid Program Files, the game directory and cloud-synchronized folders for your authoring workspace.
 
 ## Expected portable layout

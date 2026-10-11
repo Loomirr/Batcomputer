@@ -65,3 +65,6 @@ mean your custom body was removed from the build.
 
 Preview settings do not reduce your exported mesh or change final in-game materials. They also do
 not fix invalid FBX weights or rest-pose mismatches.
+
+The vehicle workshop's **Part meshes** toggle can keep all visible attachment meshes loaded,
+overriding the normal detail budget. Turn it off again if memory use or frame rate becomes poor.

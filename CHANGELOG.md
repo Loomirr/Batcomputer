@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.0 — 2026-10-11
+
+Stable Batcomputer 1.1 includes the 1.1 beta features plus the fixes below. See the [release notes](docs/releases/1.1.0.md) for update instructions and known limits.
+
+- Adds separate body-matched dodge presets; short-Batman and tall-Robin tests passed in-game, including the reported cross-height combat issue.
+- Modernizes build and ZIP progress, copyable activity logs and full-path result dialogs; archive creation runs in the background and preserves the previous ZIP on failure.
+- Warns when saved suits need an explicit review of changed parent gameplay sections, without overwriting suit-specific edits.
+- Adds vehicle part multi-selection/group transforms, in-place material updates, corrected deferred part/launcher previews and bike-specific seated idle previews.
+- Fixes single/twin boost outlet behavior and treats inactive second-outlet placements as warnings while preserving saved placement data.
+- Adds reusable copies of authored materials and restores exact-part drag/drop and guarded regular-cape selection.
+- Detects outdated game assets/mappings, fixes bike summon rig identity and preserves the stable mapping download endpoint.
+- Adds guarded experimental bike wheel-mount placement; blocks unproven whole-vehicle runtime resizing in favor of source-model resizing/reimport.
+- Publishes a full self-contained stable updater package, refreshes the GitHub landing page and tidies source/docs support files. Existing ImageSharp advisories remain unresolved.
+
 ## 1.1.0-beta.3 — 2026-10-09
 
 - Fixes animation replacement checks rejecting separately named but equivalent skeleton assets. Bone names, hierarchy and reference transforms are verified; incompatible rigs and additive-mode mismatches still block builds with more specific diagnostics.

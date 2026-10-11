@@ -1,5 +1,8 @@
 # What's next
 
+> Historical planning notes from the 1.0 development cycle, not the current feature matrix.
+> See [Compatibility and limits](../reference/compatibility.md) and [1.1 notes](../releases/1.1.0.md).
+
 The next release is mostly about testing and fixing bugs. Custom characters, extra suits, held items, and existing-rig body imports have worked in-game. The combinations people will actually use still need testing.
 
 These are the main areas still getting attention.

@@ -9,7 +9,8 @@ are still preserved. This also includes Blueprint meshes stored outside the game
 `Characters/Attachments` folders.
 Use **Filter → Attachment point** for the observed component slot (for example Head, Hair,
 Torso2, or Hip). A mesh with no proven mount appears under **Unverified**. Search by mesh
-name, path, donor, or slot. Open a tile to inspect its exact usage or choose from its
+name, path, donor, or slot. Drag a compatible exact-part tile onto the figure, or right-click for
+its actions. Open a grouped tile to choose from its
 condensed donor list. **Inspect in 3D** shows its mesh, materials,
 parent, tags, and animation class when available.
 
@@ -17,14 +18,15 @@ The status tells you where the wiring came from:
 
 | Status | Meaning | What you can do |
 | --- | --- | --- |
-| Native recipe | At least one component was observed in a game Blueprint. | Select a specific compatible usage. **Use selected recipe** is enabled only for a safe one. |
+| Native recipe | At least one component was observed in a game Blueprint. | Select a specific compatible usage. **Use selected part** is enabled only for supported wiring. |
 | Inferred | The mesh is cataloged and Batcomputer can suggest hair/hat metadata, but no Blueprint usage was found. | Preview and inspect it. There is no safe one-click graft. |
 | Preview only | The mesh exists, but no wiring recipe was established. | Browse and preview it; do not assume a mounting slot. |
 
 Different recipes for one mesh are not interchangeable. A Hair mesh can be chest-mounted;
 Satchel has both a Costume usage and a misleading Cape usage. Choose the exact donor context
-you intend to use, and test the result in-game. Capes and gliders still use the dedicated
-**Gliders** workflow, which handles their paired playable/cutscene setup. Face and root-body
+you intend to use, and test the result in-game. Regular native capes can use the guarded part
+workflow; a glide visual still uses **Gliders**, including the complete matching cape/glider pair
+when the gameplay donor needs it. Enabling the part does not bypass those checks. Face and root-body
 usages can be inspected here, but applying them still uses **Faces** and **Native body profiles**.
 Equipment has its own workflow too. Tile tooltips summarize the selected usage; the detail
 window contains the donor list, scoped to the selected point for a condensed tile.

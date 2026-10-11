@@ -2,7 +2,7 @@
 
 ## Using Batcomputer
 
-### Will installing 1.0 over an older version keep my projects?
+### Will installing 1.1 over an older version keep my projects?
 
 Yes, if you close the app and merge the **whole** release ZIP into the same folder without deleting
 your settings or workspace. Back up first. Don't copy just the EXE, and don't delete the old folder
@@ -125,7 +125,7 @@ physics and gameplay logic are not exported.
 
 ### Do players need Batcomputer?
 
-No. Players need Loomirr's LOTDK UE4SS 0.1.1 or newer and the finished mod. They do not need
+No. Players need a current game-build-compatible Loomirr's LOTDK UE4SS and the finished mod. They do not need
 Batcomputer, Unreal Engine, mappings, or your extracted workspace.
 
 ### Can one mod contain several suits?
@@ -175,6 +175,21 @@ still require in-game testing. They do not adapt arbitrary Blender-scaled or cus
 
 **Restore current melee set's takedowns** reverses these grant edits. Applying a fighting-style
 bundle afterward can replace the takedown selection, so choose the style first.
+
+### Takedowns work, but vaulting over normal enemies does not
+
+Takedowns and dodges use separate grants and paired animations. Open **Ability workshop → Dodges…**
+and match **Minifig · Batman** or **Smallfig · Robin** to the body. Save and rebuild the complete mod.
+Short-Batman and tall-Robin test suits passed in-game testing. Check ground dodges, vaults from both
+sides of a normal enemy and brute slides; a working brute slide alone does not verify enemy vaults.
+Custom animation graphs may still override the native dodge behavior.
+
+### Will changes to my character automatically update its extra suits?
+
+No: suit recipes are independent snapshots, with compatible unchanged assets reused in a combined
+build. Use **Rebase from character** to choose the sections to inherit again. Keep appearance and
+icons unchecked to preserve a suit's design. **Check mod** warns about changed parent gameplay
+sections when inheritance history is available. See [suit inheritance](../guides/custom-characters.md#refresh-a-suit-from-its-character).
 
 ### Can I resize the windows?
 
@@ -363,7 +378,7 @@ BC5 stores only two normal channels, so choose BGRA8, DXT5, or BC7 when the mate
 
 ### Can I import a model?
 
-Batcomputer 1.0 supports OBJ static-mesh attachments and an
+Batcomputer supports OBJ static-mesh attachments and an
 experimental [existing-rig FBX workshop](../guides/skeletal-mesh-proof.md) for bodies and compatible
 parts. Rigging and weights must be prepared externally first; arbitrary skeleton transfer, facial
 rigs and cloth are not supported. Native-rig skeletal equipment has its own
@@ -403,8 +418,9 @@ only when the installed editor has a different compatible `BuildId`.
 ### Where is the installable ZIP action?
 
 Build the mod first. On **Home** → **Import/Export**, select the mod and choose **Create release ZIP**.
-Extract into the game's installation directory so the archive's `LEGOBatmanLotDK` folder merges with
-that existing folder. Check the paths before confirming; don't nest a second copy inside it.
+Use the result dialog's extraction instructions: current ZIPs include the Steam game folder and
+extract into that library's `steamapps/common` directory. Check the top-level archive folder first;
+don't nest a second copy inside the game folder.
 For editable handoffs, use **Export editable copy** instead. See [Import/Export](../guides/import-export.md).
 
 ### Why should I fully restart the game after installing a build?

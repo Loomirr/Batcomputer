@@ -1,193 +1,59 @@
 [![Batcomputer](docs/assets/brand/Header.png)](https://loomirr.github.io/Batcomputer/)
 
-Batcomputer is a Windows modding tool for *LEGO Batman: Legacy of the Dark Knight*.
-Build suits, customize equipment, and create new playable characters using assets from your own
-copy of the game. Pick a base, make your changes, and build a mod to try in-game.
+Create suits, characters, equipment and vehicles for **LEGO Batman: Legacy of the Dark Knight** using assets from your own game.
 
-> **Stable:** Batcomputer 1.0 (`1.0.0`) — first official release
-> **Latest beta:** [1.1.0-beta.3](https://github.com/Loomirr/Batcomputer/releases/tag/v1.1.0-beta.3) — fixes false skeleton-compatibility errors when building custom animations
-> **Documentation:** [loomirr.github.io/Batcomputer](https://loomirr.github.io/Batcomputer/)
+**[Download Batcomputer 1.1](https://github.com/Loomirr/Batcomputer/releases/tag/v1.1.0)** · **[Documentation](https://loomirr.github.io/Batcomputer/)** · **[What's new](docs/releases/1.1.0.md)** · **[Report a bug](https://github.com/Loomirr/Batcomputer/issues)**
 
-This repository contains Batcomputer only. It does not contain game files, extracted assets, Oodle,
-or Loomirr's LOTDK UE4SS.
+## Get started
 
-## What it does
+1. Download **Batcomputer-update-win-x64.zip** from the release page and extract the entire ZIP to a writable folder, such as `C:\Tools\Batcomputer`.
+2. Keep `Batcomputer.exe` and its `app/` folder together. The Windows x64 release includes .NET; no separate .NET installation is needed.
+3. Follow [first-time setup](https://loomirr.github.io/Batcomputer/getting-started/setup/), then [build your first suit](https://loomirr.github.io/Batcomputer/guides/first-suit/).
 
-Batcomputer includes [custom characters](https://loomirr.github.io/Batcomputer/guides/custom-characters/)
-with their own suits, a [custom equipment workshop](https://loomirr.github.io/Batcomputer/guides/equipment-workshop/),
-and experimental [skinned-mesh imports using existing game rigs](https://loomirr.github.io/Batcomputer/guides/skeletal-mesh-proof/).
-Skinned-mesh importing remains experimental and requires the matching native rig.
+Already using Batcomputer? Open **Updates → Check for updates**. Stable 1.1 is available on both update channels. Back up editable projects before upgrading.
 
-- Build a suit from a visual base and a playable gameplay donor.
-- Add parts, capes, gliders, materials, textures, and custom OBJ attachments.
-- Preview the model in 3D and save custom-part placement and UV adjustments.
-- Import cooked animation packs into a shared library, then replace individual animations.
-- Change abilities and fighting styles, with checks for required equipment and compatible animations.
-- Add held items separately from the fighting style.
-- Customize supported equipment models, projectiles, and icons.
-- Create a new playable character and give it its own suits.
-- Package characters and suits together, install the mod, or export a ZIP to share.
+## Make it your own
 
-Extra effects and status-effect experiments are on hold until the reported crashes are resolved.
+- **Characters and suits:** combine native parts, custom bodies, materials and textures; reuse base-character assets and explicitly refresh inherited settings.
+- **Animation and voice:** browse native clips, author animations, import compatible actions, edit named bone groups and build character-local voice profiles.
+- **Icons:** generate individual icons or all four character slots, tune cameras and lighting, and share JSON presets.
+- **Abilities and equipment:** edit supported loadouts, choose body-matched takedown/dodge sets, and customize held items and equipment.
+- **Vehicles:** import native-rig bodies, place parts and seats, edit materials in place and move multiple parts together.
+- **Build and share:** inspect build findings, follow detailed progress and export installable ZIPs with readable output paths.
 
-## Requirements
+Some advanced workflows remain experimental. See the [guides and limitations](https://loomirr.github.io/Batcomputer/) before replacing rigs or mixing gameplay systems.
 
-### To make mods
+## What you need
 
-- A local installation of *LEGO Batman: Legacy of the Dark Knight*.
-- A matching `.usmap` file for the current game build.
-- Unreal Engine 5.6 to build the Asset Registry data used by new mods.
-- Loomirr's LOTDK UE4SS 0.1.1 or newer installed in the game.
+To author mods: a local game installation, matching game-build mappings, Unreal Engine 5.6 for Asset Registry generation, and the current **Loomirr's LOTDK UE4SS** framework. Install that framework separately; it is not bundled with Batcomputer.
 
-### To make smaller packages
+Players using finished mods need the mod and the compatible LOTDK UE4SS framework, not Batcomputer or its authoring tools. Optional Oodle compression uses your locally supplied runtime; Batcomputer does not distribute it.
 
-Batcomputer includes an Oodle-capable `retoc` helper. Compact Oodle packages additionally require a
-user-selected `oo2core_9_win64.dll` from a local UE 5.6 installation. The runtime DLL is never
-copied into a mod, release ZIP, or this repository.
+**[Setup](https://loomirr.github.io/Batcomputer/getting-started/setup/)** · **[Updating and recovery](https://loomirr.github.io/Batcomputer/guides/app-updates/)** · **[Troubleshooting](https://loomirr.github.io/Batcomputer/help/troubleshooting/)**
 
-### To use finished mods
+## Source repository
 
-Players only need the finished mod and Loomirr's LOTDK UE4SS 0.1.1 or newer. They do not need Batcomputer, .NET,
-Unreal Engine, mappings, or extracted game assets.
+| Folder | Contents |
+| --- | --- |
+| `src/Batcomputer/` | Desktop app, services and Windows manifest |
+| `Web/` | Embedded 3D viewer and updater UI |
+| `Tools/` | Build, import, documentation and release helpers |
+| `docs/` | User guides, release notes and reference documentation |
+| `Assets/`, `gamedata/` | App artwork and reference catalogs |
+| `native/`, `licenses/` | Native helpers and dependency notices |
+| `.usmap/` | Published mappings endpoint; path kept stable for clients |
 
-## Portable layout
-
-Extract a portable release somewhere writable, such as `C:\Tools\Batcomputer`.
-
-```text
-Batcomputer/
-  Batcomputer.exe
-  app/             required DLLs and bundled .NET runtime
-  Generated/       build output, suit projects, previews, and extracts
-  Data/            reusable indexes and the writer cache
-  Runtime/         local runtime state
-  Tools/           retoc and the verified Asset Registry writer
-  gamedata/        reference catalogs
-  Documentation/   offline guides
-  licenses/        dependency license and notice texts
-```
-
-Extract the entire ZIP; do not move the EXE away from its folders. Generated, Data and Runtime are
-created locally as needed. The default workspace stays beside `Batcomputer.exe`. Settings can move the workspace or the large
-extracted game dump to another drive.
-
-The installed version is shown in the app. Open **Updates** to check GitHub, download a verified
-update and restart when ready. Earlier builds without an updater need one manual installation.
-Pre-1.0 releases are legacy and are not offered by the updater.
-
-Batcomputer does not bundle LOTDKExpanded or a standalone Mode Access DLL. Install the current
-LOTDK UE4SS framework separately. Normal/Mayhem/Both character settings write per-mod configuration
-for the integrated LOTDKExpanded runtime; Mayhem/Both builds verify its installed capability.
-The `Runtime/` workspace directory above is local tool state, not a game-runtime distribution.
-
-## First run
-
-Setup asks for the game Paks folder, mappings, and other local paths. When UE 5.6 is configured,
-setup verifies the bundled Asset Registry writer once. Later mod builds reuse that local writer
-until its source or the configured UE build changes.
-
-Setup can then run the full character extraction. It reads the game's original Paks plus installed
-`Content\DLC` and `/Game/AdditionalContent` sources, while ignoring user mods under nested `~mods`
-folders. The standard all-character extraction includes character, animation, localisation, and
-character-supporting gadget assets and needs about 18 GB of free space.
-
-For the complete walkthrough, see the
-[first-time setup guide](https://loomirr.github.io/Batcomputer/getting-started/setup/).
-
-## Loomirr's LOTDK UE4SS
-
-Install Loomirr's LOTDK UE4SS separately. Batcomputer puts each mod's `mod.json` under
-`ue4ss\LOTDKExpanded\Mods` and its registry plugin under
-`ue4ss\LOTDKExpanded\RegistryPlugins`. Loomirr's LOTDK UE4SS supplies the shared
-`LOTDKExpandedCoreRegistry` plugin that keeps the Asset Manager scanning `/Game/Mods`. Mod archives
-contain only their own registry rows, gameplay tags, manifest, and cooked assets; they never
-overwrite the shared registry. Batcomputer does not modify the runtime DLL or `mods.txt`.
-
-## Build a suit
-
-1. Create or open a mod.
-2. Add a suit, then choose a visual base and a playable donor.
-3. Confirm the detected native body profile, or choose another exact shipped Minifig/Smallfig body
-   before adding replacement parts. The shared native skeleton is automatic.
-4. Use the part, material, texture, equipment, and animation tools to assemble the suit.
-5. Set the native identity and review the donor-based menu icons.
-6. Use the 3D viewer to inspect the assembled character. Normal game-part placement is preview-only;
-   custom OBJ scale, position, rotation, and UV changes can be saved and **Baked to game**.
-7. Run **Check mod**, then select **Build Mod**.
-
-Every export is a mod, including a mod containing one suit. **Build Mod** creates the release and
-installs it into the configured game folders. Restart the game before testing a newly built mod.
-
-The documentation includes a full
-[first-suit tutorial](https://loomirr.github.io/Batcomputer/guides/first-suit/),
-[update and repair guide](https://loomirr.github.io/Batcomputer/guides/update-repair-suit/),
-[materials and faces guide](https://loomirr.github.io/Batcomputer/guides/materials-textures-faces/),
-[character animation guide](https://loomirr.github.io/Batcomputer/guides/animations/),
-[suit abilities guide](https://loomirr.github.io/Batcomputer/guides/abilities/),
-[equipment workshop guide](https://loomirr.github.io/Batcomputer/guides/equipment-workshop/),
-and [troubleshooting checklist](https://loomirr.github.io/Batcomputer/help/troubleshooting/).
-
-## Equipment icons
-
-Import a white silhouette on transparency as **Equipment SDF icon (white + green PNG)**. Paint optional
-accent areas pure green (`#00FF00`); the material adds the outline. A 256×256 canvas with roughly 32px
-margins is a useful starting point. Choose the SDF in **Set up HUD icon material…**, adjust its appearance,
-then save equipment and rebuild. Fill and outline colours, opacity, width, glow, grain and sharpness
-are adjustable. **Native defaults** restores the tested starting appearance.
-
-Existing prepared-SDF cooks keep their original recipes. **Equipment color icon (BCA)** preserves the
-painted image, including any outline, and is only needed for inputs labelled BCA. SDF icons and green
-accents have passed in-game testing; the new appearance controls still need an in-game check. See the
-[icon setup steps](https://loomirr.github.io/Batcomputer/guides/equipment-workshop/#equipment-icons).
-
-## Visual base and gameplay donor
-
-The visual base controls the character's appearance. Any cutscene character can be used for this
-purpose. The playable donor supplies the gameplay-facing data that a cutscene character may not
-have, such as equipment and movement support.
-
-This separation makes it possible to build visually from a wide range of characters without
-guessing gameplay metadata.
-
-## 3D viewer
-
-The viewer lists built-in playable and cutscene characters plus suit projects in the current
-workspace. It does not scan installed game mods, so content under the game's `~mods` folder
-cannot change the base-game catalog or preview material resolution.
-
-Generated 3D preview files are cleaned automatically by default. The cleanup setting can be changed
-in Settings when a generated model or texture needs to be inspected.
-
-Face materials appear in the viewer's **Material editor** as separate named regions. Pick a face
-entry to see its Base, Normal, MMR, Emissive, Eye-spec, Teeth, and Tongue textures, or use **Solo
-layer** to identify that region on the model. These controls affect only the preview.
-
-For built-in **Playable** entries and modded suit projects, the viewer can also preview the base
-game's Red Brick colours. The selector is hidden unless the assembled
-body material has a usable Colour Mask, so a mask found only on an accessory cannot enable it. It is
-never shown for Cutscene entries, and it does not create, package, register, unlock, or edit Red
-Bricks. The normal character refresh extracts only the metadata needed to name these colour options.
-
-## Build from source
-
-Install the .NET 10 SDK, then run:
+With the **.NET 10 SDK** installed:
 
 ```powershell
-dotnet build -c Release
+dotnet build Batcomputer.csproj
 dotnet run --project Batcomputer.csproj
 ```
 
-The `Assets/` directory is not tracked. Release builds embed the artwork. A source
-checkout without local artwork still runs with text and fallback glyphs.
+Build output, private test packs, generated projects and local caches are not release source. See [Tools/README.md](Tools/README.md) for helper workflows.
 
-## Legal
+## License and game content
 
-Batcomputer ships no game content. The bundled `gamedata` catalog contains reference metadata such
-as package paths and class names, not textures, meshes, or cooked assets. Use assets from a locally
-owned game installation and do not redistribute extracted game content.
+Batcomputer is [MIT licensed](LICENSE); bundled dependencies have their own [notices](THIRD_PARTY_NOTICES.md). This repository does not include extracted game textures, meshes, cooked assets, or proprietary game runtimes. Use assets from your own game and do not redistribute extracted game content.
 
-Batcomputer is not affiliated with TT Games, Warner Bros. Games, or the LEGO Group.
-
-## License
-
-[MIT](LICENSE). See the [third-party notices](https://loomirr.github.io/Batcomputer/reference/third-party-notices/) for bundled dependencies.
+Not affiliated with TT Games, Warner Bros. Games or the LEGO Group.

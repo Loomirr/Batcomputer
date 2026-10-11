@@ -19,7 +19,7 @@ from the suit's available components; it is not a browser of every skeleton in t
 needed attachment is missing, add its native part to the suit before opening this workshop.
 
 Choose **Export native reference + rig (GLB)…**. This writes the reference and the adjacent
-`Batcomputer_PrepareBlenderRig.py` helper. Use a fresh export from 1.0 if you have an old reference
+`Batcomputer_PrepareBlenderRig.py` helper. Use a fresh export from the current release if you have an old reference
 with the tiny-rig or oversized-skeleton problem.
 
 ## 2. Prepare the model in Blender
@@ -62,6 +62,9 @@ If you switch between Minifig and Smallfig bodies, check **Ability workshop → 
 Choose **Minifig · Batman** or **Smallfig · Robin** to match the body, save and rebuild. These
 experimental presets change only the supported takedown grants, not the rest of the fighting style.
 Test both normal Focus takedowns and stealth/final-enemy takedowns in-game before sharing.
+Set **Dodges…** separately for the same body family when normal-enemy vaulting needs correction.
+Test ground dodges, vaults and brute slides after rebuilding; matching takedowns does not also
+change the dodge ability.
 
 Use **Import / replace weighted FBX…** for a newly exported Blender file. **Reimport saved FBX**
 cooks the copy already stored by Batcomputer; it does not pick up a different file in Downloads.

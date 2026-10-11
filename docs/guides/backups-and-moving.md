@@ -8,7 +8,7 @@ animation libraries can live beside them. Keep those together when making a back
 1. Save your work, close Batcomputer and note the paths in **Settings → Paths**.
 2. Copy **Batcomputer.settings.json** and the workspace's **Generated** folder to a separate backup location.
 3. Keep your mappings and any external source art, FBXs and Blender files too.
-4. If you use shared imported animations or generated materials, ensure their library folders are in the backup.
+4. Preserve `AnimationLibrary` (including `Drafts`), `VoiceWorkshop` (profiles and imported WAVs), and shared generated-material libraries. Keep external Blender projects and icon-template JSONs too.
 
 Backing up all of Generated is the simplest approach, but includes potentially large extracts,
 previews and builds. For a smaller backup, use the [workspace inventory](../reference/workspace.md)

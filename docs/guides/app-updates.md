@@ -25,8 +25,8 @@ scheduled window. Batcomputer does not force-close your editors.
 
 Your saved channel survives updates and manual installations. Installing a beta over a Stable
 installation does **not** change that saved preference. If an announced beta is missing, open
-**Settings & recovery**, select **Beta**, then **Check for updates**. For example, 1.0.0 is still
-the latest stable release while 1.1.0-beta.3 requires the Beta channel. Older Update centers can
+**Settings & recovery**, select **Stable + beta**, then **Check for updates**. Stable **1.1.0**
+is available on either channel and is newer than all 1.1 betas. Older Update centers can
 say “You're all set” when they mean only that the selected channel has no newer update.
 
 The revised Update center names the checked channel, explains when a newer beta is excluded,
@@ -50,8 +50,8 @@ The updater can reuse unchanged files **when a release provides a changed-file c
 local file hashes, downloads changed or missing files, then verifies the complete staged app.
 A changed DLL is downloaded in full, compressed; this is not a binary-delta patch.
 
-Both **1.0.0 stable and 1.1.0-beta.1 use the full ZIP**. The beta includes the new patch-ZIP
-reader for future releases, but its own download is full-sized. Do not expect every update
+Stable **1.1.0 uses the full ZIP**, including the bundled runtime. Some earlier beta releases
+provided base-version patches, but these are not standalone installations. Do not expect every update
 to be a small download. New runtimes, changed dependencies or missing local files can increase its size.
 The Update center shows the download needed for the selected release.
 

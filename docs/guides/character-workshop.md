@@ -35,13 +35,17 @@ where the viewer can resolve their material inputs; the renderer is an approxima
 ## Position imported custom parts
 
 Select an editable custom static-mesh part and open **Placement**. Click the viewport before
-using **W** (move), **E** (rotate) or **R** (scale). Shortcuts do not intercept typing in fields.
+using **W** (move), **R** (rotate) or **E** (scale). Shortcuts do not intercept typing in fields.
 Use the gizmo or numeric values, snapping and undo/redo to adjust placement.
 
 Placement changes are drafts until **Bake to game** succeeds. Then rebuild the mod and test in-game.
 Native parts and rigged body bones are not movable through this custom static-part editor.
 
 ## Export a GLB
+
+For animation authoring, open **Create** in this viewer and follow [Character animations](animations.md).
+For the four native portrait/tile slots, open **Icon studio** and follow the
+[icon generation and JSON template workflow](materials-textures-faces.md#ui-icons).
 
 For an imported part that looks missing or incorrectly shaded, use the
 [viewer troubleshooting checks](../help/troubleshooting.md#the-3d-viewer-is-blank) before changing

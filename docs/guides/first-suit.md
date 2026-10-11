@@ -53,9 +53,10 @@ donor's animation class, collision, movement, equipment, or other runtime machin
 supported Minifig and Smallfig profile already uses the game's shared `SKEL_LEGOfig` skeleton, so
 there is no separate skeleton step or skeleton selector.
 
-Switching between Minifig and Smallfig can require a matching takedown profile. Use the
-experimental size-appropriate takedown choice, rebuild, and test both combat takedowns and
-end-of-encounter actions. Changing body height alone does not guarantee compatible attacks.
+Switching between Minifig and Smallfig can require matching **Takedowns…** and **Dodges…**
+choices in the Ability workshop. These are separate presets. Choose the fighting style first,
+then match both to the body, rebuild, and test takedowns, normal-enemy vaults and brute slides.
+Changing body height alone does not guarantee compatible attacks or animation alignment.
 
 Joker and Harley suits require their current extracted DLC donors. Refresh game assets and
 mappings after a game update before creating or rebuilding those suits.

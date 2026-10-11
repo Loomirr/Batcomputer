@@ -45,7 +45,7 @@ same suit builds without the newest texture, material, part, or custom mesh.
 ## A good minimal report
 
 ```text
-Batcomputer: 1.0.0
+Batcomputer: 1.1.0
 Game/mappings: <build and date>
 Action: Build Mod
 Expected: release installs

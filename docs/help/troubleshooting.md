@@ -3,7 +3,16 @@
 Start with **Diagnostics → Copy log**. Keep the relevant lines from the first error through the end
 of the action.
 
-## Setup keeps reopening
+## The download asks for .NET, or an update says it is current
+
+Stable 1.1.0 is offered on both channels. Check the installed version and the selected channel;
+older clients can call the Stable channel current when only a newer beta exists.
+For manual installs use **Batcomputer-update-win-x64.zip**, not an `update-from-…` patch or
+GitHub's source archive. Extract the entire ZIP, including `app/`. The full Windows x64 release
+includes .NET. Copying just the EXE or installing an unrelated global runtime does not repair a
+missing bundled runtime. See [Updates](../guides/app-updates.md).
+
+## Setup keeps reopening: path checks
 
 Batcomputer silently skips setup only when the required paths resolve and the extracted Content has
 a real `Characters` folder. Check:
@@ -278,6 +287,16 @@ Close the game, FModel, UAssetGUI, Explorer preview panes, and any previous Batc
 may hold output files open. Then rebuild. Do not keep your Batcomputer workspace under `Program Files`.
 
 ## The game crashes
+
+### Old test mods
+
+With the game closed, back up saves and move only the obsolete mod's files outside the game:
+its exact pak/ucas/utoc trio, `LOTDKExpanded/Mods/<ModId>` manifest folder,
+`RegistryPlugins/<ModId>Registry` folder and `Config/Tags/<ModId>Tags.ini`.
+Do not remove shared `LOTDKExpandedCoreRegistry`, framework DLLs or other mods. Keep the backup
+until a cold launch and existing save work. A leftover registry/manifest can reference absent assets.
+
+### Gather a focused report
 
 Restore the last known-good release, then test one change at a time. Collect:
 

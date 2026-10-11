@@ -13,7 +13,7 @@ Make a separate selectable vehicle with a custom body, materials and editable at
 Start with the driving model. A LEGO build-up model is a separate asset with a different rig; see [summon and parked models](vehicle-summon-models.md) after the car drives correctly.
 
 !!! warning "Experimental vehicle workflow"
-    Vehicle authoring is included in 1.0. Native handling, collision and driving animations are retained. Moving the visible body or a seat does not rebuild the physics rig. Test each donor and model combination in-game.
+    Native handling, collision and driving animations are retained. Moving the visible body or a seat does not rebuild the physics rig. Test each donor and model combination in-game. The seated preview is a reference pose, not a simulation of every runtime rider adjustment.
 
 ## 1. Get the reference
 
@@ -123,6 +123,8 @@ Large custom bodies can exceed the workshop's safe-preview limit. In that case t
 
 ## 6. Finish in the 3D workshop
 
+Authored toybox additions and launcher meshes load automatically within the configured detail budget. Select another part to load it, or enable **Part meshes** below the viewport to keep all visible attachment meshes loaded together. This uses more memory; turning it off restores the detail budget. Loading is queued so quickly selecting several parts does not lose requests. Launcher meshes show their native rest shape, not a simulation of deployment or aiming.
+
 - **Materials:** click a surface, then **Change selected surface…**. Choose **Edit material** or **Create a copy**, set the color, and choose LEGO solid, metallic or transparent. **Keep current shader** preserves the current material; changing finish replaces its shader. **Choose from library…** opens Generated, Vehicle materials, Vehicle part materials and Base game. Base-game materials cannot be edited directly.
 - **Body paint:** open **Body & setup → Body & materials**, select a slot and choose **Set slot color…**. New colors use **Solid** native LEGO paint. Choose **Metallic** or **Transparent** in **Paint finish** when appropriate. **Use slot material** removes the color override.
 - **Light surfaces:** select the lens slot and its **Light behavior**, or use **Use named light slots**, then review the assignments. This reuses existing native lamp controllers, not a new lighting system.
@@ -137,6 +139,14 @@ Choose **Save vehicle** to keep the workshop edits.
 ### Boost and sound styles
 
 In **Vehicle setup → Vehicle**, **Boost style** offers ten native effect sets, including five twin-outlet options. Leave it at **Driving base boost** to retain the base effect. **Two boost outlets** can also be enabled with the base effect; move the second outlet in the 3D workshop. The editor builds private pawn/boost assets for this vehicle, so it does not replace another car's effects. Use **Boost preview** in the workshop to check outlet direction, then test the actual flames, gear-change effects and both outlets in game.
+
+If a saved project contains a second-outlet placement while **Two boost outlets** is off, the build logs a warning and ignores that placement. It stays saved for use when you enable the option. Unchecked means one active boost outlet even on a driving base or effect style that natively uses two. The inactive second outlet is hidden from the workshop.
+
+**Group placement:** Ctrl/Shift-click parts in the list or viewport to select several editable
+parts. Move and rotate use their shared center; group scaling is uniform. Seats and size-locked
+parts prevent group scaling. Each drag or group reset is one undo step. Click normally to
+return to a single part for material and numeric edits. Bone/socket parenting is preserved;
+transforms that would require unsupported shear are rejected.
 
 **Boost speed** and **Boost acceleration** are separate optional controls. The game's native boost curve uses 90 mph and 6 Gs even when you tune ordinary driving speed higher. Enable **Custom** to give this vehicle private values while boosting; leaving them unchecked retains the native curve. Check both ordinary driving and boosting in game.
 
@@ -155,6 +165,8 @@ Older simple-color recipes keep their existing appearance. **Upgrade simple colo
 New body imports get separate, editable copies of their assigned native materials, named for the car and slot—for example `MI_Slot0_70sBatmobile`. Existing custom assignments are kept. Reimporting does not overwrite edited copies. For an older car, use **Body & setup → Body & materials → Make editable copies** to convert its base assignments and color overrides.
 
 Material saves update the generated library immediately; **Save vehicle** keeps the assignment. Editing an existing material affects every surface using it. Create a copy when only the selected slot should change. Generated paint copies include their own color swatches, so recoloring one does not recolor another.
+
+Changing or copying a material updates the open workshop in place. It does not reload the vehicle, camera, seated figures, or placement controls. Assignment undo/reset remains available; editing an existing material's contents still affects every use of that material.
 
 To change a headlight, open **Lights**, select **Headlight beam 1** or **2**, and use **Beam color** and the position/rotation controls. Bulb/glow meshes are separate from the light cast onto the road. A marker labeled **reference** is only a socket, not an editable lamp controller; changing a decorative mesh's material does not create a functional headlight or brake light.
 
@@ -186,10 +198,12 @@ There is a separate **Body & setup → Assembly model** import. It requires the 
 
 ## Parts toybox and vehicle size
 
+For the 2022 bike driving rig, the body importer has an **experimental authored wheelbase** option. This permits bounded forward/back and vertical changes to the two `ChassisAttach_F/B` mounts only. Keep the wheel-child offsets, hierarchy, rotations, scales and all other bones native. It does not generate collision shapes or retune handling: test steering, suspension, tire contact and mounting in-game. It is not available for characters or assembly rigs. Leave whole-vehicle size at 100% when size is already baked into the source mesh.
+
 Open **+ Parts toybox** to search the installed vehicle and shared light-piece meshes. This lists static meshes; animated weapons and other skeletal parts need their own setup.
 
 - **Add a piece:** creates a movable, non-colliding decorative attachment. Select its surfaces to choose, copy or recolor materials. Adding a light-shaped mesh does not add a brake/headlight controller.
 - **Choose replacement shape:** changes a selected native decorative mesh while keeping its existing controller and position. This is the route for changing a working lamp's shape. Its material overrides reset; native light-data compatibility still matters.
 - **Remove part from mod:** hides the piece without removing the donor's controller graph. Undo or restore brings it back.
 
-**Body & setup → Vehicle → Size %** scales the body, wheel geometry and attached parts together. It also applies to the menu and parked model. This control is experimental: check tire contact, suspension, collision, character size, seat placement and summon animations in game. It does not retune the donor's handling or author new collision shapes. Keep the FBX rig at its original scale.
+**Whole-vehicle runtime resizing is disabled in 1.1.** The experimental setting could disagree between parked and driving models and was associated with a crash report. Existing values remain visible as **Legacy size %**, but builds require 100%. Resize the source mesh in your modeling application and reimport it using the supported native rig instead. Review seats and part placements afterward; they are not automatically reset. This does not retune handling or generate collision shapes.

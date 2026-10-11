@@ -5,7 +5,7 @@ items such as cowls and accessories that can follow an existing character socket
 
 For externally rigged and weighted FBX bodies/parts, see the experimental [existing-rig skinned mesh workshop](skeletal-mesh-proof.md). A static attachment does not need weights.
 
-Hip/belt and Shoulder imports also offer **Body clearance**. This moves the appropriate body bone using native game offset data, separately from moving the accessory. Use the native default or a custom value; zero disables this attachment's contribution. Existing native clearance is preserved. These offsets apply to gameplay and cutscenes after rebuilding, but are not simulated by the current 3D preview.
+Supported attachment regions also offer **Body clearance**. This moves the appropriate body bone using native offset data, separately from moving the accessory. Use the native default or a custom value; zero disables this attachment's contribution while preserving existing donor clearance. These offsets apply to gameplay and cutscenes after rebuilding. The matching preview rig includes supported permanent offsets, but does not simulate every animation-driven adjustment.
 
 ## Import
 

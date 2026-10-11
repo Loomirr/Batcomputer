@@ -375,6 +375,22 @@ the build is blocked instead of silently retaining the donor gadget.
 
 ## Recommended test flow
 
+### Body-size changes: paired dodges and takedowns
+
+Changing between Smallfig and Minifig bodies can leave the original donor's paired combat
+abilities in place. **Takedowns…** only changes takedowns; it does not fix enemy vaults.
+Use **Dodges…** in the Ability workshop to select **Smallfig · Robin** or **Minifig · Batman**
+to match the current body. The dodge preset preserves the existing input and ability level,
+replaces only the supported melee dodge grant, and uses the donor's native paired sequences.
+It also changes ordinary dodges to that donor's dodge behavior. Attacks, equipment and takedown
+choices remain unchanged. **Restore current melee set's dodges** removes only these dodge edits.
+
+Save and rebuild, then test ordinary ground dodges, vaults over normal enemies (front and back),
+brute slides and takedowns. Tall-Robin and short-Batman test suits passed in-game testing;
+this does not certify every imported rig or custom animation graph.
+Custom dodge animation graphs can override the preset, and a later fighting-style change can
+replace the melee set. A body/dodge mismatch produces a build warning for recognized body families.
+
 The Ability workshop separates the editable source loadout from coordinated fighting-style
 dependencies. **Current loadout** shows added sets and grants, plus a staged bundle for generated
 weapon attacks, the held-item ability, weapon actor and model. Bundle rows describe what the next

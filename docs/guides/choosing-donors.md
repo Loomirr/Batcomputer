@@ -60,5 +60,6 @@ Supported Minifig/Smallfig profiles use the shared native LEGOfig skeleton but h
 proportions and animation compatibility. Pick the body before fitting replacement parts.
 Do not use FBX import scale to turn a minifig into a different body type.
 
-Check takedowns, traversal and face animation after a body change. Sharing a skeleton does not
-guarantee every synchronized animation fits every body.
+Check takedowns, normal-enemy vaults, brute slides, traversal and face animation after a body change.
+The Ability workshop's separate **Takedowns…** and **Dodges…** presets can match supported native
+body families. Sharing a skeleton does not guarantee every synchronized animation fits every body.

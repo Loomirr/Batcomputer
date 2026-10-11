@@ -6,7 +6,6 @@ on:
     paths:
       - "docs/**"
       - "mkdocs.yml"
-      - "requirements-docs.txt"
       - "Tools/Documentation/**"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
@@ -32,10 +31,10 @@ jobs:
         with:
           python-version: "3.x"
           cache: pip
-          cache-dependency-path: requirements-docs.txt
+          cache-dependency-path: Tools/Documentation/requirements.txt
 
       - name: Install documentation dependencies
-        run: pip install -r requirements-docs.txt
+        run: pip install -r Tools/Documentation/requirements.txt
 
       - name: Build documentation
         run: mkdocs build --strict --site-dir _site

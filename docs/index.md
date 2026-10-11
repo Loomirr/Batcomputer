@@ -6,11 +6,11 @@ Batcomputer handles the files and registration needed to package and install you
 
 ![Batcomputer's mod workspace](assets/screenshots/home-mods.jpg){ .bc-doc-shot loading=lazy }
 
-!!! success "Batcomputer 1.0 is here"
-    Get the [official 1.0 release](https://github.com/Loomirr/Batcomputer/releases/tag/v1.0.0),
-    or use the built-in updater if your version supports it. The [latest 1.1 beta](releases/1.1.0-beta.3.md)
-    expands animation, voice and icon tools, suit inheritance and takedown compatibility. Enable beta
-    releases to try it; experimental features are marked in these guides. Keep a backup before upgrading.
+!!! success "Batcomputer 1.1"
+    Get the [stable 1.1 release](https://github.com/Loomirr/Batcomputer/releases/tag/v1.1.0),
+    or check for updates in Batcomputer on either channel. Read the [1.1 release notes](releases/1.1.0.md)
+    for animation, voice and icon tools, reusable suits, body-matched combat fixes and workshop improvements.
+    Experimental features remain marked in these guides. Back up projects before upgrading.
 
 ## Start here
 

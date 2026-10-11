@@ -17,7 +17,10 @@ The source OBJ is saved with the recipe, so moving the original file won't break
 
 The preview shows geometry, material-slot colors, and the transform used for baking. It isn't a preview of the game's final shaders. The axes mark the mesh origin, not a calibrated hand grip.
 
-Current limits are static held items, OBJ files up to 8 MB, uniform scale from 0.001 to 1000, and numeric alignment rather than drag controls.
+Use draggable handles or numeric alignment: **W** moves, **R** rotates and **E** scales, with
+World/Local axes and snapping. Sizing is uniform; the gizmo follows the centered OBJ rather than
+a calibrated hand grip. Current limits are static held items, OBJ files up to 8 MB and uniform
+scale from 0.001 to 1000. Neither alignment method changes native attack sockets or collision.
 
 ## What stays the same
 

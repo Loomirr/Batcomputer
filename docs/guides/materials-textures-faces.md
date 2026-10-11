@@ -17,6 +17,11 @@ for the current suit's set, or **All tool materials** to find and import one mad
 Batcomputer keeps the cooked package and metadata together and prevents a rename or deletion that
 would break another saved suit.
 
+Right-click your own material and choose **Use as base** to create a separate editable variant;
+face materials have the corresponding custom-face action. Choose a new output name. Batcomputer
+refuses to overwrite the original or an existing variant. Editing the original in place still
+affects every surface that uses it.
+
 Base-game material searches combine the bundled fallback catalog with every `MI_*.uasset` found
 under the active extracted **Content** folder. This includes shared instances under
 `Characters/Materials`, attachment materials, and equipment/glider materials. After changing the
@@ -308,8 +313,9 @@ and **Create selected PNG…**. The studio enlarges the tile to fill its preview
 the native 256px sharpness. Enlarging it in another image viewer will also make those pixels look soft. The export
 renders above the target size and downsamples for cleaner edges, but the native suit-selector
 texture is still 256px. Import the saved PNG in **Textures** with the matching icon type and
-assign it through **Set icons**. Saving from Icon studio alone does not change the project or
-replace an installed icon. Its materials and lighting are a preview approximation, so check the
+assign it through **Set icons**, or use the studio's **Create and assign** actions described below.
+Exporting a PNG alone does not change the project or replace an installed icon. Materials and
+lighting are a preview approximation, so check the
 result in-game before release.
 
 For a saved suit, **Test suit icon cook** in Icon studio sends the current **Suit tile** render
@@ -395,7 +401,8 @@ use **Play** to preview interpolation. **Remove key** deletes the selected bone'
 current frame. Switching away from Create restores the normal Rest pose; returning keeps the
 draft and timeline position.
 
-**Save draft JSON** downloads editable keyframes, and **Open draft JSON** loads them on a matching
-rig. Keep the JSON as your working copy. This first editor does **not** create a cooked Unreal
-animation, save changes into the suit project, or alter the installed game. Cooking and applying
-custom clips are separate steps still in development.
+**Save draft JSON** exports editable keyframes, and draft import reopens them on a matching rig.
+Keep that editable source. Saving a draft alone does not change the installed game: use
+**Cook animation draft**, assign the cooked clip to an exact slot, then rebuild the mod.
+See [Character animations](animations.md) for the native-rig reference, named bone groups,
+Blender-action import and cook/assignment workflow.

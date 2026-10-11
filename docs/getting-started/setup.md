@@ -17,6 +17,10 @@ Choose mappings made for the **currently installed game build**. Batcomputer cop
 file into its own `Data\Mappings` folder so the portable does not depend on a temporary download
 location.
 
+The repository's [mapping download page](https://github.com/Loomirr/Batcomputer/tree/main/.usmap)
+lists the verified game build and checksum. Compare that build before downloading; the stable
+filename does not mean the file works with every old or future game version.
+
 !!! warning "After a game update"
     Refresh the `.usmap`, then run a fresh character extraction before rebasing or packaging suits.
     Old cooked donors can parse successfully and still be incompatible with the updated game.

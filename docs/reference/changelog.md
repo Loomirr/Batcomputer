@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.0 — 2026-10-11
+
+Stable 1.1 includes the animation, voice, icon and suit-reuse tools introduced during the betas.
+It adds tested cross-height dodge presets, inherited-gameplay warnings, vehicle group transforms,
+in-place material changes, seated/part preview fixes and corrected boost-outlet handling.
+Build and ZIP workflows now show detailed progress and readable/copyable result paths.
+Game-build compatibility checks protect against stale extracts and mappings.
+
+Whole-vehicle runtime resizing is blocked pending a proven implementation; resize/reimport the
+source model instead. Existing ImageSharp dependency advisories remain unresolved.
+See [1.1 release notes](../releases/1.1.0.md) for the full changes, update instructions and limits.
+
+The entries below describe historical releases; their channel/version statements apply to their release dates.
+
 ## 1.1.0-beta.3 — 2026-10-09
 
 - Fixes false "different skeleton" build errors for custom animations whose separately named skeleton matches the donor's bone names, hierarchy and reference transforms.

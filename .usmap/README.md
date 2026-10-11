@@ -1,6 +1,6 @@
 # LOTDK mappings
 
-This folder holds the latest verified Unreal property mappings for LEGO Batman: Legacy of the Dark Knight. Replace `latest.usmap` here when a new game build requires updated mappings; earlier revisions remain available in Git history.
+Download the Unreal property mappings used to read cooked assets from **LEGO Batman: Legacy of the Dark Knight**. Batcomputer needs a `.usmap` that matches your installed game build.
 
 [Download latest.usmap](https://raw.githubusercontent.com/Loomirr/Batcomputer/main/.usmap/latest.usmap)
 
@@ -13,10 +13,18 @@ This folder holds the latest verified Unreal property mappings for LEGO Batman: 
 
 Use mappings that match your installed game build. A newer mapping is not necessarily compatible with older game assets.
 
-## Updating
+## Use it in Batcomputer
 
-1. Dump mappings from the updated game and validate them against that build's assets.
-2. Replace `latest.usmap` and update the build details, original filename, size, and checksum above in the same commit.
-3. Keep unrelated assets, local settings, and test outputs out of this folder.
+1. Use **Download latest.usmap** above and save the file. Download the file itself, not this README or a GitHub HTML page.
+2. In Batcomputer's first-time setup or **Settings → Paths**, select that file as your mappings.
+3. After a game update, refresh all character assets and rebuild the part index before rebuilding affected mods. Updating the mapping alone does not refresh an old asset extraction.
 
-This is a maintained download location, not an automatic mapping dumper or an automatic update mechanism for Batcomputer installations.
+Batcomputer keeps a local copy of your selected mapping. Replacing the download here does not silently update your installation.
+
+## Does this match my game?
+
+Compare the game-build details above with the build you are using. **Latest** means the newest mapping published here, not a guarantee that it fits every past or future game update. If your game updated beyond the listed build, wait for a verified matching mapping rather than forcing builds with an old one.
+
+If extraction or validation fails, include your game build, mapping filename and the first relevant error when reporting it. Do not upload extracted game assets. See the [setup guide](https://loomirr.github.io/Batcomputer/getting-started/setup/) and [update/repair guide](https://loomirr.github.io/Batcomputer/guides/update-repair-suit/).
+
+This folder provides mappings only, not game files, mods or the LOTDK UE4SS framework.

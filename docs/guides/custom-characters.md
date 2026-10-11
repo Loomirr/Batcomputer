@@ -1,6 +1,6 @@
 # Custom characters
 
-The **Characters** tab creates independent playable roster entries, not additional suits under Batman or another native character. This workflow is included in 1.0. Keep a save and project backup when testing a new character or changing its runtime identity.
+The **Characters** tab creates independent playable roster entries, not additional suits under Batman or another native character. Keep a save and project backup when testing a new character or changing its runtime identity.
 
 ## Create a character
 
@@ -38,6 +38,12 @@ Save the character's latest changes, then open its additional suit and choose **
 Rebasing saves a previous-recipe backup and copies editable sources into a fresh revision without overwriting earlier sources. Cooked animation-library selections retain their library identities so their cached dependencies can still be staged. Rebuild the mod after the generated stage finishes refreshing. Character-wide vehicle, modes and symbol continue to come from the definition at build time.
 
 This is an explicit refresh, not a live link. It inherits saved Batcomputer settings; it does not reconstruct experimental changes made only inside installed PAKs, and voice-workshop drafts are not runtime voices. Missing sources or invalid combinations still need repair before the mod can build.
+
+**Check mod** warns when the saved parent has changed gameplay sections since a suit's last
+inheritance review. Use **Rebase from character** to review abilities, animations, equipment,
+voice and other reported sections. Leave appearance and icon sections unchecked to keep the
+suit's design. The warning does not overwrite intentional overrides or block the build; older
+suits without inheritance history still need a manual first review.
 
 ## What ships
 

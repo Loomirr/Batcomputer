@@ -19,6 +19,8 @@ Batcomputer/
     VehicleProjects/
     NativeSuitMaterials/
     AnimationLibrary/
+      Drafts/
+    VoiceWorkshop/
     Preview/
   Runtime/
   Tools/
@@ -39,6 +41,7 @@ Back up:
 - `Generated/VehicleProjects`
 - `Generated/NativeSuitMaterials` for shared generated materials and their dependencies
 - `Generated/AnimationLibrary` when you have imported custom animations
+- The animation-draft and VoiceWorkshop libraries, including original WAVs and voice profiles
 - Project-owned texture sources, OBJ/FBX imports and validated mesh caches
 - Original Blender files and external artwork referenced by those projects
 - Notes stored in the mod project
