@@ -12,7 +12,7 @@ for (const name of ['textures','export']) if (fs.existsSync(path.join(input,name
 const source = fs.readFileSync(path.join(rootDir,'src/Batcomputer/Services/ModelPreviewService.cs'),'utf8');
 fs.writeFileSync(path.join(preview,'index.html'),source.split('private const string ViewerHtml = """')[1].split('""";')[0].trim());
 for (const name of ['three.min.js','GLTFLoader.js','OrbitControls.js','TransformControls.js','SkeletonUtils.js','GLTFExporter.js','CharacterExport.js','CharacterNormals.js','CharacterSurface.js','CharacterAssembly.js','CharacterMeshEditor.js','CharacterWorkshop.js','CharacterWorkshopShell.js','CharacterAnimationPreview.js','CharacterWorkshop.css','CharacterIconStudio.js','RectAreaLightUniformsLib.js'])
-  fs.copyFileSync(path.join(rootDir,'Web/preview',name),path.join(preview,name));
+  fs.copyFileSync(path.join(rootDir,'src/Batcomputer/Web/preview',name),path.join(preview,name));
 const server = http.createServer((req,res) => {
   const file = path.resolve(preview,'.'+decodeURIComponent(req.url.split('?')[0]));
   if (!file.startsWith(preview+path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) { res.writeHead(404);res.end();return; }

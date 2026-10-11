@@ -30,8 +30,8 @@ if(Test-Path -LiteralPath $catalogPath -PathType Leaf){
        (Get-Item -LiteralPath $patchPath).Length -ne $catalog.DownloadSize -or
        (Get-FileHash -LiteralPath $patchPath).Hash -ne $catalog.DownloadSha256){throw 'Patch ZIP differs from its catalog.'}
     $files+=@($patchPath,($patchPath+'.sha256'),$catalogPath,($catalogPath+'.sha256'))
-} elseif(Get-ChildItem -LiteralPath $package -Filter 'Batcomputer-update-from-*-win-x64.zip'){
-    throw 'Patch ZIP found without its catalog.'
+} else {
+    throw 'Every release requires both the full ZIP and a tested baseline patch ZIP/catalog. Use --create-app-update-patch before publishing.'
 }
 foreach($file in $files){if(-not(Test-Path -LiteralPath $file -PathType Leaf)){throw "Missing release asset: $file"}}
 foreach($file in $files | Where-Object { -not $_.EndsWith('.sha256') }){

@@ -79,6 +79,7 @@ public sealed class IconAcceptanceProbeService
             foreach (var spec in specs)
             {
                 var sourcePng = Path.Combine(projectRoot, "Assets", spec.Item2);
+                if (!File.Exists(sourcePng)) sourcePng = Path.Combine(projectRoot, "src", "Batcomputer", "Assets", spec.Item2);
                 if (!File.Exists(sourcePng)) throw new FileNotFoundException("Bundled test artwork is missing.", sourcePng);
                 var package = $"/Game/Mods/{modId}/Textures/{spec.Item6}";
                 var template = TextureCookTemplateService.TemplateJsonPath(projectRoot, spec.Item5);

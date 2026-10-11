@@ -50,8 +50,8 @@ The updater can reuse unchanged files **when a release provides a changed-file c
 local file hashes, downloads changed or missing files, then verifies the complete staged app.
 A changed DLL is downloaded in full, compressed; this is not a binary-delta patch.
 
-Stable **1.1.0 uses the full ZIP**, including the bundled runtime. Some earlier beta releases
-provided base-version patches, but these are not standalone installations. Do not expect every update
+Stable **1.1.0 provides both a full ZIP and a Beta 3 patch ZIP**. The full ZIP includes the bundled
+runtime; the patch is not a standalone installation. Do not expect every update
 to be a small download. New runtimes, changed dependencies or missing local files can increase its size.
 The Update center shows the download needed for the selected release.
 

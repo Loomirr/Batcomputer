@@ -27,3 +27,9 @@ python Tools/Documentation/check_site.py site
 only a stable semantic version and marks that release latest. Always validate with `-DryRun`
 first, using packages from the exact tested, pushed source revision. See the updater maintainer
 notes for packaging and disposable-install tests.
+
+Every release requires both the full portable ZIP and a baseline-specific updater patch, with its
+catalog and checksum sidecars. Use `Updater/Prepare-ReleasePackages.ps1` with an exact published
+baseline and a clean new publish folder. The publisher rejects missing patch packages.
+`Updater/Add-ReleasePatchAssets.ps1` repairs a missing-patch release without replacing existing
+assets; it requires the full ZIP to match the published hash and uploads the catalog last.

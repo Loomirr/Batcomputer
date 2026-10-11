@@ -3,7 +3,7 @@
 This folder contains the offline web interface embedded in Batcomputer's desktop Update center.
 It is application source, not a separate updater to download or install.
 
-For update instructions, see [Updating Batcomputer](../../docs/guides/app-updates.md).
+For update instructions, see [Updating Batcomputer](../../../../docs/guides/app-updates.md).
 For the complete application, use [GitHub Releases](https://github.com/Loomirr/Batcomputer/releases).
 
 ## Files
@@ -27,4 +27,4 @@ Blender scene from a compatible source model. Run Blender in background mode wit
 `BatSymbol`, `LeverBase` and `LeverHandle` meshes; its handle uses the `LeverCycle` animation.
 The original FBX/texture and editable Blender scene are not required at runtime.
 
-For packaging and isolated update tests, see the [maintainer notes](../../docs/research/updater-maintainer-notes.md).
+For packaging and isolated update tests, see the [maintainer notes](../../../../docs/research/updater-maintainer-notes.md).

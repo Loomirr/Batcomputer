@@ -5,7 +5,7 @@ const { chromium } = require('playwright');
 const preview = path.resolve(process.argv[2]), output = path.resolve(process.argv[3]);
 if (!fs.existsSync(path.join(preview, 'index.html'))) throw new Error('Pass a generated character preview folder.');
 if (process.env.BATCOMPUTER_REFRESH_PREVIEW_ASSETS === '1') {
-  const source = path.resolve(__dirname, '../../Web/preview');
+  const source = path.resolve(__dirname, '../../src/Batcomputer/Web/preview');
   for (const name of ['CharacterAnimationCreator.js', 'CharacterWorkshop.js', 'CharacterWorkshopShell.js', 'CharacterWorkshop.css'])
     fs.copyFileSync(path.join(source, name), path.join(preview, name));
 }

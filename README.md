@@ -35,12 +35,11 @@ Players using finished mods need the mod and the compatible LOTDK UE4SS framewor
 
 | Folder | Contents |
 | --- | --- |
-| `src/Batcomputer/` | Desktop app, services and Windows manifest |
-| `Web/` | Embedded 3D viewer and updater UI |
+| `src/Batcomputer/` | Desktop app, services, artwork, embedded web UI and native support |
 | `Tools/` | Build, import, documentation and release helpers |
 | `docs/` | User guides, release notes and reference documentation |
-| `Assets/`, `gamedata/` | App artwork and reference catalogs |
-| `native/`, `licenses/` | Native helpers and dependency notices |
+| `gamedata/` | Versioned reference catalogs |
+| `licenses/` | Dependency notices and native build provenance |
 | `.usmap/` | Published mappings endpoint; path kept stable for clients |
 
 With the **.NET 10 SDK** installed:

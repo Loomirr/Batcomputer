@@ -2,7 +2,7 @@
 const fs=require('fs'),path=require('path'),http=require('http'),assert=require('assert');
 const {chromium}=require('playwright');
 const folder=path.resolve(process.argv[2]),blenderFile=process.argv[3]&&path.resolve(process.argv[3]);
-const web=path.resolve('Web/preview');
+const web=path.resolve('src/Batcomputer/Web/preview');
 const server=http.createServer((request,response)=>{
  const relative=decodeURIComponent(request.url.split('?')[0]);let file=path.resolve(folder,'.'+relative);
  if(!file.startsWith(folder+path.sep)){response.writeHead(404);response.end();return;}

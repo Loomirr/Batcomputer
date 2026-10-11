@@ -3,7 +3,7 @@
 const fs = require('fs'), path = require('path'), http = require('http'), assert = require('assert');
 const { chromium } = require('playwright');
 const folder = path.resolve(process.argv[2]), output = path.resolve(process.argv[3] || folder);
-const source = path.resolve(__dirname, '../../Web/preview');
+const source = path.resolve(__dirname, '../../src/Batcomputer/Web/preview');
 const server = http.createServer((request, response) => {
   const rel = decodeURIComponent(request.url.split('?')[0]);
   const file = path.resolve(folder, '.' + rel);

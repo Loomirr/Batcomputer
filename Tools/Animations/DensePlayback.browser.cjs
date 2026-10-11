@@ -3,7 +3,7 @@ const fs=require('fs'),path=require('path'),http=require('http'),assert=require(
 const {chromium}=require('playwright');
 const folder=path.resolve(process.argv[2]), draftPath=path.resolve(process.argv[3]);
 const baseline=process.argv.includes('--baseline');
-const web=path.resolve('Web/preview');
+const web=path.resolve('src/Batcomputer/Web/preview');
 const server=http.createServer((request,response)=>{
  const relative=decodeURIComponent(request.url.split('?')[0]);
  let file=path.resolve(folder,'.'+relative);

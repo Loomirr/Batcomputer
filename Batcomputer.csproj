@@ -7,7 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>Batcomputer</AssemblyName>
     <RootNamespace>Batcomputer</RootNamespace>
-    <ApplicationIcon Condition="Exists('Assets\Icon.ico')">Assets\Icon.ico</ApplicationIcon>
+    <ApplicationIcon Condition="Exists('src\Batcomputer\Assets\Icon.ico')">src\Batcomputer\Assets\Icon.ico</ApplicationIcon>
     <ApplicationManifest>src\Batcomputer\app.manifest</ApplicationManifest>
     <Version>1.1.0</Version>
     <AssemblyVersion>1.1.0.0</AssemblyVersion>
@@ -52,21 +52,18 @@
     <EmbeddedResource Remove="artifacts\**\*.resx" />
     <Compile Remove="Generated\**\*.cs" />
     <!-- Embed app art in the single-file release. -->
-    <EmbeddedResource Include="Assets\**\*.png" />
+    <EmbeddedResource Include="src\Batcomputer\Assets\**\*.png" Link="Assets\%(RecursiveDir)%(Filename)%(Extension)" />
     <!-- Red Brick creation is out of scope; only the code-driven, read-only
          base-game palette selector remains in the 3D viewer. -->
-    <EmbeddedResource Remove="Assets\RedBricks.png" />
-    <EmbeddedResource Include="Assets\**\*.gif" />
-    <EmbeddedResource Include="Assets\Font\**\*.otf" />
+    <EmbeddedResource Remove="src\Batcomputer\Assets\RedBricks.png" />
+    <EmbeddedResource Include="src\Batcomputer\Assets\**\*.gif" Link="Assets\%(RecursiveDir)%(Filename)%(Extension)" />
+    <EmbeddedResource Include="src\Batcomputer\Assets\Font\**\*.otf" Link="Assets\Font\%(RecursiveDir)%(Filename)%(Extension)" />
     <!-- Embed the window and taskbar icon. -->
-    <EmbeddedResource Include="Assets\Icon.ico" Condition="Exists('Assets\Icon.ico')" />
-    <EmbeddedResource Include="Assets\Mayhem.ico" Condition="Exists('Assets\Mayhem.ico')" />
+    <EmbeddedResource Include="src\Batcomputer\Assets\Icon.ico" Link="Assets\Icon.ico" Condition="Exists('src\Batcomputer\Assets\Icon.ico')" />
+    <EmbeddedResource Include="src\Batcomputer\Assets\Mayhem.ico" Link="Assets\Mayhem.ico" Condition="Exists('src\Batcomputer\Assets\Mayhem.ico')" />
     <!-- Offline three.js preview runtime; see licenses/three.js-LICENSE.txt. -->
-    <EmbeddedResource Include="Web\preview\*.js" />
-    <EmbeddedResource Include="Web\preview\VehicleWorkshop.html" />
-    <EmbeddedResource Include="Web\preview\VehicleWorkshop.css" />
-    <EmbeddedResource Include="Web\preview\CharacterWorkshop.css" />
-    <EmbeddedResource Include="Web\updater\*.html;Web\updater\*.css;Web\updater\*.js;Web\updater\*.glb;Web\updater\*.png" />
+    <EmbeddedResource Include="src\Batcomputer\Web\preview\*.js;src\Batcomputer\Web\preview\VehicleWorkshop.html;src\Batcomputer\Web\preview\VehicleWorkshop.css;src\Batcomputer\Web\preview\CharacterWorkshop.css" Link="Web\preview\%(Filename)%(Extension)" />
+    <EmbeddedResource Include="src\Batcomputer\Web\updater\*.html;src\Batcomputer\Web\updater\*.css;src\Batcomputer\Web\updater\*.js;src\Batcomputer\Web\updater\*.glb;src\Batcomputer\Web\updater\*.png" Link="Web\updater\%(Filename)%(Extension)" />
     <EmbeddedResource Include="Tools\SkinnedMesh\import_mesh.py" />
     <EmbeddedResource Include="Tools\Animations\author_animation_drafts.py" />
     <EmbeddedResource Include="Tools\Animations\import_blender_animation.py" />
@@ -77,7 +74,7 @@
           CopyToPublishDirectory="PreserveNewest"
           ExcludeFromSingleFile="true" />
     <!-- CUE4Parse's ACL helper; keep it matched to the package version. -->
-    <None Include="native\CUE4Parse-Natives.dll"
+    <None Include="src\Batcomputer\native\CUE4Parse-Natives.dll"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest"
           ExcludeFromSingleFile="true"
@@ -96,7 +93,7 @@
     <None Update="licenses\**\*.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <!-- D-DIN is bundled under the SIL Open Font License 1.1. Keep the notice with
          the other release licenses instead of publishing a mostly empty Assets tree. -->
-    <None Update="Assets\Font\SIL Open Font License.txt"
+    <None Update="src\Batcomputer\Assets\Font\SIL Open Font License.txt"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest"
           ExcludeFromSingleFile="true"
