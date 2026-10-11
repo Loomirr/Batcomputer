@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.1-beta.1 — 2026-10-11
+
+- Restores adding/replacing removed Face overlays using verified native donor recipes; incomplete recipes and face accessories remain blocked.
+- Gives generated studio icons readable suit/slot names with short numbered revisions, preserving existing textures.
+- Updates the bundled Blender icon add-on for authored four-frame templates: single/all-slot export, transparent 256/512px PNGs, overwrite protection and render-setting restoration.
+- Consolidates app-only source resources without changing installed paths. Ships both the full portable ZIP and a patch from 1.1.0.
+
+Enable **Stable + beta** to receive this prerelease. See [release notes](docs/releases/1.1.1-beta.1.md).
+
 ## 1.1.0 — 2026-10-11
 
 Stable Batcomputer 1.1 includes the 1.1 beta features plus the fixes below. See the [release notes](docs/releases/1.1.0.md) for update instructions and known limits.

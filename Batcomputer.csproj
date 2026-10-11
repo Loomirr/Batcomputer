@@ -9,10 +9,10 @@
     <RootNamespace>Batcomputer</RootNamespace>
     <ApplicationIcon Condition="Exists('src\Batcomputer\Assets\Icon.ico')">src\Batcomputer\Assets\Icon.ico</ApplicationIcon>
     <ApplicationManifest>src\Batcomputer\app.manifest</ApplicationManifest>
-    <Version>1.1.0</Version>
+    <Version>1.1.1-beta.1</Version>
     <AssemblyVersion>1.1.0.0</AssemblyVersion>
-    <FileVersion>1.1.0.4</FileVersion>
-    <InformationalVersion>1.1.0</InformationalVersion>
+    <FileVersion>1.1.1.1</FileVersion>
+    <InformationalVersion>1.1.1-beta.1</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <!-- Code-built controls do not need designer serialization metadata. -->
     <NoWarn>$(NoWarn);WFO1000</NoWarn>
@@ -102,6 +102,7 @@
     <None Remove="Tools\BatcomputerRegistryWriter\Binaries\**\*;Tools\BatcomputerRegistryWriter\DerivedDataCache\**\*;Tools\BatcomputerRegistryWriter\Intermediate\**\*;Tools\BatcomputerRegistryWriter\Saved\**\*" />
     <Content Remove="Tools\BatcomputerRegistryWriter\Binaries\**\*;Tools\BatcomputerRegistryWriter\DerivedDataCache\**\*;Tools\BatcomputerRegistryWriter\Intermediate\**\*;Tools\BatcomputerRegistryWriter\Saved\**\*" />
     <None Update="Tools\README.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Update="Tools\Blender\batcomputer_icon_namer.py;Tools\Blender\README.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <None Update="Tools\Build-NativeSuitTemplateIndex.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <!-- Keep the Blender rig-preparation helper visible in the portable release as
          well as embedding it for export beside a native GLB reference. -->
