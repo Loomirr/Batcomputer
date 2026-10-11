@@ -123,6 +123,21 @@ internal static class AttachmentCatalogRegressionChecks
                   byName["SK_HAIR_Skeletal"].NativeRecipes[0]),
             "inferred hair and hats are inspect-only while explicit static and skeletal recipes remain selectable");
         var satchel = byName["SK_TorsoA_Satchel"];
+        var nativeFace = Usage("LEGOface/SK_LEGOface_Batman", "BatmanPlayable", "playable", "Face", "SkeletalMesh");
+        nativeFace.AttachSocket = "Head_Socket";
+        var incompleteFace = PartRecipeService.Clone(nativeFace); incompleteFace.AttachSocket = "";
+        var accessoryFace = PartRecipeService.Clone(nativeFace); accessoryFace.Slot = "Face1";
+        var syntheticFace = PartRecipeService.Clone(nativeFace); syntheticFace.IsSynthesized = true;
+        var unknownFace = PartRecipeService.Clone(nativeFace); unknownFace.Context = "unknown";
+        var faceCatalog = AttachmentAssetCatalogService.Build([], [nativeFace, incompleteFace, accessoryFace, syntheticFace, unknownFace], []);
+        var nativeFaceEntry = faceCatalog.Single();
+        Check(AttachmentAssetCatalogService.CanDragPart(nativeFaceEntry, nativeFace) &&
+              !AttachmentAssetCatalogService.CanDragPart(nativeFaceEntry, incompleteFace) &&
+              !AttachmentAssetCatalogService.CanDragPart(nativeFaceEntry, accessoryFace) &&
+              !AttachmentAssetCatalogService.CanDragPart(nativeFaceEntry, syntheticFace) &&
+              !AttachmentAssetCatalogService.CanDragPart(nativeFaceEntry, unknownFace) &&
+              !AttachmentAssetCatalogService.CanDragPart(nativeFaceEntry, PartRecipeService.Clone(nativeFace)),
+            "native Face overlays can be restored through exact donor recipes; incomplete, accessory, inferred and unlisted face recipes remain blocked");
         Check(AttachmentAssetCatalogService.CanDragPart(byName["SM_HAIR_Static"], byName["SM_HAIR_Static"].NativeRecipes[0]) &&
               AttachmentAssetCatalogService.CanDragPart(byName["SK_Cape"], byName["SK_Cape"].NativeRecipes[0]) &&
               !AttachmentAssetCatalogService.CanDragPart(byName["SK_Glider"], byName["SK_Glider"].NativeRecipes[0]) &&

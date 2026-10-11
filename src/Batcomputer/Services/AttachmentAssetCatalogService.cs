@@ -162,14 +162,28 @@ internal static class AttachmentAssetCatalogService
     internal static bool CanDragPart(Entry entry, NativeSuitPartRecord recipe)
     {
         if (CanOneClickGraft(entry, recipe)) return true;
+        // Face materials need an existing overlay, but users must also be able to
+        // restore/replace a removed overlay using its complete native component recipe.
+        if (CanRestoreFace(entry, recipe)) return true;
         // Regular capes use the same guarded graft path as the Cape filter. This
-        // does not authorize an unpaired glider, a face mesh, or a Cape-tagged satchel.
+        // does not authorize an unpaired glider or a Cape-tagged satchel.
         return entry.NativeRecipes.Contains(recipe) && !recipe.IsSynthesized &&
             recipe.Context is "playable" or "cutscene" &&
             entry.MeshPackagePath.Contains("/Cape/", StringComparison.OrdinalIgnoreCase) &&
             recipe.MeshKind == "SkeletalMesh" && GliderService.IsCosmeticCapeAttachment(recipe) &&
             PartRecipeService.Confidence(recipe).Level == PartRecipeService.RecipeConfidence.Native;
     }
+
+    internal static bool CanRestoreFace(Entry entry, NativeSuitPartRecord recipe) =>
+        entry.NativeRecipes.Contains(recipe) && !recipe.IsSynthesized &&
+        recipe.Context is "playable" or "cutscene" &&
+        recipe.Slot.Equals("Face", StringComparison.OrdinalIgnoreCase) &&
+        UsesFaceWorkflow(entry.MeshPackagePath) && recipe.MeshKind == "SkeletalMesh" &&
+        recipe.ComponentClass.Contains("SkeletalMeshComponent", StringComparison.OrdinalIgnoreCase) &&
+        !string.IsNullOrWhiteSpace(recipe.SourcePackagePath) &&
+        !string.IsNullOrWhiteSpace(recipe.ParentComponentOrVariableName) &&
+        recipe.AttachSocket.Equals("Head_Socket", StringComparison.OrdinalIgnoreCase) &&
+        PartRecipeService.Confidence(recipe).Level == PartRecipeService.RecipeConfidence.Native;
 
     internal static bool CanOneClickGraft(Entry entry, NativeSuitPartRecord recipe)
     {

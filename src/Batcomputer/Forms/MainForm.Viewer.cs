@@ -273,8 +273,8 @@ public sealed partial class MainForm
 
             var templateJson = TextureCookTemplateService.TemplateJsonPath(
                 projectRoot, TextureCookTemplateService.NativeSuitIconTemplateFolder);
-            var requestedName = $"SuitIconStudio_{Guid.NewGuid():N}";
             if (ReferenceEquals(project, _currentProject)) ReadFieldsIntoProject(project);
+            var requestedName = CharacterIconAssignmentService.NextName(project, "suit");
             var slotIndex = NextTextureSlotIndex(project);
             var modFolder = CharacterIconAssignmentService.TextureModFolder(project);
             var packagePath = TexturePackagePathFromUserName(templateJson, requestedName, slotIndex,
@@ -284,7 +284,7 @@ public sealed partial class MainForm
                 throw new InvalidOperationException("The generated icon path is already used by this suit. Try again.");
 
             outputRoot = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureImports",
-                MakeSafePackageBaseName(project.SlotId), requestedName);
+                MakeSafePackageBaseName(project.SlotId), Guid.NewGuid().ToString("N"), requestedName);
             _viewerStatus!.Text = $"{project.DisplayName}: cooking the new suit icon…";
             var cooked = await Task.Run(() => SuitIconDryRunService.CookToPackage(
                 projectRoot, request.PngBytes, outputRoot, packagePath));
@@ -299,7 +299,7 @@ public sealed partial class MainForm
             var entry = BuildTextureEntryFromSummary(outputRoot, cooked.SourcePng, templateJson,
                 DefaultTextureSourceRawRoot(projectRoot), packagePath,
                 MakeSafePackageBaseName($"Texture_{requestedName}_{slotIndex:00000}_P"),
-                "Suit icon studio", "Suit selector icon", preset);
+                requestedName, "Suit selector icon", preset);
             if (project.GeneratedTextures.Any(texture =>
                     texture.PackagePath.Equals(entry.PackagePath, StringComparison.OrdinalIgnoreCase)))
                 throw new InvalidOperationException("The cooked icon path conflicts with an existing texture. Nothing was assigned.");

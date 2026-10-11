@@ -8,6 +8,15 @@ internal static class CharacterIconAssignmentRegressionChecks
     internal static IReadOnlyList<(bool Passed, string Description)> Run()
     {
         var results = new List<(bool, string)>();
+        var named = new NativeSuitProject { DisplayName = "Classic / Blue", SlotId = "private_internal_id" };
+        results.Add((CharacterIconAssignmentService.NextName(named, "left") == "Classic_Blue_Icon_left", "studio icons use readable suit and slot names"));
+        named.GeneratedTextures.Add(new GeneratedTextureEntry { PackagePath = "/Game/Mods/Test/Textures/T_Classic_Blue_Icon_left" });
+        named.GeneratedTextures.Add(new GeneratedTextureEntry { PackagePath = "/Game/Mods/Test/Textures/T_Classic_Blue_Icon_left_2" });
+        results.Add((CharacterIconAssignmentService.NextName(named, "left") == "Classic_Blue_Icon_left_3", "icon revisions preserve existing textures with short numeric suffixes"));
+        var longName = new NativeSuitProject { DisplayName = new string('A', 150) };
+        var compact = CharacterIconAssignmentService.NextName(longName, "right");
+        longName.GeneratedTextures.Add(new GeneratedTextureEntry { PackagePath = "/Game/Mods/Test/Textures/T_" + compact });
+        results.Add((compact.Length < 60 && CharacterIconAssignmentService.NextName(longName, "right") == compact + "_2", "long suit names retain icon role and collision suffix without texture-name truncation"));
         byte[] Png(int size) { using var bitmap = new Bitmap(size, size); using var bytes = new MemoryStream(); bitmap.Save(bytes, ImageFormat.Png); return bytes.ToArray(); }
         var small = Png(256); var large = Png(512);
         var icons = CharacterIconAssignmentService.Roles.ToDictionary(role => role, role => role == "suit" ? small : large);

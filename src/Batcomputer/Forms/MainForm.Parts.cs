@@ -2328,7 +2328,7 @@ public sealed partial class MainForm
             tiles.InsertRange(0, CustomStaticMeshTiles(search, pointFilter));
         ShowVirtualTiles(tiles,
             header: $"{matches.Length:N0} shown of {allItems.Count:N0} parts. Frequently reused meshes are grouped by attachment point; " +
-                    "drag an exact part onto the figure, or right-click for its actions. Open a group to choose its exact Blueprint donor. Faces, root bodies and gliders use their dedicated workflows; regular capes retain the normal compatibility checks.",
+                    "drag an exact part onto the figure, or right-click for its actions. Open a group to choose its exact Blueprint donor. Native Face recipes can restore a removed face; use Faces for printed materials. Root bodies and gliders use dedicated workflows; regular capes retain the normal compatibility checks.",
             emptyMessage: "No parts matched. Check your search and filters.");
     }
 

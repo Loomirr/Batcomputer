@@ -43,17 +43,17 @@ public sealed partial class MainForm
                 var size = CharacterIconAssignmentService.Size(role);
                 var template = TextureCookTemplateService.TemplateJsonPath(projectRoot, size == 256
                     ? TextureCookTemplateService.NativeSuitIconTemplateFolder : TextureCookTemplateService.NativeCharacterIconTemplateFolder);
-                var name = $"IconStudio_{role}_{id}";
+                var name = CharacterIconAssignmentService.NextName(project, role);
                 var kind = size == 256 ? "Suit selector icon" : "Character icon";
                 var package = TexturePackagePathFromUserName(template, name, slotIndex, modFolder, project.SlotId, kind);
-                var output = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureImports", MakeSafePackageBaseName(project.SlotId), name);
+                var output = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureImports", MakeSafePackageBaseName(project.SlotId), id, name);
                 _viewerStatus!.Text = $"{project.DisplayName}: cooking {role} icon…";
                 var cooked = await Task.Run(() => SuitIconDryRunService.CookToPackage(projectRoot, png, output, package, size));
                 CheckViewedProject();
                 var preset = new TextureCookPreset(size == 256 ? NativeUimdIconCookProfile : NativeCharacterIconCookProfile,
                     $"Native {size}px BC7 icon", template, size, size, "PF_BC7", TextureProfileSafety.Verified, "Verified native UI icon layout.");
                 entries.Add(role, BuildTextureEntryFromSummary(output, cooked.SourcePng, template, DefaultTextureSourceRawRoot(projectRoot),
-                    package, MakeSafePackageBaseName($"Texture_{name}_{slotIndex:00000}_P"), "Character icon studio", kind, preset));
+                    package, MakeSafePackageBaseName($"Texture_{name}_{slotIndex:00000}_P"), name, kind, preset));
                 slotIndex++;
             }
             CheckViewedProject();

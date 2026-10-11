@@ -26,8 +26,11 @@ Different recipes for one mesh are not interchangeable. A Hair mesh can be chest
 Satchel has both a Costume usage and a misleading Cape usage. Choose the exact donor context
 you intend to use, and test the result in-game. Regular native capes can use the guarded part
 workflow; a glide visual still uses **Gliders**, including the complete matching cape/glider pair
-when the gameplay donor needs it. Enabling the part does not bypass those checks. Face and root-body
-usages can be inspected here, but applying them still uses **Faces** and **Native body profiles**.
+when the gameplay donor needs it. Enabling the part does not bypass those checks. Verified native
+**Face** overlay recipes attached to **Head_Socket** can restore or replace a removed face through
+the part workflow. Select the exact playable/cutscene donor; ambiguous counterparts are not guessed.
+Use **Faces** to change the printed material on an existing face. Incomplete face recipes and face
+accessories remain inspection-only. Root-body application uses **Native body profiles**.
 Equipment has its own workflow too. Tile tooltips summarize the selected usage; the detail
 window contains the donor list, scoped to the selected point for a condensed tile.
 

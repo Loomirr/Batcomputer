@@ -4,6 +4,22 @@ namespace Batcomputer;
 internal static class CharacterIconAssignmentService
 {
     internal static readonly string[] Roles = ["menu", "left", "right", "suit"];
+    internal static string NextName(NativeSuitProject project, string role)
+    {
+        _ = Size(role);
+        var label = string.IsNullOrWhiteSpace(project.DisplayName) ? project.SlotId : project.DisplayName;
+        var stem = System.Text.RegularExpressions.Regex.Replace(label ?? "", "[^A-Za-z0-9]+", "_").Trim('_');
+        if (stem.Length == 0) stem = "Suit";
+        // Leave room for the texture prefix, role and numeric revision under UE's 64-char name limit.
+        if (stem.Length > 40) stem = stem[..40].TrimEnd('_');
+        var name = $"{stem}_Icon_{role}";
+        var existing = project.GeneratedTextures.Select(t => UnrealPathUtil.AssetName(t.PackagePath))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var candidate = name;
+        for (var revision = 2; existing.Contains(candidate) || existing.Contains("T_" + candidate); revision++)
+            candidate = $"{name}_{revision}";
+        return candidate;
+    }
     internal static int Size(string role) => role == "suit" ? 256 : Roles.Contains(role, StringComparer.Ordinal)
         ? 512 : throw new InvalidDataException("Unknown character icon role.");
     internal static string TextureModFolder(NativeSuitProject project)
