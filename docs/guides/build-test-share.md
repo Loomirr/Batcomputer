@@ -65,6 +65,11 @@ none of this enables persistent preparation caching.
 Missing native voice routes are extracted with at most two converter processes, each using an
 isolated temporary output directory. Already available routes are skipped; suit-specific routing
 edits and verification still run independently. These temporary files follow normal build cleanup.
+Native audio-file lookup uses a build-local index within the same memory allowance, avoiding a
+full game-file scan for each recording and localization route. The index contains only shipped
+file paths, not suit assignments or encoded audio. Exact media names and language routes remain
+checked; an index that exceeds the allowance falls back to normal scanning. Voice timing logs
+separate discovery, extraction, route/media preparation, suit bindings and final verification.
 
 Before packaging, character-family and enabled-vehicle output sharing compares complete cooked payloads and dependencies.
 It can share matching alternate versions across suits even when the base character's version differs.

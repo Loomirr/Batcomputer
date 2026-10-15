@@ -61,9 +61,35 @@ internal static class BuildSharedAssetsRegressionChecks
 
     internal static IEnumerable<(bool Passed, string Description)> Run()
     {
+        string[] mediaPaths = [
+            "LEGOBatmanLotDK/Content/Wub/Platforms/Windows/Media/Hello.wem",
+            "LEGOBatmanLotDK/Plugins/Wub_Loc_enUS/Content/Wub/Platforms/Windows/Media/Hello.wem",
+            "LEGOBatmanLotDK/Plugins/Wub_Loc_frFR/Content/Wub/Platforms/Windows/Media/Hello.wem",
+            "LEGOBatmanLotDK/Content/Wub/Platforms/Windows/Media/NotHello.wem",
+            "LEGOBatmanLotDK/Content/Textures/Hello.uasset"
+        ];
+        var mediaIndex = VoiceMediaIndex.Create(mediaPaths, 1024 * 1024)!;
+        foreach (var name in new[] { "Hello", "HELLO", "NotHello", "Missing", "Media/Hello" })
+            yield return (mediaIndex.Find(name).Order().SequenceEqual(mediaPaths.Where(p => p.EndsWith('/' + name + ".wem", StringComparison.OrdinalIgnoreCase)).Order()),
+                "indexed native voice lookup preserves exact suffix matching: " + name);
+        var privateA = "BCV_" + new string('a', 64);
+        var privateB = "BCV_" + new string('b', 64);
+        yield return (CharacterVoiceBuildService.LocalizedMediaMounts(mediaPaths, "Hello", privateA).SequenceEqual(
+            CharacterVoiceBuildService.LocalizedMediaMounts(mediaIndex.Find("Hello"), "Hello", privateA)) &&
+            CharacterVoiceBuildService.LocalizedMediaMounts(mediaIndex.Find("Hello"), "Hello", privateB).All(p => p.EndsWith(privateB + ".wem")),
+            "indexed native voice routes retain every language and each suit's private recording name");
+        var editedPaths = mediaIndex.Find("Hello"); editedPaths[0] = "edited";
+        yield return (mediaIndex.Find("Hello")[0] == mediaPaths[0] && VoiceMediaIndex.Create(mediaPaths, 1) is null,
+            "voice media index returns independent arrays and respects the build-local memory allowance");
         yield return (!new AppSettings().EnableSuitPreparationCache, "persistent preparation cache remains off by default");
         using (var scope = new BuildSharedAssets("test", "test", _ => { }))
         {
+            var scans = 0;
+            IEnumerable<string> MediaInventory() { scans++; foreach (var path in mediaPaths) yield return path; }
+            var indexedA = scope.VoiceMediaFiles("Hello", MediaInventory());
+            var indexedB = scope.VoiceMediaFiles("NotHello", MediaInventory());
+            yield return (scans == 1 && indexedA.Length == 3 && indexedB.Length == 1,
+                "build-local voice media inventory is enumerated once across different suit lookups");
             yield return (scope.VoiceExtractionDirectory("/Game/A") != scope.VoiceExtractionDirectory("/Game/B") &&
                 FileSystemPathUtil.IsWithinDirectory(scope.VoiceExtractionDirectory("/Game/A"), Path.GetTempPath()),
                 "parallel voice extraction uses isolated temporary roots outside long suit preparation paths");
@@ -83,7 +109,7 @@ internal static class BuildSharedAssetsRegressionChecks
             scope.VoiceExports("/Game/Mods/Private/Event", Decode);
             scope.VoiceExports("/Game/Mods/Private/Event", Decode);
             yield return (decodes == 3, "private voice exports bypass native memoization");
-            var scans = 0;
+            scans = 0;
             CharacterVoiceCatalogService.Snapshot Inspect()
             {
                 scans++;

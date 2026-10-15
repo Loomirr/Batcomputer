@@ -20,6 +20,23 @@ internal sealed class BuildSharedAssets : IDisposable
     private readonly Dictionary<string, Newtonsoft.Json.Linq.JArray> voiceExports = new(StringComparer.Ordinal);
     private CUE4Parse.FileProvider.DefaultFileProvider? voiceProvider;
     private int voiceExportReuses;
+    private VoiceMediaIndex? voiceMediaIndex;
+    private bool voiceMediaIndexAttempted;
+    private int voiceMediaLookups;
+
+    internal string[] VoiceMediaFiles(string media, IEnumerable<string> nativeFiles)
+    {
+        if (!voiceMediaIndexAttempted)
+        {
+            voiceMediaIndexAttempted = true;
+            voiceMediaIndex = VoiceMediaIndex.Create(nativeFiles, MaximumBytes - bytes);
+            if (voiceMediaIndex is not null) bytes += voiceMediaIndex.Bytes;
+        }
+        if (voiceMediaIndex is null)
+            return nativeFiles.Where(p => p.EndsWith('/' + media + ".wem", StringComparison.OrdinalIgnoreCase)).ToArray();
+        voiceMediaLookups++;
+        return voiceMediaIndex.Find(media);
+    }
 
     // Shipped containers only. Mutable authoring/verification overlays must use fresh providers.
     internal CUE4Parse.FileProvider.DefaultFileProvider NativeVoiceProvider()
@@ -248,6 +265,8 @@ internal sealed class BuildSharedAssets : IDisposable
     {
         Active.Value = previous;
         voiceProvider?.Dispose();
+        voiceMediaIndex = null;
+        log($"Shared voice media index: {voiceMediaLookups} lookups avoided full native-file scans; no profile assignments are cached.");
         voiceExports.Clear();
         log($"Shared voice routing: {voiceExportReuses} repeated native export decodes avoided; private routing and verification remain independent.");
         try { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }

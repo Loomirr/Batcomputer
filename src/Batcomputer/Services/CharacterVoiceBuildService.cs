@@ -130,6 +130,8 @@ internal static class CharacterVoiceBuildService
         Dictionary<string, byte[]>? sharedMedia = null)
     {
         if (string.IsNullOrEmpty(project.VoiceProfileId)) return null;
+        using var timing = new OperationTiming("Voice " + project.DisplayName, log);
+        var mediaElapsed = TimeSpan.Zero;
         var profile = Selected(project, workspace);
         CharacterVoiceLevelService.Validate(profile.GainDb);
         if (profile.Schema is not (1 or 2) || profile.Assignments.Count == 0 || profile.Assignments.Count > 10000 || profile.Assignments.Select(a => a.LineId).Distinct().Count() != profile.Assignments.Count)
@@ -185,6 +187,7 @@ internal static class CharacterVoiceBuildService
         // Prepare only the exact missing native routes, at most two converter processes at once.
         // Separate output roots prevent prefix-matching filters from racing over the same files.
         var prefetched = new System.Collections.Concurrent.ConcurrentDictionary<string, string>(StringComparer.Ordinal);
+        timing.Mark("profile and native discovery");
         if (BuildSharedAssets.Current is { } buildScope)
         {
             var missingSources = packages.Where(p => !buildScope.HasNativeSource(p) &&
@@ -199,6 +202,7 @@ internal static class CharacterVoiceBuildService
                     ?? throw new InvalidDataException("Could not extract native voice asset: " + package);
             });
         }
+        timing.Mark("native extraction");
         async Task<string> NativeFile(string package)
         {
             var extracted = ExtractedPackagePathService.ResolvePackageUasset(AppSettings.Current.EffectiveExtractedContentRoot(), package);
@@ -231,6 +235,9 @@ internal static class CharacterVoiceBuildService
         var library = new CharacterVoiceLibraryService(workspace);
         var encoded = new Dictionary<string, string>();var mediaFiles = new List<string>();var mediaMounts = new List<string>();
         var mountedMedia = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        IEnumerable<string> MediaFilesNamed(string media) => BuildSharedAssets.Current is { } shared
+            ? shared.VoiceMediaFiles(media, stock.Files.Keys)
+            : stock.Files.Keys.Where(p => p.EndsWith('/' + media + ".wem", StringComparison.OrdinalIgnoreCase));
         void RegisterMedia(CharacterVoiceLibraryService.Assignment assignment, string name)
         {
             var shared = Path.Combine(contentRoot, "Wub/Platforms/Windows/Media", name + ".wem");
@@ -239,7 +246,7 @@ internal static class CharacterVoiceBuildService
             // Imported recordings are explicit profile choices, not translated audio.
             // Preserve every observed native language lookup route for that target.
             // The filenames are suit-private; no native localization media is replaced.
-            foreach (var mount in LocalizedMediaMounts(stock.Files.Keys, assignment.Media, name))
+            foreach (var mount in LocalizedMediaMounts(MediaFilesNamed(assignment.Media), assignment.Media, name))
             {
                 if (!mountedMedia.Add(mount)) continue;
                 if (stock.Files.ContainsKey(mount)) throw new InvalidDataException("Native localized media collision.");
@@ -254,7 +261,7 @@ internal static class CharacterVoiceBuildService
             if (encoded.TryGetValue(key, out var existing)) { RegisterMedia(assignment, existing);return existing; }
             var levelIdentity = profile.GainDb == 0 ? "" : "|gain-v3:" + profile.GainDb.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
             var name = "BCV_" + Digest(identity.Owner + "|" + profile.Id + "|" + key + levelIdentity);
-            if (stock.Files.Keys.Any(f => f.EndsWith('/' + name + ".wem", StringComparison.OrdinalIgnoreCase))) throw new InvalidDataException("Native media collision.");
+            if (MediaFilesNamed(name).Any()) throw new InvalidDataException("Native media collision.");
             var output = Path.Combine(contentRoot, "Wub/Platforms/Windows/Media", name + ".wem");Directory.CreateDirectory(Path.GetDirectoryName(output)!);
             if (sharedMedia?.TryGetValue(name, out var reused) == true)
             {
@@ -314,7 +321,9 @@ internal static class CharacterVoiceBuildService
                     if (changes.All(a => a is null)) continue;
                     if (group.Any(l => !l.OwnSpeaker) || changes.Any(a => a is null) || changes.Select(a => (a!.ClipId, a.Silent)).Distinct().Count() != 1)
                         throw new InvalidDataException("Shared recording branches need the same choice on all linked lines: " + group.Key);
+                    var mediaClock = Stopwatch.StartNew();
                     names[group.Key] = await Media(changes[0]!);
+                    mediaElapsed += mediaClock.Elapsed;
                 }
                 // Explicit speaker and self-associated actor references follow the private identity.
                 // Default speakers stay contextual; partner actors and unrelated condition fields stay intact.
@@ -335,6 +344,8 @@ internal static class CharacterVoiceBuildService
             }
             expected[paths[package]] = wanted;
         }
+        timing.Mark("route preparation including media");
+        log($"Voice media subphase: {mediaElapsed.TotalSeconds:F2}s (included in route preparation).");
         var ownedBlueprints = new[] { project.TargetPackages.Playable, project.TargetPackages.Cutscene }.Where(p => !string.IsNullOrEmpty(p)).Distinct().ToArray();
         using var authoring = ModelPreviewService.MakeProvider(AppSettings.Current.EffectiveGamePaksRoot(), AppSettings.Current.EffectiveUsmapPath()!, [contentRoot]);
         foreach (var package in ownedBlueprints)
@@ -355,6 +366,7 @@ internal static class CharacterVoiceBuildService
             expected[package] = wanted;
             Rename(asset, redirects);voice.Value = new FName(asset, actor);asset.Write(file);
         }
+        timing.Mark("suit bindings");
         using var verify = ModelPreviewService.MakeProvider(AppSettings.Current.EffectiveGamePaksRoot(), AppSettings.Current.EffectiveUsmapPath()!, [contentRoot]);verify.ReadScriptData = true;
         foreach (var pair in expected)
         {
@@ -370,6 +382,7 @@ internal static class CharacterVoiceBuildService
         for (int i = 0; i < mediaFiles.Count; i++)
             if (mediaMounts[i].StartsWith("LEGOBatmanLotDK/Content/", StringComparison.Ordinal) &&
                 !verify.SaveAsset(mediaMounts[i]).SequenceEqual(File.ReadAllBytes(mediaFiles[i]))) throw new InvalidDataException("Staged media cannot be resolved.");
+        timing.Mark("routing and media verification");
         var report = Path.Combine(work, "voice-build.json");
         File.WriteAllText(report, JsonSerializer.Serialize(new { profile.Id, profile.Name, profile.GainDb, project.SlotId, Actor = actor, Assignments = profile.Assignments.Count, Silent = profile.Assignments.Count(a => a.Silent), PrivatePackages = paths, Media = mediaFiles.Select((f,i) => new { Path = mediaMounts[i], Sha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(f))) }), NativeReplacements = 0, RuntimeTested = false }, CharacterVoiceLibraryService.Json));
         log($"Voice: {profile.Assignments.Count} assignments, {encoded.Count} private recordings, {mediaFiles.Count} shared/localized media paths; no native replacements.");
