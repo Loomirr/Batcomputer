@@ -8,11 +8,31 @@ namespace Batcomputer;
 /// </summary>
 public partial class YourCharacterControl : UserControl
 {
+    private readonly Panel _textureImportPanel = new() { Dock = DockStyle.Bottom, Height = 76, Visible = false, Padding = new Padding(8) };
+    private readonly Label _textureImportLabel = new() { Dock = DockStyle.Fill, AutoEllipsis = true };
+    private readonly ProgressBar _textureImportProgress = new() { Dock = DockStyle.Bottom, Height = 8, Style = ProgressBarStyle.Marquee, MarqueeAnimationSpeed = 25 };
+
+    internal void ShowTextureImport(string name, string step, bool busy)
+    {
+        _textureImportLabel.Text = $"{name}\n{step}";
+        _textureImportProgress.Visible = busy;
+        _textureImportProgress.MarqueeAnimationSpeed = busy ? 25 : 0;
+        _textureImportPanel.Visible = true;
+        _textureImportPanel.SendToBack();
+    }
+
     public YourCharacterControl()
     {
         InitializeComponent();
         // Darker ground so the CardBg rows below read as separated cards.
         BackColor = Theme.PanelBg;
+        _textureImportPanel.BackColor = Theme.CardBg;
+        _textureImportLabel.ForeColor = Theme.OnDark;
+        _textureImportLabel.Font = Theme.Caption;
+        _textureImportPanel.Controls.Add(_textureImportLabel);
+        _textureImportPanel.Controls.Add(_textureImportProgress);
+        Controls.Add(_textureImportPanel);
+        _textureImportPanel.SendToBack();
         Padding = new Padding(6);
         _slotFlow.BackColor = Theme.PanelBg;
         _titleLabel.ForeColor = Theme.Gold;

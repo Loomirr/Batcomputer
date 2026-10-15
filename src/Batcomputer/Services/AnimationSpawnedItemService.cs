@@ -45,6 +45,11 @@ internal static class AnimationSpawnedItemService
             // Shared base controllers are often omitted by character-only extraction. Read them
             // on demand from shipped containers, excluding all installed author mods.
             if (!UnrealPathUtil.AssetName(package).StartsWith("ABP_", StringComparison.Ordinal)) return null;
+            return BuildSharedAssets.Current is { } shared
+                ? shared.NativeAnimationParent(package, () => Extract(package)) : Extract(package);
+        }
+        private string? Extract(string package)
+        {
             var slash = package.IndexOf('/', 1);
             if (slash < 0) return null;
             Directory.CreateDirectory(Output);
@@ -60,7 +65,14 @@ internal static class AnimationSpawnedItemService
         public void Dispose()
         {
             GameAssetRefreshService.TryDeleteCombinedContainerMount(_mount);
-            // Keep the small extracted files for diagnostics; no native file is ever written.
+            // Build-local shared sources have their own copies; do not accumulate one extraction
+            // scratch folder per suit. Standalone inspection retains its previous diagnostic behavior.
+            if (BuildSharedAssets.Current is not null && Directory.Exists(Output) && FileSystemPathUtil.IsWithinDirectory(Output, Path.GetTempPath()))
+            {
+                try { Directory.Delete(Output, recursive: true); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
         }
     }
     private static IEnumerable<PropertyData> Walk(IEnumerable<PropertyData> properties)

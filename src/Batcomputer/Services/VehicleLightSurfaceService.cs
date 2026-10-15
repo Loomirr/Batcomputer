@@ -153,13 +153,13 @@ internal static class VehicleLightSurfaceService
         values[slot] = new ObjectPropertyData(new FName(asset, slot.ToString())) { Value = reference }; materials.Value = values.ToArray(); materials.IsZero = false;
         component.CreateBeforeSerializationDependencies.Add(reference);
     }
-    internal static void Verify(UAsset asset, VehicleProject project)
+    internal static void Verify(UAsset asset, VehicleProject project, IReadOnlyDictionary<string, string>? aliases = null)
     {
         foreach (var binding in project.LightSurfaces)
         {
             var role = Roles.Single(r => r.Id == binding.Role); var lamp = Component(asset, role.Component);
             var reference = lamp.Data.OfType<ObjectPropertyData>().Single(p => p.Name.ToString() == "StaticMesh");
-            VehicleAssetService.Require(EquipmentAssetService.Reference(asset, reference)?.Package == MeshPackage(project, binding), "Light mesh binding did not survive staging.");
+            VehicleAssetService.Require(EquipmentAssetService.Reference(asset, reference)?.Package == CharacterAssetReuseService.Resolve(MeshPackage(project, binding), aliases), "Light mesh binding did not survive staging.");
             VehicleAssetService.Require(lamp.Data.OfType<ArrayPropertyData>().Single(p => p.Name.ToString() == "ComponentTags").Value.OfType<NamePropertyData>().Any(t => t.Value.ToString() == SocketName(binding)), "Light socket binding did not survive staging.");
             string? Material(NormalExport component, int slot) => EquipmentAssetService.Reference(asset,
                 component.Data.OfType<ArrayPropertyData>().Single(p => p.Name.ToString() == "OverrideMaterials").Value.OfType<ObjectPropertyData>().ElementAt(slot))?.Package;

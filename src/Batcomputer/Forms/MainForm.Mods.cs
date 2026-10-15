@@ -1513,7 +1513,8 @@ public sealed partial class MainForm
     internal async Task<HeadlessModBuildResult> RebuildAndBuildModForCliAsync(
         string projectRoot,
         string suitProjectPath,
-        string modProjectPath)
+        string modProjectPath,
+        bool replaySuit = true)
     {
         projectRoot = Path.GetFullPath(projectRoot);
         suitProjectPath = Path.GetFullPath(suitProjectPath);
@@ -1540,8 +1541,11 @@ public sealed partial class MainForm
         }
 
         _currentProject = suit;
-        AppendLog($"CLI acceptance build: replaying '{suit.DisplayName}' from its saved declaration.");
-        await RebuildGraftStageFromDeclarativeAsync(suit, projectRoot, persistProject: true);
+        if (replaySuit)
+        {
+            AppendLog($"CLI acceptance build: replaying '{suit.DisplayName}' from its saved declaration.");
+            await RebuildGraftStageFromDeclarativeAsync(suit, projectRoot, persistProject: true);
+        }
 
         AppendLog("CLI acceptance build: creating the mod release without installing it.");
         var built = await BuildModAsync(modProjectPath);
@@ -1930,6 +1934,11 @@ public sealed partial class MainForm
             var preparedSuits = new List<NativeSuitProject>();
             var voiceBuilds = new List<CharacterVoiceBuildService.Result>();
             var sharedVoiceMedia = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+            using var sharedAssets = new BuildSharedAssets(AppSettings.Current.EffectiveExtractedContentRoot(),
+                AppSettings.Current.EffectiveUsmapPath()!, AppendLog);
+            ModReleaseStep("Planning and preparing shared assets…");
+            await Task.Run(() => sharedAssets.Prepare(enabled.Select(e => svc.LoadProject(ModService.ResolveSuitProjectPath(e)))
+                .Where(p => p is not null).Cast<NativeSuitProject>()));
             // No-rebase means suits keep their own /Game roots in one pak - two suits
             // sharing a DCMD package path would silently overwrite on merge. Catch it.
             var seenDcmd = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -2071,14 +2080,15 @@ public sealed partial class MainForm
                 return false;
             }
 
-            ModReleaseStep("Sharing unchanged character-family assets…");
+            ModReleaseStep("Sharing unchanged character and vehicle assets…");
             var reuse = await Task.Run(() => CharacterAssetReuseService.Apply(stageContent, preparedSuits,
-                mappings ?? throw new InvalidDataException("Asset sharing requires mappings."), Path.Combine(outRoot, "AssetReuse"), projectRoot, AppendLog));
+                mappings ?? throw new InvalidDataException("Asset sharing requires mappings."), Path.Combine(outRoot, "AssetReuse"), projectRoot, AppendLog, vehicles));
             if (reuse.Packages > 0)
             {
                 var structural = new StageValidationService(stageContent, AppSettings.Current.EffectiveUsmapPath(), projectRoot);
                 var errors = preparedSuits.SelectMany(suit => structural.Validate(suit)).Where(f => f.Severity == "ERROR").ToArray();
                 if (errors.Length > 0) throw new InvalidDataException("Shared-asset stage validation failed: " + string.Join("; ", errors.Select(e => e.Message)));
+                foreach (var vehicle in vehicles) VehicleAssetService.VerifyPrepared(vehicle, stageContent, reuse.Aliases);
             }
 
             // Do this before retoc so a bad primary-asset row never produces a
@@ -2275,6 +2285,40 @@ public sealed partial class MainForm
             var contentRoot = preparationStage.ContentRoot;
             AppendLog($"  isolated preparation copy for '{suit.DisplayName}': {contentRoot}");
 
+            string? cacheKey = null;
+            if (AppSettings.Current.EnableSuitPreparationCache)
+            {
+                try
+                {
+                    ModReleaseStep("Checking reusable preparation assets…");
+                    await Task.Run(() => SuitPreparationCache.Trim(projectService.ProjectRoot, AppSettings.Current.SuitPreparationCacheLimitMb));
+                    cacheKey = await Task.Run(() => SuitPreparationCache.Fingerprint(authoringSuit, projectService.ProjectRoot, contentRoot));
+                    var destination = Path.Combine(preparationStage.RootDirectory, "CachedPreparation");
+                    var hit = await Task.Run(() => SuitPreparationCache.Restore(projectService.ProjectRoot, suit.SlotId, cacheKey, destination));
+                    if (hit is not null)
+                    {
+                        AppendLog($"  preparation cache hit: {suit.DisplayName} (release validation still runs).");
+                        return (new PreparedSuitForRelease
+                        {
+                            Project = hit.Receipt.Project,
+                            Stage = new PackagePreparationStage
+                            {
+                                RootDirectory = preparationStage.RootDirectory,
+                                CleanupBoundary = preparationStage.CleanupBoundary,
+                                ContentRoot = Path.Combine(hit.Root, "LEGOBatmanLotDK", "Content"),
+                            },
+                            VoiceBuild = hit.Receipt.Voice,
+                        }, "");
+                    }
+                    AppendLog($"  preparation cache miss: {suit.DisplayName}.");
+                }
+                catch (Exception ex)
+                {
+                    cacheKey = null;
+                    AppendLog("  preparation cache unavailable; continuing a full preparation: " + ex.Message);
+                }
+            }
+
             if (EnsureCrossKindHeadGraftHidesBaseHead(suit))
             {
                 AppendLog($"  applied Head:0 removal for '{suit.DisplayName}' cross-kind head graft in the disposable preparation copy.");
@@ -2383,6 +2427,25 @@ public sealed partial class MainForm
             {
                 throw new InvalidOperationException(
                     "required staged assets are missing: " + string.Join(", ", missing));
+            }
+
+            if (cacheKey is not null)
+            {
+                try
+                {
+                    // Recheck the unmodified authoring inputs, not the working copy we just
+                    // patched. Never retain a mixed snapshot if an input changed during preparation.
+                    var currentKey = await Task.Run(() => SuitPreparationCache.Fingerprint(authoringSuit, projectService.ProjectRoot,
+                        CurrentPackageContentRoot(authoringSuit, projectService.ProjectRoot)));
+                    if (currentKey == cacheKey)
+                    {
+                        var stored = await Task.Run(() => SuitPreparationCache.Store(projectService.ProjectRoot, cacheKey,
+                            suit, preparationStage.RootDirectory, voiceBuild, AppSettings.Current.SuitPreparationCacheLimitMb));
+                        AppendLog(stored ? "  reusable preparation saved within the cache limit." : "  preparation exceeds cache allowance; not retained.");
+                    }
+                    else AppendLog("  preparation inputs changed; cache entry not retained.");
+                }
+                catch (Exception ex) { AppendLog("  build succeeded without retaining its preparation cache: " + ex.Message); }
             }
 
             return (new PreparedSuitForRelease

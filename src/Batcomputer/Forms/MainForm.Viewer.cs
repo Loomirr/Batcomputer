@@ -103,13 +103,13 @@ public sealed partial class MainForm
         var heading = new Label { Text = "CHARACTER LIBRARY", AutoSize = true, Font = Theme.Eyebrow,
             ForeColor = Theme.Gold, Margin = new Padding(2, 6, 0, 14) };
         left.Controls.Add(heading, 0, 0);
-        // Segmented source switch: three flat buttons that behave as one control.
+        // Wrap source buttons so all categories remain visible in the narrow sidebar.
         _viewerSources = new FlowLayoutPanel
         {
-            Dock = DockStyle.Top, Height = 30, FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false, BackColor = Color.Transparent, Margin = new Padding(0),
+            Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true, BackColor = Color.Transparent, Margin = new Padding(0),
         };
-        foreach (var name in new[] { "My library", "Playable", "Cutscene" })
+        foreach (var name in new[] { "My library", "All game", "Playable", "Cutscene", "Quest", "Other" })
         {
             var b = new Button
             {
@@ -127,6 +127,20 @@ public sealed partial class MainForm
             _viewerSources.Controls.Add(b);
         }
         left.Controls.Add(_viewerSources, 0, 1);
+        var npcTest = new Button { Text = "NPC test…", Width = 79, Height = 26, FlatStyle = FlatStyle.Flat, Font = Theme.Caption,
+            BackColor = Theme.PanelBg, ForeColor = Theme.OnDarkMuted, Margin = new Padding(0, 0, 2, 0) };
+        npcTest.Click += (_, _) =>
+        {
+            if (_viewerList?.SelectedItem is not CharacterCatalogService.Entry { Origin: CharacterCatalogService.Source.Quest } entry)
+            { Dialog.Info(this, "Choose a Quest NPC", "Select a base-game Quest character first. This experimental tool builds material-only NPC replacers, not new playable characters."); return; }
+            var package = UnrealPathUtil.NormalizePackagePath(entry.ObjectPath);
+            const string gameContentPrefix = "LEGOBatmanLotDK/Content/";
+            if (package.StartsWith(gameContentPrefix, StringComparison.OrdinalIgnoreCase)) package = "/Game/" + package[gameContentPrefix.Length..];
+            if (!package.StartsWith("/Game/", StringComparison.Ordinal))
+            { Dialog.Info(this, "Base-game test only", "DLC NPC replacement is not supported by this prototype."); return; }
+            using var form = new NpcAppearanceTestForm(package); form.ShowDialog(this);
+        };
+        _viewerSources.Controls.Add(npcTest);
         SyncViewerSourceButtons();
 
         _viewerSearch = new SearchBox { Dock = DockStyle.Top, Height = 34, Margin = new Padding(0, 10, 0, 8), AccessibleName = "Search characters and suits" };
@@ -376,27 +390,29 @@ public sealed partial class MainForm
         {
             "Playable" => CharacterCatalogService.Source.Playable,
             "Cutscene" => CharacterCatalogService.Source.Cutscene,
+            "Quest" => CharacterCatalogService.Source.Quest,
+            "Other" => CharacterCatalogService.Source.Other,
+            "All game" => CharacterCatalogService.Source.Other,
             _ => CharacterCatalogService.Source.CustomSuit,
         };
         var needle = _viewerSearch?.Text?.Trim() ?? string.Empty;
+        bool InSource(CharacterCatalogService.Entry entry) => _viewerSource == "All game"
+            ? entry.Origin != CharacterCatalogService.Source.CustomSuit : entry.Origin == source;
         if (_viewerFamily is not null) _viewerFamily.Visible = source != CharacterCatalogService.Source.CustomSuit;
         if (_viewerFamily is not null && _viewerFamilySource != _viewerSource)
         {
             _viewerFamilySource = _viewerSource; // Set before selection events recurse.
             _viewerFamily.Items.Clear();
             _viewerFamily.Items.Add("All characters");
-            foreach (var family in _viewerEntries.Where(e => e.Origin == source).Select(e => e.Name.Split(' ', 2)[0]).Distinct().OrderBy(n => n))
+            foreach (var family in _viewerEntries.Where(InSource).Select(e => e.Name.Split(' ', 2)[0]).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(n => n))
                 _viewerFamily.Items.Add(family);
             _viewerFamily.SelectedIndex = 0;
         }
         var familyFilter = source != CharacterCatalogService.Source.CustomSuit && _viewerFamily?.SelectedIndex > 0 ? _viewerFamily.SelectedItem?.ToString() : null;
         var selected = _viewerList.SelectedItem as CharacterCatalogService.Entry;
-        var matches = _viewerEntries.Where(e => e.Origin == source)
-            .Where(e => familyFilter is null || e.Name.Split(' ', 2)[0] == familyFilter)
-            .Where(e => needle.Length == 0 || e.Name.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
-                CharacterBrowserList.DisplayName(e.Name).Contains(needle, StringComparison.OrdinalIgnoreCase) ||
-                e.ProjectId.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
-                e.CharacterId.Contains(needle, StringComparison.OrdinalIgnoreCase)).ToList();
+        var matches = _viewerEntries.Where(InSource)
+            .Where(e => familyFilter is null || e.Name.Split(' ', 2)[0].Equals(familyFilter, StringComparison.OrdinalIgnoreCase))
+            .Where(e => CharacterCatalogService.MatchesSearch(e, needle)).ToList();
 
         _viewerList.BeginUpdate();
         _viewerList.Items.Clear();

@@ -45,6 +45,61 @@ overwritten. These are Batcomputer packaging changes and do not require a runtim
 
 ![Successful build check](../assets/screenshots/release-preflight-passed.jpg){ .bc-doc-shot loading=lazy }
 
+## Repeat builds and disk space
+
+At the start of a mod build, Batcomputer plans repeated custom held-item mesh work across the
+enabled suits. Matching geometry, transforms and material-slot layouts are prepared once.
+Each suit receives an independent cooked mesh with its own material bindings; abilities, parts,
+faces and other suit overrides still follow their individual recipes and validation.
+Native voice-routing packages and animation controllers needed by animation-item edits are also
+extracted once on demand and reused across suits during that build. Only unchanged shipped sources
+are pooled; suit-local voices and animation edits remain separate. The central native asset reader
+also reuses unmodified extracted input bytes across asset classes, while parsing independent objects
+for every consumer. Repeated native voice discovery is reused, but each suit's current profile and
+assignments are still checked. Mutable suit stages never enter the native-input pool.
+
+Before packaging, character-family and enabled-vehicle output sharing compares complete cooked payloads and dependencies.
+It can share matching alternate versions across suits even when the base character's version differs.
+Texture or material differences propagate through the comparison, so matching names alone are never
+enough to merge an asset.
+
+| Asset group | Sharing behavior |
+| --- | --- |
+| Static/skeletal meshes, textures, material instances, skeletons and physics assets | Identical same-name packages can share within the character family. Different geometry, texture pixels, bindings or bulk payloads remain separate. |
+| Animation sequences, montages, blend spaces and animation/layer sets | Identical cooked data and dependencies can share. Protected animation-library bundles retain their original identities. |
+| Voices | Inherited profiles already reuse the same routing paths and encoded media; different profiles and assignments remain independent. |
+| Character/animation Blueprints, abilities, roster/UI records and other identity-sensitive or unknown classes | Native input reads can be reused; generated runtime identities are not merged. |
+| Vehicles | Eligible same-name assets can share across enabled vehicles, including vehicle-only mods. Body/summon rigs, material bindings and bulk payloads must match. Vehicle Blueprints, metadata, progression, ownership, seat/part transforms and boost/exhaust choices remain independent. |
+
+The build's `AssetReuse/reuse-report.json` records aliases, bytes removed, shared classes and the
+policy for each remaining class. This is conservative sharing, not a promise that every package
+can be merged or every asset type is cooked only once.
+Vehicle settings are verified again against the shared stage without changing the saved vehicle project.
+Different package/object names are kept separate; the tool does not guess that similarly named models
+or materials are interchangeable. Native vehicle input reads use the same bounded build-local pool.
+
+The log reports shared cooks, placements, native reads, donor scans and avoided extraction requests.
+The retained shared payload (memory and temporary source files) is capped at 64 MiB and removed when the build finishes or fails; it is not retained
+between builds. Assets beyond that allowance follow the normal independent preparation path.
+
+Build caching is **off by default**. Enable **Reuse unchanged suit preparation** in Settings to
+reuse unchanged suit preparation between mod builds. When enabled, Batcomputer keeps one compressed
+snapshot per suit, with a **256 MB total limit per workspace** by default. Older snapshots are
+evicted as needed; a preparation larger than the allowance is built normally without being cached.
+This limit covers the preparation cache, not your source assets, required build working files,
+game extracts or finished mod packages.
+
+Source checks still run before reuse, and final validation, shared-asset processing, registry
+generation and packaging run on every build. Changed recipes, sources, game/extraction inventories,
+mappings, settings or application code invalidate the relevant cached preparation. Missing or
+corrupt cache files fall back to normal preparation.
+
+Under **Settings → General → Build storage**, change the limit, turn reuse off, or choose
+**Clear build cache**. Clearing it does not delete projects or built mods; the next build simply
+prepares those suits again. The build log reports cache hits and misses. First builds are not
+expected to be faster from the persistent cache alone. Vehicles still run their preparation and
+validation steps; their eligible duplicate outputs are shared afterward.
+
 ## Test matrix
 
 Test at least:

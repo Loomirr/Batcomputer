@@ -16,6 +16,8 @@ public sealed partial class MaterialWizard : AdaptiveForm
     private readonly TextBox _nameText = new();
     private readonly DataGridView _grid = new();
     private readonly ThemedDropDown _generatedTextureCombo = new();
+    private readonly ThemedDropDown _textureSourceCombo = new();
+    private HashSet<string>? _suitTexturePackages;
     private readonly Label _status = new();
     private readonly Label _titleLabel = new();
     private readonly List<GeneratedTextureEntry> _generatedTextures = new();
@@ -85,11 +87,13 @@ public sealed partial class MaterialWizard : AdaptiveForm
         string modFolder,
         string suggestedName,
         IEnumerable<GeneratedTextureEntry>? generatedTextures = null,
-        MaterialTemplateCatalogService.Target? templateTarget = null)
+        MaterialTemplateCatalogService.Target? templateTarget = null,
+        IEnumerable<string>? suitTexturePackages = null)
     {
         _projectRoot = projectRoot;
         _modFolder = string.IsNullOrWhiteSpace(modFolder) ? "Suit" : modFolder;
         _templateTarget = templateTarget;
+        _suitTexturePackages = suitTexturePackages?.ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (generatedTextures is not null)
         {
             _generatedTextures.AddRange(generatedTextures
@@ -115,8 +119,8 @@ public sealed partial class MaterialWizard : AdaptiveForm
         Controls.Clear();
 
         Text = "Batcomputer - Material forge";
-        ClientSize = new Size(width, 590);
-        MinimumSize = new Size(720, 560);
+        ClientSize = new Size(width, 656);
+        MinimumSize = new Size(720, 626);
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
         MaximizeBox = true;
@@ -188,19 +192,29 @@ public sealed partial class MaterialWizard : AdaptiveForm
 
         var textureCard = new RoundedPanel
         {
-            Left = padding, Top = 218, Width = innerWidth, Height = 84,
+            Left = padding, Top = 218, Width = innerWidth, Height = 150,
             BackColor = Theme.CardBg, BorderColor = Theme.LineSoft, CornerRadius = Theme.RadiusSm
         };
         textureCard.Controls.Add(MakeFieldLabel("GENERATED TEXTURE", 14, 13, innerWidth - 28));
-        var textureTools = new TableLayoutPanel { Name = "TextureAssignmentTools", Left = 14, Top = 31, Width = innerWidth - 28, Height = 36,
+        var ownCount = _generatedTextures.Count(IsSuitTexture);
+        _textureSourceCombo.SetBounds(14, 31, innerWidth - 28, 30);
+        _textureSourceCombo.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        _textureSourceCombo.Items.Add($"This suit ({ownCount})");
+        _textureSourceCombo.Items.Add($"Base character · shared ({_generatedTextures.Count - ownCount})");
+        _textureSourceCombo.SelectedIndex = ownCount > 0 || _generatedTextures.Count == 0 ? 0 : 1;
+        _textureSourceCombo.SelectedIndexChanged += (_, _) => PopulateGeneratedTextureCombo();
+        textureCard.Controls.Add(_textureSourceCombo);
+        var textureTools = new TableLayoutPanel { Name = "TextureAssignmentTools", Left = 14, Top = 109, Width = innerWidth - 28, Height = 36,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right, ColumnCount = 5, RowCount = 1, Margin = Padding.Empty };
         textureTools.ColumnStyles.Add(new(SizeType.Percent, 100));
         textureTools.RowStyles.Add(new(SizeType.Percent, 100));
         for (var i = 0; i < 4; i++) textureTools.ColumnStyles.Add(new(SizeType.AutoSize));
-        _generatedTextureCombo.Dock = DockStyle.Fill;
+        _generatedTextureCombo.SetBounds(14, 69, innerWidth - 28, 34);
+        _generatedTextureCombo.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _generatedTextureCombo.Placeholder = "Select generated texture";
+        _generatedTextureCombo.SelectedIndexChanged += (_, _) => UpdateTextureDetails();
         PopulateGeneratedTextureCombo();
-        textureTools.Controls.Add(_generatedTextureCombo, 0, 0); textureCard.Controls.Add(textureTools);
+        textureCard.Controls.Add(_generatedTextureCombo); textureCard.Controls.Add(textureTools);
         var useTexture = new Button
         {
             Text = "Use selected", AutoSize = true, MinimumSize = new(90, 34), Dock = DockStyle.Fill
@@ -236,7 +250,7 @@ public sealed partial class MaterialWizard : AdaptiveForm
 
         _parametersCard = new RoundedPanel
         {
-            Left = padding, Top = 314, Width = innerWidth, Height = 210,
+            Left = padding, Top = 380, Width = innerWidth, Height = 210,
             BackColor = Theme.CardBg, BorderColor = Theme.LineSoft, CornerRadius = Theme.RadiusSm
         };
         _parametersCard.Controls.Add(MakeFieldLabel("MATERIAL PARAMETERS", 14, 13, innerWidth - 300));
@@ -409,14 +423,14 @@ public sealed partial class MaterialWizard : AdaptiveForm
         }
 
         const int padding = 18;
-        const int parametersTopWithoutHelpers = 314;
-        const int parametersTopWithHelpers = 400;
+        const int parametersTopWithoutHelpers = 380;
+        const int parametersTopWithHelpers = 466;
         const int bottomGap = 12;
         var innerWidth = Math.Max(120, ClientSize.Width - padding * 2);
         var parametersTop = _faceHelpersEnabled ? parametersTopWithHelpers : parametersTopWithoutHelpers;
         var footerTop = Math.Max(parametersTop + 130, ClientSize.Height - DialogActionFooter.StandardHeight);
 
-        _faceHelpersCard.SetBounds(padding, 314, innerWidth, 74);
+        _faceHelpersCard.SetBounds(padding, 380, innerWidth, 74);
         _parametersCard.SetBounds(
             padding,
             parametersTop,
@@ -594,8 +608,11 @@ public sealed partial class MaterialWizard : AdaptiveForm
 
     private void PopulateGeneratedTextureCombo()
     {
+        var selected = SelectedGeneratedTexture()?.PackagePath;
+        _generatedTextureCombo.SelectedIndex = -1;
         _generatedTextureCombo.Items.Clear();
-        if (_generatedTextures.Count == 0)
+        var textures = _generatedTextures.Where(t => IsSuitTexture(t) == (_textureSourceCombo.SelectedIndex != 1)).ToList();
+        if (textures.Count == 0)
         {
             _generatedTextureCombo.Items.Add(new GeneratedTextureChoice(null));
             _generatedTextureCombo.SelectedIndex = 0;
@@ -604,11 +621,22 @@ public sealed partial class MaterialWizard : AdaptiveForm
         }
 
         _generatedTextureCombo.Enabled = true;
-        foreach (var texture in _generatedTextures)
+        foreach (var texture in textures)
         {
             _generatedTextureCombo.Items.Add(new GeneratedTextureChoice(texture));
         }
-        _generatedTextureCombo.SelectedIndex = 0;
+        var index = textures.FindIndex(t => string.Equals(t.PackagePath, selected, StringComparison.OrdinalIgnoreCase));
+        _generatedTextureCombo.SelectedIndex = index < 0 ? 0 : index;
+        UpdateTextureDetails();
+    }
+
+    private bool IsSuitTexture(GeneratedTextureEntry texture) => _suitTexturePackages is null || _suitTexturePackages.Contains(texture.PackagePath);
+
+    private void UpdateTextureDetails()
+    {
+        var t = SelectedGeneratedTexture();
+        _toolTips.SetToolTip(_generatedTextureCombo, t is null ? "No textures in this source." :
+            $"{t.DisplayName}\n{t.CookWidth} × {t.CookHeight} · {t.CookPixelFormat}\n{t.PackagePath}\n{(IsSuitTexture(t) ? "Owned by this suit" : "Shared from the base character; reused without copying")}");
     }
 
     private GeneratedTextureEntry? SelectedGeneratedTexture() =>
@@ -1726,16 +1754,15 @@ public sealed partial class MaterialWizard : AdaptiveForm
         {
             if (Texture is null)
             {
-                return "No generated textures on this suit";
+                return "No textures in this source";
             }
 
             var name = string.IsNullOrWhiteSpace(Texture.DisplayName)
                 ? UnrealPathUtil.AssetName(Texture.PackagePath)
                 : Texture.DisplayName;
-            var cook = Texture.CookWidth > 0 && Texture.CookHeight > 0 && !string.IsNullOrWhiteSpace(Texture.CookPixelFormat)
-                ? $"{Texture.CookWidth}x{Texture.CookHeight} {Texture.CookPixelFormat}"
-                : Texture.Kind;
-            return $"{name} - {cook}";
+            name = System.Text.RegularExpressions.Regex.Replace(name, "^T_", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            name = System.Text.RegularExpressions.Regex.Replace(name.Replace('_', ' '), "(?<=[a-z0-9])(?=[A-Z])", " ");
+            return name.Trim();
         }
     }
 }

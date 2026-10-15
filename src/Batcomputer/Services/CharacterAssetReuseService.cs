@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Security.Cryptography;
 using UAssetAPI;
 using UAssetAPI.PropertyTypes.Objects;
 using UAssetAPI.PropertyTypes.Structs;
@@ -9,17 +10,74 @@ using UAssetAPI.Unversioned;
 
 namespace Batcomputer;
 
-/// <summary>Conservative, aggregate-stage-only sharing of unchanged character-family assets.
+/// <summary>Conservative, aggregate-stage-only sharing of unchanged character-family and vehicle assets.
 /// Authoring recipes and their independent editable sources are never modified.</summary>
 internal static class CharacterAssetReuseService
 {
     internal sealed record Result(int Packages, long Bytes, IReadOnlyDictionary<string, string> Aliases);
     private static readonly string[] Extensions = [".uasset", ".uexp", ".ubulk", ".uptnl"];
     private static readonly HashSet<string> Shareable = new(StringComparer.Ordinal)
-    { "StaticMesh", "SkeletalMesh", "Texture2D", "MaterialInstanceConstant", "AnimSequence", "AnimMontage", "Skeleton", "PhysicsAsset" };
+    { "StaticMesh", "SkeletalMesh", "Texture2D", "MaterialInstanceConstant", "AnimSequence", "AnimMontage", "Skeleton", "PhysicsAsset",
+      "BlendSpace", "BlendSpace1D", "TTAnimSet", "TTLayerSet" };
     private sealed record Candidate(string Package, string File, string Class);
 
-    internal static Result Apply(string content, IList<NativeSuitProject> projects, Usmap mappings, string work, string workspace, Action<string> log)
+    internal static bool SupportsSharedPayload(string type) => Shareable.Contains(type);
+    internal static string Policy(string type) => Shareable.Contains(type)
+        ? "Share only byte-equivalent cooked payloads with equivalent dependencies; unique edits stay separate"
+        : type.StartsWith("Wub", StringComparison.Ordinal)
+            ? "Profile-owned routing; inherited profiles already merge at the same path; encoded media reused separately"
+            : "Reuse immutable native inputs only; keep runtime/package identity separate";
+
+    internal static object[] Inventory(string content, Usmap mappings) => Directory.EnumerateFiles(content, "*.uasset", SearchOption.AllDirectories)
+        .Select(file =>
+        {
+            var asset = new UAsset(file, EngineVersion.VER_UE5_6, mappings,
+                CustomSerializationFlags.SkipParsingExports | CustomSerializationFlags.SkipPreloadDependencyLoading);
+            var leaf = Path.GetFileNameWithoutExtension(file);
+            var type = asset.Exports.FirstOrDefault(e => e.ObjectName.ToString() == leaf)?.GetExportClassType()?.ToString()
+                ?? (asset.Exports.Any(e => e.GetExportClassType()?.ToString() == "BlueprintGeneratedClass") ? "BlueprintGeneratedClass" : "Other");
+            return (Type: type, Bytes: Extensions.Sum(ext => File.Exists(Path.ChangeExtension(file, ext)) ? new FileInfo(Path.ChangeExtension(file, ext)).Length : 0L));
+        }).GroupBy(p => p.Type).OrderBy(g => g.Key, StringComparer.Ordinal)
+        .Select(g => (object)new { Class = g.Key, Packages = g.Count(), Bytes = g.Sum(p => p.Bytes),
+            Policy = Policy(g.Key) }).ToArray();
+
+    // Refine equivalence groups rather than comparing everything only with the definition.
+    // A split dependency can split its consumers on the next round; groups never merge back.
+    internal static Dictionary<string, string> Refine(IEnumerable<string[]> initial,
+        Func<string, string, IReadOnlyDictionary<string, string>, string> fingerprint)
+    {
+        var groups = initial.Where(g => g.Length > 1).ToArray();
+        while (true)
+        {
+            var aliases = groups.SelectMany(g => g.Skip(1).Select(p => (p, g[0])))
+                .ToDictionary(p => p.p, p => p.Item2, StringComparer.Ordinal);
+            var next = groups.SelectMany(g => g.GroupBy(p => fingerprint(p, g[0], aliases), StringComparer.Ordinal)
+                .Select(part => part.ToArray())).Where(g => g.Length > 1).ToArray();
+            if (next.Sum(g => g.Length - 1) == aliases.Count) return aliases;
+            groups = next;
+        }
+    }
+
+    private static string Fingerprint(string source, string normalized)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        foreach (var extension in Extensions)
+        {
+            var file = Path.ChangeExtension(extension is ".uasset" or ".uexp" ? normalized : source, extension);
+            hash.AppendData(Encoding.UTF8.GetBytes(extension));
+            hash.AppendData([File.Exists(file) ? (byte)1 : (byte)0]);
+            if (!File.Exists(file)) continue;
+            using var stream = File.OpenRead(file);
+            hash.AppendData(BitConverter.GetBytes(stream.Length));
+            var buffer = new byte[65536];
+            int count;
+            while ((count = stream.Read(buffer)) > 0) hash.AppendData(buffer.AsSpan(0, count));
+        }
+        return Convert.ToHexString(hash.GetHashAndReset());
+    }
+
+    internal static Result Apply(string content, IList<NativeSuitProject> projects, Usmap mappings, string work, string workspace, Action<string> log,
+        IReadOnlyList<VehicleProject>? vehicles = null)
     {
         content = Path.GetFullPath(content);
         work = Path.GetFullPath(work);
@@ -31,18 +89,24 @@ internal static class CharacterAssetReuseService
         var immutable = projects.SelectMany(p => p.GameplayAnimationGraphs).SelectMany(g => GameplayAnimationGraphService.Load(workspace, g).Packages)
             .Select(p => p.Package).ToHashSet(StringComparer.Ordinal);
         var candidates = new Dictionary<string, Candidate>(StringComparer.Ordinal);
-        foreach (var family in projects.Where(p => p.CustomCharacter is not null).GroupBy(p => p.CustomCharacter!.DefinitionSlotId, StringComparer.Ordinal))
+        var groups = new List<string[]>();
+        var scopes = projects.Where(p => p.CustomCharacter is not null).GroupBy(p => p.CustomCharacter!.DefinitionSlotId, StringComparer.Ordinal)
+            .Where(g => g.Count() > 1 && g.Any(p => p.CustomCharacter!.IsDefinition))
+            .Select(g => g.OrderByDescending(p => p.CustomCharacter!.IsDefinition).ThenBy(p => p.SlotId, StringComparer.Ordinal)
+                .SelectMany(DeclaredRoots).Distinct(StringComparer.Ordinal).ToArray()).ToList();
+        // Only enabled vehicles supplied by this aggregate build. No scanning unrelated projects,
+        // no character-definition requirement, and no merging of primary/runtime owner assets.
+        var vehicleRoots = (vehicles ?? []).OrderBy(v => v.Id, StringComparer.Ordinal)
+            .Select(VehicleProjectService.ContentRoot).Distinct(StringComparer.Ordinal).ToArray();
+        if (vehicleRoots.Length > 0) scopes.Add(vehicleRoots);
+        foreach (var roots in scopes)
         {
-            var members = family.OrderByDescending(p => p.CustomCharacter!.IsDefinition).ThenBy(p => p.SlotId, StringComparer.Ordinal).ToArray();
-            if (members.Length < 2 || !members.Any(p => p.CustomCharacter!.IsDefinition)) continue;
-            var primary = new Dictionary<(string Class, string Leaf), Candidate>();
+            var primary = new Dictionary<(string Class, string Leaf), List<string>>();
             var visited = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var member in members)
+            // Mesh tooling and immutable libraries can own a different mod root
+            // from the receiving Blueprint. Include declared roots only.
+            foreach (var root in roots)
             {
-                // Mesh tooling and immutable libraries can own a different mod root
-                // from the receiving character Blueprint. Include declared roots only.
-                foreach (var root in DeclaredRoots(member))
-                {
                 var folder = Path.Combine(content, root[6..]);
                 if (!Directory.Exists(folder)) continue;
                 foreach (var file in Directory.EnumerateFiles(folder, "*.uasset", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
@@ -50,48 +114,51 @@ internal static class CharacterAssetReuseService
                     if (!visited.Add(file)) continue;
                     // No Blueprint, ability set, input/tag state or primary-asset identity is eligible.
                     var asset = Read(file);
-                    var classes = asset.Exports.Select(e => e.GetExportClassType()?.ToString()).Where(c => c is not null && Shareable.Contains(c)).Distinct().ToArray();
-                    if (classes.Length != 1) continue;
+                    var leaf = Path.GetFileNameWithoutExtension(file);
+                    var main = asset.Exports.Where(e => e.ObjectName.ToString() == leaf).ToArray();
+                    var assetClass = main.Length == 1 ? main[0].GetExportClassType()?.ToString() : null;
+                    if (assetClass is null || !Shareable.Contains(assetClass) ||
+                        asset.Exports.Any(e => e.GetExportClassType()?.ToString() is "BlueprintGeneratedClass" or "AnimBlueprintGeneratedClass")) continue;
                     var package = "/Game/" + Path.GetRelativePath(content, file)[..^7].Replace('\\', '/');
-                    if (immutable.Contains(package)) continue;
-                    var candidate = new Candidate(package, file, classes[0]!);
+                    if (immutable.Contains(package) || candidates.ContainsKey(package)) continue;
+                    var candidate = new Candidate(package, file, assetClass);
                     candidates[package] = candidate;
                     var key = (candidate.Class, Path.GetFileNameWithoutExtension(file));
-                    if (primary.TryGetValue(key, out var parent)) aliases[package] = parent.Package;
-                    else primary.Add(key, candidate);
-                }
+                    if (!primary.TryGetValue(key, out var peers)) primary.Add(key, peers = []);
+                    peers.Add(package);
                 }
             }
+            groups.AddRange(primary.Values.Where(g => g.Count > 1).Select(g => g.ToArray()));
         }
+        var protectedPackages = new HashSet<string>(StringComparer.Ordinal);
         foreach (var package in immutable)
             foreach (var extension in Extensions.Take(2))
             {
                 var file = Path.ChangeExtension(FileFor(package), extension);
                 if (!File.Exists(file)) continue;
                 var data = File.ReadAllBytes(file);
-                foreach (var old in aliases.Keys.Where(old => ContainsPath(data, old)).ToArray()) aliases.Remove(old);
+                foreach (var old in candidates.Keys.Where(old => ContainsPath(data, old))) protectedPackages.Add(old);
             }
         // A material is shareable only if its texture bindings also remain equivalent.
         // Start with all proposed aliases, then reject differences to a fixed point.
-        bool changed;
-        do
+        var compare = Path.Combine(work, "Compare", "Normalized.uasset");
+        Directory.CreateDirectory(Path.GetDirectoryName(compare)!);
+        aliases = Refine(groups.Select(g => g.Where(p => !protectedPackages.Contains(p)).ToArray()), (package, canonical, proposed) =>
         {
-            changed = false;
-            foreach (var pair in aliases.ToArray())
-            {
-                var left = Read(candidates[pair.Key].File);
-                var right = Read(candidates[pair.Value].File);
-                Rewrite(left, aliases); Rewrite(right, aliases);
-                left.FolderName = new FString(pair.Value); right.FolderName = new FString(pair.Value);
-                var leftFile = Path.Combine(work, "Compare", "Child.uasset");
-                var rightFile = Path.Combine(work, "Compare", "Parent.uasset");
-                Directory.CreateDirectory(Path.GetDirectoryName(leftFile)!);
-                left.Write(leftFile); right.Write(rightFile);
-                if (!EquivalentFamily(candidates[pair.Key].File, candidates[pair.Value].File, leftFile, rightFile))
-                { aliases.Remove(pair.Key); changed = true; }
-            }
-        } while (changed);
-        if (aliases.Count == 0) return new(0, 0, aliases);
+            var source = candidates[package].File;
+            var asset = Read(source);
+            Rewrite(asset, proposed);
+            asset.FolderName = new FString(canonical);
+            foreach (var ext in Extensions) File.Delete(Path.ChangeExtension(compare, ext));
+            asset.Write(compare);
+            return Fingerprint(source, compare);
+        });
+        if (aliases.Count == 0)
+        {
+            File.WriteAllText(Path.Combine(work, "reuse-report.json"), JsonSerializer.Serialize(new { Packages = 0, VehiclePackages = 0, Bytes = 0, Aliases = aliases,
+                AssetTypes = Inventory(content, mappings) }, new JsonSerializerOptions { WriteIndented = true }));
+            return new(0, 0, aliases);
+        }
 
         // Build all replacements before changing any staged package. The surrounding
         // release transaction discards this disposable stage if a write/validation fails.
@@ -100,7 +167,8 @@ internal static class CharacterAssetReuseService
         {
             var package = "/Game/" + Path.GetRelativePath(content, file)[..^7].Replace('\\', '/');
             if (aliases.ContainsKey(package)) continue;
-            if (!aliases.Keys.Any(old => ContainsPath(File.ReadAllBytes(file), old))) continue;
+            var header = File.ReadAllBytes(file);
+            if (!aliases.Keys.Any(old => ContainsPath(header, old))) continue;
             // Object imports use indexed FNames. Keep opaque Blueprint exports and
             // bytecode byte-for-byte rather than requiring their reflected schemas.
             var asset = new UAsset(file, EngineVersion.VER_UE5_6, mappings,
@@ -141,8 +209,12 @@ internal static class CharacterAssetReuseService
             projects[i] = node.Deserialize<NativeSuitProject>()!;
             projects[i].ReleaseAssetAliases = aliases;
         }
-        File.WriteAllText(Path.Combine(work, "reuse-report.json"), JsonSerializer.Serialize(new { Packages = aliases.Count, Bytes = bytes, Aliases = aliases }, new JsonSerializerOptions { WriteIndented = true }));
-        log($"Shared character assets: reused {aliases.Count} unchanged packages ({bytes:N0} staged bytes). Suit-specific edits and runtime owners remain separate.");
+        var vehiclePackages = aliases.Keys.Count(package => vehicleRoots.Any(root => package.StartsWith(root + "/", StringComparison.Ordinal)));
+        File.WriteAllText(Path.Combine(work, "reuse-report.json"), JsonSerializer.Serialize(new { Packages = aliases.Count, VehiclePackages = vehiclePackages, Bytes = bytes, Aliases = aliases,
+            SharedTypes = aliases.Keys.GroupBy(p => candidates[p].Class).Select(g => new { Class = g.Key, Packages = g.Count() }),
+            AssetTypes = Inventory(content, mappings) }, new JsonSerializerOptions { WriteIndented = true }));
+        log($"Shared character/vehicle assets: reused {aliases.Count} unchanged packages ({bytes:N0} staged bytes). Unique edits and runtime owners remain separate.");
+        log($"Vehicle asset sharing: {vehicleRoots.Length} enabled vehicle root(s), {vehiclePackages} duplicate payload package(s) removed; vehicle identities and settings remain independent.");
         return new(aliases.Count, bytes, aliases);
     }
 
@@ -170,7 +242,7 @@ internal static class CharacterAssetReuseService
         }
         return package;
     }
-    private static bool Rewrite(UAsset asset, IReadOnlyDictionary<string, string> aliases)
+    internal static bool Rewrite(UAsset asset, IReadOnlyDictionary<string, string> aliases)
     {
         bool changed = false;
         for (int i = 0; i < asset.GetNameMapIndexList().Count; i++)
@@ -222,6 +294,12 @@ internal static class CharacterAssetReuseService
         }
         Visit(JsonSerializer.SerializeToNode(project)!);
         return roots.Order(StringComparer.Ordinal).ToArray();
+    }
+    internal static T RedirectRecipe<T>(T project, IReadOnlyDictionary<string, string> aliases)
+    {
+        var node = JsonSerializer.SerializeToNode(project)!;
+        RewriteRecipe(node, aliases);
+        return node.Deserialize<T>()!;
     }
     private static void RewriteRecipe(JsonNode node, IReadOnlyDictionary<string, string> aliases)
     {

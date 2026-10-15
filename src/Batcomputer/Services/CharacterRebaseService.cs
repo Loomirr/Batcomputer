@@ -99,9 +99,50 @@ internal static class CharacterRebaseService
         foreach (var section in sections.Where(s => takeCharacter.Contains(s.Id)))
             foreach (var field in section.Fields) result[field] = incoming[field]?.DeepClone();
         var candidate = result.Deserialize<NativeSuitProject>()!;
+        if (takeCharacter.Contains("appearance"))
+        {
+            // A visual reset changes assignments, not the user's imported-texture library.
+            // Parent textures are shared, so the copied owner can legitimately have no
+            // editable recipes. Replacing the list would orphan retained icons and imports.
+            var imports = JsonSerializer.Deserialize<List<GeneratedTextureEntry>>(
+                JsonSerializer.Serialize(suit.GeneratedTextures))!;
+            var packages = imports.Select(t => t.PackagePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            imports.AddRange(candidate.GeneratedTextures.Where(t => packages.Add(t.PackagePath)));
+            candidate.GeneratedTextures = imports;
+        }
+        if (!takeCharacter.Contains("appearance") && takeCharacter.Contains("abilities"))
+            PreserveAbilityVisuals(suit, candidate);
         Record(owner, candidate, sections.Where(s => !takeCharacter.Contains(s.Id)).Select(s => s.Id));
         return candidate;
     }
+
+    // Appearance lives inside several gameplay profiles too. Refresh their behavior without
+    // replacing a receiving suit's existing mesh, material, placement or cosmetic effects.
+    private static void PreserveAbilityVisuals(NativeSuitProject suit, NativeSuitProject candidate)
+    {
+        if (suit.AbilityLoadout is not { } old || candidate.AbilityLoadout is not { } updated) return;
+        foreach (var item in updated.HeldItems ?? [])
+        {
+            var matches = (old.HeldItems ?? []).Where(i => i.Id == item.Id).ToArray();
+            if (matches.Length != 1) continue; // Never guess from display names or list positions.
+            var visual = matches[0];
+            item.MeshPackage = visual.MeshPackage;
+            item.MaterialPackage = visual.MaterialPackage;
+            item.CustomModel = visual.CustomModel?.Clone();
+            item.Effects = visual.Effects.Select(e => e.Clone()).ToList();
+        }
+        if (old.SwordCombat is { } sword && updated.SwordCombat is { } target && old.FightingStyleId == updated.FightingStyleId)
+        {
+            target.MeshPackage = sword.MeshPackage;
+            target.MaterialPackage = sword.MaterialPackage;
+            target.CustomModel = sword.CustomModel?.Clone();
+        }
+        // These are declarative visual overrides, not gameplay grants.
+        updated.NativeHeldItems = JsonSerializer.Deserialize<List<NativeHeldItemEdit>>(JsonSerializer.Serialize(old.NativeHeldItems))!;
+        updated.AnimationSpawnedItems = JsonSerializer.Deserialize<List<AnimationSpawnedItemEdit>>(JsonSerializer.Serialize(old.AnimationSpawnedItems))!;
+    }
+
+    internal static bool IsGameplayRefreshSection(string id) => id is "abilities" or "animations" or "voice";
     internal static NativeSuitProject Prepare(NativeSuitProject owner, NativeSuitProject suit, IReadOnlySet<string> takeCharacter, SuitProjectService service, Action<string> log)
     {
         RequireParent(owner, suit);

@@ -370,9 +370,11 @@
 
 					// https://github.com/KhronosGroup/glTF/blob/master/specification/2.0/README.md#glb-file-format-specification
 					const reader = new window.FileReader();
+					reader.onerror = () => writer.options.onError?.( reader.error || new Error( 'GLB buffer read failed.' ) );
 					reader.readAsArrayBuffer( blob );
 
 					reader.onloadend = function () {
+						if ( reader.error ) return;
 
 						// Binary chunk.
 						const binaryChunk = getPaddedArrayBuffer( reader.result );
@@ -395,9 +397,11 @@
 							type: 'application/octet-stream'
 						} );
 						const glbReader = new window.FileReader();
+						glbReader.onerror = () => writer.options.onError?.( glbReader.error || new Error( 'GLB output read failed.' ) );
 						glbReader.readAsArrayBuffer( glbBlob );
 
 						glbReader.onloadend = function () {
+							if ( glbReader.error ) return;
 
 							onDone( glbReader.result );
 
@@ -428,7 +432,7 @@
 
 				}
 
-			} );
+			} ).catch( error => { if ( writer.options.onError ) writer.options.onError( error ); else console.error( error ); } );
 
 		}
 		/**
@@ -726,12 +730,14 @@
 			const writer = this;
 			const json = writer.json;
 			if ( ! json.bufferViews ) json.bufferViews = [];
-			return new Promise( function ( resolve ) {
+			return new Promise( function ( resolve, reject ) {
 
 				const reader = new window.FileReader();
+				reader.onerror = () => reject( reader.error || new Error( 'Texture buffer read failed.' ) );
 				reader.readAsArrayBuffer( blob );
 
 				reader.onloadend = function () {
+					if ( reader.error ) return;
 
 					const buffer = getPaddedArrayBuffer( reader.result );
 					const bufferViewDef = {
@@ -913,16 +919,17 @@
 
 				if ( options.binary === true ) {
 
-					pending.push( new Promise( function ( resolve ) {
+					pending.push( new Promise( function ( resolve, reject ) {
 
 						canvas.toBlob( function ( blob ) {
+							if ( !blob ) { reject( new Error( 'A texture could not be encoded.' ) ); return; }
 
 							writer.processBufferViewImage( blob ).then( function ( bufferViewIndex ) {
 
 								imageDef.bufferView = bufferViewIndex;
 								resolve();
 
-							} );
+							} ).catch( reject );
 
 						}, mimeType );
 

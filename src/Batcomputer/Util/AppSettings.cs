@@ -74,6 +74,8 @@ public sealed class AppSettings
     // workspace tidy by removing older preview folders whenever a new preview is built. Authors
     // can turn this off when they need to inspect or compare the generated viewer assets.
     public bool AutoCleanPreviewFiles { get; set; } = true;
+    public bool EnableSuitPreparationCache { get; set; } = false;
+    public int SuitPreparationCacheLimitMb { get; set; } = 256;
 
     // "Your Character" panel style: true = the minifig figure, false = the classic slot list.
     // Defaults to the figure; the list stays available for anyone who prefers the dense view.

@@ -24,11 +24,21 @@ window.BatcomputerCharacterWorkshop = function ({ THREE, scene, camera, controls
   button('Show every part', () => { isolated = false; parts.forEach(p => visibility.set(p.object, true)); applyVisibility(); });
   button('Whole character', () => { isolated = false; applyVisibility(); focus(parts); });
   const hint = document.createElement('small'); hint.textContent = 'Hide/show and isolation are preview-only. Gliders are displayed beside the character.'; panel.appendChild(hint);
+  const exportName = document.createElement('input'); exportName.type = 'text'; exportName.maxLength = 100;
+  exportName.value = (root?.name && root.name !== 'Scene') ? root.name : 'Character';
+  exportName.setAttribute('aria-label', 'GLB file name'); exportName.title = 'GLB file name';
+  exportName.style.cssText = 'width:100%;box-sizing:border-box;margin-top:8px'; panel.appendChild(exportName);
+  const exportQuality = document.createElement('select'); exportQuality.setAttribute('aria-label', 'GLB texture quality');
+  for (const [value, label] of [[1024, 'GLB · Compact (1K textures)'], [2048, 'GLB · Balanced (2K textures)'], [4096, 'GLB · High quality (4K textures)']]) {
+    const item = document.createElement('option'); item.value = value; item.textContent = label; exportQuality.appendChild(item);
+  }
+  exportQuality.value = '2048'; panel.appendChild(exportQuality);
   const exportButton = button('Export GLB…', async () => {
     exportButton.disabled = true; hint.textContent = 'Preparing the whole character…';
     try {
-      await window.BatcomputerCharacterExport.download(THREE, root || sceneRoot(), exportVisibility);
-      hint.textContent = 'Choose where to save. Includes available rigs; game shaders and animations are not included.';
+      await window.BatcomputerCharacterExport.download(THREE, root || sceneRoot(), exportVisibility,
+        { name: exportName.value, maxTextureSize: Number(exportQuality.value) });
+      hint.textContent = 'Choose where to save. Includes current pose, available rigs and embedded preview textures. No animation clips or game shaders.';
     } catch (error) { hint.textContent = 'Export failed: ' + error.message; }
     finally { exportButton.disabled = !complete; }
   });

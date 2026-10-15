@@ -258,6 +258,26 @@ internal static class VehicleAssetService
         }
         var prog = Read(nativeContent, NativeProgress); var raw = prog.Exports.OfType<RawExport>().Single();
         raw.Data = CreateProgress(prog, raw.Data, VehicleProjectService.ProgressTag(p)); CustomEquipmentService.Rename(prog, redirects); Save(prog, VehicleProjectService.Progress(p));
+        var materialLibrary = new ToolMaterialLibraryService(projectRoot);
+        foreach (var material in p.MaterialOverrides.Select(m => m.MaterialPath).Where(m => m.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase))
+            materialLibrary.CopyMaterialClosureToContentRoot(material, content);
+        VerifyPrepared(p, content);
+        log($"Vehicle '{p.DisplayName}': separate entry, acquired by default; {p.Transforms.Count} attachment edits. " + Warning);
+        if (p.SizeMultiplier != 1) log($"Experimental vehicle size: {p.SizeMultiplier:P0}. Check tire contact, suspension, seats, summon and collisions in game.");
+        return [new(VehicleProjectService.Metadata(p), "PawnMetaData", "/Script/DinnerPawnMetaData.DinnerVehiclePawnMetaData", GameplayBundleAssets: [ObjectPath(VehicleProjectService.Blueprint(p), true)]),
+            new(VehicleProjectService.Progress(p), RegistryPluginService.ProgressDefinitionPrimaryAssetType, RegistryPluginService.ProgressDefinitionClass)];
+    }
+
+    // Pure verification, also run after aggregate sharing. Never re-stage material sources here:
+    // that would resurrect duplicate packages or overwrite the verified sharing result.
+    internal static void VerifyPrepared(VehicleProject source, string content, IReadOnlyDictionary<string, string>? aliases = null)
+    {
+        var p = VehicleToyboxService.BuildRecipe(source);
+        if (aliases is not null) p = CharacterAssetReuseService.RedirectRecipe(p, aliases);
+        var donor = VehicleDonorService.Get(p);
+        var root = VehicleProjectService.ContentRoot(p);
+        var menu = root + "/UI/BP_Menu_" + p.Id;
+        var plinth = root + "/UI/BP_Plinth_" + p.Id;
         var staged = Read(content, VehicleProjectService.Metadata(p));
         Require(NativeAssetTextPatch.GetGameplayTag(staged, "PawnTag") == VehicleProjectService.PawnTag(p) && NativeAssetTextPatch.GetGameplayTag(staged, "OwningCharacter") == p.OwnerTag, "Vehicle identity did not survive staging.");
         var bp = Read(content, VehicleProjectService.Blueprint(p));
@@ -275,11 +295,8 @@ internal static class VehicleAssetService
         VehicleLightService.VerifyAccent(Read(content, menu), p.AccentColor, gameplay: false);
         var displayAsset = Read(content, menu);
         VehicleCustomizationService.Verify(displayAsset, VehicleCustomizationService.DisplayEdits(displayAsset, p));
-        VehicleLightSurfaceService.Verify(bp, p);
-        VehicleLightSurfaceService.Verify(Read(content, menu), p);
-        var materialLibrary = new ToolMaterialLibraryService(projectRoot);
-        foreach (var material in p.MaterialOverrides.Select(m => m.MaterialPath).Where(m => m.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase))
-            materialLibrary.CopyMaterialClosureToContentRoot(material, content);
+        VehicleLightSurfaceService.Verify(bp, p, aliases);
+        VehicleLightSurfaceService.Verify(Read(content, menu), p, aliases);
         foreach (var transform in p.Transforms)
         {
             if (VehicleSocketService.IsEditable(transform.Component)) continue;
@@ -293,10 +310,6 @@ internal static class VehicleAssetService
             var actual = ReadTransform(bp.Exports.OfType<NormalExport>().Single(e => e.ObjectName.ToString() == transform.Component));
             Require(System.Text.Json.JsonSerializer.Serialize(actual) == System.Text.Json.JsonSerializer.Serialize(transform), "Vehicle transform did not survive staging: " + transform.Component);
         }
-        log($"Vehicle '{p.DisplayName}': separate entry, acquired by default; {p.Transforms.Count} attachment edits. " + Warning);
-        if (p.SizeMultiplier != 1) log($"Experimental vehicle size: {p.SizeMultiplier:P0}. Check tire contact, suspension, seats, summon and collisions in game.");
-        return [new(VehicleProjectService.Metadata(p), "PawnMetaData", "/Script/DinnerPawnMetaData.DinnerVehiclePawnMetaData", GameplayBundleAssets: [ObjectPath(VehicleProjectService.Blueprint(p), true)]),
-            new(VehicleProjectService.Progress(p), RegistryPluginService.ProgressDefinitionPrimaryAssetType, RegistryPluginService.ProgressDefinitionClass)];
     }
     private static void ValidateSummon(VehicleProject project, string directory, string nativeContent)
     {

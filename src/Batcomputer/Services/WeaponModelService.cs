@@ -97,6 +97,13 @@ internal static class WeaponModelService
     internal static void Bake(WeaponModelRecipe r, string extracted, string mappings, string content, string package)
     {
         Validate(r);
+        if (BuildSharedAssets.Current?.TryStage(r, extracted, mappings, content, package) == true) return;
+        BakeUnshared(r, extracted, mappings, content, package);
+    }
+
+    internal static void BakeUnshared(WeaponModelRecipe r, string extracted, string mappings, string content, string package)
+    {
+        Validate(r);
         var scratch = Path.Combine(Path.GetTempPath(), "Batcomputer-weapon-" + Guid.NewGuid().ToString("N"));
         try
         {

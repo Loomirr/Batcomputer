@@ -12,6 +12,38 @@ internal static class ReleaseRegressionChecks
     public static int Run(TextWriter output)
     {
         var failures = new List<string>();
+        var animatedBatgirl = CharacterCatalogService.EntryFromPackageKey("Game/Characters/Minifig/Batgirl/BP_Batgirl_Default_Playable.uasset")!;
+        Check(animatedBatgirl.Name == "Batgirl Animated Series (Default)" &&
+            CharacterCatalogService.MatchesSearch(animatedBatgirl, "batgirl new batman adventures") &&
+            CharacterCatalogService.MatchesSearch(animatedBatgirl, "TNBA") &&
+            !CharacterCatalogService.MatchesSearch(CharacterCatalogService.EntryFromPackageKey("Game/Characters/Minifig/Batgirl/BP_BatGirl_TASGrey_Playable.uasset")!, "TNBA"),
+            "viewer identifies animated Default Batgirl separately from TASGrey", failures, output);
+        var batgirl = CharacterCatalogService.EntryFromPackageKey("Game/Characters/Minifig/Batgirl/BP_BatGirl_TASGrey_Playable.uasset")!;
+        Check(CharacterCatalogService.MatchesSearch(batgirl, "bat girl grey") &&
+            CharacterCatalogService.MatchesSearch(batgirl, "batgirl animated series") &&
+            !CharacterCatalogService.MatchesSearch(batgirl, "batgirl beyond"),
+            "viewer token search finds internal BatGirl TASGrey name without conflating unrelated suits", failures, output);
+        Check(CharacterCatalogService.EntryFromPackageKey("Game/Characters/BP_BatGirl_TASGrey_Batcave.uasset")?.Origin == CharacterCatalogService.Source.Other &&
+            CharacterCatalogService.EntryFromPackageKey("Game/Characters/BP_Master/BP_Master_Playable.uasset") is null &&
+            CharacterCatalogService.EntryFromPackageKey("Game/Characters/BP_Weapon_Playable.uasset") is null,
+            "viewer includes visual role variants but excludes master and weapon blueprints", failures, output);
+        Check(CharacterCatalogService.EntryFromPackageKey("Game/Characters/Smallfig/Batmite/BP_Batmite_01_Quest.uasset") is
+            { Origin: CharacterCatalogService.Source.Quest, Name: "Batmite 01" },
+            "viewer includes numbered Quest NPCs", failures, output);
+        Check(CharacterCatalogService.EntryFromPackageKey("DLC_PartyPack/Characters/Alfred/BP_Alfred_Default_Quest.UASSET") is
+            { Origin: CharacterCatalogService.Source.Quest, Name: "Alfred", ObjectPath: "DLC_PartyPack/Characters/Alfred/BP_Alfred_Default_Quest" },
+            "viewer includes DLC Quest NPCs with readable names and exact paths", failures, output);
+        Check(CharacterCatalogService.EntryFromPackageKey("Game/Props/BP_Prop_Quest.uasset") is null &&
+            CharacterCatalogService.EntryFromPackageKey("Game/Characters/BP_NPC_QuestHelper.uasset") is null &&
+            CharacterCatalogService.EntryFromPackageKey("Game/Characters/SK_NPC_Quest.uasset") is null,
+            "viewer excludes props, non-blueprints and nonterminal Quest suffixes", failures, output);
+        Check(CharacterCatalogService.EntryFromPackageKey("Game/Characters/BP_Batman_Playable.uasset")?.Origin == CharacterCatalogService.Source.Playable &&
+            CharacterCatalogService.EntryFromPackageKey("Game/Characters/BP_Batman_Cutscene.uasset")?.Origin == CharacterCatalogService.Source.Cutscene,
+            "viewer preserves playable and cutscene categories", failures, output);
+        foreach (var result in SuitPreparationCacheRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
+        foreach (var result in BuildSharedAssetsRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
         foreach (var result in GameAssetCompatibilityRegressionChecks.Run())
             Check(result.Passed, result.Description, failures, output);
         foreach (var result in CharacterAssetReuseRegressionChecks.Run())

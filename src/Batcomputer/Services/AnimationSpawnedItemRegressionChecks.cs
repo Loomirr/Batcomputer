@@ -29,6 +29,10 @@ internal static class AnimationSpawnedItemRegressionChecks
         yield return (suit.AbilityLoadout!.AnimationSpawnedItems.Single().HeldItemId == "claws" && suit.VoiceProfileId == owner.VoiceProfileId && suit.FaceAnimationBlueprintPackage == owner.FaceAnimationBlueprintPackage && !ReferenceEquals(suit.AbilityLoadout, owner.AbilityLoadout), "new character suits inherit voice, face and animation items as independent recipes");
         CharacterRebaseService.CaptureInitial(owner, suit); owner.AbilityLoadout.AnimationSpawnedItems[0].Hide = true;
         var rebased = CharacterRebaseService.Compose(owner, suit, owner, new HashSet<string> { "abilities" });
-        yield return (rebased.AbilityLoadout!.AnimationSpawnedItems.Single().Hide && !suit.AbilityLoadout.AnimationSpawnedItems.Single().Hide, "character rebases propagate animation-item changes without modifying the existing suit");
+        yield return (!rebased.AbilityLoadout!.AnimationSpawnedItems.Single().Hide && !suit.AbilityLoadout.AnimationSpawnedItems.Single().Hide,
+            "gameplay-only rebases preserve animation-item visual overrides");
+        var reset = CharacterRebaseService.Compose(owner, suit, owner, new HashSet<string> { "abilities", "appearance" });
+        yield return (reset.AbilityLoadout!.AnimationSpawnedItems.Single().Hide && !suit.AbilityLoadout.AnimationSpawnedItems.Single().Hide,
+            "explicit appearance rebases propagate animation-item changes without modifying the existing suit");
     }
 }

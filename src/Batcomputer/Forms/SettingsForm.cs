@@ -132,6 +132,8 @@ public sealed partial class SettingsForm : AdaptiveForm
             _settings.AnimationsEnabled = _animationsToggle?.Checked ?? _settings.AnimationsEnabled;
             _settings.KeepPreviousExtracts = _keepExtractsToggle?.Checked ?? _settings.KeepPreviousExtracts;
             _settings.AutoCleanPreviewFiles = _autoCleanPreviewFilesToggle?.Checked ?? _settings.AutoCleanPreviewFiles;
+            _settings.EnableSuitPreparationCache = _preparationCacheToggle?.Checked ?? _settings.EnableSuitPreparationCache;
+            _settings.SuitPreparationCacheLimitMb = (int)(_preparationCacheLimit?.Value ?? _settings.SuitPreparationCacheLimitMb);
             _settings.ReviewGroupByCategory = _reviewGroupsToggle?.Checked ?? _settings.ReviewGroupByCategory;
             _settings.ReviewDetailedList = _reviewListToggle?.Checked ?? _settings.ReviewDetailedList;
             _settings.ReviewShowTimestamps = _reviewTimesToggle?.Checked ?? _settings.ReviewShowTimestamps;
@@ -371,6 +373,8 @@ public sealed partial class SettingsForm : AdaptiveForm
     private ToggleSwitch? _reviewListToggle;
     private ToggleSwitch? _reviewTimesToggle;
     private ToggleSwitch? _vehicleSafePreviewToggle;
+    private ToggleSwitch? _preparationCacheToggle;
+    private NumericUpDown? _preparationCacheLimit;
     private ThemedDropDown? _themePicker;
     private ThemedDropDown? _previewQualityPicker;
     private ThemedDropDown? _vehiclePartBudgetPicker;
@@ -455,6 +459,23 @@ public sealed partial class SettingsForm : AdaptiveForm
         ToggleRow("Keep previous asset extracts",
             "Off: a refresh deletes the dump it replaces (each is ~18 GB).",
             _keepExtractsToggle);
+
+        Section("BUILD STORAGE");
+        _preparationCacheToggle = new ToggleSwitch { Checked = _settings.EnableSuitPreparationCache };
+        ToggleRow("Reuse unchanged suit preparation", "Off by default. Enable to keep one compressed result per suit, within the cache limit. Builds still validate every time.", _preparationCacheToggle);
+        panel.Controls.Add(new Label { Left = RowLabelX, Top = y + 5, Width = 320, Height = 24, Text = "Workspace cache limit (MB)", ForeColor = Theme.OnDark, Font = Theme.Body });
+        _preparationCacheLimit = new NumericUpDown { Left = RowLabelX + 340, Top = y, Width = 100, Minimum = 16, Maximum = 2048, Increment = 64, Value = Math.Clamp(_settings.SuitPreparationCacheLimitMb, 16, 2048) };
+        panel.Controls.Add(_preparationCacheLimit); y += 40;
+        var clearPreparation = new Button { Width = 212, Text = "Clear build cache" };
+        Theme.StyleDarkButton(clearPreparation);
+        clearPreparation.Click += async (_, _) =>
+        {
+            clearPreparation.Enabled = false;
+            try { await Task.Run(() => SuitPreparationCache.Clear(_settings.EffectiveProjectRoot())); clearPreparation.Text = "Build cache cleared"; }
+            catch (Exception ex) { Dialog.Error(this, "Clear build cache", ex.Message); }
+            finally { clearPreparation.Enabled = true; }
+        };
+        ButtonRow(clearPreparation, "Only disposable preparation caches; your projects and built mods are kept.");
 
         Section("3D VIEWER");
         _autoCleanPreviewFilesToggle = new ToggleSwitch { Checked = _settings.AutoCleanPreviewFiles };

@@ -184,10 +184,17 @@ internal static class CharacterVoiceBuildService
             if (File.Exists(extracted)) return extracted!;
             var cached = ExtractedPackagePathService.ResolvePackageUasset(Path.Combine(native, "LEGOBatmanLotDK/Content"), package);
             if (File.Exists(cached)) return cached!;
-            // Each missing package is extracted from the configured game; never use imported character assets as templates.
-            await Run(AppSettings.Current.EffectiveRetocExePath(), ["to-legacy", "--version", "UE5_6", "--no-shaders", "--no-script-objects", "-f", package[6..], AppSettings.Current.EffectiveGamePaksRoot(), native], work, cancellation);
-            return ExtractedPackagePathService.ResolvePackageUasset(Path.Combine(native, "LEGOBatmanLotDK/Content"), package)
-                ?? throw new InvalidDataException("Could not extract native voice asset: " + package);
+            // Pool only unmodified shipped source packages. Every suit still clones and validates
+            // its own routing, speaker, media, gain and assignment choices below.
+            async Task<string?> Extract()
+            {
+                await Run(AppSettings.Current.EffectiveRetocExePath(), ["to-legacy", "--version", "UE5_6", "--no-shaders", "--no-script-objects", "-f", package[6..], AppSettings.Current.EffectiveGamePaksRoot(), native], work, cancellation);
+                return ExtractedPackagePathService.ResolvePackageUasset(Path.Combine(native, "LEGOBatmanLotDK/Content"), package)
+                    ?? throw new InvalidDataException("Could not extract native voice asset: " + package);
+            }
+            return (BuildSharedAssets.Current is { } shared
+                ? await shared.NativeSourceAsync(package, Extract)
+                : await Extract()) ?? throw new InvalidDataException("Could not extract native voice asset: " + package);
         }
         UAsset Read(string file) => new(file, EngineVersion.VER_UE5_6, maps, CustomSerializationFlags.SkipPreloadDependencyLoading);
         string Output(string package)

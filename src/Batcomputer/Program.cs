@@ -81,6 +81,12 @@ internal static class Program
         // with no settings file present.
         AppSettings.Current = AppSettings.Load();
 
+        if (args.Length == 6 && args[0] == "--build-npc-appearance-test")
+        {
+            try { Console.WriteLine(NpcAppearanceTestService.Build(args[1], args[2], args[3], args[4], args[5])); return 0; }
+            catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 1; }
+        }
+
         if (args.Length is 1 or 2 && args[0] == "--repair-vehicle-cooks")
         {
             try
@@ -1164,13 +1170,38 @@ internal static class Program
             return context.ExitCode;
         }
 
-        if (args.Length >= 4 && args[0].Equals("--rebuild-and-build-mod", StringComparison.OrdinalIgnoreCase))
+        if (args.Length >= 4 && (args[0].Equals("--rebuild-and-build-mod", StringComparison.OrdinalIgnoreCase) ||
+            args[0].Equals("--build-mod-only", StringComparison.OrdinalIgnoreCase)))
         {
             // Internal acceptance command: rebuild one suit from its saved declaration and create
             // the complete current mod release, but never install it into the game.
-            using var context = new HeadlessModBuildContext(args[1], args[2], args[3]);
+            using var context = new HeadlessModBuildContext(args[1], args[2], args[3], replaySuit: !args[0].Equals("--build-mod-only", StringComparison.OrdinalIgnoreCase));
             Application.Run(context);
             return context.ExitCode;
+        }
+
+        if (args.Length == 3 && args[0] == "--verify-build-sharing")
+        {
+            try { BuildSharedAssetsRegressionChecks.VerifyCooked(args[1], args[2]); return 0; }
+            catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+        }
+
+        if (args.Length == 3 && args[0] == "--audit-build-assets")
+        {
+            Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(CharacterAssetReuseService.Inventory(args[1], MappingsCache.Load(args[2])),
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+            return 0;
+        }
+
+        if (args.Length == 3 && args[0] == "--verify-cooked-asset-sharing")
+        {
+            try
+            {
+                CharacterAssetReuseRegressionChecks.VerifyCooked(args[1], args[2]);
+                CharacterAssetReuseRegressionChecks.VerifyCooked(args[1], args[2], vehicleOnly: true);
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
         }
 
         if (args.Length >= 4 && args[0].Equals("--create-icon-acceptance-probe", StringComparison.OrdinalIgnoreCase))
@@ -1276,17 +1307,19 @@ internal static class Program
         private readonly string _modProjectPath;
         private readonly bool _installOnly;
         private readonly bool _requireVehicle;
+        private readonly bool _replaySuit;
         private bool _started;
 
         public int ExitCode { get; private set; } = 1;
 
-        public HeadlessModBuildContext(string projectRoot, string suitProjectPath, string modProjectPath, bool installOnly = false, bool requireVehicle = false)
+        public HeadlessModBuildContext(string projectRoot, string suitProjectPath, string modProjectPath, bool installOnly = false, bool requireVehicle = false, bool replaySuit = true)
         {
             _projectRoot = projectRoot;
             _suitProjectPath = suitProjectPath;
             _modProjectPath = modProjectPath;
             _installOnly = installOnly;
             _requireVehicle = requireVehicle;
+            _replaySuit = replaySuit;
             _form = new MainForm
             {
                 ShowInTaskbar = false,
@@ -1324,7 +1357,7 @@ internal static class Program
                     : await _form.RebuildAndBuildModForCliAsync(
                     _projectRoot,
                     _suitProjectPath,
-                    _modProjectPath);
+                    _modProjectPath, _replaySuit);
                 if (!string.IsNullOrWhiteSpace(result.Diagnostics))
                 {
                     Console.WriteLine(result.Diagnostics.TrimEnd());

@@ -1,5 +1,9 @@
 // Reference assembly export; Unreal shaders and animation blueprints are not portable to GLB.
 window.BatcomputerCharacterExport = {
+  filename(name) {
+    const stem = String(name || 'Character').replace(/\.glb$/i, '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/g, '').trim().slice(0, 100);
+    return (stem || 'Character') + '-assembled.glb';
+  },
   snapshot(THREE, root, visibility) {
     const copy = THREE.SkeletonUtils.clone(root), cloned = new Map(), disposable = [];
     function pair(source, target) {
@@ -49,20 +53,27 @@ window.BatcomputerCharacterExport = {
       return { root: copy, dispose: () => disposable.forEach(geometry => geometry.dispose()) };
     } catch (error) { disposable.forEach(geometry => geometry.dispose()); throw error; }
   },
-  async download(THREE, root, visibility) {
+  async download(THREE, root, visibility, options = {}) {
     const snapshot = this.snapshot(THREE, root, visibility);
     try {
       const binary = await new Promise((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error('Export timed out. Reload the preview and try again.')), 60000);
         try {
           new THREE.GLTFExporter().parse(snapshot.root, result => { clearTimeout(timer); resolve(result); },
-            { binary: true, onlyVisible: true, embedImages: true, maxTextureSize: 2048 });
+            { binary: true, onlyVisible: true, embedImages: true,
+              maxTextureSize: [1024, 2048, 4096].includes(Number(options.maxTextureSize)) ? Number(options.maxTextureSize) : 2048,
+              onError: error => { clearTimeout(timer); reject(error); } });
         } catch (error) { clearTimeout(timer); reject(error); }
       });
+      if (!(binary instanceof ArrayBuffer) || binary.byteLength < 20 || new DataView(binary).getUint32(0, true) !== 0x46546c67)
+        throw new Error('The exporter did not produce a valid GLB file.');
       const url = URL.createObjectURL(new Blob([binary], { type: 'model/gltf-binary' }));
-      const link = document.createElement('a'); link.href = url; link.download = 'Character-assembled.glb';
+      const link = document.createElement('a'); link.href = url; link.download = this.filename(options.name || root.name);
       document.body.appendChild(link); link.click(); link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60000);
-    } finally { snapshot.dispose(); }
+    } finally {
+      snapshot.root.traverse(node => { if (node.isSkinnedMesh) node.skeleton.dispose(); });
+      snapshot.dispose();
+    }
   }
 };

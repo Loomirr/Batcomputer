@@ -24,8 +24,10 @@ internal static class CharacterTextureReferenceService
         var node = JsonSerializer.SerializeToNode(target)!;
         Rewrite(node, aliases);
         var result = node.Deserialize<NativeSuitProject>()!;
-        // No second editable recipe/cache: changing a suit requires importing a new local texture.
-        result.GeneratedTextures.Clear();
+        // Drop only inherited recipes. Never discard unrelated suit-owned imports if this
+        // helper receives a target that already contains local authoring work.
+        var shared = SharedPackages(source, target);
+        result.GeneratedTextures.RemoveAll(texture => shared.Contains(texture.PackagePath));
         return result;
     }
 

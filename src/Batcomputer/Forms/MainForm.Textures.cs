@@ -127,10 +127,8 @@ public sealed partial class MainForm
             _currentProject.PlayableTemplate,
             _currentProject.CutsceneTemplate);
         var donorIcons = donor?.IconPaths ?? NativeMetadataDonorService.Icons.Empty;
-        var generatedUiTextures = MaterialBrowserTextures()
-            .Where(texture => IsUiTextureKind(texture.Kind) && !string.IsNullOrWhiteSpace(texture.PackagePath))
-            .OrderBy(texture => texture.DisplayName, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        // Icon selection is suit-local; shared base textures remain available in Material Forge.
+        var generatedUiTextures = SuitUiTexturesForPicker(_currentProject);
         using var dlg = new UimdIconsDialog(
             donor?.UimdPackagePath ?? "",
             donorIcons,
@@ -153,6 +151,17 @@ public sealed partial class MainForm
         NormalizeGeneratedUimdIconRecipes(_currentProject);
         (_projectService ??= new SuitProjectService(_projectRootText.Text.Trim())).SaveProject(_currentProject);
         AppendLog("Saved suit icon paths. Repackage to bake them into the UIMD.");
+    }
+
+    internal static List<GeneratedTextureEntry> SuitUiTexturesForPicker(NativeSuitProject project)
+    {
+        var owner = ExtractModFolder(project.TargetPackages.Playable);
+        var root = string.IsNullOrWhiteSpace(owner) ? "" : $"/Game/Mods/{owner}/";
+        return project.GeneratedTextures
+            .Where(t => IsUiTextureKind(t.Kind) && !string.IsNullOrWhiteSpace(t.PackagePath) &&
+                (root.Length == 0 || t.PackagePath.StartsWith(root, StringComparison.OrdinalIgnoreCase)))
+            .GroupBy(t => t.PackagePath, StringComparer.OrdinalIgnoreCase).Select(g => g.First())
+            .OrderBy(t => t.DisplayName, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     private static string PersistedIconValue(string current, string donor) =>
@@ -1874,6 +1883,8 @@ public sealed partial class MainForm
         AppendLog($"  cooked files: {Path.Combine(outputRoot, "Cooked")}");
         AppendLog("  mode: cook-only (texture will be packed with the suit, no separate texture test pak)");
 
+        var importCompleted = false;
+        _yourCharacter.ShowTextureImport(requestedName, "Importing · encoding texture and mipmaps…", true);
         _toyboxPrimaryActionButton.Enabled = false;
         try
         {
@@ -1919,6 +1930,7 @@ public sealed partial class MainForm
                 throw new InvalidOperationException("The active project changed during the icon cook. No texture was added. Return to the original project and retry.");
 
             AppendLog($"Texture import complete: {cookResult.OutputPackagePath}");
+            _yourCharacter.ShowTextureImport(requestedName, "Saving texture to this suit…", true);
 
             var entry = BuildTextureEntryFromSummary(
                 outputRoot,
@@ -1952,6 +1964,7 @@ public sealed partial class MainForm
 
             CopyText(entry.PackagePath, $"Texture ready and package path copied: {entry.PackagePath}");
             RefreshToyboxTiles();
+            importCompleted = true;
         }
         catch (Exception ex)
         {
@@ -1962,6 +1975,7 @@ public sealed partial class MainForm
         }
         finally
         {
+            _yourCharacter.ShowTextureImport(requestedName, importCompleted ? "Import complete" : "Import failed · see the log for details", false);
             _toyboxPrimaryActionButton.Enabled = true;
         }
     }
@@ -1970,6 +1984,8 @@ public sealed partial class MainForm
     {
         var project = _currentProject;
         if (project is null) return;
+        var importCompleted = false;
+        _yourCharacter.ShowTextureImport(name, "Importing · cooking artwork and distance-field textures…", true);
         _toyboxPrimaryActionButton.Enabled = false;
         try
         {
@@ -2000,6 +2016,8 @@ public sealed partial class MainForm
                 AppendLog($"  {entry.DisplayName}: {entry.PackagePath}");
             }
             RefreshToyboxTiles();
+            importCompleted = true;
+            _yourCharacter.ShowTextureImport(name, "Import complete · both icon textures ready", false);
             Dialog.Info(this, "Equipment icon ready",
                 "Created BCA artwork and a generated SDF from your PNG.\n\nOpen Equipment and match each texture to the slot's Suggested: BCA or Suggested: SDF label, then Use this game asset and Save equipment.\n\nThe generated SDF still needs an in-game HUD check. Both outputs have their own saved source and cook recipe.");
         }
@@ -2008,7 +2026,11 @@ public sealed partial class MainForm
             AppendLog("Equipment icon import failed: " + ex.Message);
             Dialog.Warn(this, "Equipment icon could not be imported", ex.Message + "\n\nNo partial icon pair was added to the project.");
         }
-        finally { _toyboxPrimaryActionButton.Enabled = true; }
+        finally
+        {
+            _yourCharacter.ShowTextureImport(name, importCompleted ? "Import complete · both icon textures ready" : "Import failed · see the log for details", false);
+            _toyboxPrimaryActionButton.Enabled = true;
+        }
     }
 
     private async Task<bool> EnsureTextureCookTemplatesAsync(string projectRoot)

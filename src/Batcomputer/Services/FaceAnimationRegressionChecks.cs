@@ -18,10 +18,23 @@ internal static class FaceAnimationRegressionChecks
         var body=Ref("AnimClass","/Game/Characters/LEGOfig/ABP_Core_LEGOFig","AnimBlueprintGeneratedClass");var bodyIndex=body.Value;
         var face=new NormalExport(asset,[]) { ObjectName=new FName(asset,"Face_GEN_VARIABLE"),Data=[mesh,anim,material] };asset.Exports.Add(face);
         var materialIndex=material.Value;var meshIndex=mesh.Value;
+        var alias = new ObjectPropertyData(new FName(asset,"SkinnedAsset")) { Value = FPackageIndex.FromRawIndex(0) };
+        face.Data.Add(alias);
         FaceAnimationService.Apply(asset,FaceAnimationService.BruceWayne);
         var count=asset.Imports.Count;FaceAnimationService.Apply(asset,FaceAnimationService.BruceWayne);
         yield return (SwordCombatService.Package(asset,anim.Value)==FaceAnimationService.BruceWayne && material.Value==materialIndex && mesh.Value==meshIndex && body.Value==bodyIndex && asset.Imports.Count==count && face.CreateBeforeSerializationDependencies.Count==1,
             "face-only controller swaps preserve material/mesh/body references and repeated application is idempotent");
+        mesh.Value=FPackageIndex.FromRawIndex(0);
+        var savedAnim=anim.Value;var savedImports=asset.Imports.Count;var savedDependencies=face.CreateBeforeSerializationDependencies.Count;
+        yield return (!FaceAnimationService.Apply(asset,FaceAnimationService.BruceWayne) && anim.Value==savedAnim &&
+            asset.Imports.Count==savedImports && face.CreateBeforeSerializationDependencies.Count==savedDependencies && mesh.Value.IsNull() && alias.Value.IsNull(),
+            "removed face skips inherited controller without restoring mesh or changing asset references");
+        asset.Exports.Remove(face);
+        yield return (!FaceAnimationService.Apply(asset,FaceAnimationService.BruceWayne), "absent face component skips inherited controller");
+        asset.Exports.Add(face);
+        alias.Value=meshIndex;
+        yield return (FaceAnimationService.Apply(asset,FaceAnimationService.BruceWayne), "SkinnedAsset-only face accepts native rig with a null SkeletalMesh alias");
+        alias.Value=FPackageIndex.FromRawIndex(0);
         mesh.Value=SwordCombatService.Obj(asset,"/Game/Characters/OtherRig/SK_Other","SK_Other","/Script/Engine","SkeletalMesh");
         bool Rejected(Action action){try{action();return false;}catch(InvalidDataException){return true;}}
         yield return (Rejected(()=>FaceAnimationService.Apply(asset,FaceAnimationService.BruceWayne))&&Rejected(()=>FaceAnimationService.Apply(asset,"/Game/Arbitrary/ABP")),

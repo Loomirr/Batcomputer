@@ -23,7 +23,7 @@ internal sealed class CharacterRebaseForm : AdaptiveForm
             var button = new Button { Text = text, AutoSize = true, Height = 34 };
             Theme.StyleDarkButton(button); button.Click += (_, _) => click(); actions.Controls.Add(button);
         }
-        Action("Inherit everything", () => { foreach (var box in _choices.Values) box.Checked = true; });
+        Action("Update gameplay · keep visuals", () => { foreach (var (id, box) in _choices) box.Checked = CharacterRebaseService.IsGameplayRefreshSection(id); });
         Action("Keep suit edits", () => { foreach (var row in rows) _choices[row.Section.Id].Checked = Default(row); });
         Action("Keep all", () => { foreach (var box in _choices.Values) box.Checked = false; });
         layout.Controls.Add(actions, 0, 1);
@@ -36,11 +36,11 @@ internal sealed class CharacterRebaseForm : AdaptiveForm
         }
         layout.Controls.Add(list, 0, 2);
         layout.Controls.Add(new Label { Dock = DockStyle.Fill, ForeColor = Theme.OnDarkMuted,
-            Text = "Overrides are kept by section, not by individual field. Model/material sections start unchecked because external file edits cannot be detected reliably from the recipe. Review these explicitly.\n\nThis refreshes saved Batcomputer settings—not experimental installed PAKs or voice-workshop drafts. Character-wide vehicle, modes and symbol still come from the character when built. Rebuild your mod afterward." }, 0, 3);
+            Text = "Visual sections stay unchecked: body/base, custom parts, materials, textures, icons, equipment and cape setup. Check one only to intentionally replace it. Abilities can update while matching held-item meshes/materials stay suit-specific (unless you also select appearance).\n\nThis refreshes saved settings—not installed PAKs or voice-workshop drafts. Character-wide vehicles, modes and symbol still come from the character. Rebuild your mod afterward." }, 0, 3);
         var apply = new Button { Text = "Rebase suit", Width = 140, DialogResult = DialogResult.OK };
         var cancel = new Button { Text = "Cancel", Width = 100, DialogResult = DialogResult.Cancel };
         Theme.StyleGoldButton(apply); Theme.StyleDarkButton(cancel);
         Controls.Add(layout); Controls.Add(DialogActionFooter.Create(apply, cancel)); AcceptButton = apply; CancelButton = cancel;
     }
-    private static bool Default(CharacterRebaseService.Row row) => row.TakeCharacterByDefault && row.Section.Id is not ("appearance" or "abilities" or "equipment" or "icons");
+    private static bool Default(CharacterRebaseService.Row row) => row.TakeCharacterByDefault && row.Section.Id is "animations" or "voice";
 }

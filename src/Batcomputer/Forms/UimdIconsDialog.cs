@@ -69,7 +69,7 @@ public sealed partial class UimdIconsDialog : AdaptiveForm
         var header = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
         header.Controls.Add(new Label
         {
-            Text = "UIMD",
+            Text = "UIMD · this suit's UI textures",
             Dock = DockStyle.Top,
             Height = 18,
             Font = Theme.Eyebrow,

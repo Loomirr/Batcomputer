@@ -21,8 +21,15 @@ internal static class CharacterVoiceCatalogService
 
     internal static Snapshot Inspect(NativeSuitProject project, CancellationToken cancellation)
     {
+        cancellation.ThrowIfCancellationRequested();
         var donor = Donor(project);
         if (string.IsNullOrWhiteSpace(donor)) throw new InvalidDataException("Choose a gameplay donor before inspecting its voice.");
+        return BuildSharedAssets.Current is { } shared
+            ? shared.VoiceCatalog(donor, () => InspectNative(donor, cancellation)) : InspectNative(donor, cancellation);
+    }
+
+    private static Snapshot InspectNative(string donor, CancellationToken cancellation)
+    {
         using var provider = ModelPreviewService.MakeProvider(AppSettings.Current.EffectiveGamePaksRoot(), AppSettings.Current.EffectiveUsmapPath()!);
         var blueprint = Exports(provider, donor);
         var voice = blueprint.OfType<JObject>().Select(e => e["Properties"]?["VoiceActorName"]?.Value<string>())

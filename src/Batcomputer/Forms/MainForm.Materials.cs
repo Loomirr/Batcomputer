@@ -313,7 +313,8 @@ public sealed partial class MainForm
             mod,
             suggested,
             MaterialBrowserTextures(),
-            CurrentMaterialTemplateTarget());
+            CurrentMaterialTemplateTarget(),
+            _currentProject?.GeneratedTextures.Select(t => t.PackagePath) ?? Enumerable.Empty<string>());
         if (wiz.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(wiz.ResultMiPackagePath))
         {
             return;
@@ -376,7 +377,8 @@ public sealed partial class MainForm
             mod,
             suggested,
             MaterialBrowserTextures(),
-            CurrentMaterialTemplateTarget());
+            CurrentMaterialTemplateTarget(),
+            _currentProject?.GeneratedTextures.Select(t => t.PackagePath) ?? Enumerable.Empty<string>());
         wiz.PrefillBase(diskPath, suggested, editInPlace);
         wiz.OutputPackageExists = package => ResolveMaterialDiskPath(package, preferExport: true) is not null;
         if (wiz.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(wiz.ResultMiPackagePath))

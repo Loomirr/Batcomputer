@@ -43,6 +43,8 @@ internal sealed class CharacterBrowserList : ListBox
     {
         CharacterCatalogService.Source.Playable => "GAMEPLAY",
         CharacterCatalogService.Source.Cutscene => "CUTSCENE",
+        CharacterCatalogService.Source.Quest => "QUEST NPC",
+        CharacterCatalogService.Source.Other => "OTHER · " + Path.GetFileName(entry.ObjectPath).Split('_').Last().ToUpperInvariant(),
         _ when entry?.IsCharacter == true => "CHARACTER · " + entry.CharacterId,
         _ => "SUIT · " + (entry?.ProjectId ?? ""),
     };

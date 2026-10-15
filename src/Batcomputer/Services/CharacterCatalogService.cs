@@ -18,7 +18,7 @@ namespace Batcomputer;
 /// </summary>
 internal static class CharacterCatalogService
 {
-    private const int CacheSchemaVersion = 2;
+    private const int CacheSchemaVersion = 5;
 
     /// <summary>Where a character came from, which is also how the viewer groups them.</summary>
     public enum Source
@@ -26,6 +26,8 @@ internal static class CharacterCatalogService
         CustomSuit,
         Playable,
         Cutscene,
+        Quest,
+        Other,
     }
 
     /// <param name="Name">Display name, e.g. "Batman 1989".</param>
@@ -151,34 +153,7 @@ internal static class CharacterCatalogService
 
         foreach (var key in provider.Files.Keys)
         {
-            if (!key.EndsWith(".uasset", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-            var file = Path.GetFileNameWithoutExtension(key);
-            if (!file.StartsWith("BP_", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            // Only character blueprints - the game also ships BP_ assets for props, UI and gameplay.
-            if (!key.Contains("/Characters/", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            var isPlayable = file.EndsWith("_Playable", StringComparison.OrdinalIgnoreCase);
-            var isCutscene = file.Contains("Cutscene", StringComparison.OrdinalIgnoreCase)
-                             || file.Contains("_CUT", StringComparison.OrdinalIgnoreCase);
-            if (!isPlayable && !isCutscene)
-            {
-                continue;
-            }
-
-            found.Add(new Entry(
-                Pretty(file),
-                isPlayable ? Source.Playable : Source.Cutscene,
-                key[..^".uasset".Length]));
+            if (EntryFromPackageKey(key) is { } entry) found.Add(entry);
         }
 
         return found
@@ -187,6 +162,38 @@ internal static class CharacterCatalogService
             .OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
+
+    internal static Entry? EntryFromPackageKey(string key)
+    {
+        key = key.Replace('\\', '/');
+        if (!key.EndsWith(".uasset", StringComparison.OrdinalIgnoreCase) ||
+            !key.Contains("/Characters/", StringComparison.OrdinalIgnoreCase)) return null;
+        var file = Path.GetFileNameWithoutExtension(key);
+        if (!file.StartsWith("BP_", StringComparison.OrdinalIgnoreCase)) return null;
+        if (!BaseEligibilityService.IsVisualCharacterPackage("/" + key.TrimStart('/'))) return null;
+        Source? source = file.EndsWith("_Playable", StringComparison.OrdinalIgnoreCase) ? Source.Playable
+            : file.EndsWith("_Quest", StringComparison.OrdinalIgnoreCase) ? Source.Quest
+            : file.Contains("Cutscene", StringComparison.OrdinalIgnoreCase) || file.Contains("_CUT", StringComparison.OrdinalIgnoreCase)
+                ? Source.Cutscene
+                : new[] { "_Batcave", "_Boss", "_Goon", "_Civilian" }.Any(suffix => file.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                    ? Source.Other : null;
+        return source is { } origin ? new Entry(Pretty(file), origin, key[..^".uasset".Length]) : null;
+    }
+
+    internal static bool MatchesSearch(Entry entry, string query)
+    {
+        static string Normalize(string value) => new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+        var aliases = entry.Name.Contains("TAS", StringComparison.OrdinalIgnoreCase) ? " animated series" : "";
+        if (IsBatgirlAnimatedDefault(entry.ObjectPath)) aliases += " animated series the new batman adventures TNBA default";
+        var text = Normalize(entry.Name + " " + entry.ObjectPath + " " + entry.ProjectId + " " + entry.CharacterId + aliases);
+        return query.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            .All(token => text.Contains(Normalize(token), StringComparison.Ordinal));
+    }
+
+    // Confirmed through Default's DCMD -> DA_UIMD_BatgirlAnimatedSeries and its
+    // AnimatedSeries body/cowl/cape references. TASGrey is a separate variant.
+    private static bool IsBatgirlAnimatedDefault(string path) =>
+        path.Replace('\\', '/').Contains("/Characters/Minifig/Batgirl/BP_Batgirl_Default_", StringComparison.OrdinalIgnoreCase);
 
     private static DirectoryInfo[] DlcContainerRoots(string paksDir)
     {
@@ -216,12 +223,15 @@ internal static class CharacterCatalogService
     /// <summary>"BP_Batman_TheBatman2025_Playable" -> "Batman TheBatman2025".</summary>
     private static string Pretty(string file)
     {
+        if (new[] { "BP_Batgirl_Default_Playable", "BP_Batgirl_Default_Cutscene", "BP_Batgirl_Default_Batcave" }
+            .Contains(file, StringComparer.OrdinalIgnoreCase))
+            return "Batgirl Animated Series (Default)";
         var s = file;
         if (s.StartsWith("BP_", StringComparison.OrdinalIgnoreCase))
         {
             s = s[3..];
         }
-        foreach (var suffix in new[] { "_Playable", "_Default_Cutscene", "_Cutscene", "_Default_Batcave", "_CUT" })
+        foreach (var suffix in new[] { "_Playable", "_Default_Cutscene", "_Cutscene", "_Default_Quest", "_Quest", "_Default_Batcave", "_Batcave", "_Boss", "_Goon", "_Civilian", "_CUT" })
         {
             if (s.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
             {

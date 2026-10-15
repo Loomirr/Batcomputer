@@ -6,6 +6,48 @@ internal static class CharacterRebaseRegressionChecks
 {
     internal static IEnumerable<(bool Passed, string Description)> Run()
     {
+        var visualOwner = CustomCharacterProjectService.CreateRecipe(null, "Visual owner", "Visual", "Visual");
+        visualOwner.AbilityLoadout = new() { HeldItems = [new() { Id = "prop", MaterialPackage = "/Game/Owner/Material", PreferOverAnimationEmptyHands = true }], Utilities = new() { Healing = true } };
+        var visualSuit = CustomCharacterProjectService.CreateRecipe(visualOwner, "Visual suit", "Visual", "Suit", visualOwner.SlotId);
+        visualSuit.AbilityLoadout!.HeldItems![0].MaterialPackage = "/Game/Suit/Material";
+        visualSuit.AbilityLoadout.HeldItems[0].CustomModel = new() { SourceName = "Suit mesh", Scale = 0.8f };
+        visualSuit.AbilityLoadout.HeldItems[0].PreferOverAnimationEmptyHands = false;
+        visualSuit.MaterialAssignments = [new() { Component = "Body", MiPackagePath = "/Game/Suit/Body" }];
+        visualSuit.PartGrafts = [new()]; visualSuit.CustomStaticMeshes = [new()]; visualSuit.SkinnedMeshes = [new()];
+        visualSuit.PreviewPartPlacements = [new()]; visualSuit.GliderMaterial = "/Game/Suit/Cape"; visualSuit.IconMenu = "/Game/Suit/Icon";
+        visualSuit.GeneratedTextures = [new() { PackagePath = "/Game/Suit/Texture" }];
+        var visualBefore = JsonSerializer.Serialize(visualSuit);
+        var safeSections = CharacterRebaseService.Sections().Where(s => CharacterRebaseService.IsGameplayRefreshSection(s.Id)).Select(s => s.Id).ToHashSet();
+        var visualResult = CharacterRebaseService.Compose(visualOwner, visualSuit, visualOwner, safeSections);
+        yield return (visualResult.MaterialAssignments[0].MiPackagePath == "/Game/Suit/Body" && visualResult.PartGrafts.Count == 1 &&
+            visualResult.CustomStaticMeshes.Count == 1 && visualResult.SkinnedMeshes.Count == 1 && visualResult.PreviewPartPlacements.Count == 1 &&
+            visualResult.GeneratedTextures[0].PackagePath == "/Game/Suit/Texture" && visualResult.IconMenu == "/Game/Suit/Icon" && visualResult.GliderMaterial == "/Game/Suit/Cape",
+            "gameplay refresh preserves suit materials, parts, models, placements, textures, cape and icons");
+        yield return (visualResult.AbilityLoadout!.HeldItems![0].MaterialPackage == "/Game/Suit/Material" &&
+            visualResult.AbilityLoadout.HeldItems[0].CustomModel?.Scale == 0.8f &&
+            visualResult.AbilityLoadout.HeldItems[0].PreferOverAnimationEmptyHands && visualResult.AbilityLoadout.Utilities!.Healing,
+            "ability refresh keeps matched held-item visuals while adopting updated behavior");
+        visualResult.AbilityLoadout.HeldItems[0].CustomModel!.Scale = 2;
+        yield return (JsonSerializer.Serialize(visualSuit) == visualBefore, "preserved held-item visuals are deep copies, never mutations of the saved suit");
+        var resetVisuals = CharacterRebaseService.Compose(visualOwner, visualSuit, visualOwner, new HashSet<string> { "abilities", "appearance" });
+        yield return (resetVisuals.AbilityLoadout!.HeldItems![0].MaterialPackage == "/Game/Owner/Material", "explicit appearance reset still adopts the parent held-item visuals");
+        yield return (resetVisuals.GeneratedTextures.Single().PackagePath == "/Game/Suit/Texture" &&
+            !ReferenceEquals(resetVisuals.GeneratedTextures[0], visualSuit.GeneratedTextures[0]),
+            "appearance rebase retains independent local texture recipes even when shared parent recipes are empty");
+        visualOwner.GeneratedTextures = [new() { PackagePath = "/Game/Mods/CC_Visual_Visual/Textures/T_Base" }];
+        var textureCopy = CustomCharacterProjectService.CreateRecipe(visualOwner, "Test", "Visual", "Copy", visualOwner.SlotId);
+        yield return (textureCopy.GeneratedTextures.Count == 0 && visualOwner.GeneratedTextures.Count == 1,
+            "new suit shares base textures without duplicating or mutating parent recipes");
+        textureCopy.GeneratedTextures = [new() { PackagePath = "/Game/Mods/CC_Visual_Copy/Textures/T_Base" },
+            new() { PackagePath = "/Game/Mods/CC_Visual_Copy/Textures/T_Local" }];
+        var retained = CharacterTextureReferenceService.Preserve(visualOwner, textureCopy,
+            "/Game/Mods/CC_Visual_Visual", "/Game/Mods/CC_Visual_Copy");
+        yield return (retained.GeneratedTextures.Single().PackagePath.EndsWith("/T_Local") && textureCopy.GeneratedTextures.Count == 2,
+            "texture sharing removes only inherited recipes and preserves local imports without mutating input");
+        var textureRebase = CharacterRebaseService.Compose(visualOwner, resetVisuals, visualOwner, new HashSet<string> { "appearance" });
+        var again = CharacterRebaseService.Compose(visualOwner, textureRebase, visualOwner, new HashSet<string> { "appearance" });
+        yield return (again.GeneratedTextures.Count == 2 && again.GeneratedTextures.Select(t => t.PackagePath).Distinct().Count() == 2,
+            "repeated appearance rebases retain imports without duplicate recipes");
         var owner = CustomCharacterProjectService.CreateRecipe(null, "Example character", "Example", "Example");
         owner.MaterialAssignments = [new() { Component = "Body", MiPackagePath = "/Game/Example/Original" }];
         owner.AnimationSlotOverrides = [new() { ReplacementPackage = "/Game/Mods/CC_Example_Example/Animations/AM_Test" }];

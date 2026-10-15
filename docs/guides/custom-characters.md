@@ -31,8 +31,10 @@ Unchanged textures remain references to the included base character: creating a 
 
 Save the character's latest changes, then open its additional suit and choose **Base → Rebase from character** (also available in the overflow menu). Review the sections and choose **Rebase suit**:
 
-- **Inherit everything** takes all saved character sections, including abilities/held items, equipment, animation selections, parts/materials, glider setup and icons. The suit keeps its own name, ID and roster entry.
-- Unchecked sections stay suit-specific. Overrides are kept by whole section, not merged field by field. Kept sections remain overrides until you explicitly inherit them again.
+- **Update gameplay · keep visuals** selects abilities, animations and voice while keeping the suit's body/base, parts, models, materials, textures, equipment, cape setup and icons. The suit keeps its own name, ID and roster entry.
+- Unchecked sections stay suit-specific. For an abilities refresh with appearance unchecked, matching held-item IDs keep their suit meshes, materials, custom-model transforms and cosmetic effects while their behavior updates. Native and animation-spawned item visual overrides also remain suit-specific. New parent items use their parent visuals.
+- To intentionally reset a visual section, check it explicitly. Selecting both abilities and appearance also replaces held-item visuals. Other overrides are kept by whole section, and kept sections remain overrides until you explicitly inherit them again.
+- Imported texture recipes remain in **Your textures**, even when resetting appearance. Delete unwanted imports explicitly in the texture browser; rebasing does not delete your texture library.
 - New suits track the recipe they inherited. Older suits require a manual first review. Sections containing editable files start unchecked because edits made directly to those files cannot reliably be detected from recipe history.
 
 Rebasing saves a previous-recipe backup and copies editable sources into a fresh revision without overwriting earlier sources. Cooked animation-library selections retain their library identities so their cached dependencies can still be staged. Rebuild the mod after the generated stage finishes refreshing. Character-wide vehicle, modes and symbol continue to come from the definition at build time.

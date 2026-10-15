@@ -114,6 +114,14 @@ public static class EquipmentAssetService
         if (!HeldItemService.ValidPackage(package)) throw new InvalidDataException("Invalid equipment package: " + package);
         var file = ExtractedPackagePathService.ResolvePackageUasset(root, package);
         if (file is null || !File.Exists(file)) throw new FileNotFoundException("Equipment dependency is missing; run Full refresh: " + package);
+        if (BuildSharedAssets.Current?.TryReadNativeBytes(file, out var sharedBytes, out var sharedSplit) == true)
+        {
+            using var sharedStream = new MemoryStream(sharedBytes, writable: false);
+            using var sharedReader = new AssetBinaryReader(sharedStream);
+            var sharedAsset = new UAsset(sharedReader, EngineVersion.VER_UE5_6, mappings, sharedSplit, flags);
+            sharedAsset.FilePath = Path.GetFullPath(file);
+            return sharedAsset;
+        }
         using var bytes = new MemoryStream();
         using (var source = File.OpenRead(file)) source.CopyTo(bytes);
         var split = File.Exists(Path.ChangeExtension(file, ".uexp"));
