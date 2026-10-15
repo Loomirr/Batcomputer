@@ -4,6 +4,10 @@ Create suits, characters, equipment and vehicles for **LEGO Batman: Legacy of th
 
 **[Download Batcomputer 1.1](https://github.com/Loomirr/Batcomputer/releases/tag/v1.1.0)** · **[Documentation](https://loomirr.github.io/Batcomputer/)** · **[What's new](docs/releases/1.1.0.md)** · **[Report a bug](https://github.com/Loomirr/Batcomputer/issues)**
 
+> [!WARNING]
+> **AI disclosure:** Batcomputer combines hands-on development with AI-assisted coding, debugging, and documentation. I actively build, review, and test the project myself.
+
+
 ## Get started
 
 1. Download **Batcomputer-update-win-x64.zip** from the release page and extract the entire ZIP to a writable folder, such as `C:\Tools\Batcomputer`.
