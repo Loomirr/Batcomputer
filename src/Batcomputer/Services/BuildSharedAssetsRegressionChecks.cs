@@ -64,6 +64,25 @@ internal static class BuildSharedAssetsRegressionChecks
         yield return (!new AppSettings().EnableSuitPreparationCache, "persistent preparation cache remains off by default");
         using (var scope = new BuildSharedAssets("test", "test", _ => { }))
         {
+            yield return (scope.VoiceExtractionDirectory("/Game/A") != scope.VoiceExtractionDirectory("/Game/B") &&
+                FileSystemPathUtil.IsWithinDirectory(scope.VoiceExtractionDirectory("/Game/A"), Path.GetTempPath()),
+                "parallel voice extraction uses isolated temporary roots outside long suit preparation paths");
+            var decodes = 0;
+            Newtonsoft.Json.Linq.JArray Decode()
+            {
+                decodes++;
+                return Newtonsoft.Json.Linq.JArray.Parse("[{\"nested\":{\"speaker\":\"native\",\"media\":\"original\"}}]");
+            }
+            var export = scope.VoiceExports("/Game/Voice/Event", Decode);
+            export[0]["nested"]!["speaker"] = "suit one";
+            var second = scope.VoiceExports("/Game/Voice/Event", Decode);
+            second[0]["nested"]!["media"] = "suit two";
+            var third = scope.VoiceExports("/Game/Voice/Event", Decode);
+            yield return (decodes == 1 && third[0]["nested"]!["speaker"]!.ToString() == "native" &&
+                third[0]["nested"]!["media"]!.ToString() == "original", "shared voice exports deep-clone nested speaker/media data for every suit");
+            scope.VoiceExports("/Game/Mods/Private/Event", Decode);
+            scope.VoiceExports("/Game/Mods/Private/Event", Decode);
+            yield return (decodes == 3, "private voice exports bypass native memoization");
             var scans = 0;
             CharacterVoiceCatalogService.Snapshot Inspect()
             {

@@ -2400,15 +2400,17 @@ public sealed partial class MainForm
                 "Saved material replay");
 
             GameplayAnimationGraphService.Apply(suit, contentRoot, AppendLog);
+            timing.Mark("material replay and animation graphs");
             ModReleaseStep("Preparing voices and held-item audio…");
             var voiceBuild = await Task.Run(() => CharacterVoiceBuildService.StageAsync(suit, projectService.ProjectRoot,
                 contentRoot, line => AppendLog("    voice: " + line), CancellationToken.None, sharedVoiceMedia));
             var toggleAudio = HeldItemToggleService.Stage(suit, contentRoot);
             voiceBuild = CharacterVoiceBuildService.Combine(new[] { voiceBuild, toggleAudio }.OfType<CharacterVoiceBuildService.Result>().ToArray());
+            timing.Mark("character voice and toggle audio");
             ModReleaseStep("Applying face animations and animation-spawned items…");
             await Task.Run(() => FaceAnimationService.ApplyToPackagedRoot(suit, contentRoot));
             await Task.Run(() => AnimationSpawnedItemService.ApplyToPackagedRoot(suit, contentRoot, line => AppendLog("    " + line)));
-            timing.Mark("character voice and animation items");
+            timing.Mark("face and animation items");
             ModReleaseStep("Verifying the prepared character assets…");
 
             var requiredPackages = new[]

@@ -17,6 +17,38 @@ internal sealed class BuildSharedAssets : IDisposable
     private sealed record NativeBytes(byte[] Data, bool Split, long HeaderLength, long ExportLength, DateTime HeaderTime, DateTime ExportTime);
     private readonly Dictionary<string, NativeBytes> nativeBytes = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, CharacterVoiceCatalogService.Snapshot> voiceCatalogs = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Newtonsoft.Json.Linq.JArray> voiceExports = new(StringComparer.Ordinal);
+    private CUE4Parse.FileProvider.DefaultFileProvider? voiceProvider;
+    private int voiceExportReuses;
+
+    // Shipped containers only. Mutable authoring/verification overlays must use fresh providers.
+    internal CUE4Parse.FileProvider.DefaultFileProvider NativeVoiceProvider()
+    {
+        if (voiceProvider is null)
+        {
+            voiceProvider = ModelPreviewService.MakeProvider(AppSettings.Current.EffectiveGamePaksRoot(), mappings);
+            voiceProvider.ReadScriptData = true;
+        }
+        return voiceProvider;
+    }
+
+    internal Newtonsoft.Json.Linq.JArray VoiceExports(string package, Func<Newtonsoft.Json.Linq.JArray> inspect)
+    {
+        if (package.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase)) return inspect();
+        if (voiceExports.TryGetValue(package, out var saved))
+        {
+            voiceExportReuses++;
+            return (Newtonsoft.Json.Linq.JArray)saved.DeepClone();
+        }
+        var result = inspect();
+        var size = Encoding.UTF8.GetByteCount(result.ToString(Newtonsoft.Json.Formatting.None));
+        if (bytes + size <= MaximumBytes)
+        {
+            voiceExports.Add(package, (Newtonsoft.Json.Linq.JArray)result.DeepClone());
+            bytes += size;
+        }
+        return result;
+    }
     private readonly string root = Path.Combine(Path.GetTempPath(), "Batcomputer-shared-build-" + Guid.NewGuid().ToString("N"));
     private readonly string extracted, mappings;
     private readonly Action<string> log;
@@ -148,6 +180,9 @@ internal sealed class BuildSharedAssets : IDisposable
     internal string? NativeAnimationParent(string package, Func<string?> extract)
         => NativeSourceAsync(package, () => Task.FromResult(extract())).GetAwaiter().GetResult();
 
+    internal bool HasNativeSource(string package) => nativeSources.TryGetValue(package, out var file) && file is not null;
+    internal string VoiceExtractionDirectory(string package) => Path.Combine(root, "Voice", Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(package))));
+
     internal async Task<string?> NativeSourceAsync(string package, Func<Task<string?>> extract)
     {
         if (!HeldItemService.ValidPackage(package) || package.StartsWith("/Game/Mods/", StringComparison.OrdinalIgnoreCase))
@@ -212,6 +247,9 @@ internal sealed class BuildSharedAssets : IDisposable
     public void Dispose()
     {
         Active.Value = previous;
+        voiceProvider?.Dispose();
+        voiceExports.Clear();
+        log($"Shared voice routing: {voiceExportReuses} repeated native export decodes avoided; private routing and verification remain independent.");
         try { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
         catch (IOException ex) { log("Could not remove temporary shared-build files: " + ex.Message); }
         catch (UnauthorizedAccessException ex) { log("Could not remove temporary shared-build files: " + ex.Message); }

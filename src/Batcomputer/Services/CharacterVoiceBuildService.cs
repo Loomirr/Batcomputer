@@ -160,9 +160,13 @@ internal static class CharacterVoiceBuildService
         var work = Path.Combine(Path.GetDirectoryName(contentRoot)!, "VoiceBuild");Directory.CreateDirectory(work);
         var native = Path.Combine(work, "Native");
         var maps = MappingsCache.Load(AppSettings.Current.EffectiveUsmapPath()!);
-        using var stock = ModelPreviewService.MakeProvider(AppSettings.Current.EffectiveGamePaksRoot(), AppSettings.Current.EffectiveUsmapPath()!);
+        using var ownedStock = BuildSharedAssets.Current is null
+            ? ModelPreviewService.MakeProvider(AppSettings.Current.EffectiveGamePaksRoot(), AppSettings.Current.EffectiveUsmapPath()!) : null;
+        var stock = ownedStock ?? BuildSharedAssets.Current!.NativeVoiceProvider();
         stock.ReadScriptData = true;
-        JArray Exports(string package) => CharacterVoiceCatalogService.Exports(stock, package);
+        JArray Exports(string package) => BuildSharedAssets.Current is { } shared
+            ? shared.VoiceExports(package, () => CharacterVoiceCatalogService.Exports(stock, package))
+            : CharacterVoiceCatalogService.Exports(stock, package);
         string[] References(JContainer data, string marker) => data.DescendantsAndSelf().OfType<JProperty>().Where(p => p.Name == "ObjectPath")
             .Select(p => CharacterVoiceCatalogService.Package(p.Value.ToString())).Where(p => p.Contains(marker, StringComparison.Ordinal)).Distinct().ToArray();
         var tags = References(Exports(snapshot.Donor), "/Audio/Tagging/DataEntries/");
@@ -178,6 +182,23 @@ internal static class CharacterVoiceBuildService
             if (redirects.TryGetValue(leaf, out var other) && other != Path.GetFileName(pair.Value)) throw new InvalidDataException("Ambiguous native voice asset names.");
             redirects[leaf] = Path.GetFileName(pair.Value);
         }
+        // Prepare only the exact missing native routes, at most two converter processes at once.
+        // Separate output roots prevent prefix-matching filters from racing over the same files.
+        var prefetched = new System.Collections.Concurrent.ConcurrentDictionary<string, string>(StringComparer.Ordinal);
+        if (BuildSharedAssets.Current is { } buildScope)
+        {
+            var missingSources = packages.Where(p => !buildScope.HasNativeSource(p) &&
+                !File.Exists(ExtractedPackagePathService.ResolvePackageUasset(AppSettings.Current.EffectiveExtractedContentRoot(), p))).ToArray();
+            log($"Voice: preparing {missingSources.Length} missing native routes with at most two isolated extractors.");
+            await Parallel.ForEachAsync(missingSources, new ParallelOptions { MaxDegreeOfParallelism = 2, CancellationToken = cancellation }, async (package, token) =>
+            {
+                var batch = buildScope.VoiceExtractionDirectory(package);
+                Directory.CreateDirectory(batch);
+                await Run(AppSettings.Current.EffectiveRetocExePath(), ["to-legacy", "--version", "UE5_6", "--no-shaders", "--no-script-objects", "-f", package[6..], AppSettings.Current.EffectiveGamePaksRoot(), batch], batch, token);
+                prefetched[package] = ExtractedPackagePathService.ResolvePackageUasset(Path.Combine(batch, "LEGOBatmanLotDK/Content"), package)
+                    ?? throw new InvalidDataException("Could not extract native voice asset: " + package);
+            });
+        }
         async Task<string> NativeFile(string package)
         {
             var extracted = ExtractedPackagePathService.ResolvePackageUasset(AppSettings.Current.EffectiveExtractedContentRoot(), package);
@@ -188,6 +209,7 @@ internal static class CharacterVoiceBuildService
             // its own routing, speaker, media, gain and assignment choices below.
             async Task<string?> Extract()
             {
+                if (prefetched.TryGetValue(package, out var prepared)) return prepared;
                 await Run(AppSettings.Current.EffectiveRetocExePath(), ["to-legacy", "--version", "UE5_6", "--no-shaders", "--no-script-objects", "-f", package[6..], AppSettings.Current.EffectiveGamePaksRoot(), native], work, cancellation);
                 return ExtractedPackagePathService.ResolvePackageUasset(Path.Combine(native, "LEGOBatmanLotDK/Content"), package)
                     ?? throw new InvalidDataException("Could not extract native voice asset: " + package);

@@ -57,6 +57,14 @@ are pooled; suit-local voices and animation edits remain separate. The central n
 also reuses unmodified extracted input bytes across asset classes, while parsing independent objects
 for every consumer. Repeated native voice discovery is reused, but each suit's current profile and
 assignments are still checked. Mutable suit stages never enter the native-input pool.
+Voice routing also reuses one shipped-container reader and bounded native export snapshots during
+the build. Every consumer receives independent speaker/media data; private profiles, edited
+Blueprints and output verification retain fresh reads. Animation-item traversal retains its
+file-backed reader to preserve dependency resolution. The voice reader is disposed at build end;
+none of this enables persistent preparation caching.
+Missing native voice routes are extracted with at most two converter processes, each using an
+isolated temporary output directory. Already available routes are skipped; suit-specific routing
+edits and verification still run independently. These temporary files follow normal build cleanup.
 
 Before packaging, character-family and enabled-vehicle output sharing compares complete cooked payloads and dependencies.
 It can share matching alternate versions across suits even when the base character's version differs.
