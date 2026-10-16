@@ -428,7 +428,7 @@ public sealed partial class MainForm
             // The one preflight rule that's cheap enough to surface live. Note the three-way status:
             // a base we cannot READ is not a base without a cape, and reporting it as one made suits
             // that glide perfectly well show a defect they did not have.
-            if (_currentProject is not null)
+            if (_currentProject is not null && !CharacterReplacerProjectService.IsReplacer(_currentProject))
             {
                 var status = new AnimArchetypeGraftService().BaseGlideVisual(_currentProject, out _);
                 if (status == AnimArchetypeGraftService.GlideVisualStatus.Absent)

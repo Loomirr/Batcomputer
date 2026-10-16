@@ -35,8 +35,8 @@ public sealed partial class MainForm
         _currentLoadedProjectStageRestoreGeneration = 0;
 
         _currentProject = project;
-        if (_headerSuitCaption is not null) _headerSuitCaption.Text = CustomCharacterProjectService.IsCharacter(project) ? "CURRENT CHARACTER" : "CURRENT SUIT";
-        SelectWorkspaceFolder(CustomCharacterProjectService.IsCharacter(project) ? WorkspaceFolder.Characters : WorkspaceFolder.Suits, refresh: false);
+        if (_headerSuitCaption is not null) _headerSuitCaption.Text = CharacterReplacerProjectService.IsReplacer(project) ? "CURRENT REPLACER" : CustomCharacterProjectService.IsCharacter(project) ? "CURRENT CHARACTER" : "CURRENT SUIT";
+        SelectWorkspaceFolder(CharacterReplacerProjectService.IsReplacer(project) ? WorkspaceFolder.Replacers : CustomCharacterProjectService.IsCharacter(project) ? WorkspaceFolder.Characters : WorkspaceFolder.Suits, refresh: false);
         MigratePartGraftInstances(project);
         if (NormalizeGeneratedUimdIconRecipes(project))
         {

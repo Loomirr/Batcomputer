@@ -132,6 +132,11 @@ public static class BaseEligibilityService
 
     public static Result Evaluate(NativeSuitProject? project)
     {
+        if (CharacterReplacerProjectService.IsReplacer(project))
+        {
+            try { CharacterReplacerProjectService.Validate(project!); return new(true, "Visual-only replacement; original behavior retained.", project!.ReplacementTarget, project.ReplacementTarget); }
+            catch (InvalidDataException ex) { return new(false, ex.Message, project!.ReplacementTarget, ""); }
+        }
         if (project is null)
         {
             return new Result(false, "Create or open a suit before selecting a base.", "", "");

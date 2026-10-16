@@ -74,7 +74,8 @@ public sealed class SuitProjectService
         string CoverImagePath,
         string TargetPlayablePath,
         bool IsCharacter = false,
-        string CharacterId = "");
+        string CharacterId = "",
+        bool IsReplacer = false);
 
     /// <summary>Lists saved suit projects (newest first).</summary>
     public IReadOnlyList<ProjectSummary> ListProjects()
@@ -110,6 +111,7 @@ public sealed class SuitProjectService
             var targetPlayable = "";
             var isCharacter = false;
             var characterId = "";
+            var isReplacer = false;
             try
             {
                 var project = JsonSerializer.Deserialize<NativeSuitProject>(File.ReadAllText(path), JsonOptions);
@@ -125,13 +127,14 @@ public sealed class SuitProjectService
                     targetPlayable = UnrealPathUtil.NormalizePackagePath(project.TargetPackages?.Playable);
                     isCharacter = CustomCharacterProjectService.IsCharacter(project);
                     characterId = project.CustomCharacter?.CharacterId ?? "";
+                    isReplacer = CharacterReplacerProjectService.IsReplacer(project);
                 }
             }
             catch
             {
                 // Keep a corrupt file visible by filename so it can still be removed from Home.
             }
-            results.Add(new ProjectSummary(slot, display, path, File.GetLastWriteTime(path), cover, targetPlayable, isCharacter, characterId));
+            results.Add(new ProjectSummary(slot, display, path, File.GetLastWriteTime(path), cover, targetPlayable, isCharacter, characterId, isReplacer));
         }
 
         return results;

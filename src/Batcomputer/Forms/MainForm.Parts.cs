@@ -143,6 +143,7 @@ public sealed partial class MainForm
         // the slot list rather than showing an empty panel.
         var useMinifig = AppSettings.Current.UseMinifigCharacterPanel && MinifigDiagram.HasArt;
         _yourCharacter.SetMinifigMode(useMinifig);
+        _yourCharacter.Diagram.ShowGearTray = !CharacterReplacerProjectService.IsReplacer(_currentProject);
 
         ClearAndDisposeControls(_yourCharacter.SlotFlow);
         if (!useMinifig)
@@ -153,6 +154,8 @@ public sealed partial class MainForm
                 _yourCharacter.SlotFlow.Controls.Add(BuildSlotRow(label, component, slot));
             }
 
+            if (!CharacterReplacerProjectService.IsReplacer(_currentProject))
+            {
             _yourCharacter.SlotFlow.Controls.Add(BuildSectionDivider("MORE"));
 
             var gliderType = string.IsNullOrWhiteSpace(_currentProject?.GliderType) ? "base" : _currentProject!.GliderType;
@@ -179,6 +182,7 @@ public sealed partial class MainForm
                 onClick: () => SelectComboValue(_toyboxCategoryCombo, "Animations"),
                 onMaterialDrop: null));
 
+            }
             // Straight from the suit you are building into the 3D viewer, so you can check the
             // look without hunting for the character in the list.
             _yourCharacter.SlotFlow.Controls.Add(BuildActionRow(

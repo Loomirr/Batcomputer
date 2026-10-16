@@ -108,6 +108,16 @@ public sealed class ModReleaseValidationService
             }
             AddUnique(suitIds, suitId, suitId, "suit ID", result, suitId);
 
+            if (CharacterReplacerProjectService.IsReplacer(suit))
+            {
+                try { CharacterReplacerProjectService.Validate(suit); }
+                catch (InvalidDataException ex) { result.AddError("visual replacement", ex.Message, suitId); }
+                AddUnique(packageOwners, suit.ReplacementTarget, suitId, "replacement target", result, suitId);
+                ValidateGeneratedTextures(suit, textureOwners, result, suitId);
+                ValidateMaterialAssignments(suit, exportContentRoot, generatedRoot, result, suitId);
+                continue; // No new PawnTag, DCMD, UIMD, icons or registry entry.
+            }
+
             ValidateBase(suit, result, suitId);
             ValidatePawnTag(suit, pawnTags, result, suitId);
             ValidateTargetPackages(suit, packageOwners, registryRows, result, suitId);

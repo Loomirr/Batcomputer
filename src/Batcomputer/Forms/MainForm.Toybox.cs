@@ -239,6 +239,7 @@ public sealed partial class MainForm
         body.Controls.Add(viewerHost, 0, 0);
         body.SetColumnSpan(viewerHost, 3);
 
+
         SelectWorkspaceFolder(WorkspaceFolder.Home, refresh: false);
         PopulateToyboxSlots();
         PopulateToyboxTypes();
@@ -588,6 +589,7 @@ public sealed partial class MainForm
         tabs.Controls.Add(CreateWorkspaceFolderButton(WorkspaceFolder.Suits, "Suits", Theme.Base, "Suits.png"));
         tabs.Controls.Add(CreateWorkspaceFolderButton(WorkspaceFolder.Characters, "Characters", Theme.Materials));
         tabs.Controls.Add(CreateWorkspaceFolderButton(WorkspaceFolder.Vehicles, "Vehicles", Theme.Gliders));
+        tabs.Controls.Add(CreateWorkspaceFolderButton(WorkspaceFolder.Replacers, "Replacers", Theme.Materials));
         tabs.Controls.Add(CreateWorkspaceFolderButton(WorkspaceFolder.Viewer, "3D viewer", Theme.Gliders, "3D.gif"));
         return strip;
     }
@@ -777,10 +779,15 @@ public sealed partial class MainForm
         {
             _workspaceFolder = folder;
             var isHome = folder == WorkspaceFolder.Home;
-            var isSuits = folder is WorkspaceFolder.Suits or WorkspaceFolder.Characters;
-            var matchesProjectKind = (folder == WorkspaceFolder.Characters) == CustomCharacterProjectService.IsCharacter(_currentProject);
+            var isSuits = folder is WorkspaceFolder.Suits or WorkspaceFolder.Characters or WorkspaceFolder.Replacers;
+            var matchesProjectKind = CharacterReplacerProjectService.IsReplacer(_currentProject)
+                ? folder == WorkspaceFolder.Replacers
+                : folder != WorkspaceFolder.Replacers && (folder == WorkspaceFolder.Characters) == CustomCharacterProjectService.IsCharacter(_currentProject);
             var isViewer = folder == WorkspaceFolder.Viewer;
             var isDedicatedWorkspace = isViewer;
+            foreach (var (category, button) in _categoryRailButtons)
+                button.Visible = (category != "Research" || AppSettings.Current.ShowResearchTools) &&
+                    (!CharacterReplacerProjectService.IsReplacer(_currentProject) || CharacterReplacerProjectService.VisualCategory(category));
 
             if (_suitWorkflowRail is not null) _suitWorkflowRail.Visible = isSuits && matchesProjectKind;
             if (_homeWorkflowRail is not null) _homeWorkflowRail.Visible = isHome;
@@ -840,13 +847,14 @@ public sealed partial class MainForm
         {
             RefreshToyboxTiles();
         }
+        UpdateToyboxChips();
     }
 
     private void HandleToyboxCategoryChanged()
     {
         var category = _toyboxCategoryCombo.SelectedItem?.ToString() ?? "Home";
         if (!_switchingWorkspaceFolder &&
-            _workspaceFolder is not (WorkspaceFolder.Suits or WorkspaceFolder.Characters) &&
+            _workspaceFolder is not (WorkspaceFolder.Suits or WorkspaceFolder.Characters or WorkspaceFolder.Replacers) &&
             !category.Equals("Home", StringComparison.OrdinalIgnoreCase) &&
             !IsHomeOnlyCategory(category))
         {
@@ -865,6 +873,7 @@ public sealed partial class MainForm
     {
         _toyboxSaveButton.Visible = _workspaceFolder != WorkspaceFolder.Vehicles;
         _toyboxPackageButton.Visible = true;
+        _toyboxStatusChip.Visible = true;
         var hasBase = HasCurrentSuitBase();
         // The dot is drawn by the pill, so the text is just the label now.
         _toyboxStatusChip.Text = hasBase ? "base set" : "no base yet";
@@ -2018,7 +2027,7 @@ public sealed partial class MainForm
     {
         var service = new SuitProjectService(_projectRootText.Text.Trim());
         var suits = new List<SuitProjectService.ProjectSummary>();
-        try { suits = service.ListProjects().Where(suit => !suit.IsCharacter).OrderByDescending(suit => suit.Modified).ToList(); } catch { /* no saved suits yet */ }
+        try { suits = service.ListProjects().Where(suit => !suit.IsCharacter && !suit.IsReplacer).OrderByDescending(suit => suit.Modified).ToList(); } catch { /* no saved suits yet */ }
 
         var hero = new VirtualTilePanel.HeroModel
         {
@@ -2073,7 +2082,7 @@ public sealed partial class MainForm
 
     private void RefreshSuitWorkspaceTiles()
     {
-        var hasSuit = _currentProject is not null && !CustomCharacterProjectService.IsCharacter(_currentProject);
+        var hasSuit = _currentProject is not null && !CustomCharacterProjectService.IsCharacter(_currentProject) && !CharacterReplacerProjectService.IsReplacer(_currentProject);
         var hero = new VirtualTilePanel.HeroModel
         {
             Overline = "SUIT WORKSPACE",
@@ -2463,6 +2472,7 @@ public sealed partial class MainForm
     /// that only appear once a base is picked (progressive disclosure).</summary>
     private void RefreshBaseTiles()
     {
+        if (CharacterReplacerProjectService.IsReplacer(_currentProject)) { RefreshReplacerTiles(); return; }
         var profile = _currentProject?.BaseProfile;
         var hasBase = HasCurrentSuitBase();
         var visualPackage = profile?.VisualBasePackage ?? _currentProject?.CutsceneTemplate?.PackagePath ?? "";
@@ -2529,6 +2539,11 @@ public sealed partial class MainForm
         }
         var category = _toyboxCategoryCombo.SelectedItem?.ToString();
         var type = _toyboxTypeCombo.SelectedItem?.ToString();
+        if (_workspaceFolder == WorkspaceFolder.Replacers &&
+            (!CharacterReplacerProjectService.IsReplacer(_currentProject) || category is "Home" or "Base"))
+        { SetHomeInspectorCollapsed(!CharacterReplacerProjectService.IsReplacer(_currentProject)); RefreshReplacerTiles(); return; }
+        if (CharacterReplacerProjectService.IsReplacer(_currentProject) && !CharacterReplacerProjectService.VisualCategory(category ?? "Home"))
+        { SelectComboValue(_toyboxCategoryCombo, "Materials"); return; }
 
         if (_workspaceFolder == WorkspaceFolder.Home)
         {
@@ -2547,7 +2562,7 @@ public sealed partial class MainForm
             RefreshCharacterWorkspaceTiles();
             return;
         }
-        if (_workspaceFolder == WorkspaceFolder.Suits && CustomCharacterProjectService.IsCharacter(_currentProject))
+        if (_workspaceFolder == WorkspaceFolder.Suits && (CustomCharacterProjectService.IsCharacter(_currentProject) || CharacterReplacerProjectService.IsReplacer(_currentProject)))
         {
             SetHomeInspectorCollapsed(true);
             RefreshSuitWorkspaceTiles();

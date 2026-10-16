@@ -311,7 +311,8 @@ public sealed class MinifigDiagram : Control
     private const int MaxReadoutLines = 6;
     private const float LineH = 15f;
 
-    private static float TrayHeight => GearRegions.Length * GearRowH + (GearRegions.Length - 1) * GearGap;
+    public bool ShowGearTray { get; set; } = true;
+    private float TrayHeight => ShowGearTray ? GearRegions.Length * GearRowH + (GearRegions.Length - 1) * GearGap : 0;
 
     /// <summary>
     /// Figure + tray + readout lay out as ONE block so no void opens up between them. The figure is
@@ -348,6 +349,7 @@ public sealed class MinifigDiagram : Control
         var trayW = Math.Min(availW, MaxTrayW);
         var trayX = (Width - trayW) / 2f;
         var trayY = _trayTop;
+        if (!ShowGearTray) return;
         foreach (var region in GearRegions)
         {
             _hit[region] = new RectangleF(trayX, trayY, trayW, GearRowH);

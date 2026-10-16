@@ -1,17 +1,29 @@
-# Experimental NPC material replacers
+# Character replacers (experimental)
 
-In the **3D viewer**, select a base-game **Quest** character and choose **NPC test…**. Choose a material directly referenced by that Blueprint, then a different extracted native material instance. Build creates a test PAK and displays its path; it does not install it.
+Replacers use the **existing suit editor**, not a separate workshop.
 
-This prototype changes material references, not the character's identity. It is separate from Characters, which creates playable characters. All uses of the selected material in the selected Blueprint change together. Every instance of that NPC Blueprint is affected. Other replacers for the same Blueprint conflict.
+1. Open **Replacers → New replacer** and select the exact original character variant to override.
+2. Name the project. Edit its appearance using the usual **Materials**, **Faces**, **Textures** and **Parts** tools.
+3. Save and add the project to a mod through the normal mod content picker. **Build mod** can also create a mod for a project that has none yet.
+4. Build, install or ZIP through the usual controls. **View in 3D** remains available; there is no separate embedded replacer viewer.
 
-Supported in this first pass: concrete `/Game` Quest character Blueprints with directly referenced native material instances. Not supported: inherited-only materials, DLC targets, new attachments, mesh replacement, arbitrary NPCs or changes to AI, dialogue and quests. Material compatibility still needs visual testing.
+The base identifies the original Blueprint, not a new playable donor. Playable, quest and cutscene variants are separate targets. Replacing one does not automatically replace its siblings. Two enabled projects overriding the same target are rejected.
 
-The builder requires exact source round-trip compatibility, checks export payloads remain unchanged, checks the edited name map, preserves original extracted files, and verifies packaged bytes through extraction. These checks do not establish in-game quest compatibility. Test a backed-up save before sharing. Close the game before adding or removing the test PAK; install one conflicting test at a time.
+## Appearance-only output
 
-For repeatable internal tests:
+Authoring uses mod-local working copies; extracted game assets remain untouched. At build time the edited Blueprint is restored to the original package/class identity. Non-visual properties, import identities, export metadata and opaque data are checked before writing and again after cooked reload.
 
-```text
-Batcomputer --build-npc-appearance-test recipe.json extractedContent mappings.usmap UnrealPak.exe newOutputDirectory
-```
+Replacers create no new PawnTags, suit-menu entries, DCMD/UIMD assets, voices, equipment loadouts or animation/ability overrides. The builder rejects those declarations even if a project file is edited manually. Original AI, dialogue, quest logic and gameplay stay attached to the original character.
 
-The JSON recipe contains `Target`, `Material` and `Replacement` Unreal package paths. Existing output directories are rejected. No automatic installer or NPC registration is involved.
+Replacement-only mods do not generate an Asset Registry plugin. Mixed mods still register their ordinary characters, suits and vehicles.
+
+## Current safety limits
+
+- Concrete base-game `/Game/Characters` Blueprints only. DLC targets and inherited-only component authoring need more work.
+- Material, compatible existing-mesh and visual placement changes use the shared tools. Structural edits that change the Blueprint export/component layout currently fail visual-only verification; adding new attachments is not yet certified.
+- Custom visual dependencies come from the prepared project. Missing or ambiguous sources and non-visual custom dependencies block builds.
+- In-game testing is required, especially for quest/cutscene variants and mesh proportions. Offline checks do not establish quest compatibility.
+
+Installed mods override assets through game loading; they do not overwrite original game files. Removing the mod restores the base appearance. Other mods overriding the exact same Blueprint conflict. Back up saves before testing.
+
+Older experimental `.replacement.json` files remain supported by the internal `--build-character-replacer` diagnostic, but are not normal suit-editor projects and are not automatically migrated. Those files are left untouched.

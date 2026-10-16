@@ -127,20 +127,6 @@ public sealed partial class MainForm
             _viewerSources.Controls.Add(b);
         }
         left.Controls.Add(_viewerSources, 0, 1);
-        var npcTest = new Button { Text = "NPC test…", Width = 79, Height = 26, FlatStyle = FlatStyle.Flat, Font = Theme.Caption,
-            BackColor = Theme.PanelBg, ForeColor = Theme.OnDarkMuted, Margin = new Padding(0, 0, 2, 0) };
-        npcTest.Click += (_, _) =>
-        {
-            if (_viewerList?.SelectedItem is not CharacterCatalogService.Entry { Origin: CharacterCatalogService.Source.Quest } entry)
-            { Dialog.Info(this, "Choose a Quest NPC", "Select a base-game Quest character first. This experimental tool builds material-only NPC replacers, not new playable characters."); return; }
-            var package = UnrealPathUtil.NormalizePackagePath(entry.ObjectPath);
-            const string gameContentPrefix = "LEGOBatmanLotDK/Content/";
-            if (package.StartsWith(gameContentPrefix, StringComparison.OrdinalIgnoreCase)) package = "/Game/" + package[gameContentPrefix.Length..];
-            if (!package.StartsWith("/Game/", StringComparison.Ordinal))
-            { Dialog.Info(this, "Base-game test only", "DLC NPC replacement is not supported by this prototype."); return; }
-            using var form = new NpcAppearanceTestForm(package); form.ShowDialog(this);
-        };
-        _viewerSources.Controls.Add(npcTest);
         SyncViewerSourceButtons();
 
         _viewerSearch = new SearchBox { Dock = DockStyle.Top, Height = 34, Margin = new Padding(0, 10, 0, 8), AccessibleName = "Search characters and suits" };

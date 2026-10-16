@@ -157,6 +157,7 @@ public sealed partial class MainForm : AdaptiveForm
         Suits,
         Characters,
         Vehicles,
+        Replacers,
         Viewer,
     }
 
@@ -613,7 +614,7 @@ public sealed partial class MainForm : AdaptiveForm
         }
         if (_currentProject?.CustomCharacter is { } identity)
             parts.Add(identity.IsDefinition ? "default suit · unlocked" : "suit for " + identity.CharacterId);
-        else if (_currentProject is not null) parts.Add("suit project");
+        else if (_currentProject is not null) parts.Add(CharacterReplacerProjectService.IsReplacer(_currentProject) ? "visual replacement" : "suit project");
         _headerMetaLabel.Text = string.Join("  ·  ", parts);
         _tipsHeader.SetToolTip(_headerMetaLabel, $"{_headerMetaLabel.Text}\nProject: {slot}\nPackage: {pak}");
     }
@@ -867,7 +868,7 @@ public sealed partial class MainForm : AdaptiveForm
     /// </summary>
     private void EditNativeIdentity()
     {
-        if (_currentProject?.CustomCharacter is not null)
+        if (_currentProject?.CustomCharacter is not null || CharacterReplacerProjectService.IsReplacer(_currentProject))
         {
             EditCustomCharacterIdentity();
             return;
@@ -931,7 +932,7 @@ public sealed partial class MainForm : AdaptiveForm
         }
 
         var svc = new SuitProjectService(_projectRootText.Text.Trim());
-        using var dlg = new LoadSuitDialog(svc.ListProjects().Where(project => !project.IsCharacter).ToArray(), DeleteSavedSuit);
+        using var dlg = new LoadSuitDialog(svc.ListProjects().Where(project => !project.IsCharacter && !project.IsReplacer).ToArray(), DeleteSavedSuit);
         if (dlg.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(dlg.SelectedPath))
         {
             return;
@@ -3224,7 +3225,7 @@ public sealed partial class MainForm : AdaptiveForm
         NativeSuitProject project,
         NativeMetadataDonorService.Donor? donor = null)
     {
-        if (project.CustomCharacter is not null) return false;
+        if (project.CustomCharacter is not null || CharacterReplacerProjectService.IsReplacer(project)) return false;
         donor ??= NativeMetadataDonorService.TryRead(
             project.DcmdTemplate,
             project.PlayableTemplate,

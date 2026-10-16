@@ -154,6 +154,9 @@ public sealed class RecommendedDonorPlan
 
 public sealed class NativeSuitProject
 {
+    // A visual-only override uses the same authoring recipe/editor, but is never registered
+    // as a new suit. The target is the exact native Blueprint, not a family-wide replacement.
+    public string ReplacementTarget { get; set; } = "";
     // Disposable combined-build context, never persisted in an authoring recipe.
     internal IReadOnlyDictionary<string, string> ReleaseAssetAliases { get; set; } = new Dictionary<string, string>();
     // Null is a normal suit for a native character. A definition is the new character's

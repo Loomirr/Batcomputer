@@ -2,7 +2,7 @@ namespace Batcomputer;
 
 public sealed partial class MainForm
 {
-    private string CurrentProjectNoun => CustomCharacterProjectService.IsCharacter(_currentProject) ? "character" : "suit";
+    private string CurrentProjectNoun => CharacterReplacerProjectService.IsReplacer(_currentProject) ? "replacer" : CustomCharacterProjectService.IsCharacter(_currentProject) ? "character" : "suit";
 
     internal static string DescribeProjectCounts(int characters, int suits, int missing = 0)
     {
@@ -20,16 +20,19 @@ public sealed partial class MainForm
         summaries ??= new SuitProjectService(_projectRootText.Text.Trim()).ListProjects().ToList();
         var characters = 0;
         var suits = 0;
+        var replacers = 0;
         var missing = 0;
         foreach (var entry in mod.Suits.Where(entry => !enabledOnly || entry.Enabled))
         {
             var path = ModService.ResolveSuitProjectPath(entry);
             var summary = summaries.FirstOrDefault(item => item.Path.Equals(path, StringComparison.OrdinalIgnoreCase));
             if (summary is null) missing++;
+            else if (summary.IsReplacer) replacers++;
             else if (summary.IsCharacter) characters++;
             else suits++;
         }
         var description = DescribeProjectCounts(characters, suits, missing);
+        if (replacers > 0) description = (description == "no content" ? "" : description + " + ") + $"{replacers} replacer{(replacers == 1 ? "" : "s")}";
         var vehicles = mod.Vehicles.Count(e => !enabledOnly || e.Enabled);
         return vehicles == 0 ? description : (description == "no content" ? "" : description + " + ") + $"{vehicles} vehicle{(vehicles == 1 ? "" : "s")}";
     }

@@ -1021,11 +1021,17 @@ public sealed partial class MainForm
             var plugin = RegistryPluginService.CreateLayout(outRoot, mod.ModId);
             result.AssetRegistryDestination = LotdkExpandedLayout.RegistryPluginDirectory(gameRoot, plugin.PluginName);
             // Include mandatory files explicitly: missing metadata must stop before any replacement.
-            var requiredPluginFiles = new List<string> { plugin.DescriptorPath, plugin.RegistryPath };
+            var replacementOnly = IsReplacementOnlyBuild(outRoot);
+            var requiredPluginFiles = replacementOnly ? new List<string>() : new List<string> { plugin.DescriptorPath, plugin.RegistryPath };
+            if (replacementOnly)
+            {
+                changes.Add(new(null, Path.Combine(result.AssetRegistryDestination, Path.GetFileName(plugin.DescriptorPath))));
+                changes.Add(new(null, Path.Combine(result.AssetRegistryDestination, Path.GetFileName(plugin.RegistryPath))));
+            }
             var builtCharacterGroups = Path.Combine(outRoot, "Stage", "LEGOBatmanLotDK", "Content", "Characters", "MetaData", "Groups", "Mods", mod.ModId);
             if (Directory.Exists(builtCharacterGroups) && Directory.EnumerateFiles(builtCharacterGroups, "*.uasset").Any())
                 requiredPluginFiles.Add(Path.Combine(plugin.PluginDirectory, "Config", "CharacterSelectSystem.ini"));
-            foreach (var src in requiredPluginFiles.Concat(Directory.Exists(plugin.PluginDirectory)
+            foreach (var src in requiredPluginFiles.Concat(!replacementOnly && Directory.Exists(plugin.PluginDirectory)
                 ? Directory.EnumerateFiles(plugin.PluginDirectory, "*", SearchOption.AllDirectories)
                 : Array.Empty<string>()).Distinct(StringComparer.OrdinalIgnoreCase))
             {
@@ -1241,6 +1247,8 @@ public sealed partial class MainForm
                     PawnTagConfigService.RelativeConfigPath(mod.ModId)
                         .Replace('/', Path.DirectorySeparatorChar)),
                 $"{ArchiveRoot}/{PawnTagConfigService.RelativeConfigPath(mod.ModId)}");
+            if (!IsReplacementOnlyBuild(outRoot))
+            {
             AddRequired(plugin.DescriptorPath,
                 $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{plugin.PluginName}/{Path.GetFileName(plugin.DescriptorPath)}");
             AddRequired(plugin.RegistryPath,
@@ -1252,6 +1260,7 @@ public sealed partial class MainForm
                 if (relative.StartsWith("Config/Tags/", StringComparison.OrdinalIgnoreCase)) continue;
                 files.Add((pluginFile,
                     $"{ArchiveRoot}/LEGOBatmanLotDK/Binaries/Win64/ue4ss/{LotdkExpandedLayout.ModuleId}/RegistryPlugins/{plugin.PluginName}/{relative}"));
+            }
             }
         }
         catch (Exception ex) when (ex is FileNotFoundException or InvalidDataException)
@@ -1336,13 +1345,13 @@ public sealed partial class MainForm
         var suits = new SuitProjectService(_projectRootText.Text.Trim()).ListProjects().ToList();
         if (suits.Count == 0)
         {
-            AppendLog("No saved content to add. Create and save a character or suit first.");
+            AppendLog("No saved content to add. Create and save a character, suit or replacer first.");
             return Array.Empty<string>();
         }
 
         using var dlg = new AdaptiveDialogForm
         {
-            Text = $"Characters and suits in {modId}",
+            Text = $"Characters, suits and replacers in {modId}",
             Width = 460,
             Height = 460,
             AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi,
@@ -1356,7 +1365,7 @@ public sealed partial class MainForm
         dlg.Shown += (_, _) => Theme.UseDarkTitleBar(dlg);
         var lbl = new System.Windows.Forms.Label
         {
-            Text = "Include characters and suits (required defaults are added at build):",
+            Text = "Include saved projects (required defaults are added at build):",
             Left = 14, Top = 12, Width = 420, ForeColor = Theme.OnDark,
         };
         var list = new System.Windows.Forms.CheckedListBox
@@ -1387,7 +1396,7 @@ public sealed partial class MainForm
     private sealed record SuitItem(SuitProjectService.ProjectSummary Summary)
     {
         public override string ToString() =>
-            (Summary.IsCharacter ? "Character · " : "Suit · ") + (string.IsNullOrWhiteSpace(Summary.DisplayName) ? Summary.SlotId : Summary.DisplayName);
+            (Summary.IsReplacer ? "Replacer · " : Summary.IsCharacter ? "Character · " : "Suit · ") + (string.IsNullOrWhiteSpace(Summary.DisplayName) ? Summary.SlotId : Summary.DisplayName);
     }
 
     /// <summary>
@@ -1814,6 +1823,7 @@ public sealed partial class MainForm
             var abs = ModService.ResolveSuitProjectPath(entry);
             var suit = svc.LoadProject(abs);
             if (suit is null) { AppendLog($"  skip (unreadable): {abs}"); continue; }
+            if (CharacterReplacerProjectService.IsReplacer(suit)) continue;
 
             if (CanonicalizeProjectPawnTagOwner(suit))
             {
@@ -1862,7 +1872,7 @@ public sealed partial class MainForm
             });
         }
 
-        if (tagRows.Count == 0) { AppendLog("Build mod: nothing to build."); return false; }
+        if (tagRows.Count == 0 && !enabled.Any(e => CharacterReplacerProjectService.IsReplacer(svc.LoadProject(ModService.ResolveSuitProjectPath(e))))) { AppendLog("Build mod: nothing to build."); return false; }
         timing.Mark("preflight");
 
         var publishedOutputRoot = ModBuildRoot(mod.ModId);
@@ -1947,6 +1957,15 @@ public sealed partial class MainForm
                 var abs = ModService.ResolveSuitProjectPath(entry);
                 var suit = svc.LoadProject(abs);
                 if (suit is null) continue;
+                if (CharacterReplacerProjectService.IsReplacer(suit))
+                {
+                    ModReleaseStep("Preparing visual replacement " + suit.DisplayName + "…");
+                    var replacementContent = await PrepareReplacerForModAsync(suit, svc, Path.Combine(outRoot, "Replacements", suit.SlotId));
+                    MergeContentRoot(replacementContent, stageContent);
+                    mergedSuits++;
+                    AppendLog("  visual-only override: " + suit.ReplacementTarget + " (no roster registration)");
+                    continue;
+                }
                 CanonicalizeProjectPawnTagOwner(suit);
 
                 var dcmdPkg = suit.TargetPackages?.Dcmd;
@@ -2037,6 +2056,8 @@ public sealed partial class MainForm
                 string_table = stObjectPath,
                 build_id = $"{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}",
                 suits = manifestSuits,
+                replacements = enabled.Select(e => svc.LoadProject(ModService.ResolveSuitProjectPath(e)))
+                    .Where(CharacterReplacerProjectService.IsReplacer).Select(p => p!.ReplacementTarget).ToList(),
                 vehicles = vehicles.Select(v => new ModManifestVehicle { vehicle_id = v.Id, pawn_tag = VehicleProjectService.PawnTag(v), owner_tag = v.OwnerTag, metadata = VehicleProjectService.Metadata(v), blueprint = VehicleProjectService.Blueprint(v), progress_tag = VehicleProjectService.ProgressTag(v), display_name = v.DisplayName }).ToList(),
             };
 
@@ -2109,6 +2130,8 @@ public sealed partial class MainForm
                 return false;
             }
             timing.Mark("validate");
+            if (registryRows.Count > 0)
+            {
             var registry = await new RegistryPluginService().BuildAsync(
                 outRoot,
                 mod.ModId,
@@ -2144,6 +2167,9 @@ public sealed partial class MainForm
             AppendLog($"  loose gameplay-tag config: {tagConfigPath}");
             AppendLog($"  Asset Registry: {registry.Rows.Count} primary-asset row(s) -> {registry.Layout.RegistryPath}");
             AppendLog("  registry verification: " + registry.VerificationLine);
+
+            }
+            else AppendLog("  Visual replacements only: no primary assets, roster entries or registry plugin generated.");
 
             File.WriteAllText(modJsonPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
             AppendLog($"  release receipt: {manifestSuits.Count} character/suit project(s), {vehicles.Count} vehicle(s) -> {modJsonPath}");
@@ -2932,6 +2958,7 @@ public sealed partial class MainForm
         public string build_id { get; set; } = "";
         public List<ModManifestSuit> suits { get; set; } = new();
         public List<ModManifestVehicle> vehicles { get; set; } = new();
+        public List<string> replacements { get; set; } = new();
     }
 
     private sealed class ModManifestVehicle

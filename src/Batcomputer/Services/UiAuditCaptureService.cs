@@ -19,6 +19,29 @@ internal static class UiAuditCaptureService
     private static long _captureJpegQuality = 38L;
     private static long _contactSheetJpegQuality = 34L;
 
+    internal static int CaptureReplacerFlow(string root, string project, string output)
+    {
+        Directory.CreateDirectory(output);
+        var captures = new List<CaptureResult>(); var findings = new List<AuditFinding>();
+        using var form = new MainForm { Width = 1400, Height = 900 };
+        ShowAndSettle(form, 500);
+        var previous = SynchronizationContext.Current;
+        try
+        {
+            SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+            var ready = form.PrepareReplacerFlowAuditAsync(root, Path.GetFullPath(project));
+            for (var i = 0; i < 240 && !ready.IsCompleted; i++) Settle(250);
+            if (!ready.IsCompleted) throw new TimeoutException("Replacer editor restore timed out.");
+            ready.GetAwaiter().GetResult(); Settle(500);
+            CaptureVisibleForm(form, "Replacers-shared-suit-editor", output, captures, findings);
+            ValidateResizeBehavior(form, "Replacers", findings);
+        }
+        catch (Exception ex) { findings.Add(new("Replacers", "ERROR", ex.Message)); }
+        finally { SynchronizationContext.SetSynchronizationContext(previous); }
+        File.WriteAllText(Path.Combine(output, "findings.json"), JsonSerializer.Serialize(findings));
+        form.Close(); return findings.Any(f => f.Severity == "ERROR") ? 1 : 0;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeRect
     {

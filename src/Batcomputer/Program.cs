@@ -81,7 +81,19 @@ internal static class Program
         // with no settings file present.
         AppSettings.Current = AppSettings.Load();
 
-        if (args.Length == 6 && args[0] == "--build-npc-appearance-test")
+        if (args.Length == 4 && args[0] == "--inspect-character-replacer")
+        {
+            try { Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(CharacterReplacementService.Inspect(args[1], args[2], args[3]))); return 0; }
+            catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 1; }
+        }
+
+        if (args.Length == 5 && args[0] == "--verify-replacer-custom-assets")
+        {
+            try { Console.WriteLine(CharacterReplacementRegressionChecks.VerifyCustomAssets(args[1], args[2], args[3], args[4])); return 0; }
+            catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+        }
+
+        if (args.Length == 6 && args[0] is "--build-npc-appearance-test" or "--build-character-replacer")
         {
             try { Console.WriteLine(NpcAppearanceTestService.Build(args[1], args[2], args[3], args[4], args[5])); return 0; }
             catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 1; }
@@ -1180,6 +1192,18 @@ internal static class Program
             return context.ExitCode;
         }
 
+        if (args.Length == 2 && args[0] == "--create-replacer-gameplay-fixture")
+        {
+            try { CharacterReplacementRegressionChecks.CreateGameplayFixture(args[1]); return 0; }
+            catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+        }
+        if (args.Length == 2 && args[0] == "--create-replacer-flow-fixture")
+        {
+            try { CharacterReplacementRegressionChecks.CreateFlowFixture(args[1]); return 0; }
+            catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+        }
+        if (args.Length == 4 && args[0] == "--capture-replacer-flow")
+            return UiAuditCaptureService.CaptureReplacerFlow(args[1], args[2], args[3]);
         if (args.Length == 3 && args[0] == "--verify-build-sharing")
         {
             try { BuildSharedAssetsRegressionChecks.VerifyCooked(args[1], args[2]); return 0; }

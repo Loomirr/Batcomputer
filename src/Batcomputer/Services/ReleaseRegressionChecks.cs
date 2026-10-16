@@ -12,6 +12,8 @@ internal static class ReleaseRegressionChecks
     public static int Run(TextWriter output)
     {
         var failures = new List<string>();
+        foreach (var result in CharacterReplacementRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
         var animatedBatgirl = CharacterCatalogService.EntryFromPackageKey("Game/Characters/Minifig/Batgirl/BP_Batgirl_Default_Playable.uasset")!;
         Check(animatedBatgirl.Name == "Batgirl Animated Series (Default)" &&
             CharacterCatalogService.MatchesSearch(animatedBatgirl, "batgirl new batman adventures") &&
