@@ -63,11 +63,9 @@ internal static class DlcNativeRegressionChecks
                     var traversalSets = new List<string>();
                     AnimArchetypeGraftService.EnsurePairedCapeTraversalDependencies(capeProject, true, gameplayDonor!, traversalSets);
                     AnimArchetypeGraftService.EnsurePairedCapeTraversalDependencies(capeProject, true, gameplayDonor!, traversalSets);
-                    Require(traversalSets.Contains(GliderService.GlidingAbilitySetPackage) &&
-                            traversalSets.Contains("/Game/Characters/Abilities/CoreAbilities/Grappling/AS_Grappling") &&
-                            traversalSets.Count == 2,
-                        family + " paired cape lacks unique native glide/grapple grants");
-                    output.WriteLine($"PASS {family}: paired cape packages missing glide/grapple abilities exactly once without changing the donor loadout");
+                    Require(traversalSets.Count == 0,
+                        family + " paired cape bypasses native traversal upgrade requirements");
+                    output.WriteLine($"PASS {family}: paired cape retains native upgrade-gated loadout; no normal-mode traversal grants baked into the PAK");
                     var folder = Path.GetDirectoryName(Source(playablePackage))!;
                     foreach (var variant in Directory.EnumerateFiles(folder, "BP_*_Playable.uasset"))
                     {
@@ -178,8 +176,8 @@ internal static class DlcNativeRegressionChecks
                 output.WriteLine($"PASS {family}: remove/replace/replay with {replacement}'s printed face preserves native Face, animation, SCS and class fields in playable + cutscene; source files unchanged");
                 if (family is "Joker" or "HarleyQuinn")
                 {
-                    // A regular replacement glider must generate its own DPRD even
-                    // when no equipment was changed on these native DLC donors.
+                    // A visual replacement must not turn normal-mode support into
+                    // unconditional grants that bypass the native Mayhem upgrades.
                     project.UseCustomArchetype = true;
                     project.PartGrafts.Add(new SavedPartGraft { IsGlider = true });
                     var gliderDependencies = new AnimArchetypeGraftService()
@@ -187,10 +185,10 @@ internal static class DlcNativeRegressionChecks
                     var generatedDprd = Path.Combine(patch.PatchedContentRoot,
                         $"Mods/DlcFaceCheck{family}/Characters/DA_DPRD_DlcFaceCheck{family}.uasset"
                             .Replace('/', Path.DirectorySeparatorChar));
-                    Require(gliderDependencies.Status == "ok" && File.Exists(generatedDprd),
-                        family + " glider failed to produce its generated DPRD: " +
+                    Require(gliderDependencies.Status == "ok" && !File.Exists(generatedDprd),
+                        family + " visual glider changed the native upgrade-gated DPRD: " +
                         gliderDependencies.Error + " " + string.Join("; ", gliderDependencies.Log));
-                    output.WriteLine($"PASS {family}: replacement-glider dependency generates a mod-local DPRD");
+                    output.WriteLine($"PASS {family}: replacement glider retains the native upgrade-gated DPRD");
                 }
                 if (family == "Batman")
                 {
@@ -284,6 +282,7 @@ internal static class DlcNativeRegressionChecks
             foreach (var hood in new[] { "HoodSmall", "HoodFringe", "HoodFurlined" })
                 Require(hats.Any(p => p.MeshPackagePath.Contains(hood)), hood + " missing from the parts catalog");
             output.WriteLine("PASS Talia BatSuit helmet (with animation), HoodSmall, HoodFringe and HoodFurlined are selectable catalog entries");
+            NativeVillainSuitRegressionChecks.Run(Path.Combine(outputRoot, "NativeSuitVariants"), output);
             output.WriteLine("Native DLC checks: PASS. No game installation or saves changed. Cutscene motion still needs in-game validation.");
             return 0;
         }

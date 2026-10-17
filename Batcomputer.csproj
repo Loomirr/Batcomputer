@@ -9,10 +9,10 @@
     <RootNamespace>Batcomputer</RootNamespace>
     <ApplicationIcon Condition="Exists('src\Batcomputer\Assets\Icon.ico')">src\Batcomputer\Assets\Icon.ico</ApplicationIcon>
     <ApplicationManifest>src\Batcomputer\app.manifest</ApplicationManifest>
-    <Version>1.1.1-beta.1</Version>
+    <Version>1.1.1-beta.2</Version>
     <AssemblyVersion>1.1.0.0</AssemblyVersion>
-    <FileVersion>1.1.1.1</FileVersion>
-    <InformationalVersion>1.1.1-beta.1</InformationalVersion>
+    <FileVersion>1.1.1.2</FileVersion>
+    <InformationalVersion>1.1.1-beta.2</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <!-- Code-built controls do not need designer serialization metadata. -->
     <NoWarn>$(NoWarn);WFO1000</NoWarn>

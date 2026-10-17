@@ -130,7 +130,7 @@ public sealed class UAssetPatchService
         var sourceCutscene = EffectiveCharacterSourcePackage(project, playable: false);
         var identity = string.Join("\n", new[]
         {
-            "batcomputer-patched-stage-v4-native-voice",
+            "batcomputer-patched-stage-v5-noncascading-parent-identities",
             AppSettings.Current.EffectiveExtractedContentRoot(),
             SourceStamp(AppSettings.Current.EffectiveUsmapPath()),
             SourceStamp(ExtractedPackagePathService.ResolvePackageUasset(AppSettings.Current.EffectiveExtractedContentRoot(), sourcePlayable)),
@@ -531,12 +531,9 @@ public sealed class UAssetPatchService
 
     private static string ApplyReplacements(string value, Dictionary<string, string> replacements)
     {
-        var output = value;
-        foreach (var pair in replacements)
-        {
-            output = output.Replace(pair.Key, pair.Value, StringComparison.Ordinal);
-        }
-        return output;
+        // Match only the original text: a target package can contain a shorter donor
+        // stem and must not be expanded again by the next rule in the same pass.
+        return AnimArchetypeGraftService.ApplyReferenceReplacements(value, replacements);
     }
 
     private static string PackagePathToBasePath(string contentRoot, string packagePath)

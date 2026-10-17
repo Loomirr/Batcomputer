@@ -437,6 +437,9 @@ public sealed class AnimArchetypeGraftService
                 {
                     info.Family = info.LasCharStem["LAS_Char_".Length..];
                 }
+                // Alternate montage sets are costume animation choices, not new gameplay families.
+                var villainFamily = NativeVillainTraversalService.Family(info.ArchetypePackage);
+                if (villainFamily.Length > 0) info.Family = villainFamily;
 
                 var dprdUasset = ExtractedPackagePathService.ResolvePackageUasset(
                     AppSettings.Current.EffectiveExtractedContentRoot(),
@@ -447,7 +450,9 @@ public sealed class AnimArchetypeGraftService
                     info.AbilitySetPackage = dprd.Imports
                         .Select(i => i.ObjectName.ToString())
                         .FirstOrDefault(n => IsExtractedPackagePath(AppSettings.Current.EffectiveExtractedContentRoot(), n) &&
-                                             n.Contains($"/AS_{info.Family}", StringComparison.OrdinalIgnoreCase)) ?? "";
+                                             (villainFamily.Length > 0
+                                                 ? UnrealPathUtil.AssetName(n).Equals(info.Family == "Joker" ? "AS_Joker" : "AS_Harley", StringComparison.OrdinalIgnoreCase)
+                                                 : n.Contains($"/AS_{info.Family}", StringComparison.OrdinalIgnoreCase))) ?? "";
                 }
             }
             return info;
@@ -758,6 +763,14 @@ public sealed class AnimArchetypeGraftService
                 // Normal custom-archetype suits clone the selected gameplay donor wholesale.
                 CloneDonorAsset(extractedRoot, donor.ArchetypePackage, donor.ArchetypeStem,
                     contentRoot, custom, customStem, mappings, result);
+                var inherited = ReadBehaviorDefaults(ExtractedPackagePathService.ResolvePackageUasset(
+                    extractedRoot, donor.ArchetypePackage)!, mappings);
+                var concrete = new Dictionary<string, string>();
+                foreach (var (property, package) in new[] { ("AnimSet", donor.MasCharPackage),
+                    ("LayerSet", donor.LasCharPackage), ("DinnerPawnRuntimeData", donor.DprdPackage),
+                    ("AudioTagData", donor.AudioTagDataPackage) })
+                    AddPackageAndStemReplacement(concrete, inherited.GetValueOrDefault(property) ?? "", package);
+                ApplyNameMapReplacements(StageUasset(contentRoot, custom), concrete, mappings);
             }
 
             // 2) Reparent the playable + cutscene in the packaged root (name-map only,
@@ -804,12 +817,23 @@ public sealed class AnimArchetypeGraftService
                 }
             }
 
+            foreach (var reference in reparent.Where(pair => pair.Key.StartsWith('/')).ToArray())
+            {
+                var sourceStem = UnrealPathUtil.AssetName(reference.Key);
+                var targetStem = UnrealPathUtil.AssetName(reference.Value);
+                foreach (var (sourceObject, targetObject) in new[] { (sourceStem, targetStem),
+                    (sourceStem + "_C", targetStem + "_C"), ("Default__" + sourceStem + "_C", "Default__" + targetStem + "_C") })
+                    reparent[reference.Key + "." + sourceObject] = reference.Value + "." + targetObject;
+            }
+
             foreach (var pkg in new[] { project.TargetPackages.Playable, project.TargetPackages.Cutscene })
             {
                 var uasset = StageUasset(contentRoot, pkg);
                 if (File.Exists(uasset))
                 {
-                    var n = ApplyNameMapReplacements(uasset, reparent, mappings);
+                    // Reparenting is replayed after the initial patch. Exact names keep a
+                    // target such as BP_CAT_Archetype_JokerVariant from matching Joker again.
+                    var n = ApplyNameMapExact(uasset, reparent, mappings);
                     result.Log.Add($"reparent {UnrealPathUtil.AssetName(pkg)}: {n} name(s)");
                 }
                 else
@@ -1034,7 +1058,7 @@ public sealed class AnimArchetypeGraftService
             project.AnimationOverrides.Count == 0 && project.LocomotionOverrides.Count == 0 &&
             exactSlotOverrides.Count == 0 &&
             !hasAbilityCustomization &&
-            !usesPairedCapeAdapter)
+            !usesPairedCapeAdapter && !NativeVillainTraversalService.AppliesTo(project))
         {
             result.Log.Add("no foreign gadgets or animation overrides — archetype left on donor sets");
             return result;
@@ -1237,23 +1261,8 @@ public sealed class AnimArchetypeGraftService
                 }
                 if (usesPairedCapeAdapter)
                 {
-                    var donorSet = RequiredCategoryParent(
-                        graft.InspectParentSets(StageUasset(patchedContentRoot, customMasPkg)), "MAS_Glide_", $"MAS_Glide_{donor.Family}");
-                    var r = graft.ReplaceParentSet(
-                        StageUasset(patchedContentRoot, customMasPkg),
-                        "TTAnimSet",
-                        donorSet,
-                        project.PairedCapeAdapter!.GlideAnimMasPackage,
-                        requireExisting: true);
-                    result.Log.Add($"paired-cape MAS category replacement: {r.Status} {donorSet}→{UnrealPathUtil.AssetName(project.PairedCapeAdapter.GlideAnimMasPackage)}{ErrSuffix(r.Error)}");
-                    if (!r.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
-                    {
-                        result.Status = "error";
-                        result.Error =
-                            "The certified paired-cape MAS glide category could not replace the gameplay donor's native category: " +
-                            (r.Error ?? r.Status);
-                        return result;
-                    }
+                    PairedCapeAnimationGraphService.Apply(donor.MasCharPackage, customMasPkg, patchedContentRoot,
+                        project.PairedCapeAdapter!.GlideAnimMasPackage, "MAS_Glide_", $"MAS_Glide_{donor.Family}", false, mappings, result);
                 }
                 foreach (var o in montageOverrides)
                 {
@@ -1297,29 +1306,8 @@ public sealed class AnimArchetypeGraftService
                 }
                 if (usesPairedCapeAdapter)
                 {
-                    var donorSet = RequiredCategoryParent(
-                        graft.InspectParentSets(StageUasset(patchedContentRoot, customLasPkg)), "LAS_Traversal_", $"LAS_Traversal_{donor.Family}", allowMissing: true);
-                    // Some current Villain Mode donors borrow LAS_Char_MrFreeze, which
-                    // has no traversal parent. Supply the certified cape block while
-                    // retaining all of that donor's existing animation parents.
-                    var r = string.IsNullOrEmpty(donorSet)
-                        ? graft.InjectParentSets(StageUasset(patchedContentRoot, customLasPkg),
-                            "TTLayerSet", [project.PairedCapeAdapter!.GlideAnimLasPackage])
-                        : graft.ReplaceParentSet(
-                        StageUasset(patchedContentRoot, customLasPkg),
-                        "TTLayerSet",
-                        donorSet,
-                        project.PairedCapeAdapter!.GlideAnimLasPackage,
-                        requireExisting: true);
-                    result.Log.Add($"paired-cape LAS category replacement: {r.Status} {donorSet}→{UnrealPathUtil.AssetName(project.PairedCapeAdapter.GlideAnimLasPackage)}{ErrSuffix(r.Error)}");
-                    if (!r.Status.Equals("ok", StringComparison.OrdinalIgnoreCase))
-                    {
-                        result.Status = "error";
-                        result.Error =
-                            "The certified paired-cape LAS traversal category could not replace the gameplay donor's native category: " +
-                            (r.Error ?? r.Status);
-                        return result;
-                    }
+                    PairedCapeAnimationGraphService.Apply(donor.LasCharPackage, customLasPkg, patchedContentRoot,
+                        project.PairedCapeAdapter!.GlideAnimLasPackage, "LAS_Traversal_", $"LAS_Traversal_{donor.Family}", true, mappings, result);
                 }
                 foreach (var o in layerOverrides)
                 {
@@ -1441,6 +1429,9 @@ public sealed class AnimArchetypeGraftService
                 if (needMas) { repoint[donor.MasCharPackage] = customMasPkg; repoint[donor.MasCharStem] = masStem; }
                 if (needLas) { repoint[donor.LasCharPackage] = customLasPkg; repoint[donor.LasCharStem] = lasStem; }
                 var applied = ApplyNameMapReplacements(archetypeUasset, repoint, mappings);
+                // Concrete playable overrides take precedence over their parent CDO. Repoint
+                // those too, otherwise ordinary Joker/Harley suits ignore their edited sets.
+                ApplyNameMapReplacements(StageUasset(patchedContentRoot, project.TargetPackages.Playable), repoint, mappings);
                 result.Log.Add($"archetype repoint → custom anim sets: {applied} name(s)");
             }
 
@@ -1519,6 +1510,8 @@ public sealed class AnimArchetypeGraftService
                     [donor.DprdStem] = dprdStem,
                 }, mappings);
                 result.Log.Add($"archetype repoint → custom DPRD: {applied} name(s)");
+                ApplyNameMapReplacements(StageUasset(patchedContentRoot, project.TargetPackages.Playable),
+                    new Dictionary<string, string> { [donor.DprdPackage] = customDprdPkg, [donor.DprdStem] = dprdStem }, mappings);
 
                 var customizedSetPackages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 if (hasAbilityCustomization && project.AbilityLoadout is { } abilityProfile)
@@ -2215,6 +2208,7 @@ public sealed class AnimArchetypeGraftService
 
     public static bool RequiresCustomArchetype(NativeSuitProject project) =>
         project.UseCustomArchetype ||
+        NativeVillainTraversalService.AppliesTo(project) ||
         project.GameplayAnimationGraphs.Count > 0 ||
         project.EquipmentSlots.Any(slot => slot.Remove || slot.Custom is not null) ||
         AbilityLoadoutService.HasCustomizations(project) ||
@@ -2301,7 +2295,7 @@ public sealed class AnimArchetypeGraftService
         ICollection<string> foreignAbilitySets)
     {
         if (!project.PartGrafts.Any(graft => graft.IsGlider) ||
-            usesPairedCapeAdapter ||
+            usesPairedCapeAdapter || NativeVillainTraversalService.AppliesTo(project) ||
             foreignAbilitySets.Contains(
                 GliderService.GlidingAbilitySetPackage,
                 StringComparer.OrdinalIgnoreCase))
@@ -2315,21 +2309,7 @@ public sealed class AnimArchetypeGraftService
     internal static void EnsurePairedCapeTraversalDependencies(NativeSuitProject project,
         bool usesPairedCapeAdapter, DonorInfo donor, ICollection<string> requiredSets)
     {
-        if (!usesPairedCapeAdapter || !project.PartGrafts.Any(g => g.IsGlider)) return;
-        var path = ExtractedPackagePathService.ResolvePackageUasset(
-            AppSettings.Current.EffectiveExtractedContentRoot(), donor.DprdPackage)
-            ?? throw new InvalidDataException("The paired-cape gameplay DPRD is missing: " + donor.DprdPackage);
-        var inspection = new AbilityAssetMutationService().InspectDprdAbilitySets(path);
-        if (!inspection.Success) throw new InvalidDataException(inspection.Error);
-        var nativeSets = inspection.AbilitySets.Select(s => s.PackagePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        // DLC Joker/Harley only own hover + grapple DATA. Native-only runtime grants do
-        // not apply to /Game/Mods actors, so package the actual traversal abilities too.
-        var candidates = new List<string> { GliderService.GlidingAbilitySetPackage };
-        if (donor.Family is "Joker" or "HarleyQuinn")
-            candidates.Add("/Game/Characters/Abilities/CoreAbilities/Grappling/AS_Grappling");
-        foreach (var set in candidates)
-            if (!nativeSets.Contains(set) && !requiredSets.Contains(set, StringComparer.OrdinalIgnoreCase))
-                requiredSets.Add(set);
+        NativeVillainTraversalService.EnsureDependencies(project, usesPairedCapeAdapter, donor, requiredSets);
     }
 
     /// <summary>
@@ -2506,7 +2486,7 @@ public sealed class AnimArchetypeGraftService
             "Reset either the individual locomotion overrides or the conflicting layer edit, then build again.";
     }
 
-    private static void CloneDonorAsset(string extractedRoot, string donorPackage, string donorStem,
+    internal static void CloneDonorAsset(string extractedRoot, string donorPackage, string donorStem,
         string patchedRoot, string targetPackage, string targetStem, Usmap? mappings, Result result)
     {
         var donorBase = ExtractedPackagePathService.ResolvePackageBase(extractedRoot, donorPackage);
@@ -2548,7 +2528,7 @@ public sealed class AnimArchetypeGraftService
     /// Required for AnimSequence refs - a substring "A_Idle_Batman" would also
     /// corrupt "A_Idle_Batman_HAT" etc.
     /// </summary>
-    private static int ApplyNameMapExact(string uassetPath, Dictionary<string, string> exact, Usmap? mappings)
+    internal static int ApplyNameMapExact(string uassetPath, Dictionary<string, string> exact, Usmap? mappings)
     {
         var asset = new UAsset(uassetPath, EngineVersion.VER_UE5_6, mappings, NameMapOnly);
         var nameMap = asset.GetNameMapIndexList();
@@ -2656,6 +2636,9 @@ public sealed class AnimArchetypeGraftService
     internal static string ApplyNameMapReplacementsForTest(
         string original,
         IReadOnlyDictionary<string, string> replacements)
+        => ApplyReferenceReplacements(original, replacements);
+
+    internal static string ApplyReferenceReplacements(string original, IReadOnlyDictionary<string, string> replacements)
     {
         var ordered = replacements
             .Where(pair => !string.IsNullOrWhiteSpace(pair.Key) &&

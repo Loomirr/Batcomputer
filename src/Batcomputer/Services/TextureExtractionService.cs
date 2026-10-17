@@ -50,7 +50,7 @@ internal static class TextureExtractionService
         {
             var paks = new DirectoryInfo(paksRoot);
             var dlcRoot = new DirectoryInfo(GameAssetRefreshService.DlcRootForPaksRoot(paks.FullName));
-            var provider = new DefaultFileProvider(
+            using var provider = new DefaultFileProvider(
                 paks,
                 dlcRoot.Exists ? [dlcRoot] : [],
                 BaseGamePakSource.ShippedContainerSearchOption,
@@ -97,7 +97,9 @@ internal static class TextureExtractionService
             }
 
             var decoded = TextureDecodeService.TryDecode(texture);
-            if (decoded is null || !TextureDecodeService.TryExportPng(texture, tempPath, keepAlpha: true))
+            var reconstructNormal = ReconstructNormalZForExport(texture.Format, texture.CompressionSettings.ToString());
+            if (decoded is null || !TextureDecodeService.TryExportPng(texture, tempPath,
+                    reconstructNormalZ: reconstructNormal, keepAlpha: true))
             {
                 return new Result(false,
                     $"The texture uses an unsupported or unreadable pixel format ({texture.Format}).",
@@ -111,7 +113,8 @@ internal static class TextureExtractionService
                 Directory.CreateDirectory(destinationDirectory);
             }
             File.Move(tempPath, destinationPath, overwrite: true);
-            return new Result(true, "Texture extracted.", objectPath, decoded.Width, decoded.Height, texture.Format.ToString());
+            return new Result(true, reconstructNormal ? "Normal map extracted with its blue (Z) channel reconstructed." : "Texture extracted.",
+                objectPath, decoded.Width, decoded.Height, texture.Format.ToString());
         }
         catch (Exception ex)
         {
@@ -132,6 +135,9 @@ internal static class TextureExtractionService
             }
         }
     }
+
+    internal static bool ReconstructNormalZForExport(EPixelFormat format, string compressionSettings) =>
+        format == EPixelFormat.PF_BC5 && compressionSettings.Equals("TC_Normalmap", StringComparison.Ordinal);
 
     private static IEnumerable<string> LoadCandidates(string packagePath, string objectPath)
     {

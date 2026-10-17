@@ -15,6 +15,37 @@ internal static class AbilityAssetRegressionChecks
 {
     public static void Run(List<string> failures, TextWriter output)
     {
+        var nativeJoker = NativeVillainTraversalService.VillainRoot + "Joker/BP_Joker_BTAS_Playable";
+        var ordinaryVillain = new NativeSuitProject { PlayableTemplate = new() { PackagePath = nativeJoker } };
+        Check(NativeVillainTraversalService.AppliesTo(ordinaryVillain) && AnimArchetypeGraftService.RequiresCustomArchetype(ordinaryVillain) &&
+              NativeVillainTraversalService.Family(NativeVillainTraversalService.VillainRoot + "Joker/BP_CAT_Archetype_Joker") == "Joker",
+            "ordinary alternate Joker suits preserve concrete native behavior without changing their animation variant", failures, output);
+        var defaults = new List<string>();
+        NativeVillainTraversalService.EnsureDependencies(ordinaryVillain, true, new DonorInfo(), defaults);
+        Check(defaults.Count == 0 && !AnimArchetypeGraftService.RequiresGeneratedDprd(ordinaryVillain, "Joker"),
+            "native Joker suits retain upgrade-gated loadouts without baked-in traversal grants", failures, output);
+        ordinaryVillain.ReplacementTarget = nativeJoker;
+        Check(!NativeVillainTraversalService.AppliesTo(ordinaryVillain) && !NativeVillainTraversalService.IsNativePlayable("/Game/Mods/Fake/BP_Joker_BTAS_Playable"),
+            "native villain behavior bridge excludes visual-only replacers and unrelated custom paths", failures, output);
+        Check(NativeVillainTraversalService.ExplicitlyDisabled(new() { AbilitySets = [new() { PackagePath = NativeVillainTraversalService.GrapplingSet, Enabled = false }] }, NativeVillainTraversalService.GrapplingSet) &&
+              NativeVillainTraversalService.ExplicitlyDisabled(new() { AbilitySets = [new() { RemovedGameplayAbilities = ["/Game/Characters/Abilities/CoreAbilities/Gliding/GA_Gliding"] }] }, GliderService.GlidingAbilitySetPackage),
+            "traversal dependency handling respects explicit set disables and per-ability removals", failures, output);
+        const string alt = "/Game/Animation/MAS_Char_Joker_Alt", primary = "/Game/Animation/MAS_Char_Joker";
+        var inherited = new Dictionary<string, AnimGraftService.ParentSetInspection> {
+            [alt] = new() { Success = true, PackagePaths = ["/Game/Animation/MAS_Menus_Joker_Alt", primary] },
+            [primary] = new() { Success = true, PackagePaths = ["/Game/Animation/MAS_Glide_Gordon", "/Game/Animation/MAS_Glide_Joker"] } };
+        var route = PairedCapeAnimationGraphService.FindRoute(alt, "MAS_Glide_", "MAS_Glide_Joker", false, p => inherited[p]);
+        Check(route.Owners.SequenceEqual([alt, primary]) && route.Category == "/Game/Animation/MAS_Glide_Joker",
+            "paired cape follows inherited Joker glide without flattening costume menus or shared fallbacks", failures, output);
+        inherited[primary] = new() { Success = true, PackagePaths = [alt] };
+        var rejectsCycle = false;
+        try { PairedCapeAnimationGraphService.FindRoute(alt, "MAS_Glide_", "MAS_Glide_Joker", false, p => inherited[p]); }
+        catch (InvalidDataException) { rejectsCycle = true; }
+        inherited[primary] = new() { Success = true, PackagePaths = ["/Game/Animation/MAS_Glide_Joker", "/Other/Animation/MAS_Glide_Joker"] };
+        var rejectsAmbiguous = false;
+        try { PairedCapeAnimationGraphService.FindRoute(alt, "MAS_Glide_", "MAS_Glide_Joker", false, p => inherited[p]); }
+        catch (InvalidDataException) { rejectsAmbiguous = true; }
+        Check(rejectsCycle && rejectsAmbiguous, "inherited cape animation bridges reject cycles and ambiguous native categories", failures, output);
         var sharedTraversal = new AnimGraftService.ParentSetInspection { Success=true, PackagePaths=[
             "/Game/Animation/LayerAnimSets/Locomotion/LAS_Default_MrFreeze", "/Game/Animation/LayerAnimSets/Traversal/LAS_Traversal_MrFreeze"] };
         Check(AnimArchetypeGraftService.RequiredCategoryParent(sharedTraversal, "LAS_Traversal_") == "LAS_Traversal_MrFreeze",

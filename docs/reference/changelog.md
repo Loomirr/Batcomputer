@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.1-beta.2 — 2026-10-17
+
+Native Joker/Harley identity and cape repairs preserve abilities, upgrades, voices and non-glide
+animations. Character Freedom 0.2.1 handles modded-suit traversal in normal mode without bypassing
+Mayhem progression. Visual replacers use the suit/mod build flow; conservative asset sharing and
+bounded native voice/animation reuse reduce repeated work while persistent caching stays off by
+default. Suit-local authoring/rebase fixes and BC5 normal-map PNG reconstruction are included.
+
+See [Beta 2 release notes](../releases/1.1.1-beta.2.md) for updating, verification and limitations.
+
 ## 1.1.0 — 2026-10-11
 
 Stable 1.1 includes the animation, voice, icon and suit-reuse tools introduced during the betas.

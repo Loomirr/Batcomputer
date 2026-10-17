@@ -1,10 +1,19 @@
 # Changelog
 
-## Unreleased
+## 1.1.1-beta.2 — 2026-10-17
+
+- Integrates visual-only character replacers into the existing suit authoring and mod build flow, including quest/cutscene targets, while preserving native package identity and gameplay logic.
+- Shares eligible identical character and vehicle outputs conservatively, reuses bounded native input/voice/animation work within a build, and reduces repeated voice-media discovery. Unique suit content stays independent; persistent caching remains off by default.
+- Preserves authored visuals when rebasing, restores suit-local texture visibility and UI icon filtering, and handles removed faces safely during packaging.
 
 - Fixes cape builds for Joker donors that share another character's animation sets, including a missing traversal layer and retained native glide fallbacks.
 - Validates paired-cape materials against the exact playable/cutscene source recipe, preserving explicit material overrides and avoiding false build errors from stale saved donor metadata.
-- Preserves concrete playable idle/layer and audio-tag overrides when building cape adapters, and packages missing Joker/Harley glide/grapple grants instead of relying on native-only runtime grants.
+- Preserves concrete playable idle/layer and audio-tag overrides when building cape adapters. Joker/Harley suits retain native ability and upgrade progression; normal-mode traversal remains Character Freedom's responsibility, not an unconditional grant baked into the suit.
+- Keeps alternate Joker costumes in the correct gameplay family without flattening their animation inheritance, while preserving native loadouts and explicit user ability edits for ordinary suits and cape adapters.
+- Preserves Joker/Harley's non-glide traversal animation rows when adapting a cape, and prevents repeated donor-prefix replacement from corrupting generated parent-class references.
+- Reconstructs the blue channel when extracting authored BC5 normal maps to PNG; masks and textures with existing RGB channels are unchanged.
+
+Both a complete self-contained download and a baseline-specific updater package are provided. See [Beta 2 release notes](docs/releases/1.1.1-beta.2.md). Normal-mode support for modded Joker/Harley suits requires the separately installed LOTDK UE4SS 0.2.1 runtime; Mayhem retains native upgrades.
 
 ## 1.1.1-beta.1 — 2026-10-11
 

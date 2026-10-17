@@ -170,6 +170,13 @@ public sealed class StageValidationService
             }
         }
 
+        if (AnimArchetypeGraftService.RequiresCustomArchetype(project) &&
+            characterAssets.TryGetValue("playable", out var generatedPlayable) &&
+            UAssetPatchService.CustomArchetypePackage(project) is { } expectedParent &&
+            (!IsGeneratedClassParentedToPackage(generatedPlayable, project.TargetPackages.Playable, expectedParent) ||
+             !File.Exists(PackagePathToBasePath(expectedParent) + ".uasset")))
+            findings.Add(new("ERROR", "playable: the generated suit has a missing or incorrect parent-class reference; rebuild from its saved project."));
+
         // With no generated archetype, the playable must still inherit the exact donor archetype.
         // That parent owns the DPRD plus MAS/LAS composition, including native stealth/focus and
         // menu behavior. A body mesh choice never has authority to change it.
@@ -449,6 +456,15 @@ public sealed class StageValidationService
             contract,
             requireResolvedComponents: true,
             out _);
+        if (certifiedPairedCape)
+        {
+            // The category can live in a private inherited costume composite, not the
+            // top-level ParentSetsArray. The full graph certificate runs below.
+            if (project.GliderAnimMas != project.PairedCapeAdapter!.GlideAnimMasPackage ||
+                project.GliderAnimLas != project.PairedCapeAdapter.GlideAnimLasPackage)
+                findings.Add(new("ERROR", "The configured glide animation packages differ from the paired-cape certificate."));
+            return;
+        }
         CheckAnimSetReferenced(
             project.GliderAnimLas,
             $"/Game/Mods/{mod}/Characters/LAS_Char_{mod}",
@@ -514,7 +530,7 @@ public sealed class StageValidationService
     {
         if (project.EquipmentSlots.Count == 0 &&
             !project.PartGrafts.Any(graft => graft.IsGlider) &&
-            !AbilityLoadoutService.HasCustomizations(project))
+            !AbilityLoadoutService.HasCustomizations(project) && !NativeVillainTraversalService.AppliesTo(project))
         {
             return;
         }
@@ -543,15 +559,16 @@ public sealed class StageValidationService
             out _);
         if (project.PartGrafts.Any(graft => graft.IsGlider) &&
             !preservesNativeGliding &&
+            !NativeVillainTraversalService.AppliesTo(project) &&
             !requiredSets.Contains(GliderService.GlidingAbilitySetPackage, StringComparer.OrdinalIgnoreCase))
         {
             requiredSets.Add(GliderService.GlidingAbilitySetPackage);
         }
-        if (preservesNativeGliding)
+        if (preservesNativeGliding || NativeVillainTraversalService.AppliesTo(project))
         {
             var traversalDonor = AnimArchetypeGraftService.DetectDonorForProject(project, _contentRoot, _mappings)
                 ?? throw new InvalidDataException("The paired-cape traversal donor could not be resolved.");
-            AnimArchetypeGraftService.EnsurePairedCapeTraversalDependencies(project, true, traversalDonor, requiredSets);
+            AnimArchetypeGraftService.EnsurePairedCapeTraversalDependencies(project, preservesNativeGliding, traversalDonor, requiredSets);
         }
         // The generator keeps the donor DPRD when a saved equipment slot still points
         // to the donor's own item. Validate a mod DPRD only when the same resolved
@@ -559,6 +576,28 @@ public sealed class StageValidationService
         if (!RequiresGeneratedDprdCertificate(
                 project, donorFamily, requiredSets, dependencyPlan.RequiredGameplayEffects))
         {
+            if (NativeVillainTraversalService.AppliesTo(project))
+            {
+                try
+                {
+                    var donor = AnimArchetypeGraftService.DetectDonorForProject(project, _contentRoot, _mappings)
+                        ?? throw new InvalidDataException("Native villain gameplay donor could not be resolved.");
+                    var playable = AnimArchetypeGraftService.ReadBehaviorDefaults(
+                        PackagePathToBasePath(project.TargetPackages.Playable) + ".uasset", _mappings);
+                    var parentPackage = UAssetPatchService.CustomArchetypePackage(project);
+                    var parent = parentPackage is not null && File.Exists(PackagePathToBasePath(parentPackage) + ".uasset")
+                        ? AnimArchetypeGraftService.ReadBehaviorDefaults(PackagePathToBasePath(parentPackage) + ".uasset", _mappings)
+                        : new Dictionary<string, string>();
+                    var runtime = playable.GetValueOrDefault("DinnerPawnRuntimeData") ??
+                        parent.GetValueOrDefault("DinnerPawnRuntimeData") ?? donor.DprdPackage;
+                    if (!runtime.Equals(donor.DprdPackage, StringComparison.OrdinalIgnoreCase))
+                        findings.Add(new("ERROR", "Unedited Joker/Harley loadouts must retain their native upgrade-gated pawn runtime data. Rebuild to remove stale unconditional traversal grants."));
+                }
+                catch (Exception ex)
+                {
+                    findings.Add(new("ERROR", "Could not verify native villain upgrade-gated loadout: " + ex.Message));
+                }
+            }
             return;
         }
 
@@ -1979,47 +2018,12 @@ public sealed class StageValidationService
         string generatedLasPackage,
         List<Finding> findings)
     {
-        var extractedRoot = AppSettings.Current.EffectiveExtractedContentRoot();
         try
         {
-            var sourceMas = new UAsset(
-                PackagePathToBasePath(extractedRoot, gameplayDonor.MasCharPackage) + ".uasset",
-                EngineVersion.VER_UE5_6,
-                _mappings,
-                CustomSerializationFlags.SkipPreloadDependencyLoading);
-            var sourceLas = new UAsset(
-                PackagePathToBasePath(extractedRoot, gameplayDonor.LasCharPackage) + ".uasset",
-                EngineVersion.VER_UE5_6,
-                _mappings,
-                CustomSerializationFlags.SkipPreloadDependencyLoading);
-            var generatedMas = new UAsset(
-                PackagePathToBasePath(generatedMasPackage) + ".uasset",
-                EngineVersion.VER_UE5_6,
-                _mappings,
-                CustomSerializationFlags.SkipPreloadDependencyLoading);
-            var generatedLas = new UAsset(
-                PackagePathToBasePath(generatedLasPackage) + ".uasset",
-                EngineVersion.VER_UE5_6,
-                _mappings,
-                CustomSerializationFlags.SkipPreloadDependencyLoading);
-
-            CheckPairedCapeAnimationParents(
-                "MAS_Char",
-                ParentSetPackages(sourceMas),
-                ParentSetPackages(generatedMas),
-                project.PairedCapeAdapter!.GlideAnimMasPackage,
-                "MAS_Glide_",
-                findings,
-                preferredSetName: $"MAS_Glide_{gameplayDonor.Family}");
-            CheckPairedCapeAnimationParents(
-                "LAS_Char",
-                ParentSetPackages(sourceLas),
-                ParentSetPackages(generatedLas),
-                project.PairedCapeAdapter.GlideAnimLasPackage,
-                "LAS_Traversal_",
-                findings,
-                allowMissingCategory: true,
-                preferredSetName: $"LAS_Traversal_{gameplayDonor.Family}");
+            PairedCapeAnimationGraphService.Verify(gameplayDonor.MasCharPackage, generatedMasPackage, _contentRoot,
+                project.PairedCapeAdapter!.GlideAnimMasPackage, "MAS_Glide_", $"MAS_Glide_{gameplayDonor.Family}", false);
+            PairedCapeAnimationGraphService.Verify(gameplayDonor.LasCharPackage, generatedLasPackage, _contentRoot,
+                project.PairedCapeAdapter.GlideAnimLasPackage, "LAS_Traversal_", $"LAS_Traversal_{gameplayDonor.Family}", true);
         }
         catch (Exception ex)
         {

@@ -9,6 +9,11 @@ internal static class TextureCookRegressionChecks
 {
     public static void Run(List<string> failures, TextWriter output)
     {
+        Check(TextureExtractionService.ReconstructNormalZForExport(CUE4Parse.UE4.Assets.Exports.Texture.EPixelFormat.PF_BC5, "TC_Normalmap") &&
+              !TextureExtractionService.ReconstructNormalZForExport(CUE4Parse.UE4.Assets.Exports.Texture.EPixelFormat.PF_BC5, "TC_Masks") &&
+              !TextureExtractionService.ReconstructNormalZForExport(CUE4Parse.UE4.Assets.Exports.Texture.EPixelFormat.PF_BC7, "TC_Normalmap") &&
+              !TextureExtractionService.ReconstructNormalZForExport(CUE4Parse.UE4.Assets.Exports.Texture.EPixelFormat.PF_B8G8R8A8, "TC_Default"),
+            "PNG extraction reconstructs blue only for authored BC5 normals, preserving masks and existing RGB/alpha channels", failures, output);
         var root = Path.Combine(
             Path.GetTempPath(),
             "Batcomputer-texture-channel-regression-" + Guid.NewGuid().ToString("N"));

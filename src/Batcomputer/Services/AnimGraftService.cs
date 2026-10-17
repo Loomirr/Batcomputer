@@ -47,6 +47,13 @@ public sealed class AnimGraftService
         string layerSetUassetPath,
         IReadOnlyCollection<string> requiredContextTags,
         IReadOnlyCollection<string>? additionalContextTags = null)
+        => FilterLayerEntries(layerSetUassetPath, requiredContextTags, additionalContextTags, []);
+
+    internal GraftResult RemoveLayerActions(string path, IReadOnlyCollection<string> actions) =>
+        FilterLayerEntries(path, [], null, actions);
+
+    private GraftResult FilterLayerEntries(string layerSetUassetPath, IReadOnlyCollection<string> requiredContextTags,
+        IReadOnlyCollection<string>? additionalContextTags, IReadOnlyCollection<string> excludedActions)
     {
         var result = new GraftResult();
         try
@@ -66,7 +73,7 @@ public sealed class AnimGraftService
             }
 
             var required = NormalizeTags(requiredContextTags);
-            if (required.Count == 0)
+            if (required.Count == 0 && excludedActions.Count == 0)
             {
                 result.Status = "invalid-context";
                 result.Error = "At least one required animation context tag must be supplied.";
@@ -85,11 +92,20 @@ public sealed class AnimGraftService
                 return result;
             }
 
+            if (excludedActions.Any(action => !entries.Value.OfType<StructPropertyData>()
+                    .Any(entry => ReadEntryActionTag(entry).Equals(action, StringComparison.OrdinalIgnoreCase))))
+            {
+                result.Status = "action-not-found";
+                result.Error = "The native traversal layer no longer exposes the exact glide action selected for removal.";
+                return result;
+            }
+
             var retained = entries.Value.OfType<StructPropertyData>()
+                .Where(entry => !excludedActions.Contains(ReadEntryActionTag(entry), StringComparer.OrdinalIgnoreCase))
                 .Where(entry => required.All(requiredTag =>
                     ReadEntryContextTags(entry).Contains(requiredTag, StringComparer.OrdinalIgnoreCase)))
                 .ToList();
-            if (retained.Count == 0)
+            if (retained.Count == 0 && excludedActions.Count == 0)
             {
                 result.Status = "context-not-found";
                 result.Error =
@@ -222,6 +238,39 @@ public sealed class AnimGraftService
             result.Error = ex.ToString();
             return result;
         }
+    }
+
+    internal static void VerifyLayerActionsPreserved(string sourcePath, string targetPath, IReadOnlyCollection<string> removedActions)
+    {
+        var mappings = LoadMappings() ?? throw new InvalidDataException("Mappings are required for layer verification.");
+        List<string> Rows(string path, bool source)
+        {
+            var asset = new UAsset(path, EngineVersion.VER_UE5_6, mappings);
+            if (!TryGetLayerEntryStorage(asset, out _, out var entries, out _, out var error)) throw new InvalidDataException(error);
+            var rows = entries.Value.OfType<StructPropertyData>().Where(e =>
+                !source || !removedActions.Contains(ReadEntryActionTag(e), StringComparer.OrdinalIgnoreCase)).ToArray();
+            if (!source && rows.Any(e => removedActions.Contains(ReadEntryActionTag(e), StringComparer.OrdinalIgnoreCase)))
+                throw new InvalidDataException("A native non-cape glide layer remains active in the private traversal copy.");
+            if (!source && !VerifyContextFilteredLayerSet(path, mappings, [], rows.Length, out error))
+                throw new InvalidDataException(error);
+            var references = new List<string>();
+            foreach (var row in rows)
+            {
+                var imports = new HashSet<int>(); CollectObjectImports(row, imports);
+                references.Add(string.Join("|", imports.Order().Select(i => ObjectPackage(asset, new FPackageIndex(i)) + "." + new FPackageIndex(i).ToImport(asset).ObjectName)));
+                row.Name = MakeName(asset, "Entry");
+                var link = row.Value.OfType<IntPropertyData>().Single(p => p.Name.ToString() == "ActionLink");
+                link.Value = -1; // row links/indices are rebuilt by filtering, not authored behavior
+            }
+            entries.Value = rows.Cast<PropertyData>().ToArray();
+            using var json = System.Text.Json.JsonDocument.Parse(asset.SerializeJson(false));
+            var exported = json.RootElement.GetProperty("Exports").EnumerateArray()
+                .SelectMany(e => e.GetProperty("Data").EnumerateArray())
+                .Single(p => p.GetProperty("Name").GetString() == "AnimSetEntryArray").GetProperty("Value").EnumerateArray();
+            return exported.Select((row, i) => row.GetRawText() + "|" + references[i]).ToList();
+        }
+        if (!Rows(sourcePath, true).SequenceEqual(Rows(targetPath, false), StringComparer.Ordinal))
+            throw new InvalidDataException("The cape traversal copy changed native non-glide animation rows, contexts, weights or referenced blueprints.");
     }
 
     /// <summary>Reads the exact ordered packages serialized in ParentSetsArray.</summary>

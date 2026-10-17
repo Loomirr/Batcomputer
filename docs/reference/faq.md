@@ -335,8 +335,8 @@ exact character variant. The cape adapter preserves Joker's gameplay and uses th
 visuals and glide animations. Run **Check mod** and rebuild the mod before testing in-game.
 
 Older builds could reject Joker's shared animation sets or report a cutscene glider material
-mismatch during packaging even when the editor preview looked correct. The upcoming cape patch
-fixes those checks. Genuine missing components, incompatible cape pairs, and missing materials
+  mismatch during packaging even when the editor preview looked correct. The Beta 2 cape patch
+  fixes those checks. Genuine missing components, incompatible cape pairs, and missing materials
 still block builds.
 
 ### Can I still change the cape and gliding cape materials?
@@ -344,6 +344,17 @@ still block builds.
 Yes. Apply your material changes to the regular cape and glide visual as usual, then rebuild.
 Saved slot overrides take priority over the native donor materials in both gameplay and
 cutscene versions. The adapter still checks that all required material slots are present.
+
+### Why do Joker and Harley reference shared animation or ability assets?
+
+The game composes characters from shared blocks plus character-specific animations, equipment,
+and traversal data. Alternate Joker costumes can also inherit another Joker montage set.
+Batcomputer preserves those exact costume overrides. A paired cape replaces only its required
+glide categories, using private copies of inherited composites; it does not replace the character's
+  normal movement, combat, or voice with the cape donor's. Joker/Harley suits retain their native
+  ability sets and upgrade requirements in Mayhem. Character Freedom provides temporary traversal
+  support in normal mode for both native and registered modded Joker/Harley suits; the suit itself
+  does not permanently unlock those abilities. Explicit ability edits remain part of your suit.
 
 ### Why did an older build say Head belonged to the cape shell?
 
@@ -353,6 +364,13 @@ inside it as though it belonged to the cape. Current builds protect only the act
 both character roles while leaving the safe construction node in place.
 
 ## Materials, models, and previews
+
+### Why did an extracted normal map have no blue channel?
+
+BC5 normal maps store only the red and green components; the shader reconstructs blue.
+The PNG exporter now does that reconstruction for textures marked as BC5 normal maps, so
+they are usable as RGB normals in image editors. Red, green and alpha remain unchanged.
+Packed masks and textures that already store RGB are exported without this conversion.
 
 ### Can I reuse a material I created in another suit?
 
