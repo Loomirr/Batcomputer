@@ -9,7 +9,7 @@ internal sealed class ReleasePathsForm : AdaptiveForm
     {
         Text = model.WindowTitle;
         AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new Size(860, Math.Clamp(320 + model.Fields.Count * 120, 500, 740));
+        ClientSize = new Size(860, Math.Clamp(350 + model.Fields.Count * 120, 500, 740));
         MinimumSize = new Size(620, 500);
         StartPosition = FormStartPosition.CenterParent;
         ShowInTaskbar = false;

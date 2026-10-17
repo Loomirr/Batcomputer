@@ -12,6 +12,7 @@
 - Keeps alternate Joker costumes in the correct gameplay family without flattening their animation inheritance, while preserving native loadouts and explicit user ability edits for ordinary suits and cape adapters.
 - Preserves Joker/Harley's non-glide traversal animation rows when adapting a cape, and prevents repeated donor-prefix replacement from corrupting generated parent-class references.
 - Reconstructs the blue channel when extracting authored BC5 normal maps to PNG; masks and textures with existing RGB channels are unchanged.
+- Gives the default build/ZIP path receipt enough vertical space for both cards under the bundled runtime.
 
 Both a complete self-contained download and a baseline-specific updater package are provided. See [Beta 2 release notes](docs/releases/1.1.1-beta.2.md). Normal-mode support for modded Joker/Harley suits requires the separately installed LOTDK UE4SS 0.2.1 runtime; Mayhem retains native upgrades.
 

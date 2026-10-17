@@ -71,8 +71,9 @@ internal static class ReleaseOutputRegressionChecks
                     foreach (var child in All(compact)) _ = child.Handle;
                     compact.PerformLayout();
                     var scroller = All(compact).OfType<Panel>().Single(p => p.AutoScroll);
-                    results.Add((scroller.Controls[0].Height <= scroller.ClientSize.Height,
-                        "default ZIP receipt fits both path cards without unnecessary scrolling"));
+                    var fits = scroller.Controls[0].Height <= scroller.ClientSize.Height;
+                    results.Add((fits, "default ZIP receipt fits both path cards without unnecessary scrolling" +
+                        (fits ? "" : $" (content {scroller.Controls[0].Height}, viewport {scroller.ClientSize.Height}, DPI {compact.DeviceDpi})")));
                 }
                 catch (Exception ex) { results.Add((false, "release receipt UI: " + ex)); }
             }) { IsBackground = true };
