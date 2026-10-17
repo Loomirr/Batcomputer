@@ -19,6 +19,19 @@ internal static class AbilityAssetRegressionChecks
             "/Game/Animation/LayerAnimSets/Locomotion/LAS_Default_MrFreeze", "/Game/Animation/LayerAnimSets/Traversal/LAS_Traversal_MrFreeze"] };
         Check(AnimArchetypeGraftService.RequiredCategoryParent(sharedTraversal, "LAS_Traversal_") == "LAS_Traversal_MrFreeze",
             "paired-cape category replacement follows an exact borrowed native traversal parent", failures, output);
+        var noTraversal = new AnimGraftService.ParentSetInspection { Success=true,
+            PackagePaths=["/Game/Animation/LayerAnimSets/Default/LAS_Default_MrFreeze"] };
+        Check(AnimArchetypeGraftService.RequiredCategoryParent(noTraversal, "LAS_Traversal_", allowMissing:true) == "" &&
+            StageValidationService.PairedCapeAnimationParentsAreSafeForTest(noTraversal.PackagePaths,
+                [..noTraversal.PackagePaths, "/Game/Animation/LayerAnimSets/Traversal/LAS_Traversal_Batman"],
+                "/Game/Animation/LayerAnimSets/Traversal/LAS_Traversal_Batman", "LAS_Traversal_", out _, allowMissingCategory:true) &&
+            !StageValidationService.PairedCapeAnimationParentsAreSafeForTest(noTraversal.PackagePaths,
+                ["/Game/Animation/LayerAnimSets/Traversal/LAS_Traversal_Batman"],
+                "/Game/Animation/LayerAnimSets/Traversal/LAS_Traversal_Batman", "LAS_Traversal_", out _, allowMissingCategory:true) &&
+            !StageValidationService.PairedCapeAnimationParentsAreSafeForTest(noTraversal.PackagePaths,
+                [..noTraversal.PackagePaths, "/Game/Animation/LayerAnimSets/Traversal/LAS_Traversal_Batman", "/Game/Animation/LayerAnimSets/Traversal/LAS_Traversal_Batman"],
+                "/Game/Animation/LayerAnimSets/Traversal/LAS_Traversal_Batman", "LAS_Traversal_", out _, allowMissingCategory:true),
+            "Joker's traversal-free donor accepts one certified cape layer while retaining its native parents; dropped parents and duplicate cape layers fail", failures, output);
         static bool RejectCategory(AnimGraftService.ParentSetInspection value) { try { AnimArchetypeGraftService.RequiredCategoryParent(value, "LAS_Traversal_"); return false; } catch (InvalidDataException) { return true; } }
         Check(RejectCategory(new() { Success=true, PackagePaths=[] }) &&
               RejectCategory(new() { Success=true, PackagePaths=["/Game/Animation/LAS_Traversal_Batman", "/Game/Animation/LAS_Traversal_MrFreeze"] }) &&
@@ -27,6 +40,27 @@ internal static class AbilityAssetRegressionChecks
         Check(AnimArchetypeGraftService.RequiredCategoryParent(new() { Success=true,
                 PackagePaths=["/Game/Animation/MAS_Glide_Gordon", "/Game/AdditionalContent/MAS_Glide_Joker"] }, "MAS_Glide_", "MAS_Glide_Joker") == "MAS_Glide_Joker",
             "paired-cape category replacement preserves an exact native family parent alongside shared fallbacks", failures, output);
+        Check(StageValidationService.PairedCapeAnimationParentsAreSafeForTest(
+                ["/Game/Animation/MAS_Glide_Gordon", "/Game/AdditionalContent/MAS_Glide_Joker"],
+                ["/Game/Animation/MAS_Glide_Gordon", "/Game/Animation/MAS_Glide_Batman"],
+                "/Game/Animation/MAS_Glide_Batman", "MAS_Glide_", out _, preferredSetName:"MAS_Glide_Joker") &&
+              !StageValidationService.PairedCapeAnimationParentsAreSafeForTest(
+                ["/Game/Animation/MAS_Glide_Gordon", "/Game/AdditionalContent/MAS_Glide_Joker"],
+                ["/Game/Animation/MAS_Glide_Batman"],
+                "/Game/Animation/MAS_Glide_Batman", "MAS_Glide_", out _, preferredSetName:"MAS_Glide_Joker"),
+            "Joker's paired-cape certificate preserves the shared native glide fallback alongside the replaced family block", failures, output);
+        var cutMaterial = new NativeSuitObjectRef { PackagePath="/Game/Materials/Cape_CUT" };
+        var sourceDonor = new SavedPartGraftDonor { SourcePackagePath="/Game/Characters/Minifig/Batman/BP_Batman_Cutscene",
+            Context="cutscene", Slot="Torso", MeshObjectPath="/Game/Meshes/Cape.Cape", Materials=[new() { PackagePath="/Game/Materials/Cape" }] };
+        var exactIndex = new NativeSuitPartIndex { Parts=[new() { SourcePackagePath=sourceDonor.SourcePackagePath,
+            Context="cutscene", Slot="Torso", MeshObjectPath=sourceDonor.MeshObjectPath, Materials=[cutMaterial] }] };
+        Check(StageValidationService.AdapterSourceMaterials(exactIndex,sourceDonor).Single().PackagePath==cutMaterial.PackagePath &&
+              sourceDonor.Materials.Single().PackagePath=="/Game/Materials/Cape",
+            "paired-cape validation uses the exact cutscene recipe's materials without rewriting saved donor metadata", failures, output);
+        var rejectsMissingSource=false;
+        try { StageValidationService.AdapterSourceMaterials(new NativeSuitPartIndex(),sourceDonor); }
+        catch(InvalidDataException) { rejectsMissingSource=true; }
+        Check(rejectsMissingSource, "paired-cape material validation rejects an unresolved native source instead of accepting stale metadata", failures, output);
         var boundaryRoot = Path.Combine(Path.GetTempPath(), "Batcomputer-ability-root");
         Check(
             AbilityAssetMutationService.IsUnderRootForTest(

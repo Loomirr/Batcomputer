@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Fixes cape builds for Joker donors that share another character's animation sets, including a missing traversal layer and retained native glide fallbacks.
+- Validates paired-cape materials against the exact playable/cutscene source recipe, preserving explicit material overrides and avoiding false build errors from stale saved donor metadata.
+- Preserves concrete playable idle/layer and audio-tag overrides when building cape adapters, and packages missing Joker/Harley glide/grapple grants instead of relying on native-only runtime grants.
+
 ## 1.1.1-beta.1 — 2026-10-11
 
 - Restores adding/replacing removed Face overlays using verified native donor recipes; incomplete recipes and face accessories remain blocked.

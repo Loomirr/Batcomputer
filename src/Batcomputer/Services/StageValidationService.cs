@@ -547,6 +547,12 @@ public sealed class StageValidationService
         {
             requiredSets.Add(GliderService.GlidingAbilitySetPackage);
         }
+        if (preservesNativeGliding)
+        {
+            var traversalDonor = AnimArchetypeGraftService.DetectDonorForProject(project, _contentRoot, _mappings)
+                ?? throw new InvalidDataException("The paired-cape traversal donor could not be resolved.");
+            AnimArchetypeGraftService.EnsurePairedCapeTraversalDependencies(project, true, traversalDonor, requiredSets);
+        }
         // The generator keeps the donor DPRD when a saved equipment slot still points
         // to the donor's own item. Validate a mod DPRD only when the same resolved
         // dependencies actually cause the archetype pipeline to generate one.
@@ -1696,7 +1702,7 @@ public sealed class StageValidationService
         }
 
         var capeGlideContract = new AnimArchetypeGraftService().BaseCapeGlideContract(project);
-        CheckCapeGliderContract(project, capeGlideContract, characterAssets, findings);
+        CheckCapeGliderContract(project, capeGlideContract, characterAssets, findings, _projectRoot);
 
         if (GliderService.IsDeclaredPairedCapeAdapterValid(
                 project,
@@ -1935,12 +1941,17 @@ public sealed class StageValidationService
                 generatedMas,
                 generatedLas,
                 findings);
+            if (!string.IsNullOrWhiteSpace(gameplayDonor.AudioTagDataPackage))
+                CheckBehaviorBridgeReference(generated, "dialogue audio tagging",
+                    shellDonor.AudioTagDataPackage, gameplayDonor.AudioTagDataPackage, findings);
+            var traversalSets = new List<string>();
+            AnimArchetypeGraftService.EnsurePairedCapeTraversalDependencies(project, true, gameplayDonor, traversalSets);
             var expectedDprd = ExpectedPairedCapeDprdPackageForTest(
                 project,
                 mod,
                 gameplayDonor.DprdPackage,
-                gameplayDonor.Family);
-            if (AnimArchetypeGraftService.RequiresGeneratedDprd(project, gameplayDonor.Family) &&
+                gameplayDonor.Family, traversalSets.Count > 0);
+            if ((traversalSets.Count > 0 || AnimArchetypeGraftService.RequiresGeneratedDprd(project, gameplayDonor.Family)) &&
                 !File.Exists(PackagePathToBasePath(expectedDprd) + ".uasset"))
             {
                 findings.Add(new("ERROR",
@@ -1998,14 +2009,17 @@ public sealed class StageValidationService
                 ParentSetPackages(generatedMas),
                 project.PairedCapeAdapter!.GlideAnimMasPackage,
                 "MAS_Glide_",
-                findings);
+                findings,
+                preferredSetName: $"MAS_Glide_{gameplayDonor.Family}");
             CheckPairedCapeAnimationParents(
                 "LAS_Char",
                 ParentSetPackages(sourceLas),
                 ParentSetPackages(generatedLas),
                 project.PairedCapeAdapter.GlideAnimLasPackage,
                 "LAS_Traversal_",
-                findings);
+                findings,
+                allowMissingCategory: true,
+                preferredSetName: $"LAS_Traversal_{gameplayDonor.Family}");
         }
         catch (Exception ex)
         {
@@ -2021,14 +2035,18 @@ public sealed class StageValidationService
         IReadOnlyList<string> generatedParents,
         string certifiedPackage,
         string categoryPrefix,
-        List<Finding> findings)
+        List<Finding> findings,
+        bool allowMissingCategory = false,
+        string? preferredSetName = null)
     {
         if (!PairedCapeAnimationParentsAreSafeForTest(
                 gameplayParents,
                 generatedParents,
                 certifiedPackage,
                 categoryPrefix,
-                out var detail))
+                out var detail,
+                allowMissingCategory,
+                preferredSetName))
         {
             findings.Add(new("ERROR", $"The paired-cape {label} bridge is incomplete: {detail}"));
         }
@@ -2039,7 +2057,9 @@ public sealed class StageValidationService
         IReadOnlyList<string> generatedParents,
         string certifiedPackage,
         string categoryPrefix,
-        out string detail)
+        out string detail,
+        bool allowMissingCategory = false,
+        string? preferredSetName = null)
     {
         static string Package(string value) => UnrealPathUtil.NormalizePackagePath(value?.Trim() ?? "");
         static string Stem(string value) => UnrealPathUtil.AssetName(value);
@@ -2069,7 +2089,11 @@ public sealed class StageValidationService
         var sourceCategoryParents = source
             .Where(parent => Stem(parent).StartsWith(categoryPrefix, StringComparison.OrdinalIgnoreCase))
             .ToList();
-        if (sourceCategoryParents.Count != 1)
+        var preferred = sourceCategoryParents.Where(parent =>
+            Stem(parent).Equals(preferredSetName, StringComparison.OrdinalIgnoreCase)).ToList();
+        var replacedParent = preferred.Count == 1 ? preferred[0]
+            : sourceCategoryParents.Count == 1 ? sourceCategoryParents[0] : "";
+        if (string.IsNullOrEmpty(replacedParent) && !(allowMissingCategory && sourceCategoryParents.Count == 0))
         {
             detail =
                 $"the gameplay donor exposes {sourceCategoryParents.Count} native {categoryPrefix} categories; exactly one is required for a safe replacement";
@@ -2077,7 +2101,7 @@ public sealed class StageValidationService
         }
 
         var missingGameplayParents = source
-            .Where(parent => !Stem(parent).StartsWith(categoryPrefix, StringComparison.OrdinalIgnoreCase))
+            .Where(parent => !parent.Equals(replacedParent, StringComparison.OrdinalIgnoreCase))
             .Where(parent => !generated.Contains(parent, StringComparer.OrdinalIgnoreCase))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -2105,8 +2129,11 @@ public sealed class StageValidationService
         var generatedCategoryParents = generated
             .Where(parent => Stem(parent).StartsWith(categoryPrefix, StringComparison.OrdinalIgnoreCase))
             .ToList();
-        if (generatedCategoryParents.Count != 1 ||
-            !generatedCategoryParents[0].Equals(certified, StringComparison.OrdinalIgnoreCase))
+        var allowedCategoryParents = sourceCategoryParents
+            .Where(parent => !parent.Equals(replacedParent, StringComparison.OrdinalIgnoreCase))
+            .Append(certified).ToList();
+        if (generatedCategoryParents.Count != allowedCategoryParents.Count ||
+            generatedCategoryParents.Any(parent => !allowedCategoryParents.Contains(parent, StringComparer.OrdinalIgnoreCase)))
         {
             detail =
                 $"the generated composite retains competing {categoryPrefix} controller(s): " +
@@ -2115,6 +2142,7 @@ public sealed class StageValidationService
         }
 
         var retainedNativeCategories = sourceCategoryParents
+            .Where(parent => parent.Equals(replacedParent, StringComparison.OrdinalIgnoreCase))
             .Where(parent => !parent.Equals(certified, StringComparison.OrdinalIgnoreCase))
             .Where(parent => generated.Contains(parent, StringComparer.OrdinalIgnoreCase))
             .ToList();
@@ -2346,8 +2374,9 @@ public sealed class StageValidationService
         NativeSuitProject project,
         string mod,
         string gameplayDprdPackage,
-        string? donorFamily) =>
-        AnimArchetypeGraftService.RequiresGeneratedDprd(project, donorFamily)
+        string? donorFamily,
+        bool requiresTraversalSets = false) =>
+        (requiresTraversalSets || AnimArchetypeGraftService.RequiresGeneratedDprd(project, donorFamily))
             ? $"/Game/Mods/{UnrealPathUtil.SanitizeIdentifier(mod)}/Characters/DA_DPRD_{UnrealPathUtil.SanitizeIdentifier(mod)}"
             : UnrealPathUtil.NormalizePackagePath(gameplayDprdPackage);
 
@@ -2362,7 +2391,8 @@ public sealed class StageValidationService
         NativeSuitProject project,
         AnimArchetypeGraftService.CapeGlideContractStatus capeGlideContract,
         IReadOnlyDictionary<string, UAsset> characterAssets,
-        List<Finding> findings)
+        List<Finding> findings,
+        string? projectRoot = null)
     {
         if (GliderService.HasAdditiveCapeAndGliderCombination(project, capeGlideContract))
         {
@@ -2406,7 +2436,7 @@ public sealed class StageValidationService
                         requireResolvedComponents: true,
                         out adapterDetail))
                 {
-                    CheckPairedCapeAdapterAssets(project, characterAssets, findings);
+                    CheckPairedCapeAdapterAssets(project, characterAssets, findings, projectRoot);
                 }
                 else
                 {
@@ -2434,7 +2464,8 @@ public sealed class StageValidationService
     private static void CheckPairedCapeAdapterAssets(
         NativeSuitProject project,
         IReadOnlyDictionary<string, UAsset> characterAssets,
-        List<Finding> findings)
+        List<Finding> findings,
+        string? projectRoot)
     {
         var adapter = project.PairedCapeAdapter;
         if (adapter is null)
@@ -2457,6 +2488,7 @@ public sealed class StageValidationService
         }
 
         var partGrafts = project.PartGrafts ?? [];
+        var nativeParts = new PartIndexService(projectRoot ?? AppSettings.Current.EffectiveProjectRoot()).LoadPartIndex();
         var cosmetic = partGrafts.FirstOrDefault(graft => string.Equals(
             graft?.InstanceId,
             adapter.CosmeticCapeGraftInstanceId,
@@ -2492,7 +2524,8 @@ public sealed class StageValidationService
                     adapter.ResolvedCosmeticComponent ?? "",
                     cosmeticDonor,
                     isGlider: false,
-                    findings);
+                    findings,
+                    project.AllowSyntheticPairedCapeVisualOverlayFixture ? cosmeticDonor.Materials : AdapterSourceMaterials(nativeParts, cosmeticDonor));
                 CheckAdapterComponent(
                     asset,
                     project,
@@ -2500,7 +2533,8 @@ public sealed class StageValidationService
                     adapter.ResolvedGliderComponent ?? "",
                     gliderDonor,
                     isGlider: true,
-                    findings);
+                    findings,
+                    project.AllowSyntheticPairedCapeVisualOverlayFixture ? gliderDonor.Materials : AdapterSourceMaterials(nativeParts, gliderDonor));
                 CheckPairedCapeVisualOverlayAssets(project, asset, role, findings);
             }
             catch (Exception ex)
@@ -3023,7 +3057,8 @@ public sealed class StageValidationService
         string componentName,
         SavedPartGraftDonor donor,
         bool isGlider,
-        List<Finding> findings)
+        List<Finding> findings,
+        IReadOnlyList<NativeSuitObjectRef> sourceMaterials)
     {
         void Error(string message) => findings.Add(new("ERROR",
             $"{role}: paired-cape adapter component '{componentName}' {message}"));
@@ -3095,7 +3130,7 @@ public sealed class StageValidationService
         }
 
         var actualMaterials = MaterialObjectProperties(component);
-        var expectedMaterials = donor.Materials ?? [];
+        var expectedMaterials = sourceMaterials;
         if (actualMaterials.Count != expectedMaterials.Count ||
             expectedMaterials.Where((expected, slot) =>
                     !AdapterMaterialMatches(
@@ -3164,6 +3199,19 @@ public sealed class StageValidationService
         {
             Error($"uses parent '{parent}' instead of donor parent '{donor.ParentComponentOrVariableName}'.");
         }
+    }
+
+    internal static IReadOnlyList<NativeSuitObjectRef> AdapterSourceMaterials(
+        NativeSuitPartIndex? index,
+        SavedPartGraftDonor donor)
+    {
+        // Adapter replay takes the exact live native component recipe, including
+        // role-specific CUT materials. Validate that same source; old saved donor
+        // metadata can still contain the playable material list for its cutscene.
+        // User choices remain authoritative through FinalMaterialPackage below.
+        var live = PairedCapeVisualOverlayService.ResolveExactLivePart(index, donor)
+            ?? throw new InvalidDataException("The paired-cape material source could not resolve its exact native package, role, mesh and slot. Refresh the part index.");
+        return live.Materials ?? [];
     }
 
     private static bool AdapterMaterialMatches(

@@ -328,6 +328,23 @@ A regular cape cannot safely be mixed with an unrelated wingsuit or glider contr
 supported **Glide cape** preset and its matching native cape, or remove the regular `Cape` and keep
 the glide-only visual.
 
+### Can Joker use the same paired-cape workflow?
+
+Yes. Use a supported **Glide cape** preset, then apply the matching regular cape from that
+exact character variant. The cape adapter preserves Joker's gameplay and uses the cape donor's
+visuals and glide animations. Run **Check mod** and rebuild the mod before testing in-game.
+
+Older builds could reject Joker's shared animation sets or report a cutscene glider material
+mismatch during packaging even when the editor preview looked correct. The upcoming cape patch
+fixes those checks. Genuine missing components, incompatible cape pairs, and missing materials
+still block builds.
+
+### Can I still change the cape and gliding cape materials?
+
+Yes. Apply your material changes to the regular cape and glide visual as usual, then rebuild.
+Saved slot overrides take priority over the native donor materials in both gameplay and
+cutscene versions. The adapter still checks that all required material slots are present.
+
 ### Why did an older build say Head belonged to the cape shell?
 
 The adapter uses a complete authored Blueprint shell, and older builds protected every component

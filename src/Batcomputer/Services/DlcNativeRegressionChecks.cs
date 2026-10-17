@@ -59,6 +59,15 @@ internal static class DlcNativeRegressionChecks
                 }
                 if (family is "Joker" or "HarleyQuinn")
                 {
+                    var capeProject = new NativeSuitProject { PartGrafts = [new() { IsGlider = true }] };
+                    var traversalSets = new List<string>();
+                    AnimArchetypeGraftService.EnsurePairedCapeTraversalDependencies(capeProject, true, gameplayDonor!, traversalSets);
+                    AnimArchetypeGraftService.EnsurePairedCapeTraversalDependencies(capeProject, true, gameplayDonor!, traversalSets);
+                    Require(traversalSets.Contains(GliderService.GlidingAbilitySetPackage) &&
+                            traversalSets.Contains("/Game/Characters/Abilities/CoreAbilities/Grappling/AS_Grappling") &&
+                            traversalSets.Count == 2,
+                        family + " paired cape lacks unique native glide/grapple grants");
+                    output.WriteLine($"PASS {family}: paired cape packages missing glide/grapple abilities exactly once without changing the donor loadout");
                     var folder = Path.GetDirectoryName(Source(playablePackage))!;
                     foreach (var variant in Directory.EnumerateFiles(folder, "BP_*_Playable.uasset"))
                     {
@@ -67,7 +76,17 @@ internal static class DlcNativeRegressionChecks
                         Require(variantDonor is { Valid: true } &&
                                 !string.IsNullOrWhiteSpace(variantDonor.DprdPackage),
                             Path.GetFileNameWithoutExtension(variant) + " is not a complete gameplay donor");
+                        var concrete = AnimArchetypeGraftService.ReadBehaviorDefaults(variant, MappingsCache.Load(mappings!));
+                        Require(!concrete.TryGetValue("LayerSet", out var layer) || layer == variantDonor!.LasCharPackage,
+                            Path.GetFileNameWithoutExtension(variant) + " lost its concrete idle/layer override");
+                        Require(!concrete.TryGetValue("AudioTagData", out var audio) || audio == variantDonor!.AudioTagDataPackage,
+                            Path.GetFileNameWithoutExtension(variant) + " lost its concrete audio identity");
+                        if (family == "Joker" && Path.GetFileNameWithoutExtension(variant) == "BP_Joker_LBM_Playable")
+                            Require(variantDonor!.LasCharPackage == "/Game/AdditionalContent/VillainMode/Animations/LayerAnimSets/LAS_Char_Joker" &&
+                                    variantDonor.AudioTagDataPackage == "/Game/AdditionalContent/VillainMode/Audio/Tagging/DataEntries/DA_TAG_JokerDLC",
+                                "Joker LBM selected inherited Mr Freeze idle/Batman audio instead of its concrete defaults");
                     }
+                    output.WriteLine($"PASS {family}: every native playable retains its concrete layer animation and audio-tag overrides");
                 }
                 var dcmd = family == "Batman" ? "/Game/Characters/Minifig/Batman/DA_DCMD_Batman_TheBatman2025_Playable" :
                     $"/Game/AdditionalContent/VillainMode/Characters/Playables/{family}/DA_DCMD_{family}_Default_Playable";

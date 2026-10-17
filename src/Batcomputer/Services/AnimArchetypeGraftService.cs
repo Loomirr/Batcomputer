@@ -1,5 +1,6 @@
 using UAssetAPI;
 using UAssetAPI.ExportTypes;
+using UAssetAPI.PropertyTypes.Objects;
 using UAssetAPI.UnrealTypes;
 using UAssetAPI.Unversioned;
 
@@ -19,6 +20,7 @@ public sealed class DonorInfo
     public string LasCharPackage { get; set; } = "";
     public string DprdPackage { get; set; } = "";
     public string AbilitySetPackage { get; set; } = "";
+    public string AudioTagDataPackage { get; set; } = "";
 
     public string ArchetypeStemName => ArchetypeStem;
     public string MasCharStem => UnrealPathUtil.AssetName(MasCharPackage);
@@ -44,7 +46,7 @@ public sealed class AnimArchetypeGraftService
     /// <summary>
     /// Detects the donor family + its clone-source assets from the suit's playable:
     /// playable → parent BP_CAT_Archetype_&lt;Family&gt; → its MAS_Char/LAS_Char/DPRD;
-    /// DPRD → the family AS_&lt;Family&gt; ability set. Reads import tables only.
+    /// DPRD → the family AS_&lt;Family&gt; ability set. Concrete playable defaults override inherited references.
     /// </summary>
     /// <summary>
     /// Detects the donor from the suit's PRISTINE base playable template (never
@@ -413,6 +415,18 @@ public sealed class AnimArchetypeGraftService
                     }
                 }
 
+                // Concrete suits can override their archetype's defaults. Joker, for example,
+                // inherits a Mr Freeze layer set but selects LAS_Char_Joker on the playable.
+                // Reading imports alone silently discards that override on a visual scaffold.
+                var archetypeDefaults = ReadBehaviorDefaults(archUasset, mappings);
+                var playableDefaults = ReadBehaviorDefaults(playableUasset, mappings);
+                string Effective(string property, string fallback) =>
+                    playableDefaults.GetValueOrDefault(property) ?? archetypeDefaults.GetValueOrDefault(property) ?? fallback;
+                info.MasCharPackage = Effective("AnimSet", info.MasCharPackage);
+                info.LasCharPackage = Effective("LayerSet", info.LasCharPackage);
+                info.DprdPackage = Effective("DinnerPawnRuntimeData", info.DprdPackage);
+                info.AudioTagDataPackage = Effective("AudioTagData", "");
+
                 // Family from the anim-set name (e.g. MAS_Char_ThomasWayne → ThomasWayne)
                 // - robust even if the playable was already reparented to a mod archetype.
                 if (info.MasCharStem.StartsWith("MAS_Char_", StringComparison.OrdinalIgnoreCase))
@@ -442,6 +456,35 @@ public sealed class AnimArchetypeGraftService
         {
             return null;
         }
+    }
+
+    internal static IReadOnlyDictionary<string, string> ReadBehaviorDefaults(string path, Usmap? mappings)
+    {
+        var asset = new UAsset(path, EngineVersion.VER_UE5_6, mappings,
+            CustomSerializationFlags.SkipPreloadDependencyLoading);
+        NativeBlueprintSchemaService.EnsureParents(asset);
+        // A previously unknown inherited schema leaves the first CDO raw; reload after registration.
+        asset = new UAsset(path, EngineVersion.VER_UE5_6, mappings,
+            CustomSerializationFlags.SkipPreloadDependencyLoading);
+        var defaults = asset.Exports.OfType<NormalExport>()
+            .SingleOrDefault(e => e.ObjectName.ToString().StartsWith("Default__", StringComparison.Ordinal));
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var property in defaults?.Data.OfType<ObjectPropertyData>() ?? [])
+        {
+            if (property.Name.ToString() is not ("AnimSet" or "LayerSet" or "DinnerPawnRuntimeData" or "AudioTagData")) continue;
+            var index = property.Value;
+            while (index.IsImport())
+            {
+                var import = index.ToImport(asset);
+                if (import.ClassName.ToString() == "Package")
+                {
+                    result[property.Name.ToString()] = import.ObjectName.ToString();
+                    break;
+                }
+                index = import.OuterIndex;
+            }
+        }
+        return result;
     }
 
     /// <summary>
@@ -695,6 +738,8 @@ public sealed class AnimArchetypeGraftService
                     behaviorRepoint,
                     authoredShellDonor.DprdPackage,
                     donor.DprdPackage);
+                AddPackageAndStemReplacement(behaviorRepoint,
+                    authoredShellDonor.AudioTagDataPackage, donor.AudioTagDataPackage);
                 if (behaviorRepoint.Count == 0)
                 {
                     result.Status = "error";
@@ -706,7 +751,7 @@ public sealed class AnimArchetypeGraftService
                     behaviorRepoint,
                     mappings);
                 result.Log.Add(
-                    $"paired-cape authored shell: kept {authoredShellDonor.ArchetypeStem} schema and repointed {behaviorChanges} MAS/LAS/DPRD name(s) to {donor.Family}");
+                    $"paired-cape authored shell: kept {authoredShellDonor.ArchetypeStem} schema and repointed {behaviorChanges} animation/loadout/audio name(s) to {donor.Family}");
             }
             else
             {
@@ -911,7 +956,7 @@ public sealed class AnimArchetypeGraftService
         else if (usesPairedCapeAdapter)
         {
             result.Log.Add(
-                "paired-cape adapter: preserving the gameplay donor's native gliding ability/loadout while replacing its glide-only animation categories with the certified cape donor's blocks");
+                "paired-cape adapter: retaining the gameplay donor's loadout and checking missing traversal grants; only glide animation categories use the certified cape donor's blocks");
         }
 
         // Cross-type glider: inject the donor character's glide anim sets
@@ -1013,6 +1058,9 @@ public sealed class AnimArchetypeGraftService
             }
 
             var customMasPkg = $"/Game/Mods/{mod}/Characters/MAS_Char_{mod}";
+            EnsurePairedCapeTraversalDependencies(project, usesPairedCapeAdapter, donor, foreignAbilitySets);
+            if (usesPairedCapeAdapter)
+                result.Log.Add("paired-cape traversal dependencies: " + string.Join(", ", foreignAbilitySets));
             var customLasPkg = $"/Game/Mods/{mod}/Characters/LAS_Char_{mod}";
             var masStem = UnrealPathUtil.AssetName(customMasPkg);
             var lasStem = UnrealPathUtil.AssetName(customLasPkg);
@@ -1250,8 +1298,14 @@ public sealed class AnimArchetypeGraftService
                 if (usesPairedCapeAdapter)
                 {
                     var donorSet = RequiredCategoryParent(
-                        graft.InspectParentSets(StageUasset(patchedContentRoot, customLasPkg)), "LAS_Traversal_", $"LAS_Traversal_{donor.Family}");
-                    var r = graft.ReplaceParentSet(
+                        graft.InspectParentSets(StageUasset(patchedContentRoot, customLasPkg)), "LAS_Traversal_", $"LAS_Traversal_{donor.Family}", allowMissing: true);
+                    // Some current Villain Mode donors borrow LAS_Char_MrFreeze, which
+                    // has no traversal parent. Supply the certified cape block while
+                    // retaining all of that donor's existing animation parents.
+                    var r = string.IsNullOrEmpty(donorSet)
+                        ? graft.InjectParentSets(StageUasset(patchedContentRoot, customLasPkg),
+                            "TTLayerSet", [project.PairedCapeAdapter!.GlideAnimLasPackage])
+                        : graft.ReplaceParentSet(
                         StageUasset(patchedContentRoot, customLasPkg),
                         "TTLayerSet",
                         donorSet,
@@ -2258,6 +2312,26 @@ public sealed class AnimArchetypeGraftService
         return true;
     }
 
+    internal static void EnsurePairedCapeTraversalDependencies(NativeSuitProject project,
+        bool usesPairedCapeAdapter, DonorInfo donor, ICollection<string> requiredSets)
+    {
+        if (!usesPairedCapeAdapter || !project.PartGrafts.Any(g => g.IsGlider)) return;
+        var path = ExtractedPackagePathService.ResolvePackageUasset(
+            AppSettings.Current.EffectiveExtractedContentRoot(), donor.DprdPackage)
+            ?? throw new InvalidDataException("The paired-cape gameplay DPRD is missing: " + donor.DprdPackage);
+        var inspection = new AbilityAssetMutationService().InspectDprdAbilitySets(path);
+        if (!inspection.Success) throw new InvalidDataException(inspection.Error);
+        var nativeSets = inspection.AbilitySets.Select(s => s.PackagePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // DLC Joker/Harley only own hover + grapple DATA. Native-only runtime grants do
+        // not apply to /Game/Mods actors, so package the actual traversal abilities too.
+        var candidates = new List<string> { GliderService.GlidingAbilitySetPackage };
+        if (donor.Family is "Joker" or "HarleyQuinn")
+            candidates.Add("/Game/Characters/Abilities/CoreAbilities/Grappling/AS_Grappling");
+        foreach (var set in candidates)
+            if (!nativeSets.Contains(set) && !requiredSets.Contains(set, StringComparer.OrdinalIgnoreCase))
+                requiredSets.Add(set);
+    }
+
     /// <summary>
     /// Deletes previously-generated archetype derivatives (ability sets, DPRD, anim
     /// composites, cloned locomotion graph, the custom archetype) from the packaged
@@ -2626,13 +2700,14 @@ public sealed class AnimArchetypeGraftService
 
     private static string StageUasset(string contentRoot, string packagePath) => PackageToStageBase(contentRoot, packagePath) + ".uasset";
 
-    internal static string RequiredCategoryParent(AnimGraftService.ParentSetInspection inspection, string prefix, string? preferredSetName = null)
+    internal static string RequiredCategoryParent(AnimGraftService.ParentSetInspection inspection, string prefix, string? preferredSetName = null, bool allowMissing = false)
     {
         if (!inspection.Success)
             throw new InvalidDataException("Could not inspect the paired-cape donor's authored category: " + inspection.Error);
         // A character can reuse another native family's set (for example a Villain
         // Mode LAS). Read the exact serialized parent, never derive it from its name.
         var parents = inspection.PackagePaths.Where(package => UnrealPathUtil.AssetName(package).StartsWith(prefix, StringComparison.Ordinal)).ToArray();
+        if (parents.Length == 0 && allowMissing) return "";
         // Preserve the existing exact family-specific rule when the composite
         // explicitly includes it alongside a shared fallback category.
         var exact = parents.Where(package => UnrealPathUtil.AssetName(package).Equals(preferredSetName, StringComparison.Ordinal)).ToArray();
