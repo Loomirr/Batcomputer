@@ -4,6 +4,37 @@ Batcomputer starts with **working game materials**. It copies a cooked material 
 parent and parameters already work in-game, then changes the supported values. This avoids guessing
 at a cooked material layout.
 
+## Importing textures
+
+In **Textures**, use **Import texture** for one PNG or **Batch import** for several.
+Both are available in the toolbar and as Toybox action tiles.
+
+Regular import keeps the original texture settings menu for naming the texture
+and choosing its type and cook profile. After confirming, cooking progress appears
+under **Your Character**, and you can immediately open another single or batch import.
+Batch import opens a settings-only window with a preview card, image dimensions,
+editable name, type and profile for each file. You can add more PNGs or drop them
+into that window before submitting. To give several files the same settings,
+click the source card, check the destination cards, then choose **Apply active
+settings to selected**. The outlined active card supplies the type and profile;
+individual names stay unchanged.
+
+Review the output size and format in each profile. Types are suggested from names
+and can be changed. Experimental profiles require enabling the option for that
+batch. Press **Import** to close the setup window and send the files to the same
+queue under **Your Character**. You can keep adding files while it runs. Completed
+textures are saved into the selected suit; a failed file retains its error details
+and does not stop later files. Hover a queue row for its profile/error details;
+double-click a completed row to copy its package path. **Retry** requeues failures.
+
+Progress shows the current file, mip level and package-writing stage. Imports run
+one at a time to limit memory use. **Stop** waits for the current encoder operation,
+leaves remaining files queued, and preserves completed imports. **Continue** restarts
+the interrupted file and processes the rest. **Clear** removes finished rows from
+the queue display, not saved textures. Pending jobs are session-only; finish them
+before closing the app. Switching suits/workspaces during a cook prevents it from
+being attached to a different project.
+
 ## Materials
 
 1. Select the target component and material slot.

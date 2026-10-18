@@ -166,6 +166,14 @@ public sealed partial class MainForm
         _toyboxPrimaryActionButton.Height = 30;
         _toyboxPrimaryActionButton.Margin = new Padding(0, 4, 6, 0);
         _toyboxPrimaryActionButton.Click += (_, _) => RunPrimaryAction();
+        Theme.StyleDarkButton(_textureBatchActionButton);
+        _textureBatchActionButton.Width = 120;
+        _textureBatchActionButton.Height = 30;
+        _textureBatchActionButton.Margin = new Padding(0,4,6,0);
+        _textureBatchActionButton.Click += async (_,_) => await ImportTextureFromPngAsync(batchMode:true);
+        var importActions = new FlowLayoutPanel { AutoSize=true, AutoSizeMode=AutoSizeMode.GrowAndShrink,
+            WrapContents=false, Margin=Padding.Empty, Padding=Padding.Empty };
+        importActions.Controls.AddRange([_toyboxPrimaryActionButton,_textureBatchActionButton]);
         var refreshTiles = new IconButton { Size = new Size(30, 30), Margin = new Padding(0, 4, 0, 0) };
         _toyboxToolTip.SetToolTip(refreshTiles, "Rescan active extracted materials and rebuild this view");
         refreshTiles.Click += (_, _) => RescanToyboxCatalogs();
@@ -176,7 +184,7 @@ public sealed partial class MainForm
         toyBox.Controls.Add(_toyboxTypeCombo);
         toolbar.Controls.Add(_toyboxFilters, 0, 0);
         toolbar.Controls.Add(_toyboxSearchText, 1, 0);
-        toolbar.Controls.Add(_toyboxPrimaryActionButton, 2, 0);
+        toolbar.Controls.Add(importActions, 2, 0);
         toolbar.Controls.Add(refreshTiles, 3, 0);
         toyLayout.Controls.Add(toolbar, 0, 0);
 

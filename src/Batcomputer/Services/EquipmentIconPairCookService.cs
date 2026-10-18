@@ -13,7 +13,8 @@ internal static class EquipmentIconPairCookService
     }
 
     internal static List<GeneratedTextureEntry> Cook(string projectRoot, string sourceImage, string basePackage,
-        string name, string outputParent, IEnumerable<string> occupiedPackages, IEnumerable<string> occupiedNames)
+        string name, string outputParent, IEnumerable<string> occupiedPackages, IEnumerable<string> occupiedNames,
+        IProgress<TextureImportProgress>? progress = null, CancellationToken cancellation = default)
     {
         basePackage = UnrealPathUtil.NormalizePackagePath(basePackage);
         if (!HeldItemService.ValidPackage(basePackage)) throw new InvalidOperationException("Invalid equipment icon package path.");
@@ -39,6 +40,10 @@ internal static class EquipmentIconPairCookService
         var entries = new List<GeneratedTextureEntry>();
         foreach (var spec in specs)
         {
+            cancellation.ThrowIfCancellationRequested();
+            var completed = entries.Count;
+            var childProgress = progress is null ? null : new ForwardProgress(p =>
+                progress.Report(new((completed * 100 + p.Percent) / specs.Length, $"{spec.Suffix} · {p.Detail}")));
             var root = Path.Combine(outputParent, spec.Suffix);
             var source = Path.Combine(root, "Source", Path.GetFileName(sourceImage));
             Directory.CreateDirectory(Path.GetDirectoryName(source)!);
@@ -49,7 +54,8 @@ internal static class EquipmentIconPairCookService
             {
                 SourceImagePath = source, TemplateJsonPath = template,
                 OutputContentRoot = Path.Combine(root, "Cooked", "LEGOBatmanLotDK", "Content"),
-                OutputPackagePath = package, BleedTransparentRgb = false, WriteInlineMips = true
+                OutputPackagePath = package, BleedTransparentRgb = false, WriteInlineMips = true,
+                Progress = childProgress, CancellationToken = cancellation
             });
             if (!result.Status.Equals("created", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException($"{spec.Suffix} cook failed: {result.Error ?? result.Status}");
@@ -64,5 +70,10 @@ internal static class EquipmentIconPairCookService
         }
         // Nothing is registered with a project until both cooks have succeeded.
         return entries;
+    }
+
+    private sealed class ForwardProgress(Action<TextureImportProgress> report) : IProgress<TextureImportProgress>
+    {
+        public void Report(TextureImportProgress value) => report(value);
     }
 }

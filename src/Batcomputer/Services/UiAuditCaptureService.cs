@@ -19,6 +19,62 @@ internal static class UiAuditCaptureService
     private static long _captureJpegQuality = 38L;
     private static long _contactSheetJpegQuality = 34L;
 
+    internal static int CaptureTextureQueue(string output)
+    {
+        Directory.CreateDirectory(output);
+        var captures=new List<CaptureResult>(); var findings=new List<AuditFinding>();
+        var sources=new[]{"Example_Body_BC", "Example_Body_NRM", "Example_Body_MMR"}.Select(n=>Path.Combine(output,n+".png")).ToArray();
+        for (var i=0;i<sources.Length;i++)
+        {
+            using var image=new Bitmap(256,256);
+            using var graphics=Graphics.FromImage(image);
+            graphics.Clear(i==1 ? Color.FromArgb(128,128,255) : i==2 ? Color.Gray : Color.FromArgb(60,110,150));
+            using var brush=new SolidBrush(i==1 ? Color.FromArgb(150,140,250) : Color.FromArgb(30,50,70));
+            graphics.FillEllipse(brush,32,32,192,192);
+            image.Save(sources[i],ImageFormat.Png);
+        }
+        using var form=new TextureImportQueueForm("Example suit",sources,
+            ["Character texture","Normal map","Roughness/spec mask"],[],s=>s,
+            kind=>[new("fixture",kind=="Normal map" ? "Native BC5 normal" : "Native colour / mask","2048 × 2048",true,"Choose a compatible profile for this texture's use.")]);
+        ShowAndSettle(form,150);
+        CaptureVisibleForm(form,"Texture-queue-setup",output,captures,findings);
+        ValidateResizeBehavior(form,"Texture queue",findings);
+        var setupSize=form.Size;
+        form.Size=form.MinimumSize; Settle(100);
+        CaptureVisibleForm(form,"Texture-queue-setup-compact",output,captures,findings);
+        if(form.HasHorizontalScrollForAudit)
+            findings.Add(new("Texture setup","ERROR","Texture cards should fit without horizontal scrolling at the minimum window width."));
+        form.Size=setupSize; Settle(100);
+        var jobs=form.Jobs;
+        if (!form.SubmitForAudit() || form.Visible || jobs.Any(j=>j.State!=TextureImportState.Queued))
+            findings.Add(new("Texture setup","ERROR","Import must close the setup window without cooking or altering queued jobs."));
+        using var progressWindow=new AdaptiveDialogForm { Text="Your Character · Texture queue",ClientSize=new Size(340,720) };
+        var character=new YourCharacterControl { Dock=DockStyle.Fill };
+        progressWindow.Controls.Add(character);
+        using var queue=new TextureImportQueueRunner();
+        queue.Changed+=()=>character.ShowTextureQueue(queue.Jobs,queue.IsRunning,queue.IsPaused);
+        async Task<string> Import(TextureImportJob job,IProgress<TextureImportProgress> progress,CancellationToken token)
+        {
+            progress.Report(new(0,"Checking source and cook profile")); await Task.Delay(300,token);
+            progress.Report(new(45,"Encoding mip 4/12 · 256 × 256")); await Task.Delay(400,token);
+            if(job.Name.Contains("MMR"))throw new IOException("Example failed PNG · correct the source and retry.");
+            return "/Game/Mods/Example/Textures/"+job.Name;
+        }
+        queue.Enqueue([jobs[0]],Import);
+        ShowAndSettle(progressWindow,150);
+        CaptureVisibleForm(progressWindow,"Texture-progress-empty-track",output,captures,findings);
+        queue.Enqueue(jobs.Skip(1),Import);
+        Settle(250);
+        CaptureVisibleForm(progressWindow,"Texture-progress-under-character",output,captures,findings);
+        for(var i=0;i<60 && !queue.Completion.IsCompleted;i++)Settle(100);
+        queue.Completion.GetAwaiter().GetResult(); Settle(100);
+        CaptureVisibleForm(progressWindow,"Texture-queue-results",output,captures,findings);
+        if(jobs.Count(j=>j.State==TextureImportState.Complete)!=2 || jobs.Count(j=>j.State==TextureImportState.Failed)!=1)
+            findings.Add(new("Texture queue","ERROR","The shared queue failed to accept additional jobs during its active first import."));
+        File.WriteAllText(Path.Combine(output,"findings.json"),JsonSerializer.Serialize(findings));
+        progressWindow.Close(); return findings.Any(f=>f.Severity=="ERROR") ? 1 : 0;
+    }
+
     internal static int CaptureReplacerFlow(string root, string project, string output)
     {
         Directory.CreateDirectory(output);

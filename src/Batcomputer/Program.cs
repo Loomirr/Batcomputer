@@ -876,6 +876,9 @@ internal static class Program
             return ReleaseRegressionChecks.Run(Console.Out);
         }
 
+        if (args.Length == 3 && args[0] == "--verify-texture-queue-cook")
+            return TextureImportQueueRegressionChecks.RunCooked(args[1],args[2]);
+
         if (args.Length == 4 && args[0].Equals("--test-suit-icon-cook", StringComparison.OrdinalIgnoreCase))
         {
             return SuitIconDryRunService.RunCli(args[1], args[2], args[3], Console.Out);
@@ -1127,6 +1130,9 @@ internal static class Program
 
         ApplicationConfiguration.Initialize();
         ConfigureGuiCrashReporting();
+
+        if (args.Length == 2 && args[0] == "--capture-texture-queue")
+            return UiAuditCaptureService.CaptureTextureQueue(args[1]);
 
         // Keep the bundled typeface as the default for controls without an explicit font.
         try { Application.SetDefaultFont(AppFonts.Condensed(10f, FontStyle.Bold)); } catch { /* pre-window only */ }

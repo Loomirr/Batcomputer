@@ -14,6 +14,11 @@ public sealed class ThemedProgressBar : Control
     private bool _indeterminate;
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 33 };
     private float _phase;
+    private Color _trackColor = Theme.Slate;
+    private Color _trackBorderColor = Theme.LineSoft;
+
+    public Color TrackColor { get => _trackColor; set { _trackColor=value; Invalidate(); } }
+    public Color TrackBorderColor { get => _trackBorderColor; set { _trackBorderColor=value; Invalidate(); } }
 
     public ThemedProgressBar()
     {
@@ -57,7 +62,7 @@ public sealed class ThemedProgressBar : Control
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics;
-        g.Clear(BackColor);
+        g.Clear(BackColor.A == 255 ? BackColor : ControlGround.Resolve(this));
         g.SmoothingMode = SmoothingMode.AntiAlias;
 
         var h = Math.Min(Height, 10);
@@ -66,9 +71,9 @@ public sealed class ThemedProgressBar : Control
 
         using (var path = Theme.RoundedRect(track, radius))
         {
-            using var back = new SolidBrush(Theme.Slate);
+            using var back = new SolidBrush(_trackColor);
             g.FillPath(back, path);
-            using var pen = new Pen(Theme.LineSoft);
+            using var pen = new Pen(_trackBorderColor);
             g.DrawPath(pen, path);
         }
 

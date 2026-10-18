@@ -40,6 +40,8 @@ public sealed class TextureCookService
         public string Bc7InputLayout { get; set; } = "rgba";
         public string Bc7Quality { get; set; } = "balanced";
         public string ForcePixelFormat { get; set; } = "";
+        public IProgress<TextureImportProgress>? Progress { get; set; }
+        public CancellationToken CancellationToken { get; set; }
     }
 
     public sealed class Result
@@ -114,6 +116,8 @@ public sealed class TextureCookService
         string? attemptBase = null;
         try
         {
+            request.CancellationToken.ThrowIfCancellationRequested();
+            request.Progress?.Report(new(2, "Checking source and cook profile"));
             if (!File.Exists(request.SourceImagePath))
             {
                 return Fail(result, $"Source image not found: {request.SourceImagePath}");
@@ -228,7 +232,10 @@ public sealed class TextureCookService
                 string.Equals(Path.GetFileName(Path.GetDirectoryName(request.TemplateJsonPath)),
                     TextureCookTemplateService.EquipmentAccentTemplateFolder, StringComparison.OrdinalIgnoreCase),
                 string.Equals(Path.GetFileName(Path.GetDirectoryName(request.TemplateJsonPath)),
-                    TextureCookTemplateService.CharacterSymbolTemplateFolder, StringComparison.OrdinalIgnoreCase));
+                    TextureCookTemplateService.CharacterSymbolTemplateFolder, StringComparison.OrdinalIgnoreCase),
+                request.Progress, request.CancellationToken);
+            request.CancellationToken.ThrowIfCancellationRequested();
+            request.Progress?.Report(new(88, "Writing cooked texture package"));
             var sourceIntegrityAfter = FileIntegrity(request.SourceImagePath);
             if (sourceIntegrityAfter != sourceIntegrityBefore)
             {
@@ -320,12 +327,17 @@ public sealed class TextureCookService
                 includeUexp: uexpBytes is not null,
                 includeUbulk: template.Mips.Any(mip => mip.IsExternal));
             WriteReport(result, attemptBase + ".texture-cook-report.json");
+            request.CancellationToken.ThrowIfCancellationRequested();
             CommitCookAttempt(
                 attemptBase,
                 outputBase,
                 includeUexp: uexpBytes is not null,
                 includeUbulk: template.Mips.Any(mip => mip.IsExternal));
             return result;
+        }
+        catch (OperationCanceledException) when (request.CancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -734,7 +746,9 @@ public sealed class TextureCookService
         string bc7Quality,
         bool alphaToEquipmentSdf = false,
         bool greenToEquipmentSdf = false,
-        bool alphaToCharacterSymbolSdf = false)
+        bool alphaToCharacterSymbolSdf = false,
+        IProgress<TextureImportProgress>? progress = null,
+        CancellationToken cancellation = default)
     {
         using var source = new Bitmap(sourceImagePath);
         if (greenToEquipmentSdf && (source.Width > 4096 || source.Height > 4096))
@@ -777,6 +791,9 @@ public sealed class TextureCookService
         var previousHeight = 0;
         foreach (var mip in mips)
         {
+            cancellation.ThrowIfCancellationRequested();
+            progress?.Report(new(8 + output.Count * 78 / Math.Max(1, mips.Count),
+                $"Encoding mip {output.Count + 1}/{mips.Count} · {mip.SizeX} × {mip.SizeY}"));
             // Build ordinary half-size mip tails from the preceding straight-
             // RGBA level. If the source was smaller than the template's top
             // level, prefer the original once the requested mip fits it so an

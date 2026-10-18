@@ -215,6 +215,7 @@ public sealed partial class MainForm : AdaptiveForm
     private readonly Dictionary<string, Button> _categoryRailButtons = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly Button _toyboxPrimaryActionButton = new();
+    private readonly Button _textureBatchActionButton = new() { Text = "Batch import", Visible = false };
 
     private readonly Label _toyboxStatusChip = new();
 
@@ -817,6 +818,7 @@ public sealed partial class MainForm : AdaptiveForm
     private void UpdatePrimaryAction()
     {
         var category = _toyboxCategoryCombo.SelectedItem?.ToString();
+        _textureBatchActionButton.Visible = category == "Textures";
         switch (category)
         {
             case "Base":
@@ -828,7 +830,7 @@ public sealed partial class MainForm : AdaptiveForm
                 _toyboxPrimaryActionButton.Visible = false;
                 break;
             case "Textures":
-                _toyboxPrimaryActionButton.Text = "＋ Import PNG";
+                _toyboxPrimaryActionButton.Text = "＋ Import texture";
                 _toyboxPrimaryActionButton.Visible = true;
                 break;
             case "Parts":
@@ -1701,7 +1703,6 @@ public sealed partial class MainForm : AdaptiveForm
             AppendLog($"Copy failed: {ex.Message}");
         }
     }
-
     private (string Name, string Kind, TextureCookPreset Preset)? PromptForTextureImportSettings(
         string suggestedName,
         string projectRoot,

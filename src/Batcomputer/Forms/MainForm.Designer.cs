@@ -21,6 +21,7 @@ partial class MainForm
         {
             components?.Dispose();
             DisposeTextureThumbnailCache();
+            _textureImports?.Dispose();
         }
 
         base.Dispose(disposing);

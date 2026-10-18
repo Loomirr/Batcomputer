@@ -329,12 +329,21 @@ public sealed partial class MainForm
         {
             new()
             {
-                Title = "＋ Import PNG",
-                Subtitle = "cook Texture2D",
+                Title = "＋ Import texture",
+                Subtitle = "One PNG · type & profile",
                 Accent = Theme.Textures,
                 Dashed = true,
                 OnClick = () => { _ = ImportTextureFromPngAsync(); },
-                ToolTip = "Imports a PNG using a selected native cook profile, then remembers its /Game path on this suit. Compact mask and icon profiles reduce the final mod size."
+                ToolTip = "Import one PNG with a chosen texture type and native cook profile."
+            },
+            new()
+            {
+                Title = "＋ Batch import",
+                Subtitle = "Multiple PNGs · import queue",
+                Accent = Theme.Textures,
+                Dashed = true,
+                OnClick = () => { _ = ImportTextureFromPngAsync(batchMode:true); },
+                ToolTip = "Review types and profiles for multiple PNGs, then cook them through a queue with progress, cancellation and retry."
             }
         };
 
@@ -1775,263 +1784,62 @@ public sealed partial class MainForm
         }
     }
 
-    private async Task ImportTextureFromPngAsync()
-    {
-        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("import the generated texture"))
-        {
-            return;
-        }
+    private bool _textureImportSetupOpen;
 
+    private async Task ImportTextureFromPngAsync(bool batchMode = false)
+    {
+        if (_textureImportSetupOpen) return;
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("import textures")) return;
         EnsureProject();
-        if (_currentProject is null)
-        {
-            return;
-        }
-
-        ReadFieldsIntoProject(_currentProject);
-        var projectRoot = _projectRootText.Text.Trim();
-        if (!await EnsureTextureCookTemplatesAsync(projectRoot))
-        {
-            return;
-        }
-
-        using var dlg = new OpenFileDialog
-        {
-            Title = "Import PNG as Texture2D",
-            Filter = "PNG images (*.png)|*.png|All files (*.*)|*.*",
-            CheckFileExists = true,
-            Multiselect = false
-        };
-        if (dlg.ShowDialog(this) != DialogResult.OK)
-        {
-            return;
-        }
-
-        var textureSettings = PromptForTextureImportSettings(Path.GetFileNameWithoutExtension(dlg.FileName), projectRoot);
-        if (textureSettings is null || string.IsNullOrWhiteSpace(textureSettings.Value.Name))
-        {
-            AppendLog("Texture import cancelled (no texture name entered).");
-            return;
-        }
-
-        var requestedName = textureSettings.Value.Name;
-        var textureKind = textureSettings.Value.Kind;
-        var cookPreset = textureSettings.Value.Preset;
-        if (!ConfirmTextureProfileSafety(cookPreset, "import this texture"))
-        {
-            AppendLog("Texture import cancelled: experimental profile was not confirmed.");
-            return;
-        }
-        if (textureKind == EquipmentUiTextureCatalog.ImportKind)
-        {
-            await ImportEquipmentIconPairAsync(projectRoot, dlg.FileName, requestedName, cookPreset);
-            return;
-        }
-        var templateJson = cookPreset.TemplateJson;
-        var importProject = _currentProject;
-        if (string.IsNullOrWhiteSpace(templateJson) || !File.Exists(templateJson))
-        {
-            AppendLog("Texture import needs the selected verified Texture2D template in the Generated workspace.");
-            AppendLog($"Looked for: {templateJson}");
-            return;
-        }
-
-        var rawRoot = DefaultTextureSourceRawRoot(projectRoot);
-
-        AppendLog($"Texture profile selected: {cookPreset.Label} ({cookPreset.Detail})");
-        AppendLog($"  template: {Path.GetFileName(templateJson)}");
-        if (_currentProject.GeneratedTextures.Any(t =>
-                t.DisplayName.Equals(requestedName, StringComparison.OrdinalIgnoreCase)))
-        {
-            AppendLog($"Texture import cancelled: this suit already has a generated texture named '{requestedName}'. Pick a unique name.");
-            return;
-        }
-
-        var slotIndex = NextTextureSlotIndex(_currentProject);
-        string outputPackagePath;
-        try
-        {
-            outputPackagePath = TexturePackagePathFromUserName(templateJson, requestedName, slotIndex, _modFolderText.Text.Trim(), _currentProject.SlotId, textureKind);
-            if (_currentProject.GeneratedTextures.Any(t =>
-                    t.PackagePath.Equals(outputPackagePath, StringComparison.OrdinalIgnoreCase)))
-            {
-                AppendLog($"Texture import cancelled: generated package path already exists on this suit: {outputPackagePath}");
-                return;
-            }
-        }
-        catch (Exception ex)
-        {
-            AppendLog($"Texture path could not be generated safely: {ex.Message}");
-            return;
-        }
-        var packageBaseName = MakeSafePackageBaseName($"Texture_{MakeSafeTextureToken(requestedName)}_{slotIndex:00000}_P");
-        var safeSlot = MakeSafePackageBaseName(string.IsNullOrWhiteSpace(_currentProject.SlotId) ? "unsaved_suit" : _currentProject.SlotId);
-        var outputRoot = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureImports", safeSlot, $"{MakeSafeTextureToken(requestedName)}_{slotIndex:00000}");
-        string sourcePng;
-        try
-        {
-            sourcePng = CopyTextureSourceIntoOutput(dlg.FileName, outputRoot);
-        }
-        catch (Exception ex)
-        {
-            AppendLog($"Texture import could not cache its source PNG: {ex.Message}");
-            return;
-        }
-
-        AppendLog($"Texture import: {Path.GetFileName(dlg.FileName)} as '{requestedName}' ({textureKind})");
-        AppendLog($"  package path: {outputPackagePath}");
-        AppendLog($"  cooked files: {Path.Combine(outputRoot, "Cooked")}");
-        AppendLog("  mode: cook-only (texture will be packed with the suit, no separate texture test pak)");
-
-        var importCompleted = false;
-        _yourCharacter.ShowTextureImport(requestedName, "Importing · encoding texture and mipmaps…", true);
-        _toyboxPrimaryActionButton.Enabled = false;
-        try
-        {
-            var nearestMips = UseNearestNeighborMipsForTextureKind(textureKind, cookPreset.Id);
-            AppendLog(nearestMips
-                ? "  mip mode: nearest-neighbor"
-                : "  mip mode: high-quality filtered mips (complete chain)");
-
-            var cookedContentRoot = Path.Combine(outputRoot, "Cooked", "LEGOBatmanLotDK", "Content");
-            var cookResult = await Task.Run(() => new TextureCookService(projectRoot).Cook(new TextureCookService.Request
-            {
-                SourceImagePath = sourcePng,
-                TemplateJsonPath = templateJson,
-                OutputContentRoot = cookedContentRoot,
-                OutputPackagePath = outputPackagePath,
-                NearestNeighborMips = nearestMips,
-                BleedTransparentRgb = IsUiTextureKind(textureKind),
-                WriteInlineMips = true,
-                Bc7InputLayout = "rgba",
-                Bc7Quality = IsNativeUimdIconCookProfile(cookPreset.Id)
-                    ? "best"
-                    : "balanced",
-            }));
-
-            foreach (var log in cookResult.Log)
-            {
-                AppendLog($"  texture cook: {log}");
-            }
-            foreach (var warning in cookResult.Warnings)
-            {
-                AppendLog($"  texture cook warning: {warning}");
-            }
-            if (!cookResult.Status.Equals("created", StringComparison.OrdinalIgnoreCase))
-            {
-                AppendLog($"Texture import failed: {cookResult.Error?.Split('\n').FirstOrDefault() ?? cookResult.Status}");
-                if (EquipmentUiTextureCatalog.IsEquipmentIcon(textureKind))
-                    Dialog.Warn(this, "Equipment icon could not be imported", cookResult.Error?.Split('\n').FirstOrDefault() ?? cookResult.Status);
-                return;
-            }
-
-            if (EquipmentUiTextureCatalog.IsEquipmentIcon(textureKind) &&
-                (!ReferenceEquals(importProject, _currentProject) || !_projectRootText.Text.Trim().Equals(projectRoot, StringComparison.OrdinalIgnoreCase)))
-                throw new InvalidOperationException("The active project changed during the icon cook. No texture was added. Return to the original project and retry.");
-
-            AppendLog($"Texture import complete: {cookResult.OutputPackagePath}");
-            _yourCharacter.ShowTextureImport(requestedName, "Saving texture to this suit…", true);
-
-            var entry = BuildTextureEntryFromSummary(
-                outputRoot,
-                sourcePng,
-                templateJson,
-                rawRoot,
-                outputPackagePath,
-                packageBaseName,
-                requestedName,
-                textureKind,
-                cookPreset);
-
-            if (EquipmentUiTextureCatalog.IsEquipmentIcon(textureKind))
-            {
-                EquipmentIconPairCookService.CheckCollisions([entry.PackagePath], [entry.DisplayName],
-                    importProject!.GeneratedTextures.Select(t => t.PackagePath), importProject.GeneratedTextures.Select(t => t.DisplayName));
-                importProject.GeneratedTextures.Add(entry);
-                try { (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(importProject); }
-                catch { importProject.GeneratedTextures.Remove(entry); throw; }
-                RecordChange("Textures", entry.DisplayName, entry.PackagePath, status: "staged");
-            }
-            else
-            {
-                _currentProject.GeneratedTextures.RemoveAll(t =>
-                    t.PackagePath.Equals(entry.PackagePath, StringComparison.OrdinalIgnoreCase));
-                _currentProject.GeneratedTextures.Add(entry);
-                AutoAssignGeneratedUiIconSlots(_currentProject);
-                RecordChange("Textures", entry.DisplayName, entry.PackagePath, status: "staged");
-                try { (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(_currentProject); } catch { /* best effort */ }
-            }
-
-            CopyText(entry.PackagePath, $"Texture ready and package path copied: {entry.PackagePath}");
-            RefreshToyboxTiles();
-            importCompleted = true;
-        }
-        catch (Exception ex)
-        {
-            AppendLog("Texture import failed:");
-            AppendLog(ex.ToString());
-            if (EquipmentUiTextureCatalog.IsEquipmentIcon(textureKind))
-                Dialog.Warn(this, "Equipment icon could not be imported", ex.Message);
-        }
-        finally
-        {
-            _yourCharacter.ShowTextureImport(requestedName, importCompleted ? "Import complete" : "Import failed · see the log for details", false);
-            _toyboxPrimaryActionButton.Enabled = true;
-        }
-    }
-
-    private async Task ImportEquipmentIconPairAsync(string projectRoot, string sourceImage, string name, TextureCookPreset preset)
-    {
+        if (_currentProject is null) return;
         var project = _currentProject;
-        if (project is null) return;
-        var importCompleted = false;
-        _yourCharacter.ShowTextureImport(name, "Importing · cooking artwork and distance-field textures…", true);
-        _toyboxPrimaryActionButton.Enabled = false;
+        ReadFieldsIntoProject(project);
+        var projectRoot = _projectRootText.Text.Trim();
+        _textureImportSetupOpen = true;
         try
         {
-            var basePackage = TexturePackagePathFromUserName(preset.TemplateJson, name,
-                NextTextureSlotIndex(project), _modFolderText.Text.Trim(), project.SlotId, EquipmentUiTextureCatalog.ImportKind);
-            var occupiedPackages = project.GeneratedTextures.Select(t => t.PackagePath).ToArray();
-            var occupiedNames = project.GeneratedTextures.Select(t => t.DisplayName).ToArray();
-            var outputParent = Path.Combine(AppSettings.GeneratedRootFor(projectRoot), "TextureImports",
-                MakeSafePackageBaseName(project.SlotId), $"{MakeSafeTextureToken(name)}_{Guid.NewGuid():N}");
-            AppendLog($"Equipment icon: cooking '{name}' as BCA artwork and a generated SDF…");
-            var entries = await Task.Run(() => EquipmentIconPairCookService.Cook(projectRoot, sourceImage,
-                basePackage, name, outputParent, occupiedPackages, occupiedNames));
+            using var picker = new OpenFileDialog
+            {
+                Title = batchMode ? "Batch import · select PNGs" : "Import texture · select a PNG",
+                Filter = "PNG images (*.png)|*.png",
+                CheckFileExists = true, Multiselect = batchMode
+            };
+            if (picker.ShowDialog(this) != DialogResult.OK) return;
+            if (!await EnsureTextureCookTemplatesAsync(projectRoot)) return;
             if (!ReferenceEquals(project, _currentProject) ||
-                !projectRoot.Equals(_projectRootText.Text.Trim(), StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("The project changed during the icon cook. No recipes were added. Return to the intended project and import again.");
-            EquipmentIconPairCookService.CheckCollisions(entries.Select(t => t.PackagePath), entries.Select(t => t.DisplayName),
-                project.GeneratedTextures.Select(t => t.PackagePath), project.GeneratedTextures.Select(t => t.DisplayName));
-            project.GeneratedTextures.AddRange(entries);
-            try { (_projectService ??= new SuitProjectService(projectRoot)).SaveProject(project); }
-            catch
+                !projectRoot.Equals(_projectRootText.Text.Trim(), StringComparison.OrdinalIgnoreCase)) return;
+            var modFolder = _modFolderText.Text.Trim();
+            if (!batchMode)
             {
-                foreach (var entry in entries) project.GeneratedTextures.Remove(entry);
-                throw;
+                ImportSingleTexture(project, projectRoot, modFolder, picker.FileName);
+                return;
             }
-            foreach (var entry in entries)
+            var profileCache = new Dictionary<string, IReadOnlyList<TextureImportProfile>>();
+            IReadOnlyList<TextureImportProfile> Profiles(string kind)
             {
-                RecordChange("Textures", entry.DisplayName, entry.PackagePath, status: "staged");
-                AppendLog($"  {entry.DisplayName}: {entry.PackagePath}");
+                if (!profileCache.TryGetValue(kind, out var profiles))
+                    profileCache[kind] = profiles = AvailableTextureCookPresets(projectRoot, kind)
+                        .Select(p => new TextureImportProfile(p.Id, p.Label, p.Detail,
+                            p.Safety == TextureProfileSafety.Verified, p.ValidationNote)).ToArray();
+                return profiles;
             }
-            RefreshToyboxTiles();
-            importCompleted = true;
-            _yourCharacter.ShowTextureImport(name, "Import complete · both icon textures ready", false);
-            Dialog.Info(this, "Equipment icon ready",
-                "Created BCA artwork and a generated SDF from your PNG.\n\nOpen Equipment and match each texture to the slot's Suggested: BCA or Suggested: SDF label, then Use this game asset and Save equipment.\n\nThe generated SDF still needs an in-game HUD check. Both outputs have their own saved source and cook recipe.");
+            using var setup = new TextureImportQueueForm(project.DisplayName, picker.FileNames,
+                TextureImportKinds(), ReservedTextureNames(project, projectRoot), MakeSafeTextureToken, Profiles);
+            if (setup.ShowDialog(this) == DialogResult.OK)
+                EnqueueTextureImports(project, projectRoot, modFolder, setup.Jobs);
         }
         catch (Exception ex)
         {
-            AppendLog("Equipment icon import failed: " + ex.Message);
-            Dialog.Warn(this, "Equipment icon could not be imported", ex.Message + "\n\nNo partial icon pair was added to the project.");
+            AppendLog("Texture import could not be opened: " + ex);
+            Dialog.Error(this,"Texture import",ex.Message);
         }
-        finally
-        {
-            _yourCharacter.ShowTextureImport(name, importCompleted ? "Import complete · both icon textures ready" : "Import failed · see the log for details", false);
-            _toyboxPrimaryActionButton.Enabled = true;
-        }
+        finally { _textureImportSetupOpen = false; }
     }
+
+    private static string[] TextureImportKinds() =>
+        new[] { "Character texture", "Normal map", "Roughness/spec mask", "Color mask", "CT map", "RAO map",
+            "Face detail", "Face detail normal", "Suit selector icon", "Character icon" }
+        .Concat(EquipmentUiTextureCatalog.NewImportKinds).Concat(new[] { "UI artwork", "Other texture" }).ToArray();
 
     private async Task<bool> EnsureTextureCookTemplatesAsync(string projectRoot)
     {
