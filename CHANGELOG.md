@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.1-beta.3 — 2026-10-19
+
+- Allows animation replacement skeletons with extra peripheral bones when the complete donor hierarchy and reference pose match. Missing required bones, altered parents/transforms, malformed extra branches and additive-mode mismatches remain blocked.
+- Adds regression coverage for extended skeletons. The reported user's custom clip still needs their in-game confirmation; this does not retarget incompatible animations.
+- Adds a shared texture import queue under Your Character. Single imports can continue while earlier jobs cook; batch imports support per-file names, types and profiles, then close into the same queue.
+- Modernizes batch setup with thumbnails, multi-selection and profile copying, plus queue progress, cancellation and retry controls. Queued results remain tied to their original suit.
+
+Both full portable and Beta 2 updater ZIPs are available. See [Beta 3 release notes](docs/releases/1.1.1-beta.3.md).
+
 ## 1.1.1-beta.2 — 2026-10-17
 
 - Integrates visual-only character replacers into the existing suit authoring and mod build flow, including quest/cutscene targets, while preserving native package identity and gameplay logic.

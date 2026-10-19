@@ -148,18 +148,35 @@ internal static class AnimationReplacementCompatibilityService
         if (Canonical(donor.Skeleton).Equals(Canonical(replacement.Skeleton), StringComparison.OrdinalIgnoreCase)) return null;
         if (donor.Bones == null || replacement.Bones == null)
             return "The skeleton paths differ and their bone hierarchies could not be verified.";
-        if (donor.Bones.Count != replacement.Bones.Count)
-            return $"Bone counts differ ({donor.Bones.Count} expected, {replacement.Bones.Count} supplied).";
         try
         {
             // The runtime maps skeleton bones by name, so different serialization order is OK.
-            // Plan checks unique names, parents and finite matching reference transforms (including
-            // root scale). Requiring equal counts also prevents silently accepting a subset rig.
-            _ = AnimationSkeletonRemapService.Plan(Enumerable.Range(0, replacement.Bones.Count).ToArray(),
-                replacement.Bones, donor.Bones);
+            // An imported skeleton may also contain peripheral helper/attachment bones. Require
+            // the COMPLETE donor hierarchy and rest pose, not equality of the total bone count.
+            // Check the full source against itself first so extra branches cannot hide malformed
+            // names, transforms, dangling parents or cycles. No compressed tracks are rewritten.
+            ValidateHierarchy(donor.Bones);
+            ValidateHierarchy(replacement.Bones);
+            _ = AnimationSkeletonRemapService.Plan(Enumerable.Range(0, donor.Bones.Count).ToArray(),
+                donor.Bones, replacement.Bones);
             return null;
         }
         catch (InvalidDataException ex) { return ex.Message; }
+    }
+
+    private static void ValidateHierarchy(IReadOnlyList<AnimationSkeletonRemapService.Bone> bones)
+    {
+        _ = AnimationSkeletonRemapService.Plan(Enumerable.Range(0, bones.Count).ToArray(), bones, bones);
+        var parents = bones.ToDictionary(b => b.Name, b => b.Parent, StringComparer.Ordinal);
+        if (bones.Count(b => string.IsNullOrEmpty(b.Parent)) != 1)
+            throw new InvalidDataException("The skeleton must contain exactly one root bone.");
+        foreach (var bone in bones)
+        {
+            var visited = new HashSet<string>(StringComparer.Ordinal);
+            for (var name = bone.Name; !string.IsNullOrEmpty(name); name = parents[name])
+                if (!visited.Add(name))
+                    throw new InvalidDataException($"The skeleton has a parent cycle at '{name}'.");
+        }
     }
 
     private static bool IsMotion(string? kind) => kind is "AnimSequence" or "AnimMontage" or "AnimComposite" or "AnimBlueprintGeneratedClass" or "BlendSpace" or "BlendSpace1D";

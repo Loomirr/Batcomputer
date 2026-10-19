@@ -36,7 +36,17 @@ internal static class AnimationReplacementCompatibilityRegressionChecks
         results.Add((CopyCheck([bones[0], bones[2], bones[1]]).Count == 0, "equivalent rigs match bones by name rather than serialization order"));
         results.Add((CopyCheck(bones, "AAT_LocalSpaceBase").Count == 1, "equivalent skeleton paths cannot bypass additive-mode validation"));
         results.Add((CopyCheck(bones[..2]).Count == 1, "a partial imported skeleton is not treated as an equivalent rig"));
-        results.Add((CopyCheck([..bones, bones[2] with { Name = "Extra" }]).Count == 1, "additional unmatched bones still require rig repair"));
+        results.Add((CopyCheck([..bones, bones[2] with { Name = "Extra" }]).Count == 0, "peripheral imported bones do not block a complete matching donor rig"));
+        results.Add((CopyCheck([..bones, bones[2] with { Name = "Extra", Parent = "Right" }, bones[2] with { Name = "ExtraTip", Parent = "Extra" }]).Count == 0,
+            "additional attachment bone chains preserve donor compatibility"));
+        results.Add((CopyCheck([bones[0], bones[1], bones[2] with { Parent = "Extra" }, bones[2] with { Name = "Extra" }]).Count == 1,
+            "inserting an extra bone into the donor hierarchy remains blocked"));
+        results.Add((CopyCheck([..bones, bones[2] with { Name = "Extra", Parent = "Missing" }]).Count == 1, "extra branches cannot hide dangling parents"));
+        results.Add((CopyCheck([..bones, bones[2] with { Name = "Extra", Parent = "Extra" }]).Count == 1, "extra branches cannot hide parent cycles"));
+        results.Add((CopyCheck([..bones, bones[2] with { Name = "Extra", Parent = "" }]).Count == 1, "extra disconnected roots remain blocked"));
+        results.Add((CopyCheck([..bones, bones[2] with { Name = "Extra", Scale = new(float.NaN) }]).Count == 1, "extra bones must have finite reference transforms"));
+        results.Add((CopyCheck([..bones, bones[2] with { Name = "Extra" }], "AAT_LocalSpaceBase").Count == 1,
+            "peripheral bones cannot bypass additive pose checks"));
         results.Add((CopyCheck([bones[0], bones[1] with { Name = "Other" }, bones[2]]).Count == 1, "matching bone counts cannot hide different bone names"));
         results.Add((CopyCheck([bones[0], bones[1], bones[2] with { Parent = "Left" }]).Count == 1, "matching names cannot hide changed bone parents"));
         results.Add((CopyCheck([bones[0] with { Scale = new(100) }, bones[1], bones[2]]).Count == 1, "imported root-unit scale mismatches remain blocked"));

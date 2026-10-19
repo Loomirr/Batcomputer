@@ -14,8 +14,9 @@ Batcomputer handles the files and registration needed to package and install you
 
 ## Start here
 
-The [1.1.1 Beta 2 prerelease](releases/1.1.1-beta.2.md) adds cape/identity fixes, visual replacers,
-build improvements and corrected normal-map exports. Enable **Stable + beta** to receive it.
+The [1.1.1 Beta 3 prerelease](releases/1.1.1-beta.3.md) adds extended-skeleton animation checks
+and queued single/batch texture imports, alongside the earlier cape, replacer and build fixes.
+Enable **Stable + beta** to receive it.
 
 New to modding? Start with a simple suit before replacing rigs or mixing gameplay systems.
 Already making mods? Jump to [custom characters](guides/custom-characters.md),
