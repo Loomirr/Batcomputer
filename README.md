@@ -16,7 +16,7 @@ Create suits, characters, equipment and vehicles for **LEGO Batman: Legacy of th
 
 Already using Batcomputer? Open **Updates → Check for updates**. Stable 1.1 is available on both update channels. Back up editable projects before upgrading.
 
-Want the newest fixes? Enable **Stable + beta** for [1.1.1 Beta 3](docs/releases/1.1.1-beta.3.md), including extended-skeleton animation checks and queued single/batch texture imports, plus the earlier cape, replacer and build improvements.
+Want the newest fixes? Enable **Stable + beta** for [1.1.1 Beta 4](docs/releases/1.1.1-beta.4.md), including verified exporter-root animation compatibility and clearer replacement selection, plus the earlier texture queue, cape, replacer and build improvements.
 
 ## Make it your own
 

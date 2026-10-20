@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.1-beta.4 — 2026-10-19
+
+- Accepts a verified exporter wrapper above the native animation Root when decoded tracks prove the supported layout. Body hierarchy, reference pose, track ordering and root scale remain checked; root-motion, locked-root and additive cases are not relaxed.
+- Explains when an animation is already assigned, rather than leaving the disabled replacement action unexplained.
+- Validated against the supplied animation library and saved replacement, with compatibility regressions. In-game confirmation remains pending; this is not automatic retargeting.
+
+Includes earlier beta fixes. Both full portable and Beta 3 updater ZIPs are available. See [Beta 4 release notes](docs/releases/1.1.1-beta.4.md).
+
 ## 1.1.1-beta.3 — 2026-10-19
 
 - Allows animation replacement skeletons with extra peripheral bones when the complete donor hierarchy and reference pose match. Missing required bones, altered parents/transforms, malformed extra branches and additive-mode mismatches remain blocked.

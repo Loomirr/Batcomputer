@@ -1,4 +1,6 @@
 using CUE4Parse.UE4.Assets.Exports.Animation;
+using CUE4Parse_Conversion.Animations;
+using System.Numerics;
 using Newtonsoft.Json.Linq;
 
 namespace Batcomputer;
@@ -8,7 +10,8 @@ internal static class AnimationReplacementCompatibilityService
 {
     internal sealed record Pair(string Donor, string Replacement, string Role);
     internal sealed record Motion(string Skeleton, string AdditiveMode,
-        IReadOnlyList<AnimationSkeletonRemapService.Bone>? Bones = null);
+        IReadOnlyList<AnimationSkeletonRemapService.Bone>? Bones = null,
+        string? VerifiedExportRoot = null);
     internal sealed record Metadata(string Kind, IReadOnlyList<Motion> Motions,
         IReadOnlyDictionary<string, Metadata>? Slots = null);
 
@@ -56,7 +59,8 @@ internal static class AnimationReplacementCompatibilityService
                     var skeletonPath = Canonical(skeleton.GetPathName());
                     if (!skeletons.TryGetValue(skeletonPath, out var bones))
                         skeletons[skeletonPath] = bones = AnimationSkeletonRemapService.Bones(skeleton.ReferenceSkeleton);
-                    result = new("AnimSequence", [new(skeletonPath, sequence.AdditiveAnimType.ToString(), bones)]);
+                    result = new("AnimSequence", [new(skeletonPath, sequence.AdditiveAnimType.ToString(), bones,
+                        VerifyExportRoot(sequence, skeleton, bones, contentRoot, package))]);
                 }
                 else
                 {
@@ -157,12 +161,80 @@ internal static class AnimationReplacementCompatibilityService
             // names, transforms, dangling parents or cycles. No compressed tracks are rewritten.
             ValidateHierarchy(donor.Bones);
             ValidateHierarchy(replacement.Bones);
+            var actualBones = replacement.Bones;
+            var root = donor.Bones.Single(b => string.IsNullOrEmpty(b.Parent));
+            var wrapper = replacement.VerifiedExportRoot;
+            if (wrapper is not null && !donor.Bones.Any(b => b.Name == wrapper) &&
+                replacement.Bones.Any(b => b.Name == root.Name && b.Parent == wrapper) &&
+                replacement.Bones.Any(b => b.Name == wrapper && string.IsNullOrEmpty(b.Parent) && IsIdentity(b)))
+                actualBones = replacement.Bones.Select(b => b.Name == root.Name ? b with { Parent = "" } : b).ToArray();
             _ = AnimationSkeletonRemapService.Plan(Enumerable.Range(0, donor.Bones.Count).ToArray(),
-                donor.Bones, replacement.Bones);
+                donor.Bones, actualBones);
             return null;
         }
         catch (InvalidDataException ex) { return ex.Message; }
     }
+
+    // UE 5.6 SkeletonRemapping maps by name; AnimationDecompression handles track 0
+    // first, then the remaining named tracks. An exporter wrapper at track 0 is
+    // overwritten by the actual Root track. Prove this ordering, a unit-scale Root,
+    // and a fixed exporter unit scale; root motion/locking/additive clips are excluded.
+    // No bytes, skeleton names, or compressed indices are changed.
+    private static string? VerifyExportRoot(UAnimSequence sequence, USkeleton skeleton,
+        IReadOnlyList<AnimationSkeletonRemapService.Bone> bones, string contentRoot, string package)
+    {
+        var index = Enumerable.Range(0, bones.Count).SingleOrDefault(i => string.IsNullOrEmpty(bones[i].Parent), -1);
+        if (index < 0 || bones[index].Name == "Root" || !IsIdentity(bones[index]) ||
+            !bones.Any(b => b.Name == "Root" && b.Parent == bones[index].Name)) return null;
+        try
+        {
+            var rootIndex = Enumerable.Range(0, bones.Count).Single(i => bones[i].Name == "Root");
+            var map = sequence.CompressedTrackToSkeletonMapTable;
+            var properties = JObject.FromObject(sequence)["Properties"];
+            if (index != 0 || map.Length < 2 || map[0].BoneTreeIndex != 0 || map[1].BoneTreeIndex != rootIndex ||
+                map.Any(t => t.BoneTreeIndex < 0 || t.BoneTreeIndex >= bones.Count) ||
+                map.Select(t => t.BoneTreeIndex).Distinct().Count() != map.Length ||
+                properties?["bEnableRootMotion"]?.Value<bool>() == true || properties?["bForceRootLock"]?.Value<bool>() == true ||
+                NormalizeMode(sequence.AdditiveAnimType.ToString()) != "AAT_None") return null;
+            if (sequence.CompressedDataStructure is null)
+            {
+                var file = ExtractedPackagePathService.ResolvePackageUasset(contentRoot, package);
+                if (file is null) return null;
+                AnimationCookedPoseValidationService.EnsureAuthoredAclDecoded(file, sequence);
+            }
+            var decoded = skeleton.ConvertAnims(sequence).Sequences.Single();
+            if (decoded.NumFrames < 1 || decoded.Tracks.Count != bones.Count) return null;
+            Vector3? wrapperScale = null;
+            for (var frame = 0; frame < decoded.NumFrames; frame++)
+            {
+                var pose = skeleton.ReferenceSkeleton.FinalRefBonePose[index];
+                var p = pose.Translation; var q = pose.Rotation; var s = pose.Scale3D;
+                decoded.Tracks[index].GetBoneTransform(frame, decoded.NumFrames, ref q, ref p, ref s);
+                var scale = new Vector3(s.X, s.Y, s.Z);
+                if (!IsIdentity(new(bones[index].Name, "", new(p.X, p.Y, p.Z), new(q.X, q.Y, q.Z, q.W), Vector3.One)) ||
+                    (Vector3.Distance(scale, Vector3.One) > .0001f && Vector3.Distance(scale, new Vector3(100)) > .001f) ||
+                    (wrapperScale is { } previous && Vector3.Distance(scale, previous) > .0001f)) return null;
+                wrapperScale = scale;
+                pose = skeleton.ReferenceSkeleton.FinalRefBonePose[rootIndex];
+                p = pose.Translation; q = pose.Rotation; s = pose.Scale3D;
+                decoded.Tracks[rootIndex].GetBoneTransform(frame, decoded.NumFrames, ref q, ref p, ref s);
+                // Root may carry intentional visual movement. Its named track is retained;
+                // only the extra export object is ignored by the compatibility comparison.
+                var rootRotation = new Quaternion(q.X, q.Y, q.Z, q.W);
+                if (!float.IsFinite(new Vector3(p.X, p.Y, p.Z).LengthSquared()) ||
+                    !float.IsFinite(rootRotation.LengthSquared()) || Math.Abs(rootRotation.LengthSquared() - 1) > .01f ||
+                    !(Vector3.Distance(new(s.X, s.Y, s.Z), Vector3.One) < .0001f)) return null;
+            }
+            return bones[index].Name;
+        }
+        catch { return null; } // Unknown compression cannot prove the wrapper layout.
+    }
+
+    private static bool IsIdentity(AnimationSkeletonRemapService.Bone bone) =>
+        Vector3.Distance(bone.Translation, Vector3.Zero) < .0001f &&
+        Vector3.Distance(bone.Scale, Vector3.One) < .00001f &&
+        float.IsFinite(bone.Rotation.LengthSquared()) && bone.Rotation.LengthSquared() > .99f &&
+        Math.Abs(Quaternion.Dot(Quaternion.Normalize(bone.Rotation), Quaternion.Identity)) > .999999f;
 
     private static void ValidateHierarchy(IReadOnlyList<AnimationSkeletonRemapService.Bone> bones)
     {

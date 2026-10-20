@@ -108,7 +108,11 @@ public sealed partial class AnimationExplorerForm
         var choice = SelectedReplacement;
         _choiceInfo.Text = choice is null
             ? _selectedTarget is null ? "Select an animation in the character tree." : $"{_visibleChoices.Count} choices. Select one to see its source and apply it."
-            : choice.CanSelect ? choice.Detail + "\n" + choice.PackagePath : choice.IncompatibilityReason;
+            : choice.CanSelect ?
+                (_selectedTarget is { } target && choice.PackagePath.Equals(target.EffectivePackage, StringComparison.OrdinalIgnoreCase)
+                    ? "Already assigned to this target. Select a different animation to replace it.\n"
+                    : choice.Detail + "\n") + choice.PackagePath
+                : choice.IncompatibilityReason;
         SetTargetButtons(_project is null ? null : _selectedTarget);
     }
 }

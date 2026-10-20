@@ -33,6 +33,18 @@ internal static class AnimationReplacementCompatibilityRegressionChecks
             AnimationReplacementCompatibilityService.ValidatePairs([pair], p => new("AnimSequence",
                 [p == donor ? new(rig, "AAT_None", bones) : new(copiedRig, mode, copy)]));
         results.Add((CopyCheck(bones.ToArray()).Count == 0, "separately named identical cooked rigs remain usable"));
+        var exportRoot = new AnimationSkeletonRemapService.Bone("ExportObject", "", Vector3.Zero, Quaternion.Identity, Vector3.One);
+        AnimationSkeletonRemapService.Bone[] wrapped = [exportRoot, bones[0] with { Parent = exportRoot.Name }, bones[1], bones[2]];
+        string? WrappedIssue(AnimationSkeletonRemapService.Bone[] source, string? proof) =>
+            AnimationReplacementCompatibilityService.SkeletonIssue(new(rig, "AAT_None", bones), new(copiedRig, "AAT_None", source, proof));
+        results.Add((WrappedIssue(wrapped, null) is not null, "an export root is not accepted without sequence track proof"));
+        results.Add((WrappedIssue(wrapped, exportRoot.Name) is null, "a proven exporter root preserves the complete named donor hierarchy"));
+        results.Add((WrappedIssue([exportRoot with { Scale = new(100) }, ..wrapped[1..]], exportRoot.Name) is not null,
+            "export root proof cannot bypass nonidentity reference scale"));
+        results.Add((WrappedIssue([exportRoot, wrapped[1], wrapped[2] with { Parent = exportRoot.Name }, wrapped[3]], exportRoot.Name) is not null,
+            "export root proof cannot bypass changed body bone parents"));
+        results.Add((WrappedIssue([..wrapped[..3], wrapped[3] with { Translation = new(20) }], exportRoot.Name) is not null,
+            "export root proof cannot bypass changed body proportions"));
         results.Add((CopyCheck([bones[0], bones[2], bones[1]]).Count == 0, "equivalent rigs match bones by name rather than serialization order"));
         results.Add((CopyCheck(bones, "AAT_LocalSpaceBase").Count == 1, "equivalent skeleton paths cannot bypass additive-mode validation"));
         results.Add((CopyCheck(bones[..2]).Count == 1, "a partial imported skeleton is not treated as an equivalent rig"));

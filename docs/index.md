@@ -14,8 +14,8 @@ Batcomputer handles the files and registration needed to package and install you
 
 ## Start here
 
-The [1.1.1 Beta 3 prerelease](releases/1.1.1-beta.3.md) adds extended-skeleton animation checks
-and queued single/batch texture imports, alongside the earlier cape, replacer and build fixes.
+The [1.1.1 Beta 4 prerelease](releases/1.1.1-beta.4.md) adds verified exporter-root animation compatibility
+and clearer replacement selection, alongside the earlier texture queue, cape, replacer and build fixes.
 Enable **Stable + beta** to receive it.
 
 New to modding? Start with a simple suit before replacing rigs or mixing gameplay systems.
