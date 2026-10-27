@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.1-beta.5 — 2026-10-26
+
+Adds 34 optional character attributes covering movement, grapple/glide handling, health,
+combat and Focus, with native binding checks and suit-local generated effects. The editor
+uses category navigation, enabled counts and rounded setting cards. Baseline and combined
+presets were confirmed in-game; caching remains off by default.
+
+See [Beta 5 release notes](../releases/1.1.1-beta.5.md) for the full portable and Beta 4 updater downloads.
+Earlier [Beta 4](../releases/1.1.1-beta.4.md) and [Beta 3](../releases/1.1.1-beta.3.md)
+animation compatibility and texture-queue fixes are included.
+
 ## 1.1.1-beta.2 — 2026-10-17
 
 Native Joker/Harley identity and cape repairs preserve abilities, upgrades, voices and non-glide
