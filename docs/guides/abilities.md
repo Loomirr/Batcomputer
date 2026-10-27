@@ -6,11 +6,12 @@ Open **Abilities**, then choose **Edit suit abilities**.
 Every edit is suit-local. Batcomputer clones the required DPRD and AbilitySet assets into the mod;
 it does not rewrite the donor, another suit, or the installed game.
 
-## Movement attributes
+## Character attributes
 
-Open **Abilities → Movement attributes** on a character or suit. Check the values you
+Open **Abilities → Character attributes** on a character or suit. Check the values you
 want to override, save, then build the mod normally. Unchecked values inherit the
-existing character setup. **Reset to defaults** clears every override.
+existing character setup. The category sidebar shows how many overrides are enabled
+in each group. **Reset all** clears every override across all categories.
 
 | Control | Meaning |
 | --- | --- |
@@ -19,6 +20,28 @@ existing character setup. **Reset to defaults** clears every override.
 | Jump height | Percentage of ordinary jump height. Batcomputer scales launch velocity by the square root of this value; gravity and scripted jump rules still apply. |
 | Glide speed | Scales native minimum, cruising and maximum forward speeds together. |
 | Glide descent rate | Scales the native descent-rate effect. Lower values descend more slowly, within that effect's original world and gameplay conditions. |
+
+The additional categories are experimental and need in-game testing on your character:
+
+| Category | Controls |
+| --- | --- |
+| Ground | Acceleration, walking braking, crouch speed and ground friction, as percentages of existing values. |
+| Air | Air control, normal gravity, descending gravity and maximum fall speed. Gravity also affects jump height. |
+| Grapple | Travel speed, acceleration, damping, linear drag and quadratic drag. |
+| Glide handling | Acceleration, braking, sideways speed/response and steering at low/high speeds. |
+| Health & combat | Maximum health, additional defense/attack/critical power, base damage, incoming hit-stun duration and takedown Focus cost. |
+| Focus | Capacity and additional combat/traversal reward power. |
+
+Power controls add **native points**, not a guaranteed percentage. Incoming hit stun
+affects this character's reaction when hit, rather than the enemies it attacks.
+Maximum health and Focus capacity do not directly refill either resource. Takedown
+cost does not bypass unlocks or activation checks. Native difficulty, upgrades,
+attack-specific behavior and movement-mode limits can still affect the result.
+
+Each additional override requires its native attribute set in the character's active
+loadout and a matching field in the game mappings. Builds reject missing bindings
+instead of granting unrelated abilities. These settings generate suit-local effects;
+they do not install runtime hooks or polling.
 
 These controls tune existing movement; they do not grant sprinting or gliding. Sprint
 and glide overrides require the corresponding native controllers/effects in the loadout.

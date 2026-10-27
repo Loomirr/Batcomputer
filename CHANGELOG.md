@@ -2,9 +2,11 @@
 
 ## Unreleased
 
-- Adds optional per-character and per-suit controls for run speed, sprint speed, jump height, glide speed and glide descent rate under **Abilities → Movement attributes**.
+- Adds optional per-character and per-suit controls for run speed, sprint speed, jump height, glide speed and glide descent rate under **Abilities → Character attributes**.
+- Adds 29 experimental controls for ground/air movement, grapple/glide handling, health, combat and Focus. Each requires a verified native attribute field and an active matching attribute set; power points, resource capacity and incoming hit stun are labeled explicitly.
+- Modernizes the attribute editor with a category sidebar, rounded setting cards, enabled counts and a reset action that clears every category.
 - Replays movement settings during normal mod builds, preserves inherited defaults, and includes them in character-to-suit rebasing. Custom sprint controllers retain their own tuning, and visual replacers continue to reject gameplay edits.
-- Validated with save/reopen, clean rebuild/reset, native-asset checks, the regression suite, and separate in-game baseline, individual and combined movement presets. The preparation cache remains off by default.
+- Validated with save/reopen, clean rebuild/reset, native-asset checks, the regression suite, editor save/reset and size checks, and confirmed in-game using baseline, combined movement/traversal and health/combat/Focus presets. The preparation cache remains off by default.
 
 ## 1.1.1-beta.4 — 2026-10-19
 

@@ -9,7 +9,7 @@ using UAssetAPI.Unversioned;
 
 namespace Batcomputer;
 
-/// <summary>Build-time, suit-local movement changes. No polling or global native asset patches.</summary>
+/// <summary>Build-time, suit-local attribute changes. No polling or global native asset patches.</summary>
 internal static class CharacterMovementService
 {
     internal const string SprintAbility = "/Game/Characters/Abilities/CoreAbilities/Sprinting/GA_Sprinting";
@@ -22,7 +22,12 @@ internal static class CharacterMovementService
 
     internal static bool Enabled(CharacterMovementSettings? s) => s is not null &&
         (s.RunSpeedMultiplier.HasValue || s.SprintSpeed.HasValue || s.JumpHeightMultiplier.HasValue ||
-         s.GlideSpeedMultiplier.HasValue || s.GlideDescentMultiplier.HasValue);
+         s.GlideSpeedMultiplier.HasValue || s.GlideDescentMultiplier.HasValue || s.AttributeOverrides is { Count: > 0 });
+
+    private static bool NeedsSupplementalSet(CharacterMovementSettings? s) => s is { RunSpeedMultiplier: not null } or
+        { JumpHeightMultiplier: not null } or { AttributeOverrides.Count: > 0 };
+    internal static string AttributeEffectPackage(NativeSuitProject p, string id) => CharacterAttributeCatalog.Find(id) is not null
+        ? Root(p) + "/GE_Attribute_" + id : throw new InvalidDataException("Unsupported character attribute: " + id);
 
     internal static string? ValidationError(CharacterMovementSettings? s)
     {
@@ -33,7 +38,7 @@ internal static class CharacterMovementService
             ("Glide descent", s.GlideDescentMultiplier, .1f, 3) })
             if (value is { } v && (!float.IsFinite(v) || v < min || v > max))
                 return $"{name} must be between {min} and {max}.";
-        return null;
+        return CharacterAttributeCatalog.ValidationError(s);
     }
 
     internal static string? ProjectError(NativeSuitProject p)
@@ -103,6 +108,47 @@ internal static class CharacterMovementService
     }
     private static Dictionary<string, float> GlideFactors(float factor) => new(StringComparer.Ordinal) {
         ["GlideMinForwardSpeed"] = factor, ["GlideDefaultForwardSpeed"] = factor, ["GlideMaxForwardSpeed"] = factor };
+
+    private static void BindAttribute(UAsset asset, StructPropertyData modifier, CharacterAttributeCatalog.Definition definition)
+    {
+        var attribute = Struct(modifier.Value, "Attribute");
+        var owner = SwordCombatService.Obj(asset, definition.ScriptPackage, definition.OwnerClass, "/Script/CoreUObject", "Class");
+        attribute.Value.OfType<StrPropertyData>().Single(p => p.Name.ToString() == "AttributeName").Value = new FString(definition.Id);
+        attribute.Value.OfType<ObjectPropertyData>().Single(p => p.Name.ToString() == "AttributeOwner").Value = owner;
+        attribute.Value.OfType<FieldPathPropertyData>().Single(p => p.Name.ToString() == "Attribute").Value = new FFieldPath
+        { Path = [new FName(asset, definition.Id)], ResolvedOwner = owner };
+        var cdo = Defaults(asset);
+        if (!cdo.CreateBeforeSerializationDependencies.Any(index => index.Index == owner.Index))
+            cdo.CreateBeforeSerializationDependencies.Add(owner);
+    }
+
+    private static void CheckAttributeBinding(UAsset asset, StructPropertyData modifier, CharacterAttributeCatalog.Definition definition)
+    {
+        var attribute = Struct(modifier.Value, "Attribute");
+        var owner = attribute.Value.OfType<ObjectPropertyData>().Single(p => p.Name.ToString() == "AttributeOwner").Value;
+        var field = attribute.Value.OfType<FieldPathPropertyData>().Single(p => p.Name.ToString() == "Attribute").Value;
+        if (Attribute(modifier) != definition.Id || !owner.IsImport() || field.Path.Count() != 1 ||
+            field.Path.Single().ToString() != definition.Id || field.ResolvedOwner.Index != owner.Index ||
+            owner.ToImport(asset).ObjectName.ToString() != definition.OwnerClass ||
+            SwordCombatService.Package(asset, owner) != definition.ScriptPackage ||
+            !Defaults(asset).CreateBeforeSerializationDependencies.Any(index => index.Index == owner.Index))
+            throw new InvalidDataException("Character attribute binding is invalid: " + definition.Id);
+    }
+
+    private static void CheckNativeSchema(Usmap mappings, CharacterAttributeCatalog.Definition definition)
+    {
+        if (!mappings.Schemas.TryGetValue(definition.OwnerClass, out var schema) || schema.ModulePath != definition.ScriptPackage ||
+            !schema.Properties.Values.Any(property => property.Name == definition.Id))
+            throw new InvalidDataException($"The active game mappings do not expose {definition.OwnerClass}.{definition.Id}. Refresh game assets or clear this override.");
+    }
+
+    private static void ClearTemplateRestrictions(UAsset effect)
+    {
+        var cdo = Defaults(effect);
+        cdo.Data.RemoveAll(property => property.Name.ToString() is "ApplicationTagRequirements" or "OngoingTagRequirements" or "RemovalTagRequirements");
+        if (cdo.Data.OfType<ArrayPropertyData>().FirstOrDefault(property => property.Name.ToString() == "GEComponents") is { } components)
+            components.Value = [];
+    }
     private static Dictionary<string, string> Redirects(NativeSuitProject p)
     {
         var s = p.MovementAttributes!;
@@ -131,6 +177,13 @@ internal static class CharacterMovementService
         var sets = sources.Select(source => (Source: source, Asset: context.Read(source))).ToList();
         var setInfo = sets.Select(set => (set.Source, Info: mutation.InspectAbilitySet(set.Asset.FilePath))).ToList();
         foreach (var (_, info) in setInfo) if (!info.Success) throw new InvalidDataException(info.Error);
+        foreach (var (definition, _) in CharacterAttributeCatalog.Selected(s))
+        {
+            CheckNativeSchema(mappings, definition);
+            if (!setInfo.SelectMany(set => set.Info.Attributes).Any(attribute =>
+                attribute.PackagePath == definition.ScriptPackage && attribute.ObjectName == definition.OwnerClass))
+                throw new InvalidDataException($"{definition.Label} requires the active native {definition.OwnerClass}. Enable the matching gameplay ability set or clear this override; no new ability is granted by attribute tuning.");
+        }
         foreach (var native in redirects.Keys)
             if (!setInfo.Any(set => References(set.Info, native)))
                 throw new InvalidDataException($"Movement attributes: this loadout does not grant {UnrealPathUtil.AssetName(native)}. Keep that native ability/effect enabled, or clear its movement override. Custom movement controllers need their own tuning.");
@@ -161,7 +214,7 @@ internal static class CharacterMovementService
             context.Clone(source, target, redirects);
             finalSets.Add(target);
         }
-        if (s.RunSpeedMultiplier.HasValue || s.JumpHeightMultiplier.HasValue)
+        if (NeedsSupplementalSet(s))
         {
             var generatedEffects = new List<string>();
             if (s.RunSpeedMultiplier is { } run)
@@ -186,6 +239,16 @@ internal static class CharacterMovementService
                 Modifiers(effect).Value = [modifier];
                 modifier.Name = new FName(effect, "0");
                 Constant(effect, modifier, MathF.Sqrt(height), "MultiplyCompound");
+                context.Write(effect, package); generatedEffects.Add(package);
+            }
+            foreach (var (definition, value) in CharacterAttributeCatalog.Selected(s))
+            {
+                var package = AttributeEffectPackage(p, definition.Id);
+                var effect = context.Clone(RunTemplate, package);
+                var modifier = Modifiers(effect).Value.Cast<StructPropertyData>().Single();
+                BindAttribute(effect, modifier, definition);
+                Constant(effect, modifier, value, definition.Operation);
+                ClearTemplateRestrictions(effect);
                 context.Write(effect, package); generatedEffects.Add(package);
             }
             var set = context.Clone(SetTemplate, SetPackage(p));
@@ -227,7 +290,7 @@ internal static class CharacterMovementService
             }
             result.Add(actualTarget);
         }
-        if (p.MovementAttributes is { RunSpeedMultiplier: not null } or { JumpHeightMultiplier: not null })
+        if (NeedsSupplementalSet(p.MovementAttributes))
         {
             var target = p.ReleaseAssetAliases.GetValueOrDefault(SetPackage(p), SetPackage(p));
             var asset = context.ReadStagedShared(target);
@@ -235,6 +298,7 @@ internal static class CharacterMovementService
             var expectedEffects = new List<string>();
             if (p.MovementAttributes!.RunSpeedMultiplier.HasValue) expectedEffects.Add(Root(p) + "/GE_RunSpeed");
             if (p.MovementAttributes.JumpHeightMultiplier.HasValue) expectedEffects.Add(Root(p) + "/GE_JumpHeight");
+            expectedEffects.AddRange(CharacterAttributeCatalog.Selected(p.MovementAttributes).Select(entry => AttributeEffectPackage(p, entry.Definition.Id)));
             if (!info.Success || info.GameplayAbilities.Count + info.Attributes.Count + info.GameplayData.Count +
                 info.ActorGameplayCues.Count + info.StaticGameplayCues.Count != 0 || info.AccessoryAnimGraphClass is not null ||
                 !info.GameplayEffects.Select(effect => effect.PackagePath).SequenceEqual(expectedEffects.Select(package => p.ReleaseAssetAliases.GetValueOrDefault(package, package))) ||
@@ -314,11 +378,26 @@ internal static class CharacterMovementService
         }
         if (s.GlideSpeedMultiplier is { } glide) CheckScale(GlideDefaults, GlideFactors(glide));
         if (s.GlideDescentMultiplier is { } descent) CheckScale(GlideDescent, new() { ["GlideDescentRateScale"] = descent });
+        foreach (var (definition, value) in CharacterAttributeCatalog.Selected(s))
+        {
+            CheckNativeSchema(mappings, definition);
+            var package = AttributeEffectPackage(p, definition.Id);
+            CheckConstant(package, definition.Id, value, definition.Operation);
+            var effect = Read(package);
+            var modifier = Modifiers(effect).Value.Cast<StructPropertyData>().Single();
+            CheckAttributeBinding(effect, modifier, definition);
+            var cdo = Defaults(effect);
+            if (cdo.Data.OfType<EnumPropertyData>().Single(p => p.Name.ToString() == "DurationPolicy").Value.ToString() != "Infinite" ||
+                cdo.Data.Any(p => p.Name.ToString() is "ApplicationTagRequirements" or "OngoingTagRequirements" or "RemovalTagRequirements") ||
+                cdo.Data.OfType<ArrayPropertyData>().Any(p => p.Name.ToString() == "GEComponents" && p.Value.Length != 0))
+                throw new InvalidDataException("Character attribute effect retained unrelated behavior: " + definition.Id);
+        }
     }
     internal static string Summary(CharacterMovementSettings? s) => !Enabled(s) ? "Gameplay donor defaults" : string.Join(" · ", new[] {
         s!.RunSpeedMultiplier is { } run ? $"run {run * 100:0}%" : null,
         s.SprintSpeed is { } sprint ? $"sprint {sprint:0} cm/s" : null,
         s.JumpHeightMultiplier is { } jump ? $"jump {jump * 100:0}%" : null,
         s.GlideSpeedMultiplier is { } glide ? $"glide {glide * 100:0}%" : null,
-        s.GlideDescentMultiplier is { } descent ? $"descent {descent * 100:0}%" : null }.OfType<string>());
+        s.GlideDescentMultiplier is { } descent ? $"descent {descent * 100:0}%" : null,
+        s.AttributeOverrides is { Count: > 0 } extra ? $"{extra.Count} additional attribute(s)" : null }.OfType<string>());
 }

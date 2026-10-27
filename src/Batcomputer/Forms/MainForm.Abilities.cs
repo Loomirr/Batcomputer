@@ -36,12 +36,12 @@ public sealed partial class MainForm
             new()
             {
                 Section = "CHARACTER",
-                Title = "Movement attributes",
+                Title = "Character attributes",
                 Subtitle = CharacterMovementService.Summary(_currentProject.MovementAttributes),
                 Accent = Theme.Abilities,
                 Dashed = !CharacterMovementService.Enabled(_currentProject.MovementAttributes),
                 OnClick = () => _ = OpenMovementAttributesAsync(),
-                ToolTip = "Tune run and sprint speeds, jump height, glide speed and descent rate for this character or suit.",
+                ToolTip = "Tune movement, grapple/glide handling, health, combat and Focus attributes for this character or suit.",
             },
             new()
             {
@@ -118,12 +118,12 @@ public sealed partial class MainForm
 
     private async Task OpenMovementAttributesAsync()
     {
-        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("edit movement attributes")) return;
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("edit character attributes")) return;
         EnsureProject();
         if (_currentProject is not { } project) return;
         if (!string.IsNullOrWhiteSpace(project.ReplacementTarget))
         {
-            Dialog.Warn(this, "Visual edits only", "Character replacers keep the original character's gameplay. Movement attributes are available for suits and custom characters.");
+            Dialog.Warn(this, "Visual edits only", "Character replacers keep the original character's gameplay. Character attributes are available for suits and custom characters.");
             return;
         }
         var editContext = CaptureCurrentProjectEditContext(project);
@@ -134,7 +134,7 @@ public sealed partial class MainForm
         if (CharacterMovementService.ProjectError(project) is { } movementError)
         {
             project.MovementAttributes = rollback.MovementAttributes;
-            Dialog.Warn(this, "Movement attributes were not saved", movementError);
+            Dialog.Warn(this, "Character attributes were not saved", movementError);
             return;
         }
         project.Changes.RemoveAll(change => change.Category == "Abilities" && change.Target == "movement");
@@ -142,15 +142,15 @@ public sealed partial class MainForm
             Detail = CharacterMovementService.Summary(editor.Result), Status = "staged" });
         try
         {
-            var capture = CaptureCurrentProjectSave(editContext, "save movement attributes");
-            RequireCurrentProjectSaveCommitted(await CommitCurrentProjectSaveCaptureAsync(capture), "save movement attributes");
+            var capture = CaptureCurrentProjectSave(editContext, "save character attributes");
+            RequireCurrentProjectSaveCommitted(await CommitCurrentProjectSaveCaptureAsync(capture), "save character attributes");
         }
         catch (CurrentProjectSaveSupersededException) { return; }
         catch (Exception ex)
         {
             if (!CurrentProjectEditContextMatches(editContext)) return;
             _currentProject = rollback; ApplyProjectToFields(rollback);
-            Dialog.Error(this, "Movement attributes were not saved", ex.Message);
+            Dialog.Error(this, "Character attributes were not saved", ex.Message);
         }
         RefreshToyboxTiles(); PopulateToyboxSlots(); RefreshInspector(); UpdateSelectedLabels();
     }
