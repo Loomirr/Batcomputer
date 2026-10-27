@@ -1,8 +1,8 @@
 [![Batcomputer](docs/assets/brand/Header.png)](https://loomirr.github.io/Batcomputer/)
 
-Create suits, characters, equipment and vehicles for **LEGO Batman: Legacy of the Dark Knight** using assets from your own game.
+Create suits, playable characters, visual character replacers, equipment and vehicles for **LEGO Batman: Legacy of the Dark Knight** using assets from your own game.
 
-**[Download Batcomputer 1.1](https://github.com/Loomirr/Batcomputer/releases/tag/v1.1.0)** · **[Documentation](https://loomirr.github.io/Batcomputer/)** · **[What's new](docs/releases/1.1.0.md)** · **[Report a bug](https://github.com/Loomirr/Batcomputer/issues)**
+**[Stable 1.1](https://github.com/Loomirr/Batcomputer/releases/tag/v1.1.0)** · **[Beta 5](https://github.com/Loomirr/Batcomputer/releases/tag/v1.1.1-beta.5)** · **[Documentation](https://loomirr.github.io/Batcomputer/)** · **[Report a bug](https://github.com/Loomirr/Batcomputer/issues)**
 
 > [!WARNING]
 > **AI disclosure:** Batcomputer combines hands-on development with AI-assisted coding, debugging, and documentation. I actively build, review, and test the project myself.
@@ -10,30 +10,31 @@ Create suits, characters, equipment and vehicles for **LEGO Batman: Legacy of th
 
 ## Get started
 
-1. Download **Batcomputer-update-win-x64.zip** from the release page and extract the entire ZIP to a writable folder, such as `C:\Tools\Batcomputer`.
+1. Choose a stable or beta release, download **Batcomputer-update-win-x64.zip**, and extract the entire ZIP to a writable folder such as `C:\Tools\Batcomputer`. Version-specific `update-from-…` ZIPs are updater patches, not standalone installations.
 2. Keep `Batcomputer.exe` and its `app/` folder together. The Windows x64 release includes .NET; no separate .NET installation is needed.
 3. Follow [first-time setup](https://loomirr.github.io/Batcomputer/getting-started/setup/), then [build your first suit](https://loomirr.github.io/Batcomputer/guides/first-suit/).
 
-Already using Batcomputer? Open **Updates → Check for updates**. Stable 1.1 is available on both update channels. Back up editable projects before upgrading.
+Already using Batcomputer? Open **Updates → Check for updates**. Choose **Beta** under **Settings & recovery** to include prereleases; **Stable** excludes them. Back up editable projects before upgrading.
 
-Want the newest fixes? Enable **Stable + beta** for [1.1.1 Beta 5](docs/releases/1.1.1-beta.5.md), including character attribute controls and a modernized tuning editor, plus the earlier animation, texture queue, cape, replacer and build improvements.
+[1.1.1 Beta 5](https://loomirr.github.io/Batcomputer/releases/1.1.1-beta.5/) adds character attribute controls and a modernized tuning editor. It includes the earlier animation compatibility, texture queue, cape, replacer and build improvements.
 
 ## Make it your own
 
-- **Characters and suits:** combine native parts, custom bodies, materials and textures; reuse base-character assets and explicitly refresh inherited settings.
-- **Animation and voice:** browse native clips, author animations, import compatible actions, edit named bone groups and build character-local voice profiles.
+- **Characters and suits:** create separate playable roster entries or additional suits, combine parts and custom visuals, and rebase suits while preserving their own edits.
+- **Visual replacers:** edit a supported base-game playable, NPC or quest/cutscene variant through the suit tools while retaining its original identity and gameplay.
+- **Animation and voice:** browse and author clips, import animations for compatible rigs, and build character-local voice profiles.
 - **Icons:** generate individual icons or all four character slots, tune cameras and lighting, and share JSON presets.
-- **Abilities and equipment:** edit supported loadouts, choose body-matched takedown/dodge sets, and customize held items and equipment.
-- **Vehicles:** import native-rig bodies, place parts and seats, edit materials in place and move multiple parts together.
+- **Abilities and equipment:** edit supported loadouts, body-matched takedown/dodge sets and held items. Beta 5 also offers 34 optional movement, grapple/glide, health, combat and Focus controls.
+- **Vehicles:** import models fitted to supported native rigs, place parts and seats, edit materials and move multiple parts together. Native driving physics remain in place.
 - **Build and share:** inspect build findings, follow detailed progress and export installable ZIPs with readable output paths.
 
-Some advanced workflows remain experimental. See the [guides and limitations](https://loomirr.github.io/Batcomputer/) before replacing rigs or mixing gameplay systems.
+Replacers, vehicle authoring and some attribute combinations remain experimental. See the [guides](https://loomirr.github.io/Batcomputer/) for supported targets and limits, and test finished mods in-game.
 
 ## What you need
 
-To author mods: a local game installation, matching game-build mappings, Unreal Engine 5.6 for Asset Registry generation, and the current **Loomirr's LOTDK UE4SS** framework. Install that framework separately; it is not bundled with Batcomputer.
+For authoring: **Windows x64**, **WebView2**, a local game installation and matching `.usmap` mappings. Allow roughly **18 GB or more** for the full extraction. **Unreal Engine 5.6** is needed for Asset Registry generation when building new roster entries.
 
-Players using finished mods need the mod and the compatible LOTDK UE4SS framework, not Batcomputer or its authoring tools. Optional Oodle compression uses your locally supplied runtime; Batcomputer does not distribute it.
+New character, suit and vehicle mods also need the game-build-compatible **[Loomirr's LOTDK UE4SS](https://github.com/Loomirr/LOTDK-UE4SS)** framework installed separately. Players need the finished mod and its listed requirements, not Batcomputer or Unreal Engine. Reading or writing Oodle-compressed data uses your own compatible Oodle runtime; it is not bundled.
 
 **[Setup](https://loomirr.github.io/Batcomputer/getting-started/setup/)** · **[Updating and recovery](https://loomirr.github.io/Batcomputer/guides/app-updates/)** · **[Troubleshooting](https://loomirr.github.io/Batcomputer/help/troubleshooting/)**
 
@@ -55,7 +56,7 @@ dotnet build Batcomputer.csproj
 dotnet run --project Batcomputer.csproj
 ```
 
-Build output, private test packs, generated projects and local caches are not release source. See [Tools/README.md](Tools/README.md) for helper workflows.
+See [Tools/README.md](Tools/README.md) for native helpers and documentation builds. Keep authored projects, extracted game content and build outputs in your workspace.
 
 ## License and game content
 
