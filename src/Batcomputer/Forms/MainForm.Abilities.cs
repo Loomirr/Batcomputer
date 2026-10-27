@@ -36,6 +36,16 @@ public sealed partial class MainForm
             new()
             {
                 Section = "CHARACTER",
+                Title = "Movement attributes",
+                Subtitle = CharacterMovementService.Summary(_currentProject.MovementAttributes),
+                Accent = Theme.Abilities,
+                Dashed = !CharacterMovementService.Enabled(_currentProject.MovementAttributes),
+                OnClick = () => _ = OpenMovementAttributesAsync(),
+                ToolTip = "Tune run and sprint speeds, jump height, glide speed and descent rate for this character or suit.",
+            },
+            new()
+            {
+                Section = "CHARACTER",
                 Title = "Character voices",
                 Subtitle = "browse + assign + private voice builds",
                 Accent = Theme.Abilities,
@@ -104,6 +114,45 @@ public sealed partial class MainForm
             tiles,
             header: $"{state}. Changes are written only to this suit's generated DPRD and AbilitySet clones; the base-game donor remains untouched.",
             emptyMessage: "No abilities matched the current search.");
+    }
+
+    private async Task OpenMovementAttributesAsync()
+    {
+        if (!await AwaitLoadedProjectStageRestoresBeforeEditAsync("edit movement attributes")) return;
+        EnsureProject();
+        if (_currentProject is not { } project) return;
+        if (!string.IsNullOrWhiteSpace(project.ReplacementTarget))
+        {
+            Dialog.Warn(this, "Visual edits only", "Character replacers keep the original character's gameplay. Movement attributes are available for suits and custom characters.");
+            return;
+        }
+        var editContext = CaptureCurrentProjectEditContext(project);
+        using var editor = new CharacterMovementForm(project.MovementAttributes);
+        if (editor.ShowDialog(this) != DialogResult.OK || !CurrentProjectEditContextMatches(editContext)) return;
+        var rollback = JsonSerializer.Deserialize<NativeSuitProject>(JsonSerializer.Serialize(project))!;
+        project.MovementAttributes = editor.Result;
+        if (CharacterMovementService.ProjectError(project) is { } movementError)
+        {
+            project.MovementAttributes = rollback.MovementAttributes;
+            Dialog.Warn(this, "Movement attributes were not saved", movementError);
+            return;
+        }
+        project.Changes.RemoveAll(change => change.Category == "Abilities" && change.Target == "movement");
+        project.Changes.Add(new SavedChange { When = DateTime.Now.ToString("o"), Category = "Abilities", Target = "movement",
+            Detail = CharacterMovementService.Summary(editor.Result), Status = "staged" });
+        try
+        {
+            var capture = CaptureCurrentProjectSave(editContext, "save movement attributes");
+            RequireCurrentProjectSaveCommitted(await CommitCurrentProjectSaveCaptureAsync(capture), "save movement attributes");
+        }
+        catch (CurrentProjectSaveSupersededException) { return; }
+        catch (Exception ex)
+        {
+            if (!CurrentProjectEditContextMatches(editContext)) return;
+            _currentProject = rollback; ApplyProjectToFields(rollback);
+            Dialog.Error(this, "Movement attributes were not saved", ex.Message);
+        }
+        RefreshToyboxTiles(); PopulateToyboxSlots(); RefreshInspector(); UpdateSelectedLabels();
     }
 
     private async Task OpenAbilityExplorerAsync(

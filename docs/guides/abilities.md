@@ -6,6 +6,31 @@ Open **Abilities**, then choose **Edit suit abilities**.
 Every edit is suit-local. Batcomputer clones the required DPRD and AbilitySet assets into the mod;
 it does not rewrite the donor, another suit, or the installed game.
 
+## Movement attributes
+
+Open **Abilities → Movement attributes** on a character or suit. Check the values you
+want to override, save, then build the mod normally. Unchecked values inherit the
+existing character setup. **Reset to defaults** clears every override.
+
+| Control | Meaning |
+| --- | --- |
+| Run speed | Percentage of normal ground speed. 150% is a 1.5× multiplier; native sprint speed is separate. |
+| Sprint speed | Ground sprint speed in centimetres per second. 900 cm/s is 9 m/s. This explicit value also replaces boosted sprint speeds. |
+| Jump height | Percentage of ordinary jump height. Batcomputer scales launch velocity by the square root of this value; gravity and scripted jump rules still apply. |
+| Glide speed | Scales native minimum, cruising and maximum forward speeds together. |
+| Glide descent rate | Scales the native descent-rate effect. Lower values descend more slowly, within that effect's original world and gameplay conditions. |
+
+These controls tune existing movement; they do not grant sprinting or gliding. Sprint
+and glide overrides require the corresponding native controllers/effects in the loadout.
+Batcomputer reports a build error if a requested override has no supported target.
+Custom sprint controllers keep their own tuning and require leaving **Sprint speed**
+unchecked. Custom charged jumps, dives and other scripted moves can use separate values.
+
+New suits inherit saved movement settings from their custom character. **Rebase from
+character** includes them in **Abilities, movement and held items**, so you can accept
+parent changes or keep a suit's own tuning. Character replacers remain visual-only.
+Movement changes need an in-game test on the selected donor, especially at extreme values.
+
 ## Character voices
 
 ### Animation voice triggers

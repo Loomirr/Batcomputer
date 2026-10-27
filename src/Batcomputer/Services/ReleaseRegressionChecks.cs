@@ -12,6 +12,8 @@ internal static class ReleaseRegressionChecks
     public static int Run(TextWriter output)
     {
         var failures = new List<string>();
+        foreach (var result in CharacterMovementRegressionChecks.Run())
+            Check(result.Passed, result.Description, failures, output);
         foreach (var result in TextureImportQueueRegressionChecks.Run())
             Check(result.Passed, result.Description, failures, output);
         foreach (var result in CharacterReplacementRegressionChecks.Run())

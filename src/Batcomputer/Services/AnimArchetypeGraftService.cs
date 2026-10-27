@@ -1057,7 +1057,7 @@ public sealed class AnimArchetypeGraftService
             dependencyPlan.RequiredLayerSlices.Count == 0 &&
             project.AnimationOverrides.Count == 0 && project.LocomotionOverrides.Count == 0 &&
             exactSlotOverrides.Count == 0 &&
-            !hasAbilityCustomization &&
+            !hasAbilityCustomization && !CharacterMovementService.Enabled(project.MovementAttributes) &&
             !usesPairedCapeAdapter && !NativeVillainTraversalService.AppliesTo(project))
         {
             result.Log.Add("no foreign gadgets or animation overrides — archetype left on donor sets");
@@ -1438,7 +1438,7 @@ public sealed class AnimArchetypeGraftService
             // --- Loadout: clone DPRD, swap the gadget's ED into Equipment, repoint archetype. ---
             if (RequiresGeneratedDprdFromResolvedDependencies(
                     foreignEd.Count > 0 || equipmentRemovals.Length > 0,
-                    foreignAbilitySets.Count > 0 || foreignEffects.Count > 0 || hasAbilityCustomization))
+                    foreignAbilitySets.Count > 0 || foreignEffects.Count > 0 || hasAbilityCustomization || CharacterMovementService.Enabled(project.MovementAttributes)))
             {
                 var customDprdPkg = $"/Game/Mods/{mod}/Characters/DA_DPRD_{mod}";
                 var dprdStem = UnrealPathUtil.AssetName(customDprdPkg);
@@ -1771,6 +1771,8 @@ public sealed class AnimArchetypeGraftService
 
                 HeldItemToggleService.Generate(project, extractedRoot, patchedContentRoot, mod, customDprdUasset, mappings!, result.Log);
 
+                CharacterMovementService.Generate(project, extractedRoot, patchedContentRoot, customDprdUasset, mappings!, result.Log.Add);
+
                 if (!VerifyStagedDependencyCertificate(
                         project,
                         donor,
@@ -1916,6 +1918,15 @@ public sealed class AnimArchetypeGraftService
                 var bridgeIndex = expectedSets.FindIndex(p => p.Equals(bridgePackage, StringComparison.OrdinalIgnoreCase));
                 if (bridgeIndex >= 0) bridgePackage = rewritten[bridgeIndex];
                 expectedSets = rewritten;
+            }
+            catch (Exception ex) { error = ex.Message; return false; }
+        }
+        if (CharacterMovementService.Enabled(project.MovementAttributes))
+        {
+            try
+            {
+                expectedSets = CharacterMovementService.ExpectedSets(project, extractedRoot, stagedRoot, LoadMappings()!, expectedSets);
+                CharacterMovementService.Verify(project, extractedRoot, stagedRoot, LoadMappings()!);
             }
             catch (Exception ex) { error = ex.Message; return false; }
         }
@@ -2192,7 +2203,7 @@ public sealed class AnimArchetypeGraftService
                 return true;
             }
         }
-        return AbilityLoadoutService.HasCustomizations(project);
+        return AbilityLoadoutService.HasCustomizations(project) || CharacterMovementService.Enabled(project.MovementAttributes);
     }
 
     /// <summary>
@@ -2208,6 +2219,7 @@ public sealed class AnimArchetypeGraftService
 
     public static bool RequiresCustomArchetype(NativeSuitProject project) =>
         project.UseCustomArchetype ||
+        CharacterMovementService.Enabled(project.MovementAttributes) ||
         NativeVillainTraversalService.AppliesTo(project) ||
         project.GameplayAnimationGraphs.Count > 0 ||
         project.EquipmentSlots.Any(slot => slot.Remove || slot.Custom is not null) ||

@@ -530,7 +530,7 @@ public sealed class StageValidationService
     {
         if (project.EquipmentSlots.Count == 0 &&
             !project.PartGrafts.Any(graft => graft.IsGlider) &&
-            !AbilityLoadoutService.HasCustomizations(project) && !NativeVillainTraversalService.AppliesTo(project))
+            !AbilityLoadoutService.HasCustomizations(project) && !CharacterMovementService.Enabled(project.MovementAttributes) && !NativeVillainTraversalService.AppliesTo(project))
         {
             return;
         }
@@ -783,7 +783,7 @@ public sealed class StageValidationService
         NativeSuitProject project,
         ICollection<Finding> findings)
     {
-        if (!AbilityLoadoutService.HasCustomizations(project) && project.EquipmentSlots.Count == 0)
+        if (!AbilityLoadoutService.HasCustomizations(project) && !CharacterMovementService.Enabled(project.MovementAttributes) && project.EquipmentSlots.Count == 0)
         {
             return;
         }

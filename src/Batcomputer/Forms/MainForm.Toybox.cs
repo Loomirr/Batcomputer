@@ -2977,9 +2977,13 @@ public sealed partial class MainForm
                 AppendLog("Cleared equipment intent — re-add gadgets you still want.");
                 break;
             case "Abilities":
-                project.AbilityLoadout = null;
+                if (change.Target.Equals("movement", StringComparison.OrdinalIgnoreCase))
+                    project.MovementAttributes = null;
+                else project.AbilityLoadout = null;
                 requiresCleanRebuild = true;
-                AppendLog("Restored the gameplay donor's ability loadout.");
+                AppendLog(change.Target.Equals("movement", StringComparison.OrdinalIgnoreCase)
+                    ? "Restored the character's inherited movement attributes."
+                    : "Restored the gameplay donor's ability loadout.");
                 break;
             case "Materials":
                 // Drop saved assignments whose slot/context is named in this change's target.

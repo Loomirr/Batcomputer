@@ -208,6 +208,11 @@ public static class AbilityDependencyService
         var layerSlices = new List<FightingStyleLayerSlice>();
         var issues = new List<AbilityDependencyIssue>();
         var profile = project.AbilityLoadout;
+        if (CharacterMovementService.Enabled(project.MovementAttributes))
+        {
+            if (CharacterMovementService.ProjectError(project) is { } movementError)
+                issues.Add(new(AbilityDependencySeverity.Error, movementError));
+        }
         if (CharacterUtilityService.Enabled(profile?.Utilities))
         {
             if (CharacterUtilityService.ValidationError(profile!.Utilities!) is { } utilityError)

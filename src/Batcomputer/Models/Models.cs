@@ -214,6 +214,8 @@ public sealed class NativeSuitProject
     // generated mod-local DPRD / AbilitySet clones.
     public AbilityLoadoutProfile? AbilityLoadout { get; set; }
 
+    public CharacterMovementSettings? MovementAttributes { get; set; }
+
     // Glider visual: empty, cape, wingsuit, or glider.
     public string GliderType { get; set; } = "";
 

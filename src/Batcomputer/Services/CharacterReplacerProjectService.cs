@@ -18,7 +18,7 @@ internal static class CharacterReplacerProjectService
         NpcAppearanceTestService.Validate(new(p.ReplacementTarget, Changes: []));
         if (p.PlayableTemplate?.PackagePath != p.ReplacementTarget || p.CutsceneTemplate?.PackagePath != p.ReplacementTarget)
             throw new InvalidDataException("Replacement base must remain the exact original target. Create another replacer to change targets.");
-        if (p.CustomCharacter is not null || p.AbilityLoadout is not null || p.UseCustomArchetype || p.EquipmentSlots.Count != 0 ||
+        if (p.CustomCharacter is not null || p.AbilityLoadout is not null || CharacterMovementService.Enabled(p.MovementAttributes) || p.UseCustomArchetype || p.EquipmentSlots.Count != 0 ||
             p.AnimationOverrides.Count != 0 || p.LocomotionOverrides.Count != 0 || p.AnimationSlotOverrides.Count != 0 ||
             p.GameplayAnimationGraphs.Count != 0 || !string.IsNullOrWhiteSpace(p.FaceAnimationBlueprintPackage) ||
             !string.IsNullOrWhiteSpace(p.VoiceProfileId) || !string.IsNullOrWhiteSpace(p.GliderType) || p.PairedCapeAdapter is not null ||

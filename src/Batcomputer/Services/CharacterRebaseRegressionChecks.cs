@@ -67,7 +67,7 @@ internal static class CharacterRebaseRegressionChecks
         owner.UseCustomArchetype = true; owner.IconMenu = "/Game/Example/Icon";
         var beforeOwner = JsonSerializer.Serialize(owner); var beforeSuit = JsonSerializer.Serialize(suit);
         var rows = CharacterRebaseService.Preview(owner, suit);
-        yield return (CharacterRebaseService.GameplayUpdateWarning(owner, suit)?.Contains("Abilities, fighting style and held items") == true,
+        yield return (CharacterRebaseService.GameplayUpdateWarning(owner, suit)?.Contains("Abilities, movement and held items") == true,
             "parent gameplay changes produce an actionable rebase warning");
         yield return (rows.Single(r => r.Section.Id == "appearance") is { SuitEdited: true, CharacterEdited: true } &&
             rows.Single(r => r.Section.Id == "abilities") is { SuitEdited: false, CharacterEdited: true }, "rebase distinguishes local suit edits from changed character settings");

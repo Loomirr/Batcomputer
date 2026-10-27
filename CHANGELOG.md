@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Adds optional per-character and per-suit controls for run speed, sprint speed, jump height, glide speed and glide descent rate under **Abilities → Movement attributes**.
+- Replays movement settings during normal mod builds, preserves inherited defaults, and includes them in character-to-suit rebasing. Custom sprint controllers retain their own tuning, and visual replacers continue to reject gameplay edits.
+- Validated with save/reopen, clean rebuild/reset, native-asset checks, the regression suite, and separate in-game baseline, individual and combined movement presets. The preparation cache remains off by default.
+
 ## 1.1.1-beta.4 — 2026-10-19
 
 - Accepts a verified exporter wrapper above the native animation Root when decoded tracks prove the supported layout. Body hierarchy, reference pose, track ordering and root scale remain checked; root-motion, locked-root and additive cases are not relaxed.

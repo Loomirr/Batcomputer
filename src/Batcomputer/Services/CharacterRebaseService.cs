@@ -22,7 +22,7 @@ internal static class CharacterRebaseService
         var sections = new List<Section>
         {
             new("base", "Base, body and requirements", ["PlayableTemplate", "CutsceneTemplate", "DcmdTemplate", "VisualSourceTemplate", "VisualCutsceneSourceTemplate", "StaticMeshComponentShapeTemplate", "BaseProfile", "BodyProfile", "Requirements", "MachineryDonorPlayable"]),
-            new("abilities", "Abilities, fighting style and held items", ["AbilityLoadout"]),
+            new("abilities", "Abilities, movement and held items", ["AbilityLoadout", "MovementAttributes"]),
             new("equipment", "Equipment", ["EquipmentSlots"]),
             new("voice", "Voice profile", ["VoiceProfileId"]),
             new("animations", "Animations", ["UseCustomArchetype", "AnimationOverrides", "LocomotionOverrides", "AnimationSlotOverrides", "GameplayAnimationGraphs", "FaceAnimationBlueprintPackage"]),
@@ -39,7 +39,12 @@ internal static class CharacterRebaseService
     private static string Fingerprint(JsonObject node, Section section)
     {
         var fields = new JsonObject();
-        foreach (var field in section.Fields) fields[field] = node[field]?.DeepClone();
+        foreach (var field in section.Fields)
+        {
+            // Preserve pre-movement inheritance fingerprints until an actual override is authored.
+            if (field == "MovementAttributes" && node[field] is null) continue;
+            fields[field] = node[field]?.DeepClone();
+        }
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fields.ToJsonString())));
     }
     internal static void RequireParent(NativeSuitProject owner, NativeSuitProject suit)
